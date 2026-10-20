@@ -58,8 +58,8 @@ if (podHost.protocol === 'http:' && podHost.hostname.split('.').pop() !== 'local
 const sandbox = !a.production;
 const actor = `house:${name}`;
 // Whose signatures count. A sandbox house with no trust section trusts the demo specialists, and says so.
-const DEMO_TRUST = { issuers: ['issuer.lake.local'], auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'] };
-const trust = { issuers: rules.trust?.issuers ?? (sandbox ? DEMO_TRUST.issuers : []), auditors: rules.trust?.auditors ?? (sandbox ? DEMO_TRUST.auditors : []), ethics: rules.trust?.ethics ?? (sandbox ? DEMO_TRUST.ethics : []) };
+const DEMO_TRUST = { issuers: ['issuer.lake.local'], auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
+const trust = { issuers: rules.trust?.issuers ?? (sandbox ? DEMO_TRUST.issuers : []), auditors: rules.trust?.auditors ?? (sandbox ? DEMO_TRUST.auditors : []), ethics: rules.trust?.ethics ?? (sandbox ? DEMO_TRUST.ethics : []), payments: rules.trust?.payments ?? (sandbox ? DEMO_TRUST.payments : []) };
 
 let link: LakeLink | null = null;
 const emit = (e: LakeEvent) => {
@@ -122,8 +122,8 @@ if (await missing(RECORD.claims)) {
   }
 }
 
-// 4. The housekeeper and its MCP door to the pod: reads anything, writes only agreements and its audit log.
-const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/'] });
+// 4. The housekeeper and its MCP door to the pod: reads anything; writes only agreements, receipts and its audit log.
+const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/'] });
 const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
 await mcp.connect(serverSide);
 const podClient = new Client({ name: `housekeeper-${name}`, version: '0.1.0' });

@@ -117,7 +117,7 @@ An offer for a study carries the study itself, its id in `offer.study`, and two 
 
 An offer MAY include a free-text `note`. It is **untrusted**. A housekeeper MUST NOT let it change a decision. It may be shown to a human, quoted, and nothing else.
 
-An **agreement** is the ODRL `Agreement` both parties sign, built from the final accepted offer. Both parties MUST store it: the house in its pod at `/agreements/`.
+An **agreement** is the ODRL `Agreement` both parties sign, built from the final accepted offer, with a `dateTime` constraint for its end. The house signs it when it joins and returns it with the grant; the visitor MUST countersign it (a detached JWS over the agreement's canonical form) before the house runs anything. Both parties MUST keep it: the house in its pod at `/agreements/`. The grant names the agreement's `uid` and digest.
 
 **The grant issued MUST match the signed agreement**: same fields, same purpose, expiry no later than the retention allows. The contract and the key cannot drift apart.
 
@@ -160,7 +160,9 @@ A study without a valid certificate from a trusted auditor MUST be declined, wha
 
 ### 5.3 Collective counter-offers
 
-Houses that counter the same offer (same offer `uid`) and opted in with `join_collectives: true` MAY form a bloc. The bloc's counter asks for the **highest** minimum price among members and **only the fields every member accepts**. One signed counter goes back to the visitor, listing member count but not member identities.
+Houses that counter the same offer and opted in with `join_collectives: true` say so in their signed counter (`bloc: true`). A visitor MUST treat all such counters to one offer as a single bloc whose terms are the **highest** price any member asks and **only the fields every member accepts**. Anyone holding the signed counters can check the visitor applied this rule. If the visitor accepts, it re-offers the bloc's terms to everyone who joined or countered.
+
+(v0 note: the bloc's terms are computed from the members' signed counters rather than sent as one jointly signed counter. A jointly signed bloc counter via guilds is future work.)
 
 ## 6. Keys
 
@@ -176,6 +178,18 @@ The owner's signing key is made on the owner's device and never leaves it. The h
 A visitor whose offer got `ask` MAY send `{ kind: "status", offerId }` to collect the outcome: the grant once the owner allows, or `decline`.
 
 A grant is a `LakeAccessGrant` credential signed by the house, with `credentialSubject`: the visitor's WebID (`id`), `offer`, `study`, `fields`, `purpose`, `authorizedBy` (the standing rule, or the owner's live approval) and `rules` (the digest of the rules that authorised it), and a `validUntil`. The house stores it in `/agreements/`.
+
+## 6.2 Money (AP2)
+
+Payments follow the Agent Payments Protocol's mandate chain, as W3C VCs:
+
+| Mandate | Signed by | Says |
+|---|---|---|
+| `IntentMandate` | a human at the visitor's organisation (same `ownerDomain`, a separate key) | this agent, this study, `budget`, `intent_expiry` |
+| `PaymentMandate` | the visitor agent | payee (the house's WebID), amount, the digest of the Intent Mandate, the agreement `uid` |
+| `LakeReceipt` | the payments agent | payee, amount, agreement, the Intent Mandate digest, `settlement` |
+
+A payments agent MUST check the whole chain and MUST refuse once the total under one Intent Mandate would exceed its budget: past that, a human must approve. Only houses that answered are paid. A house files receipts from payments agents on its owner's `trust.payments` list in `/receipts/`. In the reference implementation settlement is simulated; the mandates and receipts are real signed objects.
 
 ## 7. Data never moves
 

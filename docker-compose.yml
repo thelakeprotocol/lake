@@ -2,7 +2,7 @@
 #   docker compose up                 (pulls images; add --build to build from source)
 #   open http://localhost:7000        (the live map)
 #   docker compose run --rm lake knock http://house-stan:4000 --offer gp
-#   docker compose run --rm lake dispatch --price 5 --wait 30
+#   docker compose run --rm lake dispatch --extra-fields postcode --wait 30
 #   open http://localhost:4001/owner/    (strict's owner: tap Allow; from a phone, set LAKE_PUBLIC_HOST=<laptop LAN IP>)
 # Join from anywhere on this machine:
 #   docker run --network lake_default --hostname house-you \
@@ -52,6 +52,15 @@ services:
     environment: { LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [ethics:/data]
 
+  payments:
+    build: { context: ., target: specialists }
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    hostname: payments
+    command: ["payments", "--url", "http://payments:4600"]
+    depends_on: [lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [payments:/data]
+
   house-stan:
     <<: *house
     hostname: house-stan
@@ -79,5 +88,6 @@ services:
     image: ghcr.io/thelakeprotocol/lake:latest
     profiles: [cli]
     environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [cli:/root/.lake]   # the agent's keys survive between runs
 
-volumes: { node: {}, issuer: {}, auditor: {}, ethics: {}, stan: {}, strict: {}, research: {} }
+volumes: { cli: {}, node: {}, issuer: {}, auditor: {}, ethics: {}, payments: {}, stan: {}, strict: {}, research: {} }

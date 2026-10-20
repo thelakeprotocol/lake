@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  cellLabels, estimate, makeEvent, studyFields, studyId,
-  type AgentCard, type Attachment, type LakeLink, type Offer, type Study,
+  buildCard, cellLabels, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  type AgentCard, type Attachment, type Identity, type LakeLink, type Offer, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
 
@@ -20,6 +20,22 @@ export function readmissionStudy(question = 'Do over-60s on drug X get readmitte
   };
 }
 
+/** The human at the research organisation who signs the spending mandate. Not the agent: a separate key. */
+export interface Human {
+  id: Identity;
+  card: AgentCard;
+  webId: string;
+}
+
+export async function makeHuman(id: Identity, domain: string): Promise<Human> {
+  const webId = `https://${domain}/people/lead#me`;
+  const card = await signCard(
+    buildCard({ name: `Research lead (${domain})`, description: 'A person who signs spending mandates for agents.', url: `https://${domain}/people/lead`, skills: [], profile: { role: 'agent', webId, ownerDomain: domain, tags: ['human'] } }, id),
+    id,
+  );
+  return { id, card, webId };
+}
+
 export interface DispatchOptions {
   visitor: Visitor;
   node: string;
@@ -27,40 +43,58 @@ export interface DispatchOptions {
   auditor: string;
   study: Study;
   priceUsd: number;
-  /** Extra fields to ask for beyond what the study reads (e.g. postcode, to test the houses). */
+  /** Extra fields to ask for beyond what the study reads (e.g. postcode, to see houses push back). */
   extraFields?: string[];
   concurrency?: number;
   /** How long to wait for owners who were asked to tap Allow. 0: don't wait. */
   waitSeconds?: number;
+  /** Money: the human who signs the mandate, the cap, and who settles. Without it the mission runs unpaid. */
+  money?: { human: Human; budgetUsd: number; payments: string };
   link?: LakeLink | null;
   log?: (step: string, detail: string) => void;
 }
+
+interface House { id: string; name: string; url: string }
+interface Joined { house: House; grant: string; agreement?: SignedAgreement; priceUsd: number }
 
 export interface MissionResult {
   study: string;
   question: string;
   houses: number;
   decisions: Record<string, number>;
+  bloc: { members: number; priceUsd: number; fields: string[] } | null;
   participants: number;
   excluded: { house: string; why: string }[];
   cells: { label: string; estimate: number }[];
   answer: { onX: { rate: number; n: number }; notOnX: { rate: number; n: number }; summary: string; reliable: boolean };
+  paid: { total: number; houses: number; receiptsFiled: number; refused?: string; notFiled?: string[] } | null;
   seconds: number;
   /** The keys this agent was given, by house. Its own to keep until they expire or are revoked. */
   grants: { house: string; url: string; grant: string }[];
 }
 
-/** The research mission, without money: ethics → audit → discover → knock → decide → grant → compute in place → answer. */
+/** The research mission: mandate → ethics → audit → discover → knock → bargain → agree → compute in place → pay → answer. */
 export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const t0 = Date.now();
   const log = o.log ?? (() => {});
+  const report = (kind: Parameters<typeof makeEvent>[0], data: Record<string, string | number | boolean>) => o.link?.report(makeEvent(kind, 'self', undefined, data));
   const id = studyId(o.study);
   const fields = [...studyFields(o.study), ...(o.extraFields ?? [])];
+
+  let intent: Attachment | null = null;
+  if (o.money) {
+    const credential = await signIntentMandate(o.money.human.id, o.money.human.webId, {
+      id: o.visitor.webId, natural_language_description: o.study.question, study: id,
+      budget: { currency: 'USD', amount: o.money.budgetUsd }, intent_expiry: new Date(Date.now() + 7 * 86_400_000).toISOString(), user_cart_confirmation_required: false,
+    });
+    intent = { credential, card: o.money.human.card };
+    log('mandate', `${o.money.human.card.name} signed an Intent Mandate: this study only, budget $${o.money.budgetUsd}`);
+  }
 
   log('ethics', `asking ${o.ethics} to review the protocol`);
   const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study: o.study, purpose: 'research', fields, retention: 'none' } });
   if (ethics.reply.kind !== 'approved') throw new Error(`ethics refused: ${(ethics.reply.problems ?? []).join('; ')}`);
-  const ethicsAtt: Attachment = { credential: ethics.reply.credential, card: (await cardOf(o.ethics)) };
+  const ethicsAtt: Attachment = { credential: ethics.reply.credential, card: await cardOf(o.ethics) };
 
   log('audit', `asking ${o.auditor} to certify the study`);
   const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study: o.study });
@@ -69,28 +103,57 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
 
   log('discover', `searching ${o.node} for houses with the health-study skill`);
   const found = (await (await fetch(`${o.node}/cards?skill=health-study&role=house`)).json()) as { id: string; card: AgentCard }[];
-  const houses = found.map((f) => ({ id: f.id, name: f.card.name, url: f.card.supportedInterfaces[0]!.url }));
-
-  const offer: Offer = { id: randomUUID(), requester: o.visitor.domain, purpose: 'research', fields, retention: 'none', priceUsd: o.priceUsd, study: id, credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true } };
-  log('knock', `knocking on ${houses.length} houses: $${o.priceUsd} for ${fields.join(', ')}`);
-  o.link?.report(makeEvent('knock', 'self', undefined, { count: houses.length, purpose: 'research' }));
-  o.link?.report(makeEvent('offer', 'self', undefined, { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' }));
+  const houses: House[] = found.map((f) => ({ id: f.id, name: f.card.name, url: f.card.supportedInterfaces[0]!.url }));
 
   const decisions: Record<string, number> = {};
-  const joined: { house: (typeof houses)[number]; grant: string }[] = [];
-  const asked: (typeof houses)[number][] = [];
-  await pool(houses, o.concurrency ?? 32, async (h) => {
-    try {
-      const { reply } = await ask(h.url, o.visitor, { kind: 'offer', offer, study: o.study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
-      const d = reply.kind === 'decision' ? String(reply.decision) : 'rejected';
-      decisions[d] = (decisions[d] ?? 0) + 1;
-      if (d === 'join' && reply.grant) joined.push({ house: h, grant: reply.grant });
-      if (d === 'ask') asked.push(h);
-    } catch {
-      decisions.unreachable = (decisions.unreachable ?? 0) + 1;
-    }
+  const joined = new Map<string, Joined>();
+  const asked: House[] = [];
+  const counters: { house: House; counter: { fields: string[]; priceUsd: number } }[] = [];
+  const knockAll = async (targets: House[], offer: Offer, tally: boolean) => {
+    await pool(targets, o.concurrency ?? 32, async (h) => {
+      try {
+        const { reply } = await ask(h.url, o.visitor, { kind: 'offer', offer, study: o.study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
+        const d = reply.kind === 'decision' ? String(reply.decision) : 'rejected';
+        if (tally) decisions[d] = (decisions[d] ?? 0) + 1;
+        if (d === 'join' && reply.grant) joined.set(h.url, { house: h, grant: reply.grant, agreement: reply.agreement, priceUsd: offer.priceUsd });
+        if (d === 'ask' && tally) asked.push(h);
+        if (d === 'counter' && reply.counter && reply.bloc) counters.push({ house: h, counter: reply.counter });
+      } catch {
+        if (tally) decisions.unreachable = (decisions.unreachable ?? 0) + 1;
+      }
+    });
+  };
+
+  const terms = (price: number, f: string[]): Offer => ({
+    id: randomUUID(), requester: o.visitor.domain, purpose: 'research', fields: f, retention: 'none', priceUsd: price, study: id,
+    credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true },
   });
+  const offer = terms(o.priceUsd, fields);
+  log('knock', `knocking on ${houses.length} houses: $${o.priceUsd} for ${fields.join(', ')}`);
+  report('knock', { count: houses.length, purpose: 'research' });
+  report('offer', { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' });
+  await knockAll(houses, offer, true);
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));
+
+  // Houses that countered the same offer bargain as one bloc: the highest price, only fields all accept (SPEC §5.3).
+  let bloc: MissionResult['bloc'] = null;
+  const b = collectiveCounter(counters.map((c) => c.counter));
+  if (b) {
+    bloc = { members: b.members, priceUsd: b.priceUsd, fields: b.fields };
+    const dropped = fields.filter((f) => !b.fields.includes(f));
+    log('bargain', `${b.members} housekeepers countered together: $${b.priceUsd}, not $${o.priceUsd}${dropped.length ? `, and drop ${dropped.join(', ')}` : ''}`);
+    report('counter', { members: b.members, price: b.priceUsd, was: o.priceUsd });
+    const everyone = [...new Map([...joined.values()].map((j) => [j.house.url, j.house])).values(), ...counters.map((c) => c.house)];
+    const cost = b.priceUsd * everyone.length;
+    const missing = studyFields(o.study).filter((f) => !b.fields.includes(f));
+    if (missing.length) log('bargain', `declined: the bloc refuses ${missing.join(', ')}, which the study needs`);
+    else if (o.money && cost > o.money.budgetUsd) log('bargain', `declined: $${cost} is over the $${o.money.budgetUsd} mandate; a human must approve`);
+    else {
+      log('bargain', `accepted: everyone who joined or countered gets the bloc's terms`);
+      joined.clear();
+      await knockAll(everyone, terms(b.priceUsd, b.fields), false);
+    }
+  }
 
   if (asked.length && (o.waitSeconds ?? 0) > 0) {
     log('wait', `${asked.length} house(s) asked their owners; waiting up to ${o.waitSeconds}s for a tap`);
@@ -98,12 +161,12 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     let waiting = [...asked];
     while (waiting.length && Date.now() < end) {
       await new Promise((r) => setTimeout(r, 1000));
-      const still: typeof waiting = [];
+      const still: House[] = [];
       await pool(waiting, o.concurrency ?? 32, async (h) => {
         try {
           const { reply } = await ask(h.url, o.visitor, { kind: 'status', offerId: offer.id });
           if (reply.decision === 'join' && reply.grant) {
-            joined.push({ house: h, grant: reply.grant });
+            joined.set(h.url, { house: h, grant: reply.grant, agreement: reply.agreement, priceUsd: offer.priceUsd });
             log('allow', `the owner of ${h.name} tapped Allow`);
           } else if (reply.decision === 'decline') log('deny', `the owner of ${h.name} said no`);
           else still.push(h);
@@ -115,18 +178,48 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     }
   }
 
-  log('compute', `running the certified study inside ${joined.length} houses`);
+  log('compute', `countersigning ${joined.size} agreement(s) and running the certified study inside each house`);
   const fragments: number[][] = [];
+  const answered: Joined[] = [];
   const excluded: MissionResult['excluded'] = [];
-  await pool(joined, o.concurrency ?? 32, async ({ house, grant }) => {
+  await pool([...joined.values()], o.concurrency ?? 32, async (j) => {
     try {
-      const { reply } = await ask(house.url, o.visitor, { kind: 'compute', grant, study: o.study });
-      if (reply.kind === 'fragment' && reply.study === id && Array.isArray(reply.fragment)) fragments.push(reply.fragment as number[]);
-      else excluded.push({ house: house.name, why: String(reply.why ?? reply.kind) });
+      const countersignature = j.agreement ? await signAgreement(j.agreement.agreement, o.visitor.id) : undefined;
+      const { reply } = await ask(j.house.url, o.visitor, { kind: 'compute', grant: j.grant, study: o.study, countersignature });
+      if (reply.kind === 'fragment' && reply.study === id && Array.isArray(reply.fragment)) {
+        fragments.push(reply.fragment as number[]);
+        answered.push(j);
+      } else excluded.push({ house: j.house.name, why: String(reply.why ?? reply.kind) });
     } catch (e) {
-      excluded.push({ house: house.name, why: (e as Error).message });
+      excluded.push({ house: j.house.name, why: (e as Error).message });
     }
   });
+
+  // Only houses that answered get paid; excluded ones don't.
+  let paid: MissionResult['paid'] = null;
+  if (o.money && intent && answered.length) {
+    const webIdOf = (j: Joined) => String(j.agreement?.agreement.assigner ?? '');
+    const payable = answered.filter((j) => j.agreement && j.priceUsd > 0);
+    const payments = await Promise.all(payable.map((j) => signPaymentMandate(o.visitor.id, o.visitor.webId, { payee: webIdOf(j), amount: j.priceUsd, intentMandate: intent!.credential, agreement: j.agreement!.agreement.uid })));
+    const { reply } = await ask(o.money.payments, o.visitor, { kind: 'settle', intent, payments });
+    if (reply.kind !== 'settled') {
+      paid = { total: 0, houses: 0, receiptsFiled: 0, refused: (reply.problems ?? []).join('; ') };
+      log('pay', `refused: ${paid.refused}`);
+    } else {
+      const paymentsCard = await cardOf(o.money.payments);
+      let filed = 0;
+      const notFiled: string[] = [];
+      await pool(payable, o.concurrency ?? 32, async (j) => {
+        const r = (reply.receipts as { payee: string; credential: string }[]).find((x) => x.payee === webIdOf(j));
+        if (!r) return;
+        const { reply: ack } = await ask(j.house.url, o.visitor, { kind: 'receipt', receipt: { credential: r.credential, card: paymentsCard } }).catch((e: Error) => ({ reply: { kind: 'error', why: e.message } as Record<string, any> }));
+        if (ack.kind === 'filed') filed++;
+        else notFiled.push(`${j.house.name}: ${ack.why ?? ack.kind}`);
+      });
+      paid = { total: reply.total, houses: payable.length, receiptsFiled: filed, ...(notFiled.length ? { notFiled } : {}) };
+      log('pay', `Payments settled $${reply.total} with ${payable.length} participants; ${filed} receipts filed in their pods. $${reply.remaining} of the mandate left`);
+    }
+  }
 
   const { n, cells } = estimate(o.study, fragments);
   // Bits: 0 over 60, 1 on drug X, 2 readmitted.
@@ -139,22 +232,22 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   log('answer', `${summary}${reliable ? '' : `. Only ${n} answers: randomised answers need a few hundred houses before this means anything`}`);
   // Houses batch their reports for ~150 ms; let theirs land first so the log reads in order.
   await new Promise((r) => setTimeout(r, 400));
-  o.link?.report(makeEvent('study.result', 'self', undefined, { participants: n, summary: reliable ? summary : `${n} answers, too few to call` }));
+  report('study.result', { participants: n, summary: reliable ? summary : `${n} answers, too few to call` });
   await o.link?.flush();
 
   return {
-    study: id, question: o.study.question, houses: houses.length, decisions, participants: n, excluded,
+    study: id, question: o.study.question, houses: houses.length, decisions, bloc, participants: n, excluded,
     cells: cellLabels(o.study).map((label, i) => ({ label, estimate: Math.round(cells[i]! * 10) / 10 })),
-    answer: { onX, notOnX, summary, reliable },
+    answer: { onX, notOnX, summary, reliable }, paid,
     seconds: Math.round((Date.now() - t0) / 100) / 10,
-    grants: joined.map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
+    grants: [...joined.values()].map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
   };
 }
 
-const cardCache = new Map<string, Promise<any>>();
-function cardOf(agentUrl: string) {
+const cardCache = new Map<string, Promise<AgentCard>>();
+function cardOf(agentUrl: string): Promise<AgentCard> {
   const u = new URL('/.well-known/agent-card.json', agentUrl).href;
-  if (!cardCache.has(u)) cardCache.set(u, fetch(u, { headers: { 'A2A-Version': '1.0' } }).then((r) => r.json()));
+  if (!cardCache.has(u)) cardCache.set(u, fetch(u, { headers: { 'A2A-Version': '1.0' } }).then((r) => r.json() as Promise<AgentCard>));
   return cardCache.get(u)!;
 }
 

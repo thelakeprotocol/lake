@@ -16,7 +16,7 @@ const rgba = (hex: string, a: number) => { const n = parseInt(hex.slice(1), 16);
 const hash = (s: string) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
-interface House { id: string; label: string; nx: number; ny: number; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number }
+interface House { id: string; label: string; nx: number; ny: number; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number; computedT: number }
 interface Spec { id: string; label: string; nx: number; ny: number }
 interface Agent { id: string; domain: string; label: string; x: number; y: number; trail: { x: number; y: number }[]; seen: number }
 interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number }
@@ -38,6 +38,8 @@ const agentByLabel = (s?: string) => [...agents.values()].find((a) => s === `age
 let threads: Thread[] = [];
 let ripples: Ripple[] = [];
 let sparks: Spark[] = [];
+/** The bargaining moment: the old price struck through, the bloc's price beside it. */
+let haggle: { was: number; price: number; t: number; at: Agent } | null = null;
 
 function resize() {
   const r = stage.getBoundingClientRect();
@@ -65,7 +67,7 @@ function addParticipant(p: Participant, fresh: boolean) {
   if (p.role === 'house') {
     if (houses.has(p.id)) return;
     const pos = place(p.id, [...houses.values(), ...specs.values()]);
-    houses.set(p.id, { id: p.id, label: p.label, ...pos, born: fresh ? clock : -10, resp: '', respT: 0, alert: 0, leaving: 0, phase: hash(p.id) * 6.28 });
+    houses.set(p.id, { id: p.id, label: p.label, ...pos, born: fresh ? clock : -10, resp: '', respT: 0, alert: 0, leaving: 0, phase: hash(p.id) * 6.28, computedT: -99 });
   } else if (p.role === 'visitor') {
     if (agents.has(p.id)) return;
     agents.set(p.id, { id: p.id, domain: p.domain ?? '', label: p.label, x: W / 2, y: H / 2, trail: [], seen: clock });
@@ -134,7 +136,18 @@ function onEvent(e: LakeEvent, p?: Participant) {
     case 'grant.issued':
       if (h) { const { x, y } = at(h); ripples.push({ x, y, r: 4, max: 40, col: COL.mint, w: 1.5 }); }
       break;
+    case 'counter': {
+      const ag = agents.get(e.actor);
+      if (ag) haggle = { was: Number(e.data?.was), price: Number(e.data?.price), t: clock, at: ag };
+      break;
+    }
+    case 'payment.settled': {
+      const from = specs.get(e.actor);
+      if (from) for (const x of houses.values()) if (clock - x.computedT < 60) threads.push({ ax: from.nx * W, ay: from.ny * H, h: x, life: 1.2, col: COL.violet });
+      break;
+    }
     case 'compute.done': {
+      if (h) h.computedT = clock;
       const ag = agentByLabel(e.subject);
       if (h && ag) threads.push({ ax: ag.x, ay: ag.y, h, life: 1, col: COL.mint });
       break;
@@ -239,6 +252,15 @@ function draw(now: number) {
     ctx.fillStyle = v.bad ? COL.threat : rgba(COL.muted, 0.85);
     ctx.beginPath(); ctx.arc(v.x, v.y, v.bad ? 3.4 : 2.2, 0, 6.283); ctx.fill();
   }
+  if (haggle && clock - haggle.t < 4) {
+    const size = Math.max(28, Math.min(64, W / 12)), x = haggle.at.x, y = haggle.at.y - 44;
+    ctx.globalAlpha = Math.min(1, (4 - (clock - haggle.t)) * 2);
+    ctx.font = `700 ${size}px Oswald, "Arial Narrow", sans-serif`; ctx.textAlign = 'center';
+    ctx.fillStyle = rgba(COL.muted, 0.9); ctx.fillText(`$${haggle.was}`, x - size * 1.1, y);
+    ctx.strokeStyle = COL.threat; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x - size * 1.6, y - size * 0.35); ctx.lineTo(x - size * 0.6, y - size * 0.35); ctx.stroke();
+    if (clock - haggle.t > 0.6) { ctx.fillStyle = COL.mint; ctx.fillText(`$${haggle.price}`, x + size * 1.1, y); }
+    ctx.globalAlpha = 1;
+  }
   for (const p of sparks) { ctx.fillStyle = rgba(COL.fg, p.life); ctx.fillRect(p.x, p.y, 2, 2); }
   for (const ag of agents.values()) {
     const rr = 12 + Math.sin(now / 180) * 2.5;
@@ -251,7 +273,7 @@ function draw(now: number) {
 // ---- Log and counters ----
 const logEl = $('log');
 const lines: { t: string; text: string; kind: string }[] = [];
-const KIND_CLASS: Record<string, string> = { 'grant.revoked': 'threat', 'approval.answered': 'mint', 'knock': '', 'offer': 'orange', 'compute.done': 'mint', 'grant.issued': 'mint', 'attack.blocked': 'threat', 'agent.quarantined': 'threat', 'record.moved': 'threat', 'house.joined': 'mint', 'agent.registered': 'violet', 'approval.requested': 'amber', 'guild.formed': 'violet', 'payment.settled': 'violet', 'study.result': 'mint' };
+const KIND_CLASS: Record<string, string> = { 'counter': 'mint', 'agreement.signed': '', 'grant.revoked': 'threat', 'approval.answered': 'mint', 'knock': '', 'offer': 'orange', 'compute.done': 'mint', 'grant.issued': 'mint', 'attack.blocked': 'threat', 'agent.quarantined': 'threat', 'record.moved': 'threat', 'house.joined': 'mint', 'agent.registered': 'violet', 'approval.requested': 'amber', 'guild.formed': 'violet', 'payment.settled': 'violet', 'study.result': 'mint' };
 function log(e: LakeEvent, text: string) {
   lines.unshift({ t: new Date(e.at).toLocaleTimeString([], { hour12: false }), text, kind: KIND_CLASS[e.kind] ?? (e.kind === 'decision' && e.data?.decision === 'join' ? 'mint' : '') });
   lines.length = Math.min(lines.length, 5);

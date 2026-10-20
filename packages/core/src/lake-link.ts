@@ -10,6 +10,7 @@ export class LakeLink {
   private queue: LakeEvent[] = [];
   private timer: NodeJS.Timeout | null = null;
   id: string | null = null;
+  private warned = false;
 
   constructor(private o: { nodeUrl: string; card: AgentCard; identity: Identity; webId: string; log?: (msg: string) => void }) {}
 
@@ -45,7 +46,11 @@ export class LakeLink {
     if (!events.length || !this.id) return;
     try {
       const env = await signMessage({ kind: 'events', events }, this.o.identity, { iss: this.o.webId });
-      await fetch(`${this.o.nodeUrl}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`${this.o.nodeUrl}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) });
+      if (!res.ok && !this.warned) {
+        this.warned = true;
+        this.o.log?.(`node ${this.o.nodeUrl} refused our events: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      }
     } catch {
       // The node is an optimisation, not a dependency.
     }

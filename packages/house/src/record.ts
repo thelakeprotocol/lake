@@ -14,7 +14,7 @@ export const RECORD = {
   converterCert: 'health/converter.cert.json',
 } as const;
 
-export interface Trust { issuers: string[]; auditors: string[]; ethics: string[] }
+export interface Trust { issuers: string[]; auditors: string[]; ethics: string[]; payments: string[] }
 
 export interface Issued {
   recordId: string;

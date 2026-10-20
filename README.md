@@ -85,16 +85,21 @@ docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper for
 # ✗ REJECTED (forged-card): card signature does not verify
 ```
 
-Then run a whole study across the Lake and watch it on the map. Open the strict house's approvals app at http://localhost:4001/owner/ (or scan the QR code on the map with your phone) and tap Allow when it asks:
+Then run a whole study across the Lake and watch it on the map. Add `--wait 30` and open the strict house's approvals app at http://localhost:4001/owner/ (or scan the QR code on the map with your phone) to tap Allow when it asks:
 
 ```bash
-docker compose run --rm lake dispatch --price 5 --wait 30
-# ETHICS   asking http://ethics:4500 to review the protocol
-# AUDIT    asking http://auditor:4400 to certify the study
-# KNOCK    knocking on 4 houses: $5 for age_band, medications, readmissions
-# DECIDE   3 join · 1 ask
-# COMPUTE  running the certified study inside 3 houses
-# ANSWER   …
+docker compose run --rm lake dispatch --extra-fields postcode
+# MANDATE   Research lead (uni.example) signed an Intent Mandate: this study only, budget $5000
+# ETHICS    asking http://ethics:4500 to review the protocol
+# AUDIT     asking http://auditor:4400 to certify the study
+# DISCOVER  searching http://lake-node:7000 for houses with the health-study skill
+# KNOCK     knocking on 3 houses: $2 for age_band, medications, readmissions, postcode
+# DECIDE    2 counter · 1 ask
+# BARGAIN   2 housekeepers countered together: $5, not $2, and drop postcode
+# BARGAIN   accepted: everyone who joined or countered gets the bloc's terms
+# COMPUTE   countersigning 2 agreement(s) and running the certified study inside each house
+# PAY       Payments settled $10 with 2 participants; 2 receipts filed in their pods. $4990 of the mandate left
+# ANSWER    … Only 2 answers: randomised answers need a few hundred houses before this means anything
 ```
 
 Your `rules.yaml` is the note on the fridge:
@@ -141,8 +146,8 @@ Honest, updated every merge.
 | ✅ | **M2 Lake node**: registry that verifies every card and checks the registrant serves it, signed event intake (the node stamps who said it), counters, WebSocket stream, live map | runs, end-to-end tested. The NATS bus arrives with broadcast knocks in M3 |
 | ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and returns one randomised answer; de-biased result; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
 | ✅ | **M4 Approvals app**: phone-first; the owner's key is made on the phone and signs every live Allow; the house checks the grant matches what the owner saw; Your keys with Revoke; revocation refuses the next request at once (tested under 1 s); QR code on the map; the research agent waits for taps | runs, end-to-end tested. No push notifications yet; over-asking is stopped by the housekeeper, not yet below it |
-| 🔨 | **M5 Money**: ODRL agreements, collective bargaining, AP2 mandates | next |
-| ⬜ | **M6 Wild life**: swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | |
+| ✅ | **M5 Money**: ODRL agreements signed by both sides before any study runs; houses counter as one bloc ($2 → $5, drop the postcode); a human's AP2 Intent Mandate caps spending; the Payments agent checks the chain, refuses over budget, settles (simulated) and signs receipts filed in each pod | runs, end-to-end tested |
+| 🔨 | **M6 Wild life**: swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | next |
 | ⬜ | **M7 Scale**: 1,000 houses on one laptop | |
 | ⬜ | **M8 Federation**: many nodes, `.well-known` discovery, shared blocklists | |
 | ⬜ | **M9 Open door**: agent SDK, Lake MCP connector, public sandbox | |
@@ -167,7 +172,7 @@ packages/
   house/         Solid pod + housekeeper + MCP pod door                   ✅
   lake/          registry, event stream, counters (bus: M3)               ✅
   visitor/       `lake` CLI: knock, dispatch (the research agent)         ✅
-  specialists/   issuer, ethics, auditor ✅ · payments                     M5
+  specialists/   issuer, ethics, auditor, payments                        ✅
   swarm/         background traders and attackers                        M6
   ui/            the live map ✅ · the approvals app                       M4
   agent/         SDK for outside agents                                   M9

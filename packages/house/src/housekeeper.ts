@@ -1,9 +1,9 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { rng, seedFrom } from '@thelakeprotocol/convert-fhir';
 import {
-  auditStudy, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signMessage, studyFields, studyId,
-  verifyCredential, verifyLakeData,
-  type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type Offer, type Rules, type Study,
+  agreementDigest, agreementFor, auditStudy, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
+  studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
+  type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { checkRecord, type RecordCheck, type Trust } from './record.js';
 import type { OwnerDesk } from './owner.js';
@@ -32,13 +32,15 @@ export interface HousekeeperOptions {
 type Decision = 'join' | 'decline' | 'ask' | 'counter';
 export type Reply =
   | { kind: 'rejected'; code: string; why: string }
-  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; grantHours?: number; grant?: string; holds: string[]; notes: string[] }
+  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[] }
+  | { kind: 'filed'; receipt: string }
   | { kind: 'fragment'; study: string; fragment: number[] }
   | { kind: 'excluded'; study: string; why: string };
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment } }
-interface ComputePayload { kind: 'compute'; grant: string; study: Study }
+interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string }
 interface StatusPayload { kind: 'status'; offerId: string }
+interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
 
 const HOUR = 3_600_000;
 
@@ -66,7 +68,7 @@ export class Housekeeper {
   }
 
   async handle(data: LakeData | null): Promise<LakeData> {
-    const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload | StatusPayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
+    const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload | StatusPayload | ReceiptPayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
     if (!v.ok) {
       // Unverified, so only a label: the domain the card claims, or its name.
       const claimed = (data?.card?.capabilities?.extensions?.[0]?.params as { ownerDomain?: unknown } | undefined)?.ownerDomain;
@@ -76,8 +78,9 @@ export class Housekeeper {
     }
     const visitor = `agent:${v.profile.ownerDomain}`;
     if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor);
-    if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile.webId, visitor);
+    if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor);
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
+    if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer or a compute request' });
   }
 
@@ -125,28 +128,35 @@ export class Housekeeper {
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, recommendation: [d.reason, ...notes].join('. '),
       });
     }
-    if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter } : {});
+    if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
     const chain = await this.verifyOwnRecord();
     if (!chain.ok) return decide('decline', `my own record failed its checks (${chain.why}), so I won't take part`);
 
+    // The terms and the key are cut from the same cloth: one ODRL agreement, one grant that names it.
+    const until = new Date(Date.now() + d.grantHours * HOUR);
+    const agreement = await this.agree({ ...offer, fields: d.fields }, visitorWebId, until);
     const grant = await issueCredential(
       {
         '@context': ['https://www.w3.org/ns/credentials/v2'],
         type: ['VerifiableCredential', 'LakeAccessGrant'],
         issuer: this.o.webId,
         validFrom: new Date().toISOString(),
-        validUntil: new Date(Date.now() + d.grantHours * HOUR).toISOString(),
-        credentialSubject: { id: visitorWebId, offer: offer.id, study: offer.study ?? null, fields: d.fields, purpose: offer.purpose, authorizedBy: `standing rule ${d.rule}`, rules: digestSRI(this.o.rulesText) },
+        validUntil: until.toISOString(),
+        credentialSubject: {
+          id: visitorWebId, offer: offer.id, study: offer.study ?? null, fields: d.fields, purpose: offer.purpose, authorizedBy: `standing rule ${d.rule}`,
+          rules: digestSRI(this.o.rulesText), agreement: agreement.agreement.uid, agreementDigest: agreementDigest(agreement.agreement),
+        },
       } as never,
       this.o.id,
     );
     await this.tool('pod_write', { path: `agreements/${offer.id}.grant.jwt`, content: grant, contentType: 'text/plain' });
     this.o.desk.record({ id: offer.id, jws: grant, visitor: domain, fields: d.fields, purpose: offer.purpose, until: new Date(Date.now() + d.grantHours * HOUR).toISOString(), authorizedBy: `standing rule ${d.rule}` });
     this.o.emit(makeEvent('grant.issued', this.actor, visitor, { hours: d.grantHours }));
-    return decide('join', d.reason, { grantHours: d.grantHours, grant });
+    return decide('join', d.reason, { grantHours: d.grantHours, grant, agreement });
   }
 
-  private async compute(p: ComputePayload, requester: string, visitor: string): Promise<LakeData> {
+  private async compute(p: ComputePayload, profile: LakeProfile, visitor: string): Promise<LakeData> {
+    const requester = profile.webId;
     const id = p.study ? studyId(p.study) : '';
     const excluded = (why: string) => {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision: 'excluded', reason: why }));
@@ -170,6 +180,9 @@ export class Housekeeper {
     if (!grant.type.includes('LakeAccessGrant') || g.id !== requester) return excluded('the grant belongs to someone else');
     if (until && Date.parse(until) < Date.now()) return excluded('the grant has expired');
     if (g.study !== id || !auditStudy(p.study).ok) return excluded('the grant does not cover this study');
+    // No study runs before both parties have signed the same terms.
+    const signed = await this.countersign(g.offer, p.countersignature, profile);
+    if (!signed.ok) return excluded(signed.why);
     const chain = await this.verifyOwnRecord();
     if (!chain.ok) return excluded(`my record failed its checks: ${chain.why}`);
 
@@ -184,14 +197,60 @@ export class Housekeeper {
     return this.reply({ kind: 'fragment', study: id, fragment });
   }
 
+  private async agree(offer: Offer, visitorWebId: string, until: Date): Promise<SignedAgreement> {
+    const agreement = agreementFor(offer, this.o.webId, visitorWebId, until);
+    const signed: SignedAgreement = { agreement, signatures: [{ by: this.o.webId, jws: await signAgreement(agreement, this.o.id) }] };
+    await this.tool('pod_write', { path: `agreements/${offer.id}.agreement.json`, content: JSON.stringify(signed) });
+    return signed;
+  }
+
+  private async countersign(offerId: string, jws: string | undefined, visitor: LakeProfile): Promise<{ ok: true } | { ok: false; why: string }> {
+    let signed: SignedAgreement;
+    try {
+      signed = JSON.parse(await this.read(`agreements/${offerId}.agreement.json`));
+    } catch {
+      return { ok: false, why: 'no agreement on file for this grant' };
+    }
+    if (signed.signatures.some((s) => s.by === visitor.webId)) return { ok: true };
+    if (!jws || !(await verifyAgreementSignature(signed.agreement, jws, visitor.publicJwk))) return { ok: false, why: 'countersign the agreement first' };
+    signed.signatures.push({ by: visitor.webId, jws });
+    await this.tool('pod_write', { path: `agreements/${offerId}.agreement.json`, content: JSON.stringify(signed) });
+    this.o.emit(makeEvent('agreement.signed', this.actor, `agent:${visitor.ownerDomain}`, {}));
+    return { ok: true };
+  }
+
+  /** A receipt from a payments agent the owner trusts goes in /receipts/. */
+  private async receipt(p: ReceiptPayload): Promise<LakeData> {
+    const check = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: this.o.webId, sandbox: this.o.sandbox });
+    if (!check.ok) return this.reply({ kind: 'rejected', code: 'receipt', why: check.why });
+    const agreement = String(check.vc.credentialSubject.agreement ?? 'unknown').split(':').slice(-2).join('-').replace(/[^a-zA-Z0-9-]/g, '');
+    await this.tool('pod_write', { path: `receipts/${agreement}.receipt.jwt`, content: p.receipt.credential, contentType: 'text/plain' });
+    return this.reply({ kind: 'filed', receipt: agreement });
+  }
+
   /** A visitor waiting on an "ask" checks back: has the owner answered? */
   private async status(p: StatusPayload, requester: string): Promise<LakeData> {
     const req = this.o.desk.pending.get(p.offerId);
     if (!req || req.visitor.webId !== requester) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such request from you' });
     const base = { kind: 'decision' as const, offerId: req.offerId, holds: [], notes: [] };
-    if (req.status === 'allowed') return this.reply({ ...base, decision: 'join', reason: 'your owner tapped Allow', grant: req.grant, grantHours: 48 });
+    if (req.status === 'allowed') {
+      const g = (await verifyCredential(req.grant!, this.o.desk.ownerJwk!)) as { validUntil?: string };
+      const agreement = await this.agreementOnFile(req.offerId) ?? await this.agree(
+        { id: req.offerId, requester: req.visitor.domain, purpose: req.purpose, fields: req.fields, retention: req.retention, priceUsd: req.priceUsd, study: req.study ?? undefined, credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true } },
+        req.visitor.webId, new Date(g.validUntil ?? Date.now() + 48 * HOUR),
+      );
+      return this.reply({ ...base, decision: 'join', reason: 'your owner tapped Allow', grant: req.grant, grantHours: 48, agreement });
+    }
     if (req.status === 'denied') return this.reply({ ...base, decision: 'decline', reason: 'the owner said no' });
     return this.reply({ ...base, decision: 'ask', reason: 'still waiting for the owner' });
+  }
+
+  private async agreementOnFile(offerId: string): Promise<SignedAgreement | null> {
+    try {
+      return JSON.parse(await this.read(`agreements/${offerId}.agreement.json`));
+    } catch {
+      return null;
+    }
   }
 
   private async tool(name: string, args: Record<string, unknown>): Promise<string> {

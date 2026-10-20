@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { lakeAgentApp, LakeLink, loadOrCreateIdentity, signMessage, type LakeData } from '@thelakeprotocol/core';
-import { dispatch, readmissionStudy } from './dispatch.js';
+import { dispatch, makeHuman, readmissionStudy } from './dispatch.js';
 import { knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
 
 const HELP = `lake — talk to the Lake
@@ -12,9 +12,10 @@ const HELP = `lake — talk to the Lake
              [--purpose p --fields a,b --price 2 --retention none] [--note "..."]
              [--tamper forge-card|unsigned|replay|impersonate] [--json]
 
-  lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--as uni.example]
+  lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--budget 5000] [--as uni.example]
                 [--extra-fields postcode] [--epsilon 2] [--node http://lake-node:7000]
-                [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--wait 30] [--port 4800] [--json]
+                [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
+                [--wait 30] [--unpaid] [--port 4800] [--json]
 
 Coming: lake attack · lake revoke · lake reset (milestones 4–6)`;
 
@@ -39,6 +40,9 @@ const { positionals, values: a } = parseArgs({
     auditor: { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
     port: { type: 'string', default: '4800' },
     wait: { type: 'string', default: '0' },
+    budget: { type: 'string', default: '5000' },
+    payments: { type: 'string', default: process.env.LAKE_PAYMENTS_URL ?? 'http://payments:4600' },
+    unpaid: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
   },
 });
@@ -84,7 +88,7 @@ async function dispatchCmd() {
   const visitor = await makeVisitor(id, domain, `Research agent (${domain})`, url);
   const reply = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'a research agent on a mission' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
   const server = lakeAgentApp(visitor.card, reply).listen(port);
-  const link = new LakeLink({ nodeUrl: a.node!.replace(/\/$/, ''), card: visitor.card, identity: id, webId: visitor.webId });
+  const link = new LakeLink({ nodeUrl: a.node!.replace(/\/$/, ''), card: visitor.card, identity: id, webId: visitor.webId, log: (m) => { if (!a.json) console.log(`NODE      ${m}`); } });
   await link.register(6);
 
   const say = (step: string, detail: string) => { if (!a.json) console.log(`${step.toUpperCase().padEnd(9)} ${detail}`); };
@@ -96,6 +100,11 @@ async function dispatchCmd() {
       priceUsd: Number(a.price ?? 2),
       extraFields: a['extra-fields']?.split(',').filter(Boolean),
       waitSeconds: Number(a.wait),
+      money: a.unpaid ? undefined : {
+        human: await makeHuman(await loadOrCreateIdentity(`${homedir()}/.lake/human-${domain}.json`), domain),
+        budgetUsd: Number(a.budget),
+        payments: a.payments!,
+      },
     });
     if (a.json) console.log(JSON.stringify({ ...r, grants: r.grants.map((g) => g.house) }, null, 2));
     else {

@@ -69,6 +69,7 @@ trust:
   issuers: [issuer.lake.local]     # who may sign your records
   auditors: [audit.lake.local]     # who may certify studies and converters
   ethics: [ethics.lake.local]      # whose ethics approvals count
+  payments: [payments.lake.local]  # whose receipts you file
 ```
 
 `ethics_approved: true` in a rule means *approved by an ethics body you list here*. An approval from anyone else counts as none. Nobody appoints these for the Lake; you choose. A sandbox house with no `trust` section trusts the demo specialists and says so in its log; outside the sandbox, an empty list trusts nobody.

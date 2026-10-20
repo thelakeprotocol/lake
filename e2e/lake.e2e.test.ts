@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { buildCard, generateIdentity, issueCredential, signCard, signMessage, type Identity } from '../packages/core/src/index.js';
-import { dispatch, readmissionStudy } from '../packages/visitor/src/dispatch.js';
+import { dispatch, makeHuman, readmissionStudy } from '../packages/visitor/src/dispatch.js';
 import { ask, knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
 
 // Boots a whole Lake from source: a node, the issuer, auditor and ethics specialists, and three houses
@@ -16,6 +16,7 @@ let dir: string;
 let node: string;
 let ethics: string;
 let auditor: string;
+let payments: string;
 const houses: Record<string, string> = {};
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
@@ -39,13 +40,15 @@ beforeAll(async () => {
   const nodePort = await port();
   node = `http://localhost:${nodePort}`;
   await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node')], /Lake node on/);
-  const [ip, ap, ep] = [await port(), await port(), await port()];
+  const [ip, ap, ep, pp] = [await port(), await port(), await port(), await port()];
   auditor = `http://localhost:${ap}`;
   ethics = `http://localhost:${ep}`;
+  payments = `http://localhost:${pp}`;
   await Promise.all([
     start(['packages/specialists/dist/main.js', 'issuer', '--port', ip, '--data', join(dir, 'issuer'), '--lake', node], /registered with the Lake node/),
     start(['packages/specialists/dist/main.js', 'auditor', '--port', ap, '--data', join(dir, 'auditor'), '--lake', node], /registered with the Lake node/),
     start(['packages/specialists/dist/main.js', 'ethics', '--port', ep, '--data', join(dir, 'ethics'), '--lake', node], /registered with the Lake node/),
+    start(['packages/specialists/dist/main.js', 'payments', '--port', pp, '--data', join(dir, 'payments'), '--lake', node], /registered with the Lake node/),
   ]);
   await Promise.all(
     ['stan', 'strict', 'research'].map(async (name) => {
@@ -100,7 +103,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(3);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(4);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -185,6 +188,41 @@ describe('the owner', () => {
   it('refuses owner requests not signed by the owner', async () => {
     const env = await signMessage({ kind: 'revoke', revoke: 'all' }, await generateIdentity('owner-phone'), { iss: webId });
     expect((await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) })).status).toBe(403);
+  });
+});
+
+describe('money', () => {
+  const human = async () => makeHuman(await generateIdentity(), 'uni.example');
+  const paidRun = async (priceUsd: number, budgetUsd: number, extraFields: string[] = []) =>
+    dispatch({ visitor: await visitor('uni.example'), node, ethics, auditor, study: readmissionStudy(), priceUsd, extraFields, money: { human: await human(), budgetUsd, payments } });
+
+  it('$2 becomes $5: the houses counter as one bloc, drop the postcode, sign, get paid, and file the receipts', async () => {
+    const before = (await (await fetch(`${node}/state`)).json()).counters.valueSettled;
+    const r = await paidRun(2, 5000, ['postcode']);
+    expect(r.decisions).toEqual({ counter: 2, ask: 1 });
+    expect(r.bloc).toEqual({ members: 2, priceUsd: 5, fields: ['age_band', 'medications', 'readmissions'] });
+    expect(r.participants).toBe(2);
+    expect(r.paid).toEqual({ total: 10, houses: 2, receiptsFiled: 2 });
+    const receipts = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'receipts'));
+    expect(receipts.some((f) => f.includes('.receipt.jwt'))).toBe(true);
+    const agreements = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements'));
+    const signed = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', agreements.find((f) => f.includes('.agreement.json'))!), 'utf8'));
+    expect(signed.agreement['@type']).toBe('Agreement');
+    await new Promise((ok) => setTimeout(ok, 500));
+    expect((await (await fetch(`${node}/state`)).json()).counters.valueSettled - before).toBe(10);
+  });
+
+  it("walks away from a bloc it can't afford", async () => {
+    const r = await paidRun(2, 6, ['postcode']);
+    expect(r.bloc?.priceUsd).toBe(5);
+    expect(r.participants).toBe(0);
+    expect(r.paid).toBeNull();
+  });
+
+  it('cannot spend past what the human signed for', async () => {
+    const r = await paidRun(5, 5);
+    expect(r.participants).toBe(2);
+    expect(r.paid?.refused).toMatch(/a human must approve/);
   });
 });
 

@@ -125,6 +125,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     const env = req.body as Signed<{ kind: 'events'; events: LakeEvent[] }>;
     const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
     if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
+    // The signature must be by the key on the card registered now, not an older one.
     try {
       await verifyMessage(env, async (kid) => (kid === entry.profile.publicJwk.kid ? entry.profile.publicJwk : null), { replay });
     } catch (e) {

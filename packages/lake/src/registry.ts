@@ -47,6 +47,8 @@ export class Registry {
     }
 
     const id = `${profile.role}:${profile.publicJwk.kid!.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`;
+    // One live card per WebID: a newer card (a rotated key) replaces the old one.
+    for (const [old, e] of this.entries) if (e.profile.webId === profile.webId && old !== id) this.entries.delete(old);
     const entry: Entry = { id, label: card.name, card, profile, domainVia: proof.via, registeredAt: new Date().toISOString(), url };
     this.entries.set(id, entry);
     return { ok: true, entry };

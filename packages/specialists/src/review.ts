@@ -1,19 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditStudy, buildCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  auditStudy, buildCard, digestSRI, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
 interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean }
-type Reply = { kind: 'approved' | 'certified'; credential: string; notes: string[] } | { kind: 'refused'; problems: string[] };
+type Reply =
+  | { kind: 'approved' | 'certified'; credential: string; notes: string[] }
+  | { kind: 'settled'; receipts: { payee: string; credential: string }[]; total: number; remaining: number }
+  | { kind: 'refused'; problems: string[] };
 
 const IDENTIFYING = ['name', 'dob', 'nhs_number', 'email', 'phone', 'address'];
 /** Converters this auditor has reviewed. A real auditor would pin the package digest too. */
 const CERTIFIED_CONVERTERS = ['@thelakeprotocol/convert-fhir@0.1.0'];
 const DAY = 86_400_000;
 
-async function specialist(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string) => Promise<Reply>) {
+async function specialist(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: { ownerDomain: string; publicJwk: import('@thelakeprotocol/core').JWK }) => Promise<Reply>) {
   const webId = `${o.url}/#${skill}`;
   const card = await signCard(
     buildCard({ name, description, url: `${o.url}/a2a`, skills: [{ id: skill, name, description }], profile: { role: 'specialist', webId, ownerDomain: o.domain, tags: [skill] } }, o.id),
@@ -24,7 +27,7 @@ async function specialist(o: SpecialistOptions, name: string, description: strin
   const app = lakeAgentApp(card, async (data) => {
     const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox });
     if (!v.ok) return reply({ kind: 'refused', problems: [`${v.rejection.code}: ${v.rejection.why}`] });
-    return reply(await decide(v.payload, v.profile.webId));
+    return reply(await decide(v.payload, v.profile.webId, v.profile));
   });
   const vc = (type: string, subject: Record<string, unknown> & { id: string }, days: number) =>
     issueCredential(
@@ -81,3 +84,60 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
 }
 
 export const newId = () => randomUUID();
+
+/**
+ * The demo Payments agent: checks the AP2 mandate chain (a human's Intent Mandate, the agent's Payment
+ * Mandates under it, the budget) and records settlements. Settlement is simulated; receipts are real VCs.
+ */
+export async function createPayments(o: SpecialistOptions & { onSettled?: (amount: number, count: number) => void }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
+  const spent = new Map<string, number>();
+  const s = await specialist(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed.', 'payments', async (p, agentWebId, agent) => {
+    if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...] }'] };
+    const intent = p.intent as { credential: string; card: AgentCard } | undefined;
+    const payments = (p.payments as string[] | undefined) ?? [];
+    if (!intent?.credential || !intent.card) return { kind: 'refused', problems: ['no Intent Mandate'] };
+    let human;
+    try {
+      human = await verifyLakeCard(intent.card);
+    } catch (e) {
+      return { kind: 'refused', problems: [`the human's card: ${(e as Error).message}`] };
+    }
+    if (human.ownerDomain !== agent.ownerDomain) return { kind: 'refused', problems: ['the Intent Mandate was signed by someone outside the agent\'s organisation'] };
+    let mandate;
+    try {
+      mandate = await verifyCredential(intent.credential, human.publicJwk);
+    } catch {
+      return { kind: 'refused', problems: ['the Intent Mandate signature does not verify'] };
+    }
+    const m = mandate.credentialSubject as unknown as { id: string; budget: { amount: number }; intent_expiry: string };
+    if (!mandate.type.includes('IntentMandate') || m.id !== agentWebId) return { kind: 'refused', problems: ['the Intent Mandate is not for this agent'] };
+    if (Date.parse(m.intent_expiry) < Date.now()) return { kind: 'refused', problems: ['the Intent Mandate has expired'] };
+    const digest = digestSRI(intent.credential);
+    const checked: { payee: string; amount: number; agreement: string }[] = [];
+    for (const pm of payments) {
+      try {
+        const vc = await verifyCredential(pm, agent.publicJwk);
+        const x = vc.credentialSubject as unknown as { id: string; amount: { value: number }; intentMandate: string; agreement: string };
+        if (!vc.type.includes('PaymentMandate') || x.intentMandate !== digest || !(x.amount.value > 0)) throw new Error();
+        checked.push({ payee: x.id, amount: x.amount.value, agreement: x.agreement });
+      } catch {
+        return { kind: 'refused', problems: ['a Payment Mandate is not signed by the agent under this Intent Mandate'] };
+      }
+    }
+    const total = checked.reduce((a, c) => a + c.amount, 0);
+    const already = spent.get(digest) ?? 0;
+    if (already + total > m.budget.amount) {
+      return { kind: 'refused', problems: [`$${already + total} is over the $${m.budget.amount} the human signed for: a human must approve`] };
+    }
+    spent.set(digest, already + total);
+    const receipts = await Promise.all(
+      checked.map(async (c) => ({
+        payee: c.payee,
+        credential: await s.vc('LakeReceipt', { id: c.payee, amount: { currency: 'USD', value: c.amount }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated' }, 3650),
+      })),
+    );
+    o.onSettled?.(total, checked.length);
+    return { kind: 'settled', receipts, total, remaining: m.budget.amount - already - total };
+  });
+  return { app: s.app, card: s.card, webId: s.webId };
+}

@@ -18,3 +18,4 @@ trust:                       # whose signatures count; anyone else's approval co
   issuers: [issuer.lake.local]
   auditors: [audit.lake.local]
   ethics: [ethics.lake.local]
+  payments: [payments.lake.local]
