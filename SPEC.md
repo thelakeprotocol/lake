@@ -219,6 +219,10 @@ Kinds in v0:
 - Anyone may run a node. Nodes follow peers they choose and exchange signed cards and revocation notices.
 - Registries are search indexes, not gatekeepers. Any agent MUST be reachable through its `.well-known` card with every registry offline.
 - Nodes MAY publish and subscribe to blocklists and reputation signals. Each node chooses which lists it trusts.
+- A node publishes its signals at `/signals`, signed with its card's key: `{ kind: "signals", blocklist: [key ids], reputation: { domain: 0..1 } }`. A house follows the nodes it chooses and MUST verify the signature.
+- Blocklists name **keys**, never domains: a forger claiming someone else's domain must never get that domain blocked. Reputation is kept only for verified identities.
+- Attack reports (`attack.blocked`) carry the attacker's key id, the domain it claimed, and whether that identity was verified. A node SHOULD quarantine a key after a few independent blocks (reference: 3).
+- Houses sharing an interest tag form a **guild**; a node announces it (`guild.formed`) when enough members exist (reference: 3).
 - Losing any node MUST NOT stop a mission that is already running.
 
 ## 10. Canonical data model

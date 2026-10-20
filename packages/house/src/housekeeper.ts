@@ -1,7 +1,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { rng, seedFrom } from '@thelakeprotocol/convert-fhir';
 import {
-  agreementDigest, agreementFor, auditStudy, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, auditStudy, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -26,6 +26,8 @@ export interface HousekeeperOptions {
   seed?: string;
   /** The owner's side: pending asks, live grants, revocations. */
   desk: OwnerDesk;
+  /** Signals from the nodes this house follows: keys to drop on sight, agents' reputation. */
+  signals?: () => { blocklist: Set<string>; reputation: Record<string, number> };
   emit: (e: LakeEvent) => void;
 }
 
@@ -68,27 +70,42 @@ export class Housekeeper {
   }
 
   async handle(data: LakeData | null): Promise<LakeData> {
+    // Who the card claims to be, unverified: a key and a domain. Attackers are tracked by key, so a
+    // forger claiming someone else's domain can never get that someone quarantined.
+    const params = data?.card?.capabilities?.extensions?.[0]?.params as { ownerDomain?: unknown; publicJwk?: { kid?: unknown } } | undefined;
+    const claimed = typeof params?.ownerDomain === 'string' ? params.ownerDomain.slice(0, 60) : String(data?.card?.name ?? 'unknown').slice(0, 60);
+    const key = typeof params?.publicJwk?.kid === 'string' ? params.publicJwk.kid.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) : '';
+    const blocked = (why: string, verified: boolean) => this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : claimed, { why, key, claimed, verified }));
+    if (key && this.o.signals?.().blocklist.has(key)) {
+      blocked('quarantined', false);
+      return this.reply({ kind: 'rejected', code: 'quarantined', why: 'this key is quarantined' });
+    }
     const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload | StatusPayload | ReceiptPayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
     if (!v.ok) {
-      // Unverified, so only a label: the domain the card claims, or its name.
-      const claimed = (data?.card?.capabilities?.extensions?.[0]?.params as { ownerDomain?: unknown } | undefined)?.ownerDomain;
-      const who = typeof claimed === 'string' ? `agent:${claimed.slice(0, 60)}` : String(data?.card?.name ?? 'unknown agent').slice(0, 60);
-      this.o.emit(makeEvent('attack.blocked', this.actor, who, { why: v.rejection.code }));
+      blocked(v.rejection.code, false);
       return this.reply({ kind: 'rejected', code: v.rejection.code, why: v.rejection.why });
     }
+    if (v.payload.kind === 'offer' && looksLikeInjection((v.payload as OfferPayload).offer?.note)) {
+      // The note never reaches a decision anyway; this only logs the attempt for what it is.
+      blocked('prompt-injection', true);
+      const offer = (v.payload as OfferPayload).offer;
+      this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'the note tried to give me orders; offers are data' }));
+      return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
+    }
     const visitor = `agent:${v.profile.ownerDomain}`;
-    if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor);
+    if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key);
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor);
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer or a compute request' });
   }
 
-  private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string): Promise<LakeData> {
+  private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {
     const offer = p.offer;
     if (!isOffer(offer)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected a Lake offer' });
     if (offer.requester !== domain) {
-      this.o.emit(makeEvent('attack.blocked', this.actor, visitor, { why: 'impersonation' }));
+      // Blame lands on the impersonator's own verified domain and key, never on the domain it pretended to be.
+      this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why: 'impersonation', claimed: domain, key, verified: true }));
       return this.reply({ kind: 'rejected', code: 'impersonation', why: `card is for ${domain}, offer claims ${offer.requester}` });
     }
     this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: offer.purpose }));
@@ -121,7 +138,7 @@ export class Housekeeper {
     }
     if (this.o.sandbox) notes.push('sandbox Lake: the visitor domain was not proved');
 
-    const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } });
+    const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
     if (d.decision === 'ask') {
       this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,

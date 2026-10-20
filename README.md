@@ -147,8 +147,8 @@ Honest, updated every merge.
 | ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and returns one randomised answer; de-biased result; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
 | ✅ | **M4 Approvals app**: phone-first; the owner's key is made on the phone and signs every live Allow; the house checks the grant matches what the owner saw; Your keys with Revoke; revocation refuses the next request at once (tested under 1 s); QR code on the map; the research agent waits for taps | runs, end-to-end tested. No push notifications yet; over-asking is stopped by the housekeeper, not yet below it |
 | ✅ | **M5 Money**: ODRL agreements signed by both sides before any study runs; houses counter as one bloc ($2 → $5, drop the postcode); a human's AP2 Intent Mandate caps spending; the Payments agent checks the chain, refuses over budget, settles (simulated) and signs receipts filed in each pod | runs, end-to-end tested |
-| 🔨 | **M6 Wild life**: swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | next |
-| ⬜ | **M7 Scale**: 1,000 houses on one laptop | |
+| ✅ | **M6 Wild life**: background traders and attackers (`lake swarm`, `lake attack`); every attack blocked and logged, prompt injection included; quarantine by key after 3 blocks, published as a signed blocklist houses follow; reputation for verified agents, usable in rules; guilds | runs, end-to-end tested |
+| 🔨 | **M7 Scale**: 1,000 houses on one laptop | next |
 | ⬜ | **M8 Federation**: many nodes, `.well-known` discovery, shared blocklists | |
 | ⬜ | **M9 Open door**: agent SDK, Lake MCP connector, public sandbox | |
 
@@ -171,9 +171,8 @@ packages/
   core/          signing, Lake cards, rules engine, ODRL, VCs, events     ✅
   house/         Solid pod + housekeeper + MCP pod door                   ✅
   lake/          registry, event stream, counters (bus: M3)               ✅
-  visitor/       `lake` CLI: knock, dispatch (the research agent)         ✅
+  visitor/       `lake` CLI: knock, dispatch, attack, swarm               ✅
   specialists/   issuer, ethics, auditor, payments                        ✅
-  swarm/         background traders and attackers                        M6
   ui/            the live map ✅ · the approvals app                       M4
   agent/         SDK for outside agents                                   M9
   mcp/           Lake MCP connector: any assistant can use the Lake       M9

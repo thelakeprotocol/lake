@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  buildCard, describe, EVENT_KINDS, makeEvent, ReplayGuard, signCard, verifyMessage,
+  buildCard, describe, EVENT_KINDS, makeEvent, ReplayGuard, signCard, signMessage, verifyMessage,
   type AgentCard, type Identity, type LakeEvent, type Signed,
 } from '@thelakeprotocol/core';
 import { Registry, type Entry } from './registry.js';
@@ -17,7 +17,14 @@ export interface NodeOptions {
   uiDir?: string;
   /** A house's approvals app, shown as a QR code on the map so an owner can scan it on stage. */
   approvalsUrl?: string;
+  /** Blocks from different reports before an attacker's key is quarantined. Default 3. */
+  quarantineAfter?: number;
+  /** Houses sharing an interest tag before they count as a guild. Default 3. */
+  guildMin?: number;
 }
+
+/** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
+export interface Signals { kind: 'signals'; blocklist: string[]; reputation: Record<string, number> }
 
 export interface Counters {
   houses: number;
@@ -29,7 +36,7 @@ export interface Counters {
 }
 
 type Wire =
-  | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: Line[] }
+  | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: Line[]; guilds: { tag: string; members: number }[] }
   | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
 interface Participant { id: string; role: string; label: string; tags: string[]; domain: string }
 interface Line { event: LakeEvent; text: string }
@@ -46,6 +53,18 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   const sockets = new Set<WebSocket>();
   const seenVisitors = new Set<string>();
   const nodeId = `node:${o.domain}`;
+  // The immune system: blocks per attacker key, quarantined keys, and each verified agent's record.
+  const blocks = new Map<string, number>();
+  const quarantined = new Set<string>();
+  const record = new Map<string, { kept: number; blocked: number }>();
+  const guilds = new Map<string, number>();
+  const reputation = () => Object.fromEntries([...record].map(([d, r]) => [d, Math.round(Math.min(1, Math.max(0, 0.5 + 0.05 * r.kept - 0.15 * r.blocked)) * 100) / 100]));
+  const tally = (agent: string | undefined, k: 'kept' | 'blocked') => {
+    if (!agent?.startsWith('agent:')) return;
+    const r = record.get(agent.slice(6)) ?? { kept: 0, blocked: 0 };
+    r[k]++;
+    record.set(agent.slice(6), r);
+  };
 
   const card = await signCard(
     buildCard(
@@ -69,6 +88,17 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   };
   const send = (ws: WebSocket, w: Wire) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(w));
 
+  /** Houses sharing an interest tag form a guild; announce it when one forms or grows. */
+  function guildCheck() {
+    const byTag = new Map<string, Entry[]>();
+    for (const e of registry.all()) if (e.profile.role === 'house') for (const t of e.profile.tags) byTag.set(t, [...(byTag.get(t) ?? []), e]);
+    for (const [tag, members] of byTag) {
+      if (members.length < (o.guildMin ?? 3) || (guilds.get(tag) ?? 0) >= members.length) continue;
+      guilds.set(tag, members.length);
+      publish(makeEvent('guild.formed', nodeId, undefined, { tag, members: members.length }));
+    }
+  }
+
   function publish(event: LakeEvent, p?: Participant) {
     switch (event.kind) {
       case 'knock': {
@@ -82,7 +112,21 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
         }
         break;
       }
-      case 'attack.blocked': counters.attacksBlocked++; break;
+      case 'attack.blocked': {
+        counters.attacksBlocked++;
+        if (event.data?.verified) tally(`agent:${event.data.claimed}`, 'blocked');
+        const key = event.data?.key ? String(event.data.key) : '';
+        if (key && !quarantined.has(key)) {
+          const n = (blocks.get(key) ?? 0) + 1;
+          blocks.set(key, n);
+          if (n >= (o.quarantineAfter ?? 3)) {
+            quarantined.add(key);
+            queueMicrotask(() => publish(makeEvent('agent.quarantined', nodeId, event.subject, { blocks: n, key, claimed: String(event.data?.claimed ?? '') })));
+          }
+        }
+        break;
+      }
+      case 'agreement.signed': tally(event.subject, 'kept'); break;
       case 'payment.settled': counters.valueSettled += Number(event.data?.amount ?? 0); break;
       // Computed from what each house's audit log says left it, never assumed.
       case 'compute.done': counters.recordsMoved += Number(event.data?.recordsOut ?? 0); break;
@@ -109,6 +153,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
     const p = participant(r.entry);
     publish(r.entry.profile.role === 'house' ? makeEvent('house.joined', r.entry.id, undefined, { label: r.entry.label }) : makeEvent('agent.registered', r.entry.id, undefined, { role: r.entry.profile.role, label: r.entry.label }), p);
+    if (r.entry.profile.role === 'house') guildCheck();
     res.json({ id: r.entry.id, domainVia: r.entry.domainVia });
   });
 
@@ -117,7 +162,14 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card })));
   });
 
-  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant) }));
+  const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
+  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList() }));
+
+  // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
+  app.get('/signals', async (_req, res) => {
+    const body: Signals = { kind: 'signals', blocklist: [...quarantined], reputation: reputation() };
+    res.json(await signMessage(body, o.id, { iss: `${o.url}/#node`, ttl: 60 }));
+  });
 
   // Participants report what happened at their door. Signed by their registered key; the node
   // stamps the actor itself, so nobody can speak for someone else.
@@ -149,7 +201,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   wss.on('connection', (ws) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    send(ws, { type: 'snapshot', node: o.domain, sandbox: o.sandbox, approvalsUrl: o.approvalsUrl, participants: registry.all().map(participant), counters, recent: recent.slice(-20) });
+    send(ws, { type: 'snapshot', node: o.domain, sandbox: o.sandbox, approvalsUrl: o.approvalsUrl, participants: registry.all().map(participant), counters, recent: recent.slice(-20), guilds: guildList() });
   });
   return { server, card, registry, publish };
 }

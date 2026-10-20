@@ -153,7 +153,9 @@ try {
   // no approvals app built; the API still works
 }
 
-const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox, seed: a.seed, emit, desk });
+// Signals from the node this house follows: refreshed every 2 s, verified against the node's own card.
+const signals = { blocklist: new Set<string>(), reputation: {} as Record<string, number> };
+const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox, seed: a.seed, emit, desk, signals: () => signals });
 const check = await keeper.verifyOwnRecord();
 say(check.ok ? 'record chain verified: trusted issuer → original → certified converter → housekeeper' : `record chain BROKEN: ${check.why}`);
 
@@ -163,6 +165,10 @@ const server = createHouseServer(card, keeper, desk, appDir).listen(port, async 
     link = new LakeLink({ nodeUrl: a.lake.replace(/\/$/, ''), card, identity: id, webId: owner.webId, log: say });
     const nodeId = await link.register();
     if (nodeId) say(`registered with the Lake node at ${a.lake} as ${nodeId}`);
+    setInterval(async () => {
+      const s = await link?.signals();
+      if (s) { signals.blocklist = new Set(s.blocklist); signals.reputation = s.reputation; }
+    }, 2000).unref();
   }
   emit(makeEvent('house.joined', actor, undefined, { tags: (rules.tags ?? []).join(',') }));
 });

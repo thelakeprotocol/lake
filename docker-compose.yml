@@ -83,6 +83,15 @@ services:
     command: ["--name", "research"]
     volumes: [research:/data, ./personas/research.yaml:/rules.yaml:ro]
 
+  # Background life: ordinary traders, and an attacker now and then. The Lake defends itself.
+  swarm:
+    build: { context: ., target: cli }
+    image: ghcr.io/thelakeprotocol/lake:latest
+    command: ["swarm", "--traders", "6", "--attackers", "1", "--interval", "2500"]
+    depends_on: [house-stan, house-strict, house-research]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    restart: unless-stopped
+
   lake:
     build: { context: ., target: cli }
     image: ghcr.io/thelakeprotocol/lake:latest

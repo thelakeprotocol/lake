@@ -18,7 +18,7 @@ export interface Rules {
 }
 
 export interface Rule {
-  match: Partial<Record<MatchKey, string | boolean>>;
+  match: Partial<Record<MatchKey, string | boolean | number>>;
   allow_fields?: string[];
   deny_fields?: string[];
   min_price_usd?: number;
@@ -27,7 +27,7 @@ export interface Rule {
   decision: 'join' | 'decline' | 'ask';
 }
 
-const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified'] as const;
+const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least'] as const;
 type MatchKey = (typeof MATCH_KEYS)[number];
 const DECISIONS = ['join', 'decline', 'ask'];
 
@@ -59,24 +59,27 @@ export type Decision =
   | { decision: 'ask'; rule: number | null; reason: string }
   | { decision: 'counter'; rule: number; reason: string; counter: { fields: string[]; priceUsd: number } };
 
-function matches(m: Rule['match'], o: Offer): boolean {
-  const facts: Record<MatchKey, string | boolean> = {
+/** What a house knows about the visitor besides the offer: its reputation from the signals it follows (0–1). */
+export interface Context { reputation?: number }
+
+function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
+  const facts: Record<Exclude<MatchKey, 'reputation_at_least'>, string | boolean> = {
     purpose: o.purpose,
     requester: o.requester,
     sponsor_verified: o.credentials.sponsorVerified,
     ethics_approved: o.credentials.ethicsApproved,
     audit_certified: o.credentials.auditCertified,
   };
-  return Object.entries(m).every(([k, v]) => facts[k as MatchKey] === v);
+  return Object.entries(m).every(([k, v]) => (k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : facts[k as keyof typeof facts] === v));
 }
 
 /**
  * Decide an offer. Pure and deterministic: same rules + same offer = same answer.
  * The offer's free-text note is never read here, so prompt injection has nothing to grab.
  */
-export function evaluate(rules: Rules, offer: Offer): Decision {
+export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decision {
   for (const [i, r] of rules.rules.entries()) {
-    if (!matches(r.match, offer)) continue;
+    if (!matches(r.match, offer, ctx)) continue;
     const n = i + 1;
     if (r.decision === 'decline') return { decision: 'decline', rule: n, reason: `your rule ${n} declines ${offer.purpose} requests` };
     if (r.decision === 'ask') return { decision: 'ask', rule: n, reason: `your rule ${n} says ask you first about ${offer.purpose} requests` };

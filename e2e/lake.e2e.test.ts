@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { buildCard, generateIdentity, issueCredential, signCard, signMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, generateIdentity, issueCredential, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman, readmissionStudy } from '../packages/visitor/src/dispatch.js';
+import { attack } from '../packages/visitor/src/attack.js';
 import { ask, knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
 
 // Boots a whole Lake from source: a node, the issuer, auditor and ethics specialists, and three houses
@@ -39,7 +40,7 @@ beforeAll(async () => {
   const port = async () => String(await freePort());
   const nodePort = await port();
   node = `http://localhost:${nodePort}`;
-  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node')], /Lake node on/);
+  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2'], /Lake node on/);
   const [ip, ap, ep, pp] = [await port(), await port(), await port(), await port()];
   auditor = `http://localhost:${ap}`;
   ethics = `http://localhost:${ep}`;
@@ -133,6 +134,32 @@ describe('the Lake node', () => {
     const env = await signMessage({ kind: 'events', events: [{ id: 'x', kind: 'record.moved', at: new Date().toISOString(), actor: 'house:stan' }] }, id, { iss: 'https://fake.example/#me' });
     const res = await fetch(`${node}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('wild life', () => {
+  const signals = async () => {
+    const key = (await verifyLakeCard(await (await fetch(`${node}/.well-known/agent-card.json`)).json())).publicJwk;
+    return verifyMessage(await (await fetch(`${node}/signals`)).json(), async () => key) as unknown as Promise<{ blocklist: string[]; reputation: Record<string, number> }>;
+  };
+
+  it('blocks every attack, then quarantines the key, and houses drop it on sight', async () => {
+    const r = await attack({ houses: [houses.stan!, houses.research!], count: 15, domain: 'evil.example' });
+    expect(Object.keys(r.tally).some((k) => k.includes('NOT BLOCKED') || k.startsWith('join'))).toBe(false);
+    expect(r.tally.quarantined).toBeGreaterThan(0);
+    expect((await signals()).blocklist.length).toBeGreaterThan(0);
+  });
+
+  it('lowers the reputation of a verified attacker, and never of the domain a forger pretended to be', async () => {
+    const rep = (await signals()).reputation;
+    expect(rep['evil.example']).toBeLessThan(0.5);
+    expect(rep['trusted-hospital.example']).toBeUndefined();
+    expect(rep['nhs.uk']).toBeUndefined();
+  });
+
+  it('announces a guild when houses share an interest', async () => {
+    const state = await (await fetch(`${node}/state`)).json();
+    expect(state.guilds).toContainEqual({ tag: 'research-volunteers', members: 2 });
   });
 });
 

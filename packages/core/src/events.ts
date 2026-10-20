@@ -43,8 +43,8 @@ export function describe(e: LakeEvent): string {
     case 'approval.requested': return `${e.actor} asked its owner about ${e.subject}.`;
     case 'approval.answered': return `The owner of ${e.actor} tapped ${d.answer}.`;
     case 'payment.settled': return `Payments settled $${d.amount} with ${d.count} participant(s).`;
-    case 'attack.blocked': return `${e.actor} blocked ${e.subject}: ${d.why}.`;
-    case 'agent.quarantined': return `${e.subject} quarantined after ${d.blocks} blocked attempts. No human involved.`;
+    case 'attack.blocked': return `${e.actor} blocked ${d.claimed ? `an agent claiming ${d.claimed}` : e.subject}: ${d.why}.`;
+    case 'agent.quarantined': return `Immune response: ${d.claimed ? `the key claiming ${d.claimed}` : e.subject} quarantined after ${d.blocks} blocked attempts. No human involved.`;
     case 'guild.formed': return `Guild formed: ${d.members} houses for ${d.tag} now bargain as one.`;
     case 'study.result': return `${e.actor} got its answer from ${d.participants} houses${d.summary ? `: ${d.summary}` : ''}.`;
     case 'compute.done': return `${e.actor} ran ${e.subject}'s certified study inside its pod. Records out: ${d.recordsOut}.`;

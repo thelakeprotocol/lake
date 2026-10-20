@@ -9,4 +9,9 @@ lake dispatch [--goal "..."] [--price 5] [--extra-fields postcode] [--epsilon 2]
 
 `dispatch` runs the mission: ethics approval → study certificate → discover houses on the node → knock on each over A2A with the offer, the study and both credentials → collect decisions and grants → ask each joining house to run the study → de-bias the randomised answers → report the result. It serves its own card while it runs, so the node can verify it and show it on the map.
 
-Coming: `lake attack` (6), `lake revoke` (4), `lake reset`.
+```bash
+lake attack [--count 10] [<house-url> …]          # one attacker key tries every trick; all must be blocked
+lake swarm [--traders 8] [--attackers 1]           # background life for a demo Lake
+```
+
+Revoking a house's keys: from the owner's phone, or `docker compose exec house-stan node dist/admin.js revoke-all`.

@@ -19,9 +19,11 @@
 | **Sybil houses.** One person running 50 houses to farm payments. | Personhood credential per house. | open question |
 | **Typo in rules.** | Unknown keys are errors. Misspellings never widen access. | <span class="status done">tested</span> |
 
-## Immune response
+## Immune response <span class="status done">runs</span>
 
-A blocked attacker triggers `attack.blocked`. Its target warns its neighbours. After a few blocks the Lake quarantines the attacker and drops its requests, with no human involved. Nodes can share blocklists.
+A blocked attempt triggers `attack.blocked`, naming the attacker's key and the domain it claimed. After 3 blocks the node quarantines that key and publishes it in its signed `/signals`; houses following the node refresh every 2 seconds and drop the key on sight. No human is involved. Blocklists name keys, never domains, so a forger can't get a real hospital blocked by pretending to be it. Reputation (kept deals up, blocked attempts down) is kept only for verified identities, and owners can require it: `reputation_at_least: 0.7`.
+
+Prompt injection never changes a decision, because rules don't read free text. A house also recognises common injection phrasing in an offer's note, declines the offer, and logs it as an attack. That check only labels the attempt; it isn't what keeps the house safe.
 
 ## Report a hole
 

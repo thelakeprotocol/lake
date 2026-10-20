@@ -46,6 +46,7 @@ export default defineConfig({
             { text: 'What is the Lake', link: '/docs/' },
             { text: 'Join the Lake', link: '/docs/join' },
             { text: 'How a study works', link: '/docs/how-it-works' },
+            { text: 'How agents find each other', link: '/docs/discovery' },
           ],
         },
         {

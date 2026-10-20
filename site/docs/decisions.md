@@ -19,6 +19,10 @@
 | Broadcast | **Direct A2A** to every discovered house, 32 at a time; no NATS | Direct messaging is required anyway (SPEC §9); a bus is an optimisation to revisit at 1,000 houses (milestone 7) |
 | Converter certificates | The auditor certifies `name@version` from an allowlist | Pinning the package digest is a follow-up |
 | Grants | A `join` is the owner's standing pre-approval; keys are minted by the owner's approval flow (milestone 4) | Agents never mint keys |
+| Quarantine | By key, after 3 independent blocks; signed blocklist at `/signals` | Blocking by claimed domain would let forgers frame real organisations |
+| Reputation | 0.5 + 0.05 per kept deal − 0.15 per blocked attempt, clamped to 0–1, verified identities only | Simple, explainable, and impossible to dent by impersonation |
+| Injection detection | A pattern check that only labels attempts | Safety comes from rules not reading free text; a classifier would be a second line, not the first |
+| Swarm | Lives in the CLI (`lake swarm`) | One image, nothing new to run |
 | AP2 | Mandates implemented from the spec as W3C VCs; no AP2 SDK used | There is no stable JS SDK; the chain is what matters, and it is real |
 | Settlement | Simulated; receipts are signed | Real money movement is a non-goal |
 | Bloc terms | Computed by the visitor from members' signed counters, by a fixed rule anyone can check | No coordinator needed; a jointly signed bloc counter is future work |

@@ -8,7 +8,7 @@ interface LakeEvent { id: string; kind: string; at: string; actor: string; subje
 interface Participant { id: string; role: string; label: string; tags: string[]; domain?: string }
 interface Counters { houses: number; agents: number; conversations: number; valueSettled: number; attacksBlocked: number; recordsMoved: number }
 type Wire =
-  | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: { event: LakeEvent; text: string }[] }
+  | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; guilds?: { tag: string }[]; participants: Participant[]; counters: Counters; recent: { event: LakeEvent; text: string }[] }
   | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
 
 const COL = { ink: '#070B12', mint: '#3DDC97', orange: '#FF6A2B', violet: '#9D8FFF', threat: '#FF4D6A', muted: '#8B9BAE', fg: '#E6EDF2', amber: '#F5C451' };
@@ -16,10 +16,10 @@ const rgba = (hex: string, a: number) => { const n = parseInt(hex.slice(1), 16);
 const hash = (s: string) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
-interface House { id: string; label: string; nx: number; ny: number; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number; computedT: number }
+interface House { id: string; label: string; nx: number; ny: number; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number; computedT: number; tags: string[] }
 interface Spec { id: string; label: string; nx: number; ny: number }
 interface Agent { id: string; domain: string; label: string; x: number; y: number; trail: { x: number; y: number }[]; seen: number }
-interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number }
+interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number; q: number }
 interface Thread { ax: number; ay: number; h: House; life: number; col: string }
 interface Ripple { x: number; y: number; r: number; max: number; col: string; w: number }
 interface Spark { x: number; y: number; vx: number; vy: number; life: number }
@@ -39,6 +39,8 @@ let threads: Thread[] = [];
 let ripples: Ripple[] = [];
 let sparks: Spark[] = [];
 /** The bargaining moment: the old price struck through, the bloc's price beside it. */
+/** Guilds: houses sharing a tag, linked in violet. */
+const guilds: { tag: string; born: number }[] = [];
 let haggle: { was: number; price: number; t: number; at: Agent } | null = null;
 
 function resize() {
@@ -67,7 +69,7 @@ function addParticipant(p: Participant, fresh: boolean) {
   if (p.role === 'house') {
     if (houses.has(p.id)) return;
     const pos = place(p.id, [...houses.values(), ...specs.values()]);
-    houses.set(p.id, { id: p.id, label: p.label, ...pos, born: fresh ? clock : -10, resp: '', respT: 0, alert: 0, leaving: 0, phase: hash(p.id) * 6.28, computedT: -99 });
+    houses.set(p.id, { id: p.id, label: p.label, ...pos, born: fresh ? clock : -10, resp: '', respT: 0, alert: 0, leaving: 0, phase: hash(p.id) * 6.28, computedT: -99, tags: p.tags ?? [] });
   } else if (p.role === 'visitor') {
     if (agents.has(p.id)) return;
     agents.set(p.id, { id: p.id, domain: p.domain ?? '', label: p.label, x: W / 2, y: H / 2, trail: [], seen: clock });
@@ -84,7 +86,7 @@ function visitor(id: string, bad = false): Visitor {
   if (!v) {
     const edge = hash(id);
     const x = edge < 0.5 ? (edge < 0.25 ? 2 : W - 2) : rand(0, W), y = edge >= 0.5 ? (edge < 0.75 ? 2 : H - 2) : rand(0, H);
-    v = { id, x, y, vx: rand(-20, 20), vy: rand(-20, 20), bad, target: null, seen: clock };
+    v = { id, x, y, vx: rand(-20, 20), vy: rand(-20, 20), bad, target: null, seen: clock, q: 0 };
     visitors.set(id, v);
   }
   v.seen = clock;
@@ -118,6 +120,17 @@ function onEvent(e: LakeEvent, p?: Participant) {
         v.target = h;
         threads.push({ ax: v.x, ay: v.y, h, life: 1, col: COL.muted });
       }
+      break;
+    }
+    case 'agent.quarantined': {
+      const v = e.subject ? visitors.get(e.subject) : undefined;
+      if (v) { v.q = clock; v.bad = true; ripples.push({ x: v.x, y: v.y, r: 4, max: 60, col: COL.threat, w: 2 }); }
+      break;
+    }
+    case 'guild.formed': {
+      const tag = String(e.data?.tag ?? '');
+      const g = guilds.find((x) => x.tag === tag);
+      if (g) g.born = clock; else guilds.push({ tag, born: clock });
       break;
     }
     case 'grant.revoked':
@@ -176,6 +189,8 @@ function onEvent(e: LakeEvent, p?: Participant) {
         const { x, y } = at(h);
         ripples.push({ x, y, r: 4, max: 150, col: COL.threat, w: 2 });
         if (v) { v.target = h; threads.push({ ax: v.x, ay: v.y, h, life: 1, col: COL.threat }); }
+        // The house's alarm reaches its neighbours.
+        for (const o of houses.values()) if (o !== h && Math.hypot((o.nx - h.nx) * W, (o.ny - h.ny) * H) < 150) o.alert = Math.max(o.alert, 0.7);
       } else {
         ripples.push({ x: W / 2, y: H / 2, r: 4, max: Math.min(W, H) / 2, col: COL.threat, w: 1.5 });
       }
@@ -192,7 +207,8 @@ function update(dt: number) {
     ag.y += (H / 2 - ag.y) * Math.min(1, dt * 2);
   }
   for (const [id, v] of visitors) {
-    if (clock - v.seen > 40) { visitors.delete(id); continue; }
+    if (clock - v.seen > 40 || (v.q && clock - v.q > 16)) { visitors.delete(id); continue; }
+    if (v.q) { v.vx *= 0.96; v.vy *= 0.96; v.x += v.vx * dt; v.y += v.vy * dt; continue; }
     if (v.target && !houses.has(v.target.id)) v.target = null;
     if (v.target) {
       const tx = v.target.nx * W, ty = v.target.ny * H, dx = tx - v.x, dy = ty - v.y, d = Math.hypot(dx, dy) || 1;
@@ -216,6 +232,17 @@ function update(dt: number) {
 function draw(now: number) {
   ctx.fillStyle = reduced ? COL.ink : rgba(COL.ink, 0.32);
   ctx.fillRect(0, 0, W, H);
+  guilds.forEach((g, gi) => {
+    const members = [...houses.values()].filter((h) => h.tags.includes(g.tag));
+    const pulse = 0.55 + 0.45 * Math.sin(now / 700 + gi);
+    ctx.strokeStyle = rgba(COL.violet, 0.3 * pulse * Math.min(1, (clock - g.born) / 2)); ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const h of members) {
+      const near = members.filter((o) => o !== h).sort((a, b) => Math.hypot(a.nx - h.nx, a.ny - h.ny) - Math.hypot(b.nx - h.nx, b.ny - h.ny)).slice(0, 2);
+      for (const o of near) { ctx.moveTo(h.nx * W, h.ny * H); ctx.lineTo(o.nx * W, o.ny * H); }
+    }
+    ctx.stroke();
+  });
   for (const t of threads) {
     ctx.strokeStyle = rgba(t.col, 0.6 * t.life); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(t.ax, t.ay); ctx.lineTo(t.h.nx * W, t.h.ny * H); ctx.stroke();
@@ -249,6 +276,13 @@ function draw(now: number) {
     ctx.fillText(sp.label.toUpperCase(), x, y + r + 16);
   }
   for (const v of visitors.values()) {
+    if (v.q) {
+      const fade = Math.max(0, 1 - (clock - v.q) / 16);
+      ctx.strokeStyle = rgba(COL.threat, 0.7 * fade); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(v.x, v.y, 9, 0, 6.283); ctx.stroke();
+      ctx.fillStyle = rgba(COL.threat, 0.5 * fade); ctx.beginPath(); ctx.arc(v.x, v.y, 2.5, 0, 6.283); ctx.fill();
+      continue;
+    }
     ctx.fillStyle = v.bad ? COL.threat : rgba(COL.muted, 0.85);
     ctx.beginPath(); ctx.arc(v.x, v.y, v.bad ? 3.4 : 2.2, 0, 6.283); ctx.fill();
   }
@@ -308,6 +342,7 @@ function connect(delay = 500) {
       where.textContent = `live · node ${w.node}${w.sandbox ? ' · sandbox' : ''}`;
       if (w.approvalsUrl) { $('qr').hidden = false; void QRCode.toCanvas($<HTMLCanvasElement>('qr-canvas'), w.approvalsUrl, { width: 232, margin: 0 }); }
       for (const p of w.participants) addParticipant(p, false);
+      for (const g of w.guilds ?? []) if (!guilds.some((x) => x.tag === g.tag)) guilds.push({ tag: g.tag, born: -10 });
       for (const r of w.recent) log(r.event, r.text);
       counters(w.counters);
     } else {

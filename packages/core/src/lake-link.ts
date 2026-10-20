@@ -1,5 +1,10 @@
 import type { AgentCard } from '@a2a-js/sdk';
+import { verifyLakeCard } from './card.js';
+import { verifyMessage } from './crypto.js';
 import { signMessage, type Identity } from './crypto.js';
+
+/** What a node publishes for the houses that follow it (signed by the node). */
+export interface Signals { blocklist: string[]; reputation: Record<string, number> }
 import type { LakeEvent } from './events.js';
 
 /**
@@ -33,6 +38,20 @@ export class LakeLink {
     }
     this.o.log?.(`node ${this.o.nodeUrl} unreachable (${last}); carrying on without it`);
     return null;
+  }
+
+  private nodeKey: import('jose').JWK | null = null;
+
+  /** The node's blocklist and reputation, verified against the node's own signed card. */
+  async signals(): Promise<Signals | null> {
+    try {
+      if (!this.nodeKey) this.nodeKey = (await verifyLakeCard(await (await fetch(`${this.o.nodeUrl}/.well-known/agent-card.json`)).json())).publicJwk;
+      const env = await (await fetch(`${this.o.nodeUrl}/signals`, { signal: AbortSignal.timeout(3000) })).json();
+      const p = (await verifyMessage(env, async (kid) => (kid === this.nodeKey!.kid ? this.nodeKey : null))) as unknown as Signals;
+      return { blocklist: p.blocklist ?? [], reputation: p.reputation ?? {} };
+    } catch {
+      return null;
+    }
   }
 
   report(e: LakeEvent) {

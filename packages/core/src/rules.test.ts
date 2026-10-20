@@ -71,3 +71,13 @@ describe('collective counter', () => {
     });
   });
 });
+
+describe('reputation in rules', () => {
+  it('lets owners require a minimum reputation', () => {
+    const rules = parseRules('owner: x\ndefault: decline\nrules:\n  - match: { purpose: care, reputation_at_least: 0.7 }\n    allow_fields: [medications]\n    decision: join');
+    const care = { ...study, purpose: 'care', fields: ['medications'], priceUsd: 0 };
+    expect(evaluate(rules, care, { reputation: 0.9 }).decision).toBe('join');
+    expect(evaluate(rules, care, { reputation: 0.4 }).decision).toBe('decline');
+    expect(evaluate(rules, care).decision).toBe('decline'); // unknown agents start at 0.5
+  });
+});

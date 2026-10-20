@@ -4,6 +4,7 @@ import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { lakeAgentApp, LakeLink, loadOrCreateIdentity, signMessage, type LakeData } from '@thelakeprotocol/core';
 import { dispatch, makeHuman, readmissionStudy } from './dispatch.js';
+import { attack, houseUrls, swarm } from './attack.js';
 import { knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
 
 const HELP = `lake — talk to the Lake
@@ -17,7 +18,8 @@ const HELP = `lake — talk to the Lake
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
                 [--wait 30] [--unpaid] [--port 4800] [--json]
 
-Coming: lake attack · lake revoke · lake reset (milestones 4–6)`;
+  lake attack [--count 10] [--node http://lake-node:7000] [<house-url> …]
+  lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
 
 const [cmd, ...rest] = process.argv.slice(2);
 const { positionals, values: a } = parseArgs({
@@ -44,11 +46,23 @@ const { positionals, values: a } = parseArgs({
     payments: { type: 'string', default: process.env.LAKE_PAYMENTS_URL ?? 'http://payments:4600' },
     unpaid: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
+    count: { type: 'string', default: '10' },
+    traders: { type: 'string', default: '8' },
+    attackers: { type: 'string', default: '1' },
+    interval: { type: 'string', default: '2000' },
   },
 });
 
 if (cmd === 'knock') await knockCmd();
 else if (cmd === 'dispatch') await dispatchCmd();
+else if (cmd === 'attack') {
+  const houses = positionals.length ? positionals : await houseUrls(a.node!);
+  const r = await attack({ houses, count: Number(a.count), log: (l) => console.log(l) });
+  console.log(`DONE      attacker ${r.domain}: ${Object.entries(r.tally).map(([k, n]) => `${n} ${k}`).join(', ')}`);
+} else if (cmd === 'swarm') {
+  console.log(`swarm: ${a.traders} traders, ${a.attackers} attacker(s), one move every ~${a.interval} ms. Ctrl-C to stop.`);
+  await swarm({ node: a.node!, traders: Number(a.traders), attackers: Number(a.attackers), intervalMs: Number(a.interval), log: (l) => console.log(l) });
+}
 else {
   console.log(HELP);
   process.exit(cmd && cmd !== 'help' ? 2 : 0);
