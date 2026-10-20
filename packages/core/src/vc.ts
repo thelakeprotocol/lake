@@ -29,16 +29,25 @@ export async function issueCredential(vc: Credential, id: Identity): Promise<str
 
 export class CredentialError extends Error {}
 
+const signatureOk = new Map<string, Credential>();
+
 /** Verifies a VC-JOSE credential against the issuer's public key; optionally checks a related resource's bytes. */
 export async function verifyCredential(jws: string, issuerJwk: jose.JWK, related?: { id: string; bytes: string | Uint8Array }): Promise<Credential> {
-  let vc: Credential;
-  try {
-    const key = await jose.importJWK(issuerJwk, 'EdDSA');
-    const { payload, protectedHeader } = await jose.compactVerify(jws, key);
-    if (protectedHeader.typ !== 'vc+jwt') throw new Error('wrong typ');
-    vc = JSON.parse(new TextDecoder().decode(payload)) as Credential;
-  } catch {
-    throw new CredentialError('credential signature does not verify');
+  // Signature checks are pure: the same credential and key always give the same answer, so remember good ones.
+  // Time and the related resource's bytes are checked fresh every call.
+  const memo = `${issuerJwk.x}|${jws}`;
+  let vc = signatureOk.get(memo);
+  if (!vc) {
+    try {
+      const key = await jose.importJWK(issuerJwk, 'EdDSA');
+      const { payload, protectedHeader } = await jose.compactVerify(jws, key);
+      if (protectedHeader.typ !== 'vc+jwt') throw new Error('wrong typ');
+      vc = JSON.parse(new TextDecoder().decode(payload)) as Credential;
+    } catch {
+      throw new CredentialError('credential signature does not verify');
+    }
+    if (signatureOk.size > 20000) signatureOk.clear();
+    signatureOk.set(memo, vc);
   }
   if (Date.parse(vc.validFrom) > Date.now()) throw new CredentialError('credential not yet valid');
   if (related) {

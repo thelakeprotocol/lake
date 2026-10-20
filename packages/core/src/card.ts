@@ -71,6 +71,19 @@ export class CardError extends Error {
  * (see domain.ts), because it needs the network.
  */
 export async function verifyLakeCard(card: AgentCard): Promise<LakeProfile> {
+  // The same signed card is verified by every house it knocks on; the answer can't change, so remember it.
+  const memo = JSON.stringify(card);
+  const known = verified.get(memo);
+  if (known) return known;
+  const profile = await verifyLakeCardUncached(card);
+  if (verified.size > 5000) verified.clear();
+  verified.set(memo, profile);
+  return profile;
+}
+
+const verified = new Map<string, LakeProfile>();
+
+async function verifyLakeCardUncached(card: AgentCard): Promise<LakeProfile> {
   const profile = lakeProfile(card);
   if (!profile?.publicJwk) throw new CardError('not-lake', 'card has no Lake profile');
   if (major(profile.lakeVersion) !== major(LAKE_VERSION)) throw new CardError('wrong-major', `Lake ${profile.lakeVersion} is not compatible with ${LAKE_VERSION}`);

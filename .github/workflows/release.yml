@@ -26,6 +26,9 @@ jobs:
         run: pnpm build
       - if: env.NPM_TOKEN != ''
         run: pnpm test
+      - name: Licence in every package
+        if: env.NPM_TOKEN != ''
+        run: for p in core convert-fhir visitor agent; do cp LICENSE NOTICE packages/$p/; done
       - name: Version from tag
         if: env.NPM_TOKEN != ''
         run: pnpm -r --filter "./packages/*" exec npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
