@@ -76,11 +76,39 @@ export class OwnerDesk {
       writeGrant: (id: string, jws: string) => Promise<void>;
       saveRevoked: (ids: string[]) => Promise<void>;
       loadRevoked: () => Promise<string[]>;
+      /**
+       * Sandbox houses anyone can claim: a claim is a lease, not a deed. When it ends (or the owner hands
+       * the house back), every key is revoked, the house forgets its owner, and `onRelease` resets it.
+       */
+      leaseHours?: number;
+      clearOwnerKey?: () => Promise<void>;
+      onRelease?: () => Promise<void>;
     },
   ) {}
 
+  /** When the current owner's lease ends, if this house is leased. */
+  leaseUntil(): Date | null {
+    const at = (this.ownerJwk as (JWK & { claimedAt?: number }) | null)?.claimedAt;
+    return this.o.leaseHours && at ? new Date(at + this.o.leaseHours * 3_600_000) : null;
+  }
+
+  /** Back to nobody's: keys revoked, requests dropped, owner forgotten, house reset. Anyone can claim it again. */
+  async release() {
+    await this.revoke('all');
+    this.pending.clear();
+    this.ownerJwk = null;
+    await this.o.clearOwnerKey?.();
+    this.token = await secret(join(this.o.dataDir, 'pairing-token'), true);
+    await this.o.onRelease?.();
+  }
+
   async init() {
     this.ownerJwk = await this.o.readOwnerKey();
+    if (this.o.leaseHours) {
+      const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
+      check();
+      setInterval(check, 60_000).unref();
+    }
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
@@ -126,11 +154,14 @@ export class OwnerDesk {
       if (this.ownerJwk && this.ownerJwk.x === publicJwk.x) return void res.json({ paired: true, webId: this.o.webId });
       const firstCome = this.o.openPairing && !this.ownerJwk;
       if (!firstCome && token !== this.token) return void res.status(403).json({ error: this.ownerJwk ? 'this house already has an owner' : 'wrong or missing pairing token' });
-      this.ownerJwk = { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid: String(publicJwk.kid ?? 'owner'), alg: 'EdDSA' };
+      this.ownerJwk = { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid: String(publicJwk.kid ?? 'owner'), alg: 'EdDSA', ...(this.o.leaseHours ? { claimedAt: Date.now() } : {}) } as JWK;
       await this.o.saveOwnerKey(this.ownerJwk);
       this.token = await secret(join(this.o.dataDir, 'pairing-token'), true); // one use only
-      res.json({ paired: true, webId: this.o.webId });
+      res.json({ paired: true, webId: this.o.webId, until: this.leaseUntil()?.toISOString() });
     });
+
+    // Public: is this house taken? (For the sandbox's list of houses to claim.)
+    r.get('/status', (_req, res) => void res.json({ claimed: !!this.ownerJwk, until: this.leaseUntil()?.toISOString() ?? null, leaseHours: this.o.leaseHours ?? null }));
 
     r.post('/api', async (req, res) => {
       if (!this.ownerJwk) return void res.status(409).json({ error: 'pair first' });
@@ -143,6 +174,10 @@ export class OwnerDesk {
       if (p.kind === 'list') return void res.json(this.view());
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
       if (p.kind === 'revoke') return void res.json({ revoked: await this.revoke(p.revoke ?? 'all') });
+      if (p.kind === 'release' && this.o.leaseHours) {
+        await this.release();
+        return void res.json({ released: true });
+      }
       const panel = this.o.panel;
       if (panel && p.kind.startsWith('panel.')) {
         const q = p as unknown as { text?: string };
@@ -174,6 +209,7 @@ export class OwnerDesk {
   view() {
     return {
       webId: this.o.webId,
+      until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

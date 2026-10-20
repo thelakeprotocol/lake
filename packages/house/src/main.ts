@@ -8,7 +8,7 @@ import express from 'express';
 import { describe, parseRules, type LakeEvent } from '@thelakeprotocol/core';
 import { seedFrom } from '@thelakeprotocol/convert-fhir';
 import { startHouse, type House } from './house.js';
-import { ownerSession, startPod, startProvider, tenantSessions } from './pod.js';
+import { externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
 
 const { values: a } = parseArgs({
   options: {
@@ -23,6 +23,13 @@ const { values: a } = parseArgs({
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL },
     join: { type: 'string', default: process.env.LAKE_JOIN },
+    // Bring your own pod (any Solid server): your WebID and client credentials registered with its identity provider.
+    webid: { type: 'string', default: process.env.LAKE_WEBID },
+    'client-id': { type: 'string', default: process.env.LAKE_CLIENT_ID },
+    'client-secret': { type: 'string', default: process.env.LAKE_CLIENT_SECRET },
+    pod: { type: 'string', default: process.env.LAKE_POD },
+    'oidc-issuer': { type: 'string', default: process.env.LAKE_OIDC_ISSUER },
+    'pod-folder': { type: 'string', default: process.env.LAKE_POD_FOLDER ?? 'lake' },
     seed: { type: 'string', default: process.env.LAKE_SEED },
     'owner-url': { type: 'string', default: process.env.LAKE_OWNER_URL },
     'open-pairing': { type: 'boolean', default: process.env.LAKE_OPEN_PAIRING === '1' },
@@ -33,6 +40,8 @@ const { values: a } = parseArgs({
     'tenant-prefix': { type: 'string', default: process.env.LAKE_TENANT_PREFIX },
     'personas-dir': { type: 'string', default: process.env.LAKE_PERSONAS ?? '/personas' },
     relay: { type: 'boolean', default: process.env.LAKE_RELAY === '1' },
+    // With --open-pairing, how long a claim lasts before the house resets for the next person (0: forever).
+    'lease-hours': { type: 'string', default: process.env.LAKE_LEASE_HOURS },
   },
 });
 
@@ -73,14 +82,24 @@ async function single() {
   const emit = (e: LakeEvent) => console.log(a.json ? JSON.stringify(e) : `[${actor}] ${describe(e)}`);
   const say = (msg: string) => console.log(a.json ? JSON.stringify({ at: new Date().toISOString(), actor, msg }) : `[${actor}] ${msg}`);
 
-  say(`starting pod for ${name}`);
   const podOpts = { dataDir: `${a.data}/${name}`, port: podPort, baseUrl: podUrl, owner: name };
-  const pod = await startPod(podOpts);
-  const owner = await ownerSession(podOpts);
-  say(`pod up: ${owner.podRoot} (WebID ${owner.webId})`);
+  let pod: { stop: () => void } | null = null;
+  let owner: OwnerSession;
+  if (a.webid) {
+    if (!a['client-id'] || !a['client-secret']) throw new Error('--webid needs --client-id and --client-secret: register an app with your Solid identity provider');
+    const x = await externalSession({ webId: a.webid, clientId: a['client-id'], clientSecret: a['client-secret'], podRoot: a.pod, oidcIssuer: a['oidc-issuer'], folder: a['pod-folder'] });
+    owner = x;
+    await mkdir(podOpts.dataDir, { recursive: true }); // the owner's desk keeps its pairing state here
+    say(`your own pod: ${owner.podRoot} (WebID ${owner.webId}, logged in at ${x.oidcIssuer})`);
+  } else {
+    say(`starting pod for ${name}`);
+    pod = await startPod(podOpts);
+    owner = await ownerSession(podOpts);
+    say(`pod up: ${owner.podRoot} (WebID ${owner.webId})`);
+  }
 
   if (a.relay && !a.lake) throw new Error('--relay needs at least one Lake node (--lake or LAKE_NODE_URL) to relay through');
-  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], openPairing: a['open-pairing'], emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
+  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], openPairing: a['open-pairing'], leaseHours: a['open-pairing'] && a['lease-hours'] ? Number(a['lease-hours']) || undefined : undefined, emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
   const server = house.app.listen(port, async () => {
     say(a.relay ? `reached through the Lake's relay: ${house.card.supportedInterfaces.map((i) => i.url).join(' · ')}` : `A2A on ${baseUrl}/a2a · card at ${baseUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
     await house.join();
@@ -88,7 +107,7 @@ async function single() {
   const stop = async () => {
     await house.leave();
     server.close();
-    pod.stop();
+    pod?.stop();
     setTimeout(() => process.exit(0), 300).unref();
   };
   process.on('SIGTERM', stop);
@@ -127,12 +146,24 @@ async function hosted(n: number) {
     await writeFile(join(houseDir, 'rules.yaml'), rulesText);
     const house = await startHouse({
       ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'],
+      leaseHours: a['open-pairing'] ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
       emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true,
     });
     app.use(`/t/${name}`, house.app);
     houses.push(house);
   });
   app.get('/health', (_req, res) => void res.json({ ok: true, houses: houses.length }));
+  // Which houses are free to claim right now, and when the taken ones free up.
+  app.get('/t/', (_req, res) => {
+    const rows = houses.map((h) => ({ name: h.name, until: h.desk.ownerJwk ? h.desk.leaseUntil()?.toISOString() ?? 'kept' : null }));
+    if (_req.accepts(['html', 'json']) === 'json') return void res.json(rows);
+    const li = rows.map((r) => r.until
+      ? `<li><span>${r.name}</span><em>taken${r.until === 'kept' ? '' : ` until ${r.until.slice(11, 16)} UTC`}</em></li>`
+      : `<li><a href="${r.name}/owner/">${r.name}</a><b>free · claim it</b></li>`).join('');
+    res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Claim a house</title>
+<style>body{margin:0;background:#070B12;color:#E6EDF2;font:16px/1.5 system-ui,sans-serif;padding:24px 16px;max-width:560px}h1{font:700 32px/1 'Arial Narrow',sans-serif;text-transform:uppercase}p{color:#8B9BAE}ul{list-style:none;padding:0;display:grid;gap:8px}li{display:flex;justify-content:space-between;border:1px solid #1D2838;border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace}a{color:#3DDC97}b{color:#3DDC97;font-weight:400}em{color:#8B9BAE;font-style:normal}</style>
+<h1>Claim a house</h1><p>Sandbox houses: synthetic data, simulated money. A claim lasts ${Number(a['lease-hours'] ?? 24) || 'unlimited'} hours, then the house resets for the next person. Open one, tap <b>Pair this device</b>, and it's yours.</p><ul>${li}</ul>`);
+  });
 
   const server = app.listen(port, async () => {
     await pool(houses, 16, (h) => h.join());

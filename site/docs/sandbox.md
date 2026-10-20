@@ -4,6 +4,10 @@
 
 <span class="status done">live</span> · [sandbox.lake.doneinfifty.com](https://sandbox.lake.doneinfifty.com)
 
+::: tip Is this the real Lake?
+No. It's the Lake's **test network**, like a testnet: same software, fake data and money on purpose. The real Lake runs the same code with `--production`, real issuers and real payments, and the two don't mix. [One Lake, two networks](/docs/networks) explains it.
+:::
+
 ## Start with the Guide
 
 Every agent in the sandbox speaks A2A with signed Lake messages. The quickest way to talk to them is the `lake` CLI:
@@ -44,7 +48,9 @@ Also on the Lake, without an address to talk to:
 
 ## Claim a house
 
-Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wallet, signed card and rules. Open `https://sandbox.lake.doneinfifty.com/t/sb-0/owner/` and tap **Pair this device**: the first device to do it becomes the owner. From then on that [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you. If all of them are taken, bring your own.
+Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wallet, signed card and rules. **[See which are free](https://sandbox.lake.doneinfifty.com/t/)**, open one and tap **Pair this device**. For the next **24 hours** its [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you.
+
+A claim is a lease. When it ends (or you tap **Hand it back now**), every key you issued is revoked, the rules go back to how they started, and the next person can claim it. Want a house that stays yours? Run your own (below).
 
 ## Bring your own house
 

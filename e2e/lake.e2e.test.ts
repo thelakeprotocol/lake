@@ -11,6 +11,7 @@ import { joinLake } from '../packages/agent/src/index.js';
 import { buildCard, generateIdentity, issueCredential, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman, readmissionStudy } from '../packages/visitor/src/dispatch.js';
 import { attack } from '../packages/visitor/src/attack.js';
+import { ownerSession, startPod } from '../packages/house/src/pod.js';
 import { ask, knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
 
 // Boots a whole Lake from source: a node, the issuer, auditor and ethics specialists, and three houses
@@ -380,6 +381,34 @@ describe('the sandbox specialists', () => {
     expect(agent.quests.find((q: { id: string }) => q.id === 'sparred').done).toBe(true);
     expect((await ask(`${quests}/a2a`, me, { kind: 'leaderboard' })).reply.top.length).toBeGreaterThan(0);
   });
+});
+
+describe('bring your own pod', () => {
+  it('a house runs on a pod it did not start, on another Solid server, with the owner\'s WebID and app credentials', async () => {
+    // Someone else's Solid server, with an account, a pod and client credentials made the usual way.
+    const port = await freePort();
+    const opts = { dataDir: join(dir, 'elsewhere'), port, baseUrl: `http://localhost:${port}/`, owner: 'alice' };
+    const pod = await startPod(opts);
+    try {
+      const alice = await ownerSession(opts);
+      const creds = JSON.parse(await readFile(join(opts.dataDir, 'house-secrets.json'), 'utf8'));
+      const hp = String(await freePort());
+      await start(
+        ['packages/house/dist/main.js', '--name', 'alice', '--rules', 'personas/stan.yaml', '--data', join(dir, 'byo'), '--port', hp, '--lake', node,
+          '--issuer-url', issuerUrl, '--auditor-url', auditor, '--webid', alice.webId, '--client-id', creds.clientId, '--client-secret', creds.clientSecret],
+        /joined the Lake/,
+      );
+      // Everything the house keeps lives in a corner of Alice's pod (/lake/), found from her WebID profile.
+      const files = await readdir(join(opts.dataDir, 'pod', 'alice', 'lake'));
+      expect(files).toEqual(expect.arrayContaining(['health', 'agreements', 'wallet', 'settings']));
+      const { reply } = await knock(`http://localhost:${hp}/a2a`, await visitor('gp.example'), PRESETS.gp!);
+      expect(reply).toMatchObject({ kind: 'decision', decision: 'join', holds: ['medications'] });
+    } finally {
+      procs.pop()?.kill('SIGTERM'); // the house leaves the Lake, so later tests count three again
+      await new Promise((r) => setTimeout(r, 1000));
+      pod.stop();
+    }
+  }, 120_000);
 });
 
 describe('relay: a house behind a home router', () => {

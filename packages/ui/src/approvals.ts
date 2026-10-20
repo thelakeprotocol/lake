@@ -16,6 +16,7 @@ const key = loadKey();
 const api = new URL('./', location.href).href; // served at /owner/
 let webId = '';
 let houseName = '';
+let leaseUntil: string | null = null;
 let pendingSeen = new Set<string>();
 
 // ---- tiny DOM helper ----
@@ -39,6 +40,7 @@ async function pair(): Promise<boolean> {
   const body = await res.json();
   if (res.ok) {
     webId = body.webId;
+    leaseUntil = body.until ?? null;
     history.replaceState(null, '', location.pathname);
     return true;
   }
@@ -109,6 +111,7 @@ async function home() {
       h('p', { class: 'muted' }, o.record.ok
         ? `Signed by a trusted issuer, unchanged since, converted by a certified converter. Your house holds ${o.claims} claims: ${o.holds.map(nice).join(', ') || 'none'}.`
         : `${o.record.why}. Your house won't join studies until this is fixed.`)),
+    leaseUntil ? leaseCard() : '',
     h('div', { class: 'card' },
       h('h3', {}, o.relayed ? 'Reached through the Lake' : 'Reached directly'),
       h('p', { class: 'muted' }, o.relayed ? 'Your house is behind a router; agents reach it through the nodes it follows.' : 'Agents reach your house at its own address.'),
@@ -117,6 +120,21 @@ async function home() {
     feed.length ? h('ul', { class: 'feed' }, ...feed.slice(0, 12).map((a) => h('li', {}, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text))))
       : h('p', { class: 'muted' }, 'Quiet so far.'),
   );
+}
+
+/** Sandbox houses are leased: shown on Home, with a way to hand the house back early. */
+function leaseCard() {
+  const until = new Date(leaseUntil!);
+  const back = h('button', { class: 'btn danger small', type: 'button' }, 'Hand it back now');
+  back.onclick = async () => {
+    if (!confirm('Hand this house back? Every key is revoked and the next person gets it fresh.')) return;
+    await call({ kind: 'release' });
+    location.reload();
+  };
+  return h('div', { class: 'card' },
+    h('h3', {}, `Yours until ${until.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`),
+    h('p', { class: 'muted' }, 'A sandbox house is a lease. When it ends, every key is revoked, the rules reset and the next person can claim it. Want to keep a house? Run your own: it stays yours.'),
+    back);
 }
 
 // ---- Requests ----
@@ -402,7 +420,7 @@ function start() {
 }
 
 // Already paired? A signed "list" answers. Otherwise offer to pair (automatically when the link carries a token).
-call({ kind: 'list' }).then((v) => { webId = v.webId; start(); }).catch(async () => {
+call({ kind: 'list' }).then((v) => { webId = v.webId; leaseUntil = v.until ?? null; start(); }).catch(async () => {
   $('pair').hidden = false;
   if (location.hash.includes('pair=') && (await pair())) start();
 });

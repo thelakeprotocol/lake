@@ -33,6 +33,8 @@ export interface HouseOptions {
   seed?: string;
   sandbox: boolean;
   openPairing?: boolean;
+  /** With open pairing: a claim lasts this long, then the house resets for the next person. */
+  leaseHours?: number;
   domain?: string;
   emit: (e: LakeEvent) => void;
   say: (msg: string) => void;
@@ -94,7 +96,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
 
   // Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
-  for (const f of ['health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/']) await ensureContainer(owner, f);
+  for (const f of ['', 'health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/']) await ensureContainer(owner, f);
 
   // The owner's rules. Edits made in the control panel live in their pod and win over the file the house started with.
   let rulesText = o.rulesText;
@@ -178,6 +180,15 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),
     saveRevoked: (ids) => put(owner, 'agreements/revoked.json', JSON.stringify(ids), 'application/json'),
     loadRevoked: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/revoked.json`); return r.ok ? r.json() : []; },
+    leaseHours: o.leaseHours,
+    clearOwnerKey: async () => { await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`, { method: 'DELETE' }); },
+    // The next person gets the house as it started: its original rules.
+    onRelease: async () => {
+      await put(owner, 'settings/rules.yaml', o.rulesText, 'text/yaml');
+      const fresh = parseRules(o.rulesText);
+      keeperRef?.setRules(fresh, o.rulesText, trustFrom(fresh));
+      say('the lease ended: keys revoked, owner forgotten, rules reset. Anyone can claim this house now.');
+    },
   });
   const pairing = await desk.init();
   const ownerUrl = `${(o.ownerUrl ?? o.publicUrl).replace(/\/$/, '')}/owner/`;
@@ -229,13 +240,14 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 async function ensureContainer(o: OwnerSession, path: string) {
   const url = o.podRoot + path;
   if ((await o.fetch(url, { method: 'HEAD' })).ok) return;
-  const res = await o.fetch(url, { method: 'PUT', headers: { 'content-type': 'text/turtle' }, body: '' });
-  if (!res.ok) throw new Error(`could not create ${path}: ${res.status}`);
+  // The portable way to make a container on any Solid server (CSS, ESS, …): PUT with the container type.
+  const res = await o.fetch(url, { method: 'PUT', headers: { 'content-type': 'text/turtle', link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"', 'if-none-match': '*' } });
+  if (!res.ok && res.status !== 412) throw new Error(`could not create ${path}: ${res.status} ${(await res.text()).slice(0, 160)}`);
 }
 
 async function put(o: OwnerSession, path: string, body: string, contentType: string) {
   const res = await o.fetch(o.podRoot + path, { method: 'PUT', headers: { 'content-type': contentType }, body });
-  if (!res.ok) throw new Error(`could not write ${path}: ${res.status}`);
+  if (!res.ok) throw new Error(`could not write ${path}: ${res.status} ${(await res.text()).slice(0, 160)}`);
 }
 
 /** The housekeeper's signing key lives in the owner's pod, in /wallet/, readable only by the owner. */

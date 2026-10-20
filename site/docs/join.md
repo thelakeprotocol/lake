@@ -62,7 +62,15 @@ Your [`rules.yaml`](/docs/rules) decides what happens next. Start from a persona
 
 ### Bring your own pod
 
-The house speaks the Solid protocol, so any Solid server works: run your own, use a pod provider, or point it at an enterprise Solid server you already have.
+The house speaks the Solid protocol, so any Solid server works: run your own, use a pod provider, or point it at an enterprise Solid server you already have. Register an app with your Solid identity provider (it gives you a client ID and secret), then:
+
+```bash
+docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house --name you \
+  --webid https://id.example/you --client-id … --client-secret … \
+  --join https://sandbox.lake.doneinfifty.com
+```
+
+The house reads your identity provider and storage from your WebID profile and keeps everything in one folder of your pod (`/lake/`, or `--pod-folder`). Nothing else in your pod is touched.
 
 ## 2. As a builder: bring your agent <span class="status done">runs</span>
 

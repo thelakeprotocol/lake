@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { Session } from '@inrupt/solid-client-authn-node';
+import { Parser } from 'n3';
 
 export interface PodOptions {
   /** Where the pod's files and the house's local secrets live. */
@@ -124,6 +125,41 @@ async function loadProviderSecrets(o: { dataDir: string; baseUrl: string }): Pro
 async function pool<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => { while (i < items.length) await fn(items[i++]!); }));
+}
+
+const SOLID_OIDC_ISSUER = 'http://www.w3.org/ns/solid/terms#oidcIssuer';
+const PIM_STORAGE = 'http://www.w3.org/ns/pim/space#storage';
+
+/**
+ * A pod you already have, on any Solid server (Community Solid Server, Inrupt's ESS, a provider's). The house
+ * logs in as you with client credentials you registered with your identity provider; your WebID profile
+ * says which provider and where your storage is. `folder` keeps the house's files in one corner of your pod.
+ */
+export async function externalSession(o: { webId: string; clientId: string; clientSecret: string; podRoot?: string; oidcIssuer?: string; folder?: string }): Promise<OwnerSession & { oidcIssuer: string }> {
+  let { podRoot, oidcIssuer } = o;
+  if (!podRoot || !oidcIssuer) {
+    const res = await fetch(o.webId, { headers: { accept: 'text/turtle' } });
+    if (!res.ok) throw new Error(`could not read your WebID profile ${o.webId}: ${res.status}`);
+    const quads = new Parser({ baseIRI: o.webId }).parse(await res.text());
+    const about = (p: string) => quads.find((q) => q.subject.value === o.webId && q.predicate.value === p)?.object.value;
+    oidcIssuer ??= about(SOLID_OIDC_ISSUER);
+    podRoot ??= about(PIM_STORAGE) ?? (await storageAbove(o.webId));
+    if (!oidcIssuer) throw new Error(`your WebID profile names no solid:oidcIssuer; pass --oidc-issuer`);
+    if (!podRoot) throw new Error(`your WebID profile names no pim:storage and no storage was found above it; pass --pod`);
+  }
+  const root = podRoot.replace(/\/?$/, '/') + (o.folder ? o.folder.replace(/^\/|\/?$/g, '') + '/' : '');
+  return { webId: o.webId, podRoot: root, oidcIssuer, fetch: await sessionFetch(oidcIssuer, { clientId: o.clientId, clientSecret: o.clientSecret }) };
+}
+
+/** Solid Protocol §4.1: walk up from the WebID's document to the container that says it is a storage root. */
+async function storageAbove(webId: string): Promise<string | undefined> {
+  let url = new URL('.', webId.split('#')[0]);
+  for (;;) {
+    const res = await fetch(url, { method: 'HEAD' }).catch(() => null);
+    if (res?.headers.get('link')?.includes('http://www.w3.org/ns/pim/space#Storage')) return url.href;
+    if (url.pathname === '/') return undefined;
+    url = new URL('..', url);
+  }
 }
 
 /** Logs in as the owner with client credentials (minted once through the CSS account API). */
