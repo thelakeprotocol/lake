@@ -173,6 +173,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         link = new LakeLinks({ nodeUrls: nodes, card, identity: id, webId: owner.webId, log: say });
         const ids = await link.register();
         ids.forEach((nodeId, i) => { if (nodeId) say(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
+        link.keepAlive(5_000 + Math.floor(Math.random() * 10_000));
         setInterval(async () => {
           const s = await link?.signals();
           if (s) { signals.blocklist = new Set(s.blocklist); signals.reputation = s.reputation; }

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditStudy, buildCard, digestSRI, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  auditStudy, buildCard, digestSRI, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
-interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean }
+interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean; report?: (e: LakeEvent) => void }
 type Reply =
   | { kind: 'approved' | 'certified'; credential: string; notes: string[] }
   | { kind: 'settled'; receipts: { payee: string; credential: string }[]; total: number; remaining: number }
@@ -27,7 +27,10 @@ async function specialist(o: SpecialistOptions, name: string, description: strin
   const app = lakeAgentApp(card, async (data) => {
     const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox });
     if (!v.ok) return reply({ kind: 'refused', problems: [`${v.rejection.code}: ${v.rejection.why}`] });
-    return reply(await decide(v.payload, v.profile.webId, v.profile));
+    const out = await decide(v.payload, v.profile.webId, v.profile);
+    // Tell the map who just came by, so it can show the visit. Ids and kinds only.
+    if (out.kind !== 'refused') o.report?.(makeEvent('decision', 'self', `agent:${v.profile.ownerDomain}`, { decision: out.kind }));
+    return reply(out);
   });
   const vc = (type: string, subject: Record<string, unknown> & { id: string }, days: number) =>
     issueCredential(

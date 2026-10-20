@@ -35,7 +35,7 @@ const port = Number(values.port ?? d.port);
 const domain = values.domain ?? d.domain;
 const url = values.url ?? `http://localhost:${port}`;
 const id = await loadOrCreateIdentity(`${values.data}/${kind}-key.json`);
-const o = { id, url, domain, sandbox: !values.production };
+const o = { id, url, domain, sandbox: !values.production, report: (e: import('@thelakeprotocol/core').LakeEvent) => link?.report(e) };
 
 let link: LakeLinks | null = null;
 let s: { app: express.Express; card: AgentCard; webId: string };
@@ -51,5 +51,6 @@ s.app.listen(port, async () => {
     const nodes = values.lake.split(',').map((u) => u.trim()).filter(Boolean);
     link = new LakeLinks({ nodeUrls: nodes, card: s.card, identity: id, webId: s.webId, log });
     (await link.register()).forEach((nodeId, i) => { if (nodeId) log(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
+    link.keepAlive(5_000);
   }
 });

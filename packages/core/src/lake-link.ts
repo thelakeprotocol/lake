@@ -54,6 +54,21 @@ export class LakeLink {
     }
   }
 
+  /** Nodes forget (restarts, resets). Check now and then, and register again if this one has forgotten us. */
+  keepAlive(everyMs = 15_000) {
+    setInterval(async () => {
+      try {
+        const r = (await (await fetch(`${this.o.nodeUrl}/registered?webId=${encodeURIComponent(this.o.webId)}`, { signal: AbortSignal.timeout(3000) })).json()) as { registered: boolean };
+        if (!r.registered) {
+          this.id = null;
+          await this.register(1);
+        }
+      } catch {
+        // node down; try again later
+      }
+    }, everyMs).unref();
+  }
+
   report(e: LakeEvent) {
     this.queue.push(e);
     this.timer ??= setTimeout(() => void this.flush(), 150);
@@ -94,6 +109,10 @@ export class LakeLinks {
 
   report(e: LakeEvent) {
     for (const l of this.links) l.report(e);
+  }
+
+  keepAlive(everyMs?: number) {
+    for (const l of this.links) l.keepAlive(everyMs);
   }
 
   async flush() {

@@ -9,7 +9,8 @@ interface Participant { id: string; role: string; label: string; tags: string[];
 interface Counters { houses: number; agents: number; conversations: number; valueSettled: number; attacksBlocked: number; recordsMoved: number }
 type Wire =
   | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; guilds?: { tag: string }[]; participants: Participant[]; counters: Counters; recent: { event: LakeEvent; text: string }[] }
-  | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
+  | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant }
+  | { type: 'reset' };
 
 const COL = { ink: '#070B12', mint: '#3DDC97', orange: '#FF6A2B', violet: '#9D8FFF', threat: '#FF4D6A', muted: '#8B9BAE', fg: '#E6EDF2', amber: '#F5C451' };
 const rgba = (hex: string, a: number) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
@@ -18,7 +19,7 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 interface House { id: string; label: string; nx: number; ny: number; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number; computedT: number; tags: string[] }
 interface Spec { id: string; label: string; nx: number; ny: number }
-interface Agent { id: string; domain: string; label: string; x: number; y: number; trail: { x: number; y: number }[]; seen: number }
+interface Agent { id: string; domain: string; label: string; x: number; y: number; trail: { x: number; y: number }[]; seen: number; goto?: { x: number; y: number; until: number } }
 interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number; q: number }
 interface Thread { ax: number; ay: number; h: House; life: number; col: string }
 interface Ripple { x: number; y: number; r: number; max: number; col: string; w: number }
@@ -57,9 +58,12 @@ new ResizeObserver(resize).observe(stage);
 /** Deterministic spot per id, nudged away from neighbours, so a house is always in the same place. */
 function place(id: string, avoid: { nx: number; ny: number }[]) {
   let s = hash(id);
-  for (let i = 0; i < 40; i++) {
+  // Few houses get room to breathe (and readable labels); a crowded Lake packs tighter.
+  const gap = avoid.length < 40 ? 90 : avoid.length < 200 ? 40 : 22;
+  for (let i = 0; i < 60; i++) {
     const nx = 0.05 + 0.9 * (s % 1), ny = 0.1 + 0.75 * ((s * 7.31) % 1);
-    if (avoid.every((o) => Math.hypot((o.nx - nx) * W, (o.ny - ny) * H) > 26)) return { nx, ny };
+    const underQr = !$('qr').hidden && nx * W > W - 190 && ny * H < 200; // keep clear of the QR card
+    if (!underQr && avoid.every((o) => Math.hypot((o.nx - nx) * W, (o.ny - ny) * H) > gap)) return { nx, ny };
     s = hash(id + i);
   }
   return { nx: 0.05 + 0.9 * (s % 1), ny: 0.1 + 0.75 * ((s * 7.31) % 1) };
@@ -171,6 +175,12 @@ function onEvent(e: LakeEvent, p?: Participant) {
       break;
     }
     case 'decision':
+      if (!h && specs.has(e.actor)) {
+        // A specialist approved, certified or settled for this agent: the agent goes to it, as in the simulation.
+        const sp = specs.get(e.actor)!, ag = agentByLabel(e.subject);
+        if (ag) { ag.goto = { x: sp.nx * W, y: sp.ny * H, until: clock + 1.6 }; ag.seen = clock; }
+        break;
+      }
       if (h) {
         h.resp = String(e.data?.decision ?? '') as House['resp'];
         h.respT = clock;
@@ -203,8 +213,11 @@ function update(dt: number) {
   clock += dt;
   for (const [id, ag] of agents) {
     if (clock - ag.seen > 60) { agents.delete(id); continue; }
-    ag.x += (W / 2 - ag.x) * Math.min(1, dt * 2);
-    ag.y += (H / 2 - ag.y) * Math.min(1, dt * 2);
+    const to = ag.goto && clock < ag.goto.until ? ag.goto : { x: W / 2, y: H / 2 };
+    ag.x += (to.x - ag.x) * Math.min(1, dt * 2.5);
+    ag.y += (to.y - ag.y) * Math.min(1, dt * 2.5);
+    ag.trail.push({ x: ag.x, y: ag.y });
+    if (ag.trail.length > 28) ag.trail.shift();
   }
   for (const [id, v] of visitors) {
     if (clock - v.seen > 40 || (v.q && clock - v.q > 16)) { visitors.delete(id); continue; }
@@ -297,10 +310,17 @@ function draw(now: number) {
   }
   for (const p of sparks) { ctx.fillStyle = rgba(COL.fg, p.life); ctx.fillRect(p.x, p.y, 2, 2); }
   for (const ag of agents.values()) {
+    ctx.strokeStyle = rgba(COL.orange, 0.35); ctx.lineWidth = 2; ctx.beginPath();
+    ag.trail.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.stroke();
     const rr = 12 + Math.sin(now / 180) * 2.5;
     ctx.strokeStyle = COL.orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ag.x, ag.y, rr, 0, 6.283); ctx.stroke();
     ctx.fillStyle = COL.orange; ctx.beginPath(); ctx.arc(ag.x, ag.y, 6, 0, 6.283); ctx.fill();
-    ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillText(ag.label.toUpperCase(), ag.x, ag.y + rr + 16);
+    // A moving label smears across the fading canvas; show it only when the agent is still.
+    const to = ag.goto && clock < ag.goto.until ? ag.goto : { x: W / 2, y: H / 2 };
+    if (Math.hypot(to.x - ag.x, to.y - ag.y) < 8) {
+      ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillText(ag.label.toUpperCase(), ag.x, ag.y + rr + 16);
+    }
   }
 }
 
@@ -345,6 +365,8 @@ function connect(delay = 500) {
       for (const g of w.guilds ?? []) if (!guilds.some((x) => x.tag === g.tag)) guilds.push({ tag: g.tag, born: -10 });
       for (const r of w.recent) log(r.event, r.text);
       counters(w.counters);
+    } else if (w.type === 'reset') {
+      location.reload();
     } else {
       onEvent(w.event, w.participant);
       log(w.event, w.text);

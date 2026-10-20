@@ -11,6 +11,8 @@ export interface Entry {
   url: string;
   /** Where we learned of it: registered here directly, or synced from a peer node we follow. */
   via: 'direct' | string;
+  /** Last time the participant checked in (registration, keep-alive, or an event report). */
+  lastSeen: number;
 }
 
 export type Refusal = { code: 'not-lake' | 'forged-card' | 'domain' | 'unreachable' | 'card-mismatch'; why: string };
@@ -24,7 +26,7 @@ export class Registry {
 
   constructor(private o: { sandbox: boolean; fetch?: typeof fetch }) {}
 
-  async register(card: AgentCard, via: Entry['via'] = 'direct'): Promise<{ ok: true; entry: Entry } | { ok: false; refusal: Refusal }> {
+  async register(card: AgentCard, via: Entry['via'] = 'direct'): Promise<{ ok: true; entry: Entry; replaced: Entry[] } | { ok: false; refusal: Refusal }> {
     let profile: LakeProfile;
     try {
       profile = await verifyLakeCard(card);
@@ -50,10 +52,11 @@ export class Registry {
 
     const id = `${profile.role}:${profile.publicJwk.kid!.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`;
     // One live card per WebID: a newer card (a rotated key) replaces the old one.
-    for (const [old, e] of this.entries) if (e.profile.webId === profile.webId && old !== id) this.entries.delete(old);
-    const entry: Entry = { id, label: card.name, card, profile, domainVia: proof.via, registeredAt: new Date().toISOString(), url, via };
+    const replaced: Entry[] = [];
+    for (const [old, e] of this.entries) if (e.profile.webId === profile.webId && old !== id) { this.entries.delete(old); replaced.push(e); }
+    const entry: Entry = { id, label: card.name, card, profile, domainVia: proof.via, registeredAt: new Date().toISOString(), url, via, lastSeen: Date.now() };
     this.entries.set(id, entry);
-    return { ok: true, entry };
+    return { ok: true, entry, replaced };
   }
 
   remove(id: string) {

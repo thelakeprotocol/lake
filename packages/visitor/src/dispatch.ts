@@ -52,6 +52,8 @@ export interface DispatchOptions {
   concurrency?: number;
   /** How long to wait for owners who were asked to tap Allow. 0: don't wait. */
   waitSeconds?: number;
+  /** Pause between steps, so people can watch the map (stage demos). */
+  paceMs?: number;
   /** Money: the human who signs the mandate, the cap, and who settles. Without it the mission runs unpaid. */
   money?: { human: Human; budgetUsd: number; payments: string };
   link?: { report(e: LakeEvent): void; flush(): Promise<void> } | null;
@@ -97,6 +99,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const log = o.log ?? (() => {});
   const report = (kind: Parameters<typeof makeEvent>[0], data: Record<string, string | number | boolean>) => o.link?.report(makeEvent(kind, 'self', undefined, data));
   const id = studyId(o.study);
+  const beat = () => new Promise((r) => setTimeout(r, o.paceMs ?? 0));
   const fields = [...studyFields(o.study), ...(o.extraFields ?? [])];
 
   let intent: Attachment | null = null;
@@ -113,11 +116,13 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study: o.study, purpose: 'research', fields, retention: 'none' } });
   if (ethics.reply.kind !== 'approved') throw new Error(`ethics refused: ${(ethics.reply.problems ?? []).join('; ')}`);
   const ethicsAtt: Attachment = { credential: ethics.reply.credential, card: await cardOf(o.ethics) };
+  await beat();
 
   log('audit', `asking ${o.auditor} to certify the study`);
   const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study: o.study });
   if (audit.reply.kind !== 'certified') throw new Error(`auditor refused: ${(audit.reply.problems ?? []).join('; ')}`);
   const auditAtt: Attachment = { credential: audit.reply.credential, card: await cardOf(o.auditor) };
+  await beat();
 
   const houses = await discover(o, log);
 
@@ -152,6 +157,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   report('offer', { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' });
   await knockAll(houses, offer, true);
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));
+  await beat();
 
   // Houses that countered the same offer bargain as one bloc: the highest price, only fields all accept (SPEC §5.3).
   let bloc: MissionResult['bloc'] = null;
@@ -161,6 +167,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     const dropped = fields.filter((f) => !b.fields.includes(f));
     log('bargain', `${b.members} housekeepers countered together: $${b.priceUsd}, not $${o.priceUsd}${dropped.length ? `, and drop ${dropped.join(', ')}` : ''}`);
     report('counter', { members: b.members, price: b.priceUsd, was: o.priceUsd });
+    await beat();
     const everyone = [...new Map([...joined.values()].map((j) => [j.house.url, j.house])).values(), ...counters.map((c) => c.house)];
     const cost = b.priceUsd * everyone.length;
     const missing = studyFields(o.study).filter((f) => !b.fields.includes(f));
@@ -214,6 +221,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     }
   });
 
+  await beat();
   // Only houses that answered get paid; excluded ones don't.
   let paid: MissionResult['paid'] = null;
   if (o.money && intent && answered.length) {

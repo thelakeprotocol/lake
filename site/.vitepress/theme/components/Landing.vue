@@ -71,7 +71,7 @@ const standards = [
 
 const milestones = [
   ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'done'], ['Approvals', 'done'],
-  ['Money', 'done'], ['Wild life', 'done'], ['1,000 houses', 'done'], ['Federation', 'done'], ['Open door', 'done'],
+  ['Money', 'done'], ['Wild life', 'done'], ['1,000 houses', 'done'], ['Federation', 'done'], ['Open door', 'done'], ['Polish', 'done'],
 ];
 </script>
 
@@ -126,6 +126,16 @@ const milestones = [
         </div>
         <p class="sim-note">Simulation. The real map runs the same picture off live Lake events.</p>
       </div>
+    </section>
+
+    <!-- THE REAL THING -->
+    <section class="block gutter real">
+      <div class="eyebrow">Not a simulation</div>
+      <h2>The map above is a simulation.<br><span class="mint">This one is real.</span></h2>
+      <p class="kicker">Ninety seconds of a running Lake: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 owners get paid, an attacker is quarantined, an owner revokes every key. Records moved: 0.</p>
+      <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
+        <source src="/demo.mp4" type="video/mp4">
+      </video>
     </section>
 
     <!-- MANIFESTO -->
@@ -221,7 +231,7 @@ await me.study(question,
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Days old. Built in the open.</h2>
-      <p class="kicker">Houses, the node, the live map and a full study across the Lake are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">Every milestone runs and is tested end to end. It is also days old: rough edges, open questions, a public sandbox waiting for a server. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>
@@ -313,6 +323,7 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
 .kicker b { color: var(--fg); font-weight: 500; }
 .kicker code, .fine code { font-family: var(--f-mono); font-size: 0.9em; color: var(--fg); background: var(--deep); padding: 2px 6px; border-radius: 3px; }
 
+.real .demo { display: block; width: 100%; margin-top: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--ink); aspect-ratio: 16 / 10; }
 .manifesto .big { margin: 22px 0 0; max-width: 24ch; font: 700 clamp(30px, 4.6vw, 58px)/1.05 var(--f-display); text-transform: uppercase; color: var(--fg); }
 .manifesto .big.dim { color: var(--muted); }
 .mint { color: var(--mint) !important; }
@@ -346,7 +357,7 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
 .tag.next { color: var(--orange); border-color: rgba(255,106,43,0.5); }
 .tag.done { color: var(--mint); border-color: rgba(61,220,151,0.5); }
 
-.ms { list-style: none; margin: 32px 0 0; padding: 0; display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 6px; }
+.ms { list-style: none; margin: 32px 0 0; padding: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
 .ms li { margin: 0; padding-top: 12px; border-top: 4px solid var(--line); font: 500 11px/1.3 var(--f-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .ms li.done { border-color: var(--mint); color: var(--mint); }
 .ms li.next { border-color: var(--orange); color: var(--orange); }

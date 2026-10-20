@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -24,6 +25,10 @@ export interface NodeOptions {
   /** Peer nodes to follow: their cards (re-verified here) and their blocklists. */
   follow?: string[];
   syncMs?: number;
+  /** Lets an operator wipe counters, history and quarantines (demo resets). Off unless set. */
+  resetToken?: string;
+  /** Append every event, with its timing, to this file (JSON lines), for replay. */
+  record?: string;
 }
 
 /** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
@@ -40,7 +45,8 @@ export interface Counters {
 
 type Wire =
   | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: Line[]; guilds: { tag: string; members: number }[] }
-  | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
+  | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant }
+  | { type: 'reset' };
 interface Participant { id: string; role: string; label: string; tags: string[]; domain: string }
 interface Line { event: LakeEvent; text: string }
 
@@ -61,6 +67,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   const quarantined = new Set<string>();
   const record = new Map<string, { kept: number; blocked: number }>();
   const guilds = new Map<string, number>();
+  const peerBlocked = new Set<string>();
   const reputation = () => Object.fromEntries([...record].map(([d, r]) => [d, Math.round(Math.min(1, Math.max(0, 0.5 + 0.05 * r.kept - 0.15 * r.blocked)) * 100) / 100]));
   const tally = (agent: string | undefined, k: 'kept' | 'blocked') => {
     if (!agent?.startsWith('agent:')) return;
@@ -140,6 +147,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     const line = { event, text: describe({ ...event, actor: name(event.actor)!, subject: name(event.subject) }) };
     recent.push(line);
     if (recent.length > 50) recent.shift();
+    if (o.record) appendFileSync(o.record, JSON.stringify({ t: Date.now(), ...line, counters, participant: p }) + '\n');
     for (const ws of sockets) send(ws, { type: 'event', ...line, counters, participant: p });
   }
 
@@ -154,6 +162,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
       publish(makeEvent('attack.blocked', nodeId, String(req.body?.card?.name ?? 'unknown card'), { why: r.refusal.code }));
       return void res.status(400).json(r.refusal);
     }
+    for (const old of r.replaced) if (old.profile.role === 'house') publish(makeEvent('house.left', old.id, undefined, { replaced: true }));
     const p = participant(r.entry);
     publish(r.entry.profile.role === 'house' ? makeEvent('house.joined', r.entry.id, undefined, { label: r.entry.label }) : makeEvent('agent.registered', r.entry.id, undefined, { role: r.entry.profile.role, label: r.entry.label }), p);
     if (r.entry.profile.role === 'house') guildCheck();
@@ -166,6 +175,37 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
+  // A demo reset: counters, history, quarantines, reputation and guilds go; houses and specialists stay.
+  app.post('/reset', (req, res) => {
+    if (!o.resetToken) return void res.status(404).json({ error: 'reset is off on this node' });
+    if (req.get('x-lake-reset') !== o.resetToken) return void res.status(403).json({ error: 'wrong reset token' });
+    Object.assign(counters, { conversations: 0, valueSettled: 0, attacksBlocked: 0, recordsMoved: 0 });
+    recent.length = 0;
+    for (const set of [blocks, quarantined, record, guilds, seenVisitors, peerBlocked] as { clear(): void }[]) set.clear();
+    for (const e of registry.all()) if (e.profile.role === 'visitor') registry.remove(e.id);
+    recount();
+    guildCheck();
+    for (const ws of sockets) send(ws, { type: 'reset' });
+    res.json({ reset: true });
+  });
+
+  /** Cheap check for participants: does this node still know you (after a restart or a reset, it may not)? */
+  app.get('/registered', (req, res) => {
+    const e = registry.byWebId(String(req.query.webId ?? ''));
+    if (e) e.lastSeen = Date.now();
+    res.json({ registered: !!e });
+  });
+
+  // Participants check in every few seconds. Anyone silent for a minute has gone: say so, and forget them.
+  setInterval(() => {
+    for (const e of registry.all()) {
+      if (e.via !== 'direct' || e.profile.role === 'node' || Date.now() - e.lastSeen < 60_000) continue;
+      registry.remove(e.id);
+      if (e.profile.role === 'house') publish(makeEvent('house.left', e.id, undefined, { silent: true }));
+      else recount();
+    }
+  }, 15_000).unref();
+
   app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList() }));
 
   // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
@@ -181,6 +221,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     const env = req.body as Signed<{ kind: 'events'; events: LakeEvent[] }>;
     const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
     if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
+    entry.lastSeen = Date.now();
     // The signature must be by the key on the card registered now, not an older one.
     try {
       await verifyMessage(env, async (kid) => (kid === entry.profile.publicJwk.kid ? entry.profile.publicJwk : null), { replay });
@@ -202,7 +243,6 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   // Federation (SPEC §9): follow peers. Their cards are verified again here, from the agents' own endpoints,
   // so a peer can point us at agents but can't vouch for them. A card disappears when its peer drops it.
-  const peerBlocked = new Set<string>();
   const peerKeys = new Map<string, import('@thelakeprotocol/core').JWK>();
   async function syncPeer(peer: string) {
     try {
@@ -264,4 +304,42 @@ function cleanData(d: LakeEvent['data']): LakeEvent['data'] {
     else if (typeof v === 'string') out[k.slice(0, 32)] = v.slice(0, 160);
   }
   return out;
+}
+
+/**
+ * Replays a recorded run (from --record) through the map at the pace it happened: the stage fallback when
+ * live mode fails. No registry, no intake; just the stream.
+ */
+export async function replayNode(o: { file: string; uiDir?: string; speed?: number; loop?: boolean; domain: string }): Promise<Server> {
+  const { readFileSync } = await import('node:fs');
+  const lines = readFileSync(o.file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line & { t: number; counters: Counters; participant?: Participant });
+  const app = express();
+  if (o.uiDir) app.use(express.static(o.uiDir));
+  const server = createServer(app);
+  const wss = new WebSocketServer({ server, path: '/events' });
+  const sockets = new Set<WebSocket>();
+  let participants = new Map<string, Participant>();
+  let recent: Line[] = [];
+  let counters: Counters = { houses: 0, agents: 0, conversations: 0, valueSettled: 0, attacksBlocked: 0, recordsMoved: 0 };
+  const send = (ws: WebSocket, w: Wire) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(w));
+  wss.on('connection', (ws) => {
+    sockets.add(ws);
+    ws.on('close', () => sockets.delete(ws));
+    send(ws, { type: 'snapshot', node: `${o.domain} (replay)`, sandbox: true, participants: [...participants.values()], counters, recent: recent.slice(-20), guilds: [] });
+  });
+  const play = () => {
+    participants = new Map();
+    recent = [];
+    for (const ws of sockets) send(ws, { type: 'reset' });
+    const t0 = lines[0]?.t ?? 0;
+    lines.forEach((l, i) => setTimeout(() => {
+      if (l.participant) participants.set(l.participant.id, l.participant);
+      counters = l.counters;
+      recent.push({ event: l.event, text: l.text });
+      for (const ws of sockets) send(ws, { type: 'event', event: l.event, text: l.text, counters: l.counters, participant: l.participant });
+      if (i === lines.length - 1 && o.loop) setTimeout(play, 5000);
+    }, (l.t - t0) / (o.speed ?? 1)));
+  };
+  setTimeout(play, 1500);
+  return server;
 }

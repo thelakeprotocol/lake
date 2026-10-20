@@ -11,6 +11,7 @@
   <a href="SPEC.md">Spec</a> ·
   <a href="https://lake.doneinfifty.com/docs/">Docs</a> ·
   <a href="https://lake.doneinfifty.com/docs/agents">For agents</a> ·
+  <a href="https://lake.doneinfifty.com/demo.mp4">Watch 90 seconds</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
   <a href="https://github.com/thelakeprotocol/lake/discussions">Talk</a> ·
   <a href="LICENSE">Apache-2.0</a>
@@ -158,6 +159,7 @@ Honest, updated every merge.
 | ✅ | **M8 Federation**: nodes follow peers (`--follow`), re-verify every card they learn, drop what peers drop, share blocklists; participants use several nodes; agents remember houses; `lake card <url>` finds anyone at their own address. Stop a node mid-study and the study finishes | runs, end-to-end tested and shown in Docker (`docker stop lake-node-a`) |
 | ✅ | **npm**: `@thelakeprotocol/core`, `convert-fhir`, `visitor`, `agent` 0.1.0, published from CI with provenance | live |
 | ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox config (Caddy + HTTPS) | runs, end-to-end tested. Sandbox not deployed yet; one-click hosted houses for non-developers are next |
+| ✅ | **M10 Polish**: map choreography like the reference (the agent visits each specialist, the $2 → $5 moment, payment threads, snapping keys); `lake demo` runs the on-stage script; `lake reset` in under a second; `--record` / `--replay` for a stage fallback; seeded runs; a [90-second recording](https://lake.doneinfifty.com/demo.mp4) | done. [Acceptance scorecard](https://lake.doneinfifty.com/docs/roadmap#acceptance-tests): 12 of 14 met; startup and 1,000-house timing miss their targets on a 4-core laptop |
 
 ## Hack on it
 

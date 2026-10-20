@@ -3,9 +3,17 @@ import { knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
 
 export const ATTACKS: (Tamper | 'injection')[] = ['forge-card', 'unsigned', 'replay', 'impersonate', 'injection'];
 
-export async function houseUrls(node: string): Promise<string[]> {
-  const found = (await (await fetch(`${node}/cards?role=house`)).json()) as { card: AgentCard }[];
-  return found.map((f) => f.card.supportedInterfaces[0]!.url);
+/** Houses from the first node that answers (one URL, or several comma-separated). */
+export async function houseUrls(nodes: string): Promise<string[]> {
+  for (const node of nodes.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean)) {
+    try {
+      const found = (await (await fetch(`${node}/cards?role=house`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
+      return found.map((f) => f.card.supportedInterfaces[0]!.url);
+    } catch {
+      // next node
+    }
+  }
+  return [];
 }
 
 /**

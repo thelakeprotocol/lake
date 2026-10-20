@@ -18,6 +18,8 @@ const HELP = `lake — talk to the Lake
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
                 [--wait 30] [--unpaid] [--concurrency 32] [--port 4800] [--json]
 
+  lake demo [--pace 2000]          the on-stage script: dispatch (bloc, owner's tap), then an attacker
+  lake reset                       demo reset: every node's counters, history and quarantines (needs LAKE_RESET_TOKEN)
   lake card <agent-url>            fetch and verify any agent's card from its own .well-known path (no node needed)
   lake attack [--count 10] [--node http://lake-node:7000] [<house-url> …]
   lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
@@ -44,6 +46,7 @@ const { positionals, values: a } = parseArgs({
     port: { type: 'string', default: '4800' },
     wait: { type: 'string', default: '0' },
     concurrency: { type: 'string', default: '32' },
+    pace: { type: 'string', default: '0' },
     budget: { type: 'string', default: '5000' },
     payments: { type: 'string', default: process.env.LAKE_PAYMENTS_URL ?? 'http://payments:4600' },
     unpaid: { type: 'boolean', default: false },
@@ -57,7 +60,28 @@ const { positionals, values: a } = parseArgs({
 
 if (cmd === 'knock') await knockCmd();
 else if (cmd === 'dispatch') await dispatchCmd();
-else if (cmd === 'card') {
+else if (cmd === 'demo') {
+  // The on-stage script (spec, "On-stage script"): pace it so people can follow on the map.
+  const node = a.node!.split(',')[0]!.trim();
+  const s = await (await fetch(`${node}/state`)).json();
+  console.log(`THE LAKE  ${s.counters.houses} houses, ${s.counters.agents} agents, ${s.guilds?.length ?? 0} guilds. Records moved: ${s.counters.recordsMoved}.\n`);
+  a.pace = a.pace === '0' ? '2000' : a.pace;
+  a['extra-fields'] ??= 'postcode';
+  a.wait = a.wait === '0' ? '20' : a.wait;
+  await dispatchCmd();
+  console.log('\nATTACK    releasing an attacker. Watch the houses block it and the Lake quarantine it.');
+  const houses = await houseUrls(node);
+  const r = await attack({ houses, count: 6, log: (l) => console.log(`          ${l}`) });
+  console.log(`DONE      ${Object.entries(r.tally).map(([k, n]) => `${n} ${k}`).join(', ')}. No human involved.`);
+}
+else if (cmd === 'reset') {
+  const t0 = Date.now();
+  for (const node of a.node!.split(',').map((u) => u.trim())) {
+    const res = await fetch(`${node}/reset`, { method: 'POST', headers: { 'x-lake-reset': process.env.LAKE_RESET_TOKEN ?? '' } }).catch((e: Error) => ({ ok: false, status: e.message }) as const);
+    console.log(`${node}: ${res.ok ? 'reset' : `not reset (${res.status})`}`);
+  }
+  console.log(`done in ${Date.now() - t0} ms`);
+} else if (cmd === 'card') {
   // Registries are search indexes, not gatekeepers: every agent can be found at its own address.
   const at = positionals[0];
   if (!at) throw new Error('lake card <agent url, e.g. https://house.example/a2a or https://house.example>');
@@ -128,6 +152,7 @@ async function dispatchCmd() {
       extraFields: a['extra-fields']?.split(',').filter(Boolean),
       waitSeconds: Number(a.wait),
       concurrency: Number(a.concurrency),
+      paceMs: Number(a.pace),
       money: a.unpaid ? undefined : {
         human: await makeHuman(await loadOrCreateIdentity(`${homedir()}/.lake/human-${domain}.json`), domain),
         budgetUsd: Number(a.budget),
