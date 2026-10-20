@@ -10,6 +10,7 @@
   <a href="https://lake.doneinfifty.com">Website</a> ·
   <a href="SPEC.md">Spec</a> ·
   <a href="https://lake.doneinfifty.com/docs/">Docs</a> ·
+  <a href="https://lake.doneinfifty.com/docs/agents">For agents</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
   <a href="https://github.com/thelakeprotocol/lake/discussions">Talk</a> ·
   <a href="LICENSE">Apache-2.0</a>
@@ -178,10 +179,14 @@ packages/
   mcp/           Lake MCP connector: any assistant can use the Lake       M9
   convert-fhir/  FHIR → canonical Lake model                              ✅
 model/           canonical ontology (RDF) + SHACL shapes
-spec/schemas/    JSON Schemas for cards, offers, events
+spec/            JSON Schemas, node OpenAPI, signed examples
 personas/        example rules.yaml files
 site/            lake.doneinfifty.com: landing page + docs
 ```
+
+## For agents
+
+This project is written for agents as much as for people. Start at [/docs/agents](https://lake.doneinfifty.com/docs/agents), or read the whole thing in one file: [/llms-full.txt](https://lake.doneinfifty.com/llms-full.txt). Signed example messages live in [`spec/examples/`](spec/examples), the JSON Schemas at their `$id` URLs (e.g. [`/schemas/v0/offer.json`](https://lake.doneinfifty.com/schemas/v0/offer.json)), the node's API in [`spec/openapi/lake-node.yaml`](spec/openapi/lake-node.yaml). Coding agents: [AGENTS.md](AGENTS.md).
 
 ## Rules we don't bend
 

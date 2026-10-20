@@ -1,0 +1,32 @@
+{
+  "id": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+  "study": {
+    "v": 1,
+    "question": "Do over-60s on drug X get readmitted less?",
+    "kind": "contingency",
+    "predicates": [
+      {
+        "name": "over 60",
+        "field": "age_band",
+        "op": "age_at_least",
+        "value": 60
+      },
+      {
+        "name": "on drug X",
+        "field": "medications",
+        "op": "has_code",
+        "value": "drug-x"
+      },
+      {
+        "name": "readmitted",
+        "field": "readmissions",
+        "op": "present"
+      }
+    ],
+    "privacy": {
+      "mechanism": "unary-randomized-response",
+      "epsilon": 2
+    },
+    "minTier": "issuer-signed"
+  }
+}

@@ -13,7 +13,8 @@
     "typecheck": "tsc -b packages/core packages/convert-fhir packages/specialists packages/house packages/visitor",
     "site:dev": "pnpm --filter site dev",
     "site:build": "pnpm --filter site build",
-    "test:e2e": "vitest run -c vitest.e2e.config.ts"
+    "test:e2e": "vitest run -c vitest.e2e.config.ts",
+    "examples": "node scripts/make-examples.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

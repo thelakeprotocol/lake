@@ -1,0 +1,247 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "Research agent (uni.example)",
+    "description": "Research agent (uni.example) (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://uni.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://uni.example",
+      "organization": "uni.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "visitor",
+            "webId": "https://uni.example/#agent",
+            "ownerDomain": "uni.example",
+            "tags": [],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "QTLpu7x_s_oeXlstenDJEn6kkHy-9Ki2dvjLYz1ih2w",
+              "kty": "OKP",
+              "kid": "visitor-uni.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
+        "signature": "EbkQG_bBiiB2IQacJlrlQHJ4YbJ5To3FLhYsZ0UyebXUm5Ku0kW5MtmAuLEEFTKKDN3YesDrgncfIuibK1kRCg"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "offer",
+      "offer": {
+        "id": "7f1c0a52-1d1e-4a5e-9c41-2b7d2d0f4e10",
+        "requester": "uni.example",
+        "purpose": "research",
+        "fields": [
+          "age_band",
+          "medications",
+          "readmissions",
+          "postcode"
+        ],
+        "retention": "none",
+        "priceUsd": 2,
+        "study": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+        "credentials": {
+          "ethicsApproved": true,
+          "sponsorVerified": true,
+          "auditCertified": true
+        }
+      },
+      "study": {
+        "v": 1,
+        "question": "Do over-60s on drug X get readmitted less?",
+        "kind": "contingency",
+        "predicates": [
+          {
+            "name": "over 60",
+            "field": "age_band",
+            "op": "age_at_least",
+            "value": 60
+          },
+          {
+            "name": "on drug X",
+            "field": "medications",
+            "op": "has_code",
+            "value": "drug-x"
+          },
+          {
+            "name": "readmitted",
+            "field": "readmissions",
+            "op": "present"
+          }
+        ],
+        "privacy": {
+          "mechanism": "unary-randomized-response",
+          "epsilon": 2
+        },
+        "minTier": "issuer-signed"
+      },
+      "attachments": {
+        "ethics": {
+          "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VFdGhpY3NBcHByb3ZhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V0aGljcy5leGFtcGxlLyNldGhpY3MtcmV2aWV3IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yMFQxMTo1MDoxMy4yNDVaIiwidmFsaWRVbnRpbCI6IjIwMjctMDEtMThUMTE6NTA6MTMuMjQ1WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNuL3VsYlBFeCtXei84M05wak1oNm9vUVRVdzZxM0hoNVFFUWcwK0dYUlU9IiwicXVlc3Rpb24iOiJEbyBvdmVyLTYwcyBvbiBkcnVnIFggZ2V0IHJlYWRtaXR0ZWQgbGVzcz8iLCJwdXJwb3NlIjoicmVzZWFyY2giLCJmaWVsZHMiOlsiYWdlX2JhbmQiLCJtZWRpY2F0aW9ucyIsInJlYWRtaXNzaW9ucyIsInBvc3Rjb2RlIl0sInNwb25zb3IiOiJodHRwczovL3VuaS5leGFtcGxlLyNhZ2VudCIsInJldmlld2VkQnkiOiJleGFtcGxlIn19.NILY46t64rIcvwpVv6HaDd3n1jZzv83T63KL34LcMz1CJi4aLUiqyExoiVlOd4v_NyFVy3x3yo1_AXqYwF6BAA",
+          "card": {
+            "name": "Ethics",
+            "description": "Ethics (example)",
+            "supportedInterfaces": [
+              {
+                "url": "https://ethics.example/a2a",
+                "protocolBinding": "JSONRPC",
+                "tenant": "",
+                "protocolVersion": "1.0"
+              }
+            ],
+            "provider": {
+              "url": "https://ethics.example",
+              "organization": "ethics.example"
+            },
+            "version": "0.1.0",
+            "capabilities": {
+              "streaming": false,
+              "pushNotifications": false,
+              "extensions": [
+                {
+                  "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+                  "description": "Lake profile: identity, owner domain and tags",
+                  "required": true,
+                  "params": {
+                    "role": "specialist",
+                    "webId": "https://ethics.example/#ethics-review",
+                    "ownerDomain": "ethics.example",
+                    "tags": [
+                      "ethics-review"
+                    ],
+                    "publicJwk": {
+                      "crv": "Ed25519",
+                      "x": "rfjkYWq_GKuEhxHtiIAvWNpetb2rjuv33CkqT3s-yRE",
+                      "kty": "OKP",
+                      "kid": "specialist-ethics.example",
+                      "alg": "EdDSA"
+                    },
+                    "lakeVersion": "0.1.0"
+                  }
+                }
+              ]
+            },
+            "securitySchemes": {},
+            "securityRequirements": [],
+            "defaultInputModes": [
+              "application/json"
+            ],
+            "defaultOutputModes": [
+              "application/json"
+            ],
+            "skills": [],
+            "signatures": [
+              {
+                "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
+                "signature": "7CiGAzez3234DV9_Zoekf0gGzIdqiN6muRhpHpeX33g2NRNj_5U8XhnNAkSWTfDPamPrFUwsfyAvOK0ROnNxBQ"
+              }
+            ]
+          }
+        },
+        "audit": {
+          "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTIwVDExOjUwOjEzLjI0NloiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0xOFQxMTo1MDoxMy4yNDZaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc24vdWxiUEV4K1d6LzgzTnBqTWg2b29RVFV3NnEzSGg1UUVRZzArR1hSVT0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHJhbmRvbWlzZWQgYmVmb3JlIGxlYXZpbmcgYSBob3VzZSJdfX0.FWdYu_dyXhq9sX6EwImlLcVAZy1SBVpr0k2WP7owqDiD8qn78OtTsekHZVgXvKdXI57hQkYqwbEqMZpCIGhbBw",
+          "card": {
+            "name": "Auditor",
+            "description": "Auditor (example)",
+            "supportedInterfaces": [
+              {
+                "url": "https://audit.example/a2a",
+                "protocolBinding": "JSONRPC",
+                "tenant": "",
+                "protocolVersion": "1.0"
+              }
+            ],
+            "provider": {
+              "url": "https://audit.example",
+              "organization": "audit.example"
+            },
+            "version": "0.1.0",
+            "capabilities": {
+              "streaming": false,
+              "pushNotifications": false,
+              "extensions": [
+                {
+                  "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+                  "description": "Lake profile: identity, owner domain and tags",
+                  "required": true,
+                  "params": {
+                    "role": "specialist",
+                    "webId": "https://audit.example/#study-audit",
+                    "ownerDomain": "audit.example",
+                    "tags": [
+                      "study-audit"
+                    ],
+                    "publicJwk": {
+                      "crv": "Ed25519",
+                      "x": "Y_ViOVG5gg8dGwav97bfMHyPXPIntEbdjpT8SDYMmiY",
+                      "kty": "OKP",
+                      "kid": "specialist-audit.example",
+                      "alg": "EdDSA"
+                    },
+                    "lakeVersion": "0.1.0"
+                  }
+                }
+              ]
+            },
+            "securitySchemes": {},
+            "securityRequirements": [],
+            "defaultInputModes": [
+              "application/json"
+            ],
+            "defaultOutputModes": [
+              "application/json"
+            ],
+            "skills": [],
+            "signatures": [
+              {
+                "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
+                "signature": "A9a4_KXDzZymDsXEj4JK38ulF-GPh8cQgAcVGF-LboGrxNZ12405DeiPFK-Fgt7PH12OvsGPiGYx7jrP8k67AA"
+              }
+            ]
+          }
+        }
+      },
+      "nonce": "77f1f5ed-0b5c-41e2-8dc8-e875f7e55e5b",
+      "iat": 1792497013,
+      "exp": 1792497313,
+      "iss": "https://uni.example/#agent"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
+      "signature": "Bxfa9DVs3OoD-gNAi7uS_kpKOzweBZdNe83UbMSGAh_E6QKf5sCqcSc5cQ0xn8UOnKq5aYONBGxKQWh9VnVODQ"
+    }
+  }
+}

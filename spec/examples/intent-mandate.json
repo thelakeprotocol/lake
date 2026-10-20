@@ -1,0 +1,84 @@
+{
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50LXVuaS5leGFtcGxlIiwidHlwIjoidmMrand0IiwiY3R5IjoidmMifQ.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkludGVudE1hbmRhdGUiXSwiaXNzdWVyIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS9wZW9wbGUvbGVhZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjBUMTE6NTA6MTMuMjU0WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQiLCJuYXR1cmFsX2xhbmd1YWdlX2Rlc2NyaXB0aW9uIjoiRG8gb3Zlci02MHMgb24gZHJ1ZyBYIGdldCByZWFkbWl0dGVkIGxlc3M_Iiwic3R1ZHkiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc24vdWxiUEV4K1d6LzgzTnBqTWg2b29RVFV3NnEzSGg1UUVRZzArR1hSVT0iLCJidWRnZXQiOnsiY3VycmVuY3kiOiJVU0QiLCJhbW91bnQiOjUwMDB9LCJpbnRlbnRfZXhwaXJ5IjoiMjAyNi0xMC0yN1QxMTo1MDoxMy4yNTRaIiwidXNlcl9jYXJ0X2NvbmZpcm1hdGlvbl9yZXF1aXJlZCI6ZmFsc2V9fQ.s-zwA0pO6wiQFmQv9FyDBwm7XxErkyGqkearI03IZkuGmTNuE_mpjTaN4SPgnpe0IYc4gyu-AvLbuyv3j9VmBA",
+  "card": {
+    "name": "Research lead (uni.example)",
+    "description": "Research lead (uni.example) (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://uni.example/people/lead",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://uni.example",
+      "organization": "uni.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "agent",
+            "webId": "https://uni.example/people/lead#me",
+            "ownerDomain": "uni.example",
+            "tags": [
+              "human"
+            ],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "QmuxyPY78zFx0IdJmh7oXzSJ1mLoy2k_wGexeT5jsKk",
+              "kty": "OKP",
+              "kid": "agent-uni.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50LXVuaS5leGFtcGxlIiwidHlwIjoiSk9TRSJ9",
+        "signature": "3uXh9lHJD-pIsTV0nYaTJUbyTuZWuMHqjqIRywmJWcc2c2RTZta7y-7YXcqDN7lhM-r2hPpBF1sJVQc-I_BwAA"
+      }
+    ]
+  },
+  "decoded": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "type": [
+      "VerifiableCredential",
+      "IntentMandate"
+    ],
+    "issuer": "https://uni.example/people/lead#me",
+    "validFrom": "2026-10-20T11:50:13.254Z",
+    "credentialSubject": {
+      "id": "https://uni.example/#agent",
+      "natural_language_description": "Do over-60s on drug X get readmitted less?",
+      "study": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+      "budget": {
+        "currency": "USD",
+        "amount": 5000
+      },
+      "intent_expiry": "2026-10-27T11:50:13.254Z",
+      "user_cart_confirmation_required": false
+    }
+  }
+}

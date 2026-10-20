@@ -1,0 +1,135 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "Research agent (uni.example)",
+    "description": "Research agent (uni.example) (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://uni.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://uni.example",
+      "organization": "uni.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "visitor",
+            "webId": "https://uni.example/#agent",
+            "ownerDomain": "uni.example",
+            "tags": [],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "QTLpu7x_s_oeXlstenDJEn6kkHy-9Ki2dvjLYz1ih2w",
+              "kty": "OKP",
+              "kid": "visitor-uni.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
+        "signature": "EbkQG_bBiiB2IQacJlrlQHJ4YbJ5To3FLhYsZ0UyebXUm5Ku0kW5MtmAuLEEFTKKDN3YesDrgncfIuibK1kRCg"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "receipt",
+      "receipt": {
+        "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtcGF5bWVudHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VSZWNlaXB0Il0sImlzc3VlciI6Imh0dHBzOi8vcGF5bWVudHMuZXhhbXBsZS8jcGF5bWVudHMiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTIwVDExOjUwOjEzLjI1NVoiLCJ2YWxpZFVudGlsIjoiMjAzNi0xMC0xN1QxMTo1MDoxMy4yNTVaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsImFtb3VudCI6eyJjdXJyZW5jeSI6IlVTRCIsInZhbHVlIjo1fSwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAiLCJpbnRlbnRNYW5kYXRlIjoic2hhMjU2LXYzNHZVUU1veEMvNm8yUHZpQlV2SmxEc2d4V2wyaUFEa1o3RTRCWkF4N009Iiwic2V0dGxlbWVudCI6InNpbXVsYXRlZCJ9fQ.x20cuP51WQaw5aaUD8k5wbkNJ_0KGMQUiO6hFMzTkceXdMHJzjTEXLjN_Hx901q6rhyoZ8RU2H6peIu4GGfLDA",
+        "card": {
+          "name": "Payments",
+          "description": "Payments (example)",
+          "supportedInterfaces": [
+            {
+              "url": "https://payments.example/a2a",
+              "protocolBinding": "JSONRPC",
+              "tenant": "",
+              "protocolVersion": "1.0"
+            }
+          ],
+          "provider": {
+            "url": "https://payments.example",
+            "organization": "payments.example"
+          },
+          "version": "0.1.0",
+          "capabilities": {
+            "streaming": false,
+            "pushNotifications": false,
+            "extensions": [
+              {
+                "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+                "description": "Lake profile: identity, owner domain and tags",
+                "required": true,
+                "params": {
+                  "role": "specialist",
+                  "webId": "https://payments.example/#payments",
+                  "ownerDomain": "payments.example",
+                  "tags": [
+                    "payments"
+                  ],
+                  "publicJwk": {
+                    "crv": "Ed25519",
+                    "x": "GikOYoZwdkMs3qMxCiq3EMSNaXvlJmGb1WSeGB4qmO0",
+                    "kty": "OKP",
+                    "kid": "specialist-payments.example",
+                    "alg": "EdDSA"
+                  },
+                  "lakeVersion": "0.1.0"
+                }
+              }
+            ]
+          },
+          "securitySchemes": {},
+          "securityRequirements": [],
+          "defaultInputModes": [
+            "application/json"
+          ],
+          "defaultOutputModes": [
+            "application/json"
+          ],
+          "skills": [],
+          "signatures": [
+            {
+              "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtcGF5bWVudHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
+              "signature": "ay3V-83LlWJbXN3Jd7PTJ_7h_8hgVPErRmY3hPwnV8jT2M8Qw58d-to6FvhGHtUfvCaDAMrgRtEQTnCiTkK7Cw"
+            }
+          ]
+        }
+      },
+      "nonce": "fe3da3d7-2e1e-4a39-8a2e-66b9bc3f492e",
+      "iat": 1792497013,
+      "exp": 1792497313,
+      "iss": "https://uni.example/#agent"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
+      "signature": "Wd5Zc67HfS_tkj_DpszSIRfzGuxFYlxXiladxLVDcktpw3hsUpTOLB1VZj-XHkRm4E8t75NL2bXtfHRD4qUWAA"
+    }
+  }
+}

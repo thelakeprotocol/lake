@@ -1,0 +1,29 @@
+{
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VBY2Nlc3NHcmFudCJdLCJpc3N1ZXIiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjBUMTE6NTA6MTMuMjUwWiIsInZhbGlkVW50aWwiOiIyMDI2LTEwLTIyVDExOjUwOjEzLjI0OVoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50Iiwib2ZmZXIiOiIwYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjIiLCJzdHVkeSI6InVybjpsYWtlOnN0dWR5OnNoYTI1Ni1zbi91bGJQRXgrV3ovODNOcGpNaDZvb1FUVXc2cTNIaDVRRVFnMCtHWFJVPSIsImZpZWxkcyI6WyJhZ2VfYmFuZCIsIm1lZGljYXRpb25zIiwicmVhZG1pc3Npb25zIl0sInB1cnBvc2UiOiJyZXNlYXJjaCIsImF1dGhvcml6ZWRCeSI6InN0YW5kaW5nIHJ1bGUgMSIsInJ1bGVzIjoic2hhMjU2LTh3bmZ0QzErdkd0RThMQnI4TjR4RXh3QnV2bVNkamVXT3gvdHNDV1ArNUk9IiwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAifX0.avv_5OFJLi51sGCuPcLrt6jKaMrhTGPrHGBWG_W2M9DgEahawzBlDY6P8P8Qi3Qnap0fbX1SKBowk0JvipYLAQ",
+  "decoded": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "type": [
+      "VerifiableCredential",
+      "LakeAccessGrant"
+    ],
+    "issuer": "https://pods.example/stan/profile/card#me",
+    "validFrom": "2026-10-20T11:50:13.250Z",
+    "validUntil": "2026-10-22T11:50:13.249Z",
+    "credentialSubject": {
+      "id": "https://uni.example/#agent",
+      "offer": "0b3e8c55-6f0a-4c61-8d3e-55d1c3f0a9b2",
+      "study": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+      "fields": [
+        "age_band",
+        "medications",
+        "readmissions"
+      ],
+      "purpose": "research",
+      "authorizedBy": "standing rule 1",
+      "rules": "sha256-8wnftC1+vGtE8LBr8N4xExwBuvmSdjeWOx/tsCWP+5I=",
+      "agreement": "urn:lake:agreement:0b3e8c55-6f0a-4c61-8d3e-55d1c3f0a9b2:noH8fLMnUn9P"
+    }
+  }
+}

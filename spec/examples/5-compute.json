@@ -1,0 +1,104 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "Research agent (uni.example)",
+    "description": "Research agent (uni.example) (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://uni.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://uni.example",
+      "organization": "uni.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "visitor",
+            "webId": "https://uni.example/#agent",
+            "ownerDomain": "uni.example",
+            "tags": [],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "QTLpu7x_s_oeXlstenDJEn6kkHy-9Ki2dvjLYz1ih2w",
+              "kty": "OKP",
+              "kid": "visitor-uni.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
+        "signature": "EbkQG_bBiiB2IQacJlrlQHJ4YbJ5To3FLhYsZ0UyebXUm5Ku0kW5MtmAuLEEFTKKDN3YesDrgncfIuibK1kRCg"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "compute",
+      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VBY2Nlc3NHcmFudCJdLCJpc3N1ZXIiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjBUMTE6NTA6MTMuMjUwWiIsInZhbGlkVW50aWwiOiIyMDI2LTEwLTIyVDExOjUwOjEzLjI0OVoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50Iiwib2ZmZXIiOiIwYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjIiLCJzdHVkeSI6InVybjpsYWtlOnN0dWR5OnNoYTI1Ni1zbi91bGJQRXgrV3ovODNOcGpNaDZvb1FUVXc2cTNIaDVRRVFnMCtHWFJVPSIsImZpZWxkcyI6WyJhZ2VfYmFuZCIsIm1lZGljYXRpb25zIiwicmVhZG1pc3Npb25zIl0sInB1cnBvc2UiOiJyZXNlYXJjaCIsImF1dGhvcml6ZWRCeSI6InN0YW5kaW5nIHJ1bGUgMSIsInJ1bGVzIjoic2hhMjU2LTh3bmZ0QzErdkd0RThMQnI4TjR4RXh3QnV2bVNkamVXT3gvdHNDV1ArNUk9IiwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAifX0.avv_5OFJLi51sGCuPcLrt6jKaMrhTGPrHGBWG_W2M9DgEahawzBlDY6P8P8Qi3Qnap0fbX1SKBowk0JvipYLAQ",
+      "study": {
+        "v": 1,
+        "question": "Do over-60s on drug X get readmitted less?",
+        "kind": "contingency",
+        "predicates": [
+          {
+            "name": "over 60",
+            "field": "age_band",
+            "op": "age_at_least",
+            "value": 60
+          },
+          {
+            "name": "on drug X",
+            "field": "medications",
+            "op": "has_code",
+            "value": "drug-x"
+          },
+          {
+            "name": "readmitted",
+            "field": "readmissions",
+            "op": "present"
+          }
+        ],
+        "privacy": {
+          "mechanism": "unary-randomized-response",
+          "epsilon": 2
+        },
+        "minTier": "issuer-signed"
+      },
+      "countersignature": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJvZHJsK2p3cyJ9..15oBHayI_i3Ng1hnUhkS8ErDUlmImbgkIwCRmodkR_DFXvLEMSgfj4Bc0dQU9E6OJOYrT_fVMYUYLewlppkNDQ",
+      "nonce": "2acd8851-738e-4dde-bbdd-bddc2ead4116",
+      "iat": 1792497013,
+      "exp": 1792497313,
+      "iss": "https://uni.example/#agent"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
+      "signature": "1lIBoqBZ-HOSalay0CYncrExwyIYSnvnY7NzkzlW5pAPyQ2lCOPVt6mV3-i07Jf5S29C-x6BZBSn_2uOQMckAg"
+    }
+  }
+}

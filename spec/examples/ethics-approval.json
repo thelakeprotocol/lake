@@ -1,0 +1,87 @@
+{
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VFdGhpY3NBcHByb3ZhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V0aGljcy5leGFtcGxlLyNldGhpY3MtcmV2aWV3IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yMFQxMTo1MDoxMy4yNDVaIiwidmFsaWRVbnRpbCI6IjIwMjctMDEtMThUMTE6NTA6MTMuMjQ1WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNuL3VsYlBFeCtXei84M05wak1oNm9vUVRVdzZxM0hoNVFFUWcwK0dYUlU9IiwicXVlc3Rpb24iOiJEbyBvdmVyLTYwcyBvbiBkcnVnIFggZ2V0IHJlYWRtaXR0ZWQgbGVzcz8iLCJwdXJwb3NlIjoicmVzZWFyY2giLCJmaWVsZHMiOlsiYWdlX2JhbmQiLCJtZWRpY2F0aW9ucyIsInJlYWRtaXNzaW9ucyIsInBvc3Rjb2RlIl0sInNwb25zb3IiOiJodHRwczovL3VuaS5leGFtcGxlLyNhZ2VudCIsInJldmlld2VkQnkiOiJleGFtcGxlIn19.NILY46t64rIcvwpVv6HaDd3n1jZzv83T63KL34LcMz1CJi4aLUiqyExoiVlOd4v_NyFVy3x3yo1_AXqYwF6BAA",
+  "card": {
+    "name": "Ethics",
+    "description": "Ethics (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://ethics.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://ethics.example",
+      "organization": "ethics.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "specialist",
+            "webId": "https://ethics.example/#ethics-review",
+            "ownerDomain": "ethics.example",
+            "tags": [
+              "ethics-review"
+            ],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "rfjkYWq_GKuEhxHtiIAvWNpetb2rjuv33CkqT3s-yRE",
+              "kty": "OKP",
+              "kid": "specialist-ethics.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
+        "signature": "7CiGAzez3234DV9_Zoekf0gGzIdqiN6muRhpHpeX33g2NRNj_5U8XhnNAkSWTfDPamPrFUwsfyAvOK0ROnNxBQ"
+      }
+    ]
+  },
+  "decoded": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "type": [
+      "VerifiableCredential",
+      "LakeEthicsApproval"
+    ],
+    "issuer": "https://ethics.example/#ethics-review",
+    "validFrom": "2026-10-20T11:50:13.245Z",
+    "validUntil": "2027-01-18T11:50:13.245Z",
+    "credentialSubject": {
+      "id": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+      "question": "Do over-60s on drug X get readmitted less?",
+      "purpose": "research",
+      "fields": [
+        "age_band",
+        "medications",
+        "readmissions",
+        "postcode"
+      ],
+      "sponsor": "https://uni.example/#agent",
+      "reviewedBy": "example"
+    }
+  }
+}

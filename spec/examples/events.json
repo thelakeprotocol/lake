@@ -1,0 +1,68 @@
+[
+  {
+    "id": "mvgmfv9k-0",
+    "kind": "knock",
+    "at": "2026-10-20T11:50:13.256Z",
+    "actor": "house:745cdb1d",
+    "subject": "agent:uni.example",
+    "data": {
+      "purpose": "research"
+    }
+  },
+  {
+    "id": "mvgmfv9k-1",
+    "kind": "decision",
+    "at": "2026-10-20T11:50:13.256Z",
+    "actor": "house:745cdb1d",
+    "subject": "agent:uni.example",
+    "data": {
+      "decision": "counter",
+      "reason": "you'd join if they drop postcode and pay at least $4"
+    }
+  },
+  {
+    "id": "mvgmfv9k-2",
+    "kind": "counter",
+    "at": "2026-10-20T11:50:13.256Z",
+    "actor": "visitor:1a2b3c4d",
+    "data": {
+      "members": 2,
+      "price": 5,
+      "was": 2
+    }
+  },
+  {
+    "id": "mvgmfv9k-3",
+    "kind": "compute.done",
+    "at": "2026-10-20T11:50:13.256Z",
+    "actor": "house:745cdb1d",
+    "subject": "agent:uni.example",
+    "data": {
+      "recordsOut": 0,
+      "claimsRead": 3
+    }
+  },
+  {
+    "id": "mvgmfv9k-4",
+    "kind": "payment.settled",
+    "at": "2026-10-20T11:50:13.256Z",
+    "actor": "specialist:9f8e7d6c",
+    "data": {
+      "amount": 10,
+      "count": 2
+    }
+  },
+  {
+    "id": "mvgmfv9k-5",
+    "kind": "attack.blocked",
+    "at": "2026-10-20T11:50:13.256Z",
+    "actor": "house:745cdb1d",
+    "subject": "key:a1b2c3d4e5f6",
+    "data": {
+      "why": "forged-card",
+      "key": "a1b2c3d4e5f6",
+      "claimed": "trusted-hospital.example",
+      "verified": false
+    }
+  }
+]

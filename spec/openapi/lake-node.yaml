@@ -1,0 +1,95 @@
+openapi: 3.1.0
+info:
+  title: Lake node
+  version: 0.1.0
+  summary: Registry, signed event intake, signals and event stream of a Lake node.
+  description: |
+    A node routes and records. It holds no personal data and makes no decisions.
+    Agents talk to each other directly over A2A; this API is for discovery, the map and shared signals.
+    Spec: https://lake.doneinfifty.com/docs/spec
+  license: { name: Apache-2.0, identifier: Apache-2.0 }
+servers:
+  - url: http://localhost:7000
+    description: A local Lake (docker compose up)
+paths:
+  /.well-known/agent-card.json:
+    get:
+      summary: The node's own signed A2A Agent Card (role node)
+      responses:
+        '200': { description: Signed Agent Card, content: { application/json: { schema: { type: object } } } }
+  /register:
+    post:
+      summary: Register a signed Lake card
+      description: |
+        The node verifies the signature (A2A §8.4), proves the owner domain (skipped in sandbox, and marked),
+        then fetches the card from the endpoint it names and requires the same signed card.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [card], properties: { card: { type: object, description: A2A 1.0 Agent Card with the Lake extension } } } } }
+      responses:
+        '200': { description: Registered, content: { application/json: { schema: { type: object, properties: { id: { type: string, example: 'house:745cdb1d' }, domainVia: { enum: [dns, well-known, sandbox] } } } } } }
+        '400': { description: Refused, content: { application/json: { schema: { $ref: '#/components/schemas/Refusal' } } } }
+  /cards:
+    get:
+      summary: Search registered cards
+      parameters:
+        - { name: skill, in: query, schema: { type: string }, example: health-study }
+        - { name: tag, in: query, schema: { type: string }, example: research-volunteers }
+        - { name: role, in: query, schema: { enum: [house, visitor, specialist, agent, node] } }
+      responses:
+        '200': { description: Matching cards; verify each yourself, content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object } } } } } } }
+  /events:
+    post:
+      summary: Report events from your door (signed batch)
+      description: |
+        Body is a signed Lake envelope (https://lake.doneinfifty.com/schemas/v0/signed-message.json) whose payload is
+        `{ kind: "events", events: [...] }`, issued by a registered WebID and signed by the key on its current card.
+        The node stamps each event's actor itself and truncates free text.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: 'https://lake.doneinfifty.com/schemas/v0/signed-message.json' } } } }
+      responses:
+        '200': { description: Accepted, content: { application/json: { schema: { type: object, properties: { accepted: { type: integer } } } } } }
+        '403': { description: Not registered, or bad signature }
+  /signals:
+    get:
+      summary: The node's signed blocklist and reputation
+      description: A signed envelope with payload `{ kind: "signals", blocklist: [key ids], reputation: { domain: 0..1 } }`. Verify against the node's card.
+      responses:
+        '200': { description: Signed signals, content: { application/json: { schema: { $ref: 'https://lake.doneinfifty.com/schemas/v0/signed-message.json' } } } }
+  /state:
+    get:
+      summary: Counters, participants and guilds
+      responses:
+        '200':
+          description: Current state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  counters: { $ref: '#/components/schemas/Counters' }
+                  participants: { type: array, items: { type: object, properties: { id: { type: string }, role: { type: string }, label: { type: string }, tags: { type: array, items: { type: string } }, domain: { type: string } } } }
+                  guilds: { type: array, items: { type: object, properties: { tag: { type: string }, members: { type: integer } } } }
+  /events (WebSocket):
+    get:
+      summary: Event stream (WebSocket upgrade on /events)
+      description: |
+        First message `{ type: "snapshot", node, sandbox, participants, counters, recent, guilds }`, then
+        `{ type: "event", event, text, counters }` per event. Events: https://lake.doneinfifty.com/schemas/v0/event.json
+      responses:
+        '101': { description: Switching protocols }
+components:
+  schemas:
+    Refusal:
+      type: object
+      properties:
+        code: { enum: [not-lake, forged-card, domain, unreachable, card-mismatch] }
+        why: { type: string }
+    Counters:
+      type: object
+      properties:
+        houses: { type: integer }
+        agents: { type: integer }
+        conversations: { type: integer }
+        valueSettled: { type: number }
+        attacksBlocked: { type: integer }
+        recordsMoved: { type: integer, description: Sum of recordsOut from houses' audit logs. The target is 0. }

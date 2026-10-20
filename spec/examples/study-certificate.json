@@ -1,0 +1,81 @@
+{
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTIwVDExOjUwOjEzLjI0NloiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0xOFQxMTo1MDoxMy4yNDZaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc24vdWxiUEV4K1d6LzgzTnBqTWg2b29RVFV3NnEzSGg1UUVRZzArR1hSVT0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHJhbmRvbWlzZWQgYmVmb3JlIGxlYXZpbmcgYSBob3VzZSJdfX0.FWdYu_dyXhq9sX6EwImlLcVAZy1SBVpr0k2WP7owqDiD8qn78OtTsekHZVgXvKdXI57hQkYqwbEqMZpCIGhbBw",
+  "card": {
+    "name": "Auditor",
+    "description": "Auditor (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://audit.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://audit.example",
+      "organization": "audit.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "specialist",
+            "webId": "https://audit.example/#study-audit",
+            "ownerDomain": "audit.example",
+            "tags": [
+              "study-audit"
+            ],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "Y_ViOVG5gg8dGwav97bfMHyPXPIntEbdjpT8SDYMmiY",
+              "kty": "OKP",
+              "kid": "specialist-audit.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
+        "signature": "A9a4_KXDzZymDsXEj4JK38ulF-GPh8cQgAcVGF-LboGrxNZ12405DeiPFK-Fgt7PH12OvsGPiGYx7jrP8k67AA"
+      }
+    ]
+  },
+  "decoded": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "type": [
+      "VerifiableCredential",
+      "LakeStudyCertificate"
+    ],
+    "issuer": "https://audit.example/#study-audit",
+    "validFrom": "2026-10-20T11:50:13.246Z",
+    "validUntil": "2027-01-18T11:50:13.246Z",
+    "credentialSubject": {
+      "id": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+      "checks": [
+        "declarative study, no code",
+        "answers randomised before leaving a house"
+      ]
+    }
+  }
+}

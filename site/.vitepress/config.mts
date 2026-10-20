@@ -1,4 +1,7 @@
 import { defineConfig } from 'vitepress';
+import llmstxt from 'vitepress-plugin-llms';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 const GH = 'https://github.com/thelakeprotocol/lake';
 const SITE = 'https://lake.doneinfifty.com';
@@ -34,6 +37,7 @@ export default defineConfig({
       { text: 'Docs', link: '/docs/', activeMatch: '/docs/' },
       { text: 'Spec', link: '/docs/spec' },
       { text: 'Join', link: '/docs/join' },
+      { text: 'Agents', link: '/docs/agents' },
       { text: 'Contribute', link: '/docs/contributing' },
       { text: 'Talk', link: 'https://github.com/thelakeprotocol/lake/discussions' },
     ],
@@ -44,6 +48,7 @@ export default defineConfig({
           text: 'Start',
           items: [
             { text: 'What is the Lake', link: '/docs/' },
+            { text: 'For agents', link: '/docs/agents' },
             { text: 'Join the Lake', link: '/docs/join' },
             { text: 'How a study works', link: '/docs/how-it-works' },
             { text: 'How agents find each other', link: '/docs/discovery' },
@@ -82,7 +87,22 @@ export default defineConfig({
     footer: { message: 'Apache-2.0 · Synthetic data only · Nobody owns the Lake.', copyright: 'The Lake Protocol contributors' },
     outline: { level: [2, 3] },
   },
+  // Machine-readable files at stable URLs: each JSON Schema at its $id, the model, the node's OpenAPI.
+  buildEnd({ outDir }) {
+    const repo = join(__dirname, '..', '..');
+    const put = (from: string, to: string) => { mkdirSync(join(outDir, to, '..'), { recursive: true }); copyFileSync(join(repo, from), join(outDir, to)); };
+    for (const f of readdirSync(join(repo, 'spec/schemas'))) {
+      const id = JSON.parse(readFileSync(join(repo, 'spec/schemas', f), 'utf8')).$id as string;
+      put(`spec/schemas/${f}`, new URL(id).pathname.slice(1));
+    }
+    put('model/lake.ttl', 'model/v0/lake.ttl');
+    put('model/shapes.ttl', 'model/v0/shapes.ttl');
+    put('spec/openapi/lake-node.yaml', 'openapi/lake-node.yaml');
+    for (const f of readdirSync(join(repo, 'spec/examples'), { withFileTypes: true })) if (f.isFile()) put(`spec/examples/${f.name}`, `examples/v0/${f.name}`);
+  },
   vite: {
     server: { fs: { allow: ['..'] } },
+    // Agents are half the Lake's audience: /llms.txt, /llms-full.txt and a markdown twin of every page.
+    plugins: [llmstxt({ title: 'The Lake', description: DESC, details: 'An open protocol (on Solid, A2A, MCP, ODRL, W3C VCs and AP2) where each person\'s data stays in their own pod, a housekeeper agent answers by the owner\'s rules, and agents knock, sign, and pay. Start with /docs/agents.md if you are an agent.' })],
   },
 });

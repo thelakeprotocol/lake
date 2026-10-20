@@ -1,0 +1,97 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "House stan",
+    "description": "House stan (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://pods.example/t/stan/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://pods.example",
+      "organization": "pods.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "house",
+            "webId": "https://pods.example/stan/profile/card#me",
+            "ownerDomain": "pods.example",
+            "tags": [
+              "research-volunteers"
+            ],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "w-ZZadd_nS1aHiP7pvUQC-Q9Wn579MwcXaeslIoElZ0",
+              "kty": "OKP",
+              "kid": "house-pods.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [
+      {
+        "id": "health-study",
+        "name": "Health study",
+        "description": "Considers research offers",
+        "tags": [],
+        "examples": [],
+        "inputModes": [],
+        "outputModes": [],
+        "securityRequirements": []
+      }
+    ],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
+        "signature": "fVi6OBfZp_UJIDf1N-dWvsANIQ8bLWoqqVtI66P_GRzv1Mj0WVSXOh4fJM6txu1VPdwt3MnIVFuYfq8zGDGKDg"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "fragment",
+      "study": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+      "fragment": [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1
+      ],
+      "nonce": "0e6bd10e-35e9-4528-9174-1cb94aa29d79",
+      "iat": 1792497013,
+      "exp": 1792497313,
+      "iss": "https://pods.example/stan/profile/card#me"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
+      "signature": "PGcm4yMkQuwYU8Eq9EyK5Bl7_0pQryUCzdNpX14urQWPGfqiQkctmd06a2Fsy2HB_exKHCATtIIk4UuirfIjBw"
+    }
+  }
+}

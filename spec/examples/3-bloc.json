@@ -1,0 +1,30 @@
+{
+  "rule": "highest price any member asks; only fields every member accepts",
+  "counters": [
+    {
+      "fields": [
+        "age_band",
+        "medications",
+        "readmissions"
+      ],
+      "priceUsd": 4
+    },
+    {
+      "fields": [
+        "age_band",
+        "medications",
+        "readmissions"
+      ],
+      "priceUsd": 5
+    }
+  ],
+  "bloc": {
+    "fields": [
+      "age_band",
+      "medications",
+      "readmissions"
+    ],
+    "priceUsd": 5,
+    "members": 2
+  }
+}

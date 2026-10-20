@@ -83,6 +83,17 @@ services:
     command: ["--name", "research"]
     volumes: [research:/data, ./personas/research.yaml:/rules.yaml:ro]
 
+  # The scale run: 250 hosted houses per container, each its own WebID, pod, wallet, card and rules.
+  #   docker compose --profile scale up -d --scale house-multi=4      (about 1,000 houses)
+  house-multi:
+    build: { context: ., target: house }
+    image: ghcr.io/thelakeprotocol/lake-house:latest
+    profiles: [scale]
+    command: ["--tenants", "250"]
+    depends_on: [issuer, auditor, lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42" }
+    restart: unless-stopped
+
   # Background life: ordinary traders, and an attacker now and then. The Lake defends itself.
   swarm:
     build: { context: ., target: cli }
