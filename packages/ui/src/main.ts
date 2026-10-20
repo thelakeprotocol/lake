@@ -79,7 +79,8 @@ function addParticipant(p: Participant, fresh: boolean) {
     agents.set(p.id, { id: p.id, domain: p.domain ?? '', label: p.label, x: W / 2, y: H / 2, trail: [], seen: clock });
   } else if (p.role === 'specialist' || p.role === 'agent') {
     if (specs.has(p.id)) return;
-    const slots = [[0.18, 0.28], [0.82, 0.28], [0.8, 0.74], [0.2, 0.74], [0.5, 0.18]];
+    // Round the edge of the Lake; a sandbox has eight specialists, so there's room for ten.
+    const slots = [[0.18, 0.28], [0.82, 0.28], [0.8, 0.74], [0.2, 0.74], [0.5, 0.18], [0.34, 0.12], [0.66, 0.12], [0.07, 0.5], [0.93, 0.5], [0.5, 0.84]];
     const [nx, ny] = slots[specs.size % slots.length]!;
     specs.set(p.id, { id: p.id, label: p.label.replace(/\s*\(.*\)$/, ''), nx: nx!, ny: ny! });
   }

@@ -20,8 +20,9 @@ services:
     <<: *small
     image: ghcr.io/thelakeprotocol/lake-node:latest
     hostname: lake-node
-    command: ["--domain", "${LAKE_DOMAIN:?set LAKE_DOMAIN}", "--url", "https://${LAKE_DOMAIN}"]
-    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "https://${LAKE_DOMAIN}/t/" }
+    command: ["--domain", "${LAKE_DOMAIN:?set LAKE_DOMAIN}", "--url", "https://${LAKE_DOMAIN}", "--guild-min", "2"]
+    # The map's QR code: how to claim a hosted house.
+    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "https://lake.doneinfifty.com/docs/sandbox#claim-a-house" }
     volumes: [node:/data]
     ports: ["127.0.0.1:7000:7000"]
     mem_limit: 160m
@@ -69,8 +70,10 @@ services:
     memswap_limit: 140m
 
   # Background traders (mostly marketing, which rules decline) and an attacker now and then.
+  # Off by default: on a 1 GB server the houses need the room. --profile lively turns it on.
   swarm:
     <<: *small
+    profiles: [lively]
     image: ghcr.io/thelakeprotocol/lake:latest
     command: ["swarm", "--traders", "3", "--attackers", "1", "--interval", "30000", "--node", "http://lake-node:7000"]
     environment: { NODE_OPTIONS: "--max-old-space-size=64" }
