@@ -8,6 +8,7 @@
 # (deploy/apache-sandbox.conf), or with Caddy if ports 80/443 are free (--profile caddy, deploy/Caddyfile):
 #   /        the node: live map, registry, events, signals, relay
 #   /s/*     the specialists: /s/guide /s/inspector /s/sparring /s/quests /s/ethics /s/auditor /s/payments /s/issuer
+#   /mcp     the Lake MCP connector over HTTP (Claude as a Lake agent)
 #   /t/*     the hosted houses (anyone can claim one: the first device to open /t/<name>/owner/ becomes its owner)
 name: lake-sandbox
 
@@ -69,6 +70,24 @@ services:
     depends_on: [houses]
     mem_limit: 140m
     memswap_limit: 140m
+
+  # Claude (or any MCP client) as a Lake agent, over HTTP: add https://<domain>/mcp as a custom connector.
+  # Every conversation gets its own key and card, served from here at /mcp/a/<id>/.
+  mcp:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake:latest
+    hostname: mcp
+    command: ["mcp", "--http", "4800", "--public-url", "https://${LAKE_DOMAIN}"]
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=128"
+      LAKE_NODE_URL: "http://lake-node:7000"
+      LAKE_ETHICS_URL: "http://specialists:4300/ethics"
+      LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
+      LAKE_PAYMENTS_URL: "http://specialists:4300/payments"
+    ports: ["127.0.0.1:4800:4800"]
+    depends_on: [houses]
+    mem_limit: 180m
+    memswap_limit: 180m
 
   # Background traders (mostly marketing, which rules decline) and an attacker now and then.
   # Off by default: on a 1 GB server the houses need the room. --profile lively turns it on.

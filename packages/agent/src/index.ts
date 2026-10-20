@@ -22,6 +22,11 @@ export interface LakeAgentOptions {
   publicUrl?: string;
   /** Keep the agent's key here so it keeps its identity (and reputation) across runs. Default: a fresh key. */
   keyFile?: string;
+  /**
+   * Serve this agent's card from an app you already run, instead of its own port: `mount` gets the
+   * agent's routes (card at /.well-known/agent-card.json, A2A at /a2a). Set `publicUrl` to where they land.
+   */
+  mount?: (app: import('express').Express) => void;
   /** Specialists to use. Defaults are the demo Lake's (docker compose). */
   ethics?: string;
   auditor?: string;
@@ -73,8 +78,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
 
   // Serve our card while we're around, so a node can verify it and others can look us up.
   const busy = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'this agent visits; it does not take offers' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
-  const server: Server = lakeAgentApp(visitor.card, busy).listen(port);
-  await new Promise((ok) => server.once('listening', ok));
+  const app = lakeAgentApp(visitor.card, busy);
+  let server: Server | null = null;
+  if (o.mount) o.mount(app);
+  else {
+    server = app.listen(port);
+    await new Promise((ok) => server!.once('listening', ok));
+  }
   const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
 
@@ -122,11 +132,12 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     },
     async close() {
       await link.flush();
-      await new Promise((ok) => server.close(ok));
+      if (server) await new Promise((ok) => server!.close(ok));
     },
   };
 }
 
 export { createLakeMcpServer } from './mcp.js';
+export { lakeMcpHttpApp } from './http.js';
 
 export const defaultKeyFile = (domain: string) => `${homedir()}/.lake/agent-${domain}.json`;

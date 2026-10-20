@@ -38,9 +38,16 @@ importers:
       '@thelakeprotocol/visitor':
         specifier: workspace:^
         version: link:../visitor
+      express:
+        specifier: '5'
+        version: 5.3.0
       zod:
         specifier: '3'
         version: 3.25.76
+    devDependencies:
+      '@types/express':
+        specifier: '5'
+        version: 5.0.6
 
   packages/convert-fhir:
     dependencies:

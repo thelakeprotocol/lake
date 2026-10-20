@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
 import { buildCard, generateIdentity, issueCredential, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman, readmissionStudy } from '../packages/visitor/src/dispatch.js';
@@ -32,9 +33,9 @@ const houses: Record<string, string> = {};
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
 
-function start(args: string[], ready: RegExp): Promise<void> {
+function start(args: string[], ready: RegExp, env?: Record<string, string>): Promise<void> {
   return new Promise((ok, fail) => {
-    const p = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
     procs.push(p);
     let out = '';
     const timer = setTimeout(() => fail(new Error(`timed out:\n${out}`)), 120_000);
@@ -301,6 +302,28 @@ describe('the open door', () => {
     expect(out.participants).toBeGreaterThan(0);
     expect(out.steps.some((s: string) => s.startsWith('pay:'))).toBe(true);
   });
+
+  it('Claude over HTTP: every conversation is its own signed agent, registered on the Lake, and runs a paid study', async () => {
+    const port = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments });
+    const client = new Client({ name: 'claude-ai', version: '0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+    const text = async (name: string, args: Record<string, unknown> = {}) => {
+      const r = await client.callTool({ name, arguments: args });
+      expect(r.isError).toBeFalsy();
+      return JSON.parse((r.content as { text: string }[])[0]!.text);
+    };
+    const o = await text('lake_overview');
+    expect(o.you).toMatchObject({ name: 'Claude (via MCP)', domain: expect.stringMatching(/^claude-ai-[0-9a-f]{8}\.mcp\.example$/) });
+    expect(o.studies).toContain('Are people with heart failure on drug Y readmitted more?');
+    expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === 'Claude (via MCP)')).toBe(true);
+    expect((await text('lake_ask', { agent_url: `${guide}/a2a`, message: { kind: 'hello' } })).kind).toBe('welcome');
+    const r = await client.callTool({ name: 'lake_dispatch_study', arguments: { question: 'Is this a real study?', price_usd: 5, budget_usd: 200 } });
+    expect(r.isError).toBe(true); // only certified questions
+    const done = await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', price_usd: 5, budget_usd: 200 });
+    expect(done.paid.total).toBeGreaterThan(0);
+    await client.close();
+  }, 60_000);
 });
 
 describe('a mission, no money', () => {

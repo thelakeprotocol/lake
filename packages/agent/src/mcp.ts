@@ -1,15 +1,22 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { SANDBOX_STUDIES } from '@thelakeprotocol/visitor';
 import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
+
+export interface McpExtras {
+  /** Who this agent is, decided when the first tool is called (so it can be named after the MCP client). */
+  identity?: (client?: { name: string }) => { name: string; domain: string };
+  onAgent?: (agent: LakeAgent) => void;
+}
 
 /**
  * The Lake MCP connector: lets any MCP-capable assistant search the Lake, knock, and dispatch whole
  * studies, as its own signed agent. The assistant brings the model; the Lake bundles none.
  */
-export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
-  const server = new McpServer({ name: 'lake', version: '0.1.0' });
+export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): McpServer {
+  const server = new McpServer({ name: 'lake', version: '0.2.0' });
   let me: Promise<LakeAgent> | null = null;
-  const agent = () => (me ??= joinLake(o));
+  const agent = () => (me ??= joinLake({ ...o, ...x.identity?.(server.server.getClientVersion()) }).then((a) => { x.onAgent?.(a); return a; }));
   const json = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v, null, 2) }] });
   const fail = (e: unknown) => ({ content: [{ type: 'text' as const, text: `Lake error: ${(e as Error).message}` }], isError: true });
 
@@ -22,7 +29,15 @@ export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
         const roles: Record<string, number> = {};
         for (const p of s.participants) roles[p.role] = (roles[p.role] ?? 0) + 1;
         const specialists = (await (await agent()).find({ role: 'specialist' })).map((x) => ({ name: x.name, url: x.url }));
-        return json({ counters: s.counters, participants: roles, guilds: s.guilds, specialists, start: 'lake_ask the Guide with { "kind": "hello" }', explain: 'https://lake.doneinfifty.com/docs/agents' });
+        const me = await agent();
+        return json({
+          you: { name: me.card.name, domain: me.domain, webId: me.webId },
+          counters: s.counters, participants: roles, guilds: s.guilds, specialists,
+          studies: SANDBOX_STUDIES.map((x) => x.question),
+          start: 'lake_ask the Guide with { "kind": "hello" }',
+          map: o.node.split(',')[0]!.trim(),
+          explain: 'https://lake.doneinfifty.com/docs/agents',
+        });
       } catch (e) {
         return fail(e);
       }
@@ -88,7 +103,7 @@ export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
       description:
         'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (only randomised answers leave), pay under a signed budget, and return the answer. Records moved stays 0.',
       inputSchema: {
-        question: z.string().default('Do over-60s on drug X get readmitted less?'),
+        question: z.string().default(SANDBOX_STUDIES[0]!.question).describe(`One of the questions this Lake's auditor certifies: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`),
         price_usd: z.number().default(2),
         budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
@@ -97,8 +112,10 @@ export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
     },
     async (a) => {
       try {
+        const study = SANDBOX_STUDIES.find((x) => x.question.toLowerCase() === a.question.trim().toLowerCase());
+        if (!study) throw new Error(`studies here are declarative and certified in advance; pick one of: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`);
         const steps: string[] = [];
-        const r = await (await agent()).study(a.question, { priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
+        const r = await (await agent()).study(a.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
         const { grants: _, ...result } = r;
         return json({ ...result, steps });
       } catch (e) {
