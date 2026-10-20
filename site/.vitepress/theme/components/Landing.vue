@@ -70,8 +70,8 @@ const standards = [
 ];
 
 const milestones = [
-  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'done'], ['Approvals', 'next'],
-  ['Money', ''], ['Wild life', ''], ['1,000 houses', ''], ['Federation', ''], ['Open door', ''],
+  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'done'], ['Approvals', 'done'],
+  ['Money', 'next'], ['Wild life', ''], ['1,000 houses', ''], ['Federation', ''], ['Open door', ''],
 ];
 </script>
 

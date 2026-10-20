@@ -6,4 +6,4 @@
 pnpm --filter @thelakeprotocol/ui dev   # proxies /events to a node on :7000
 ```
 
-The approvals app (phone-first Allow / Deny, your keys, Revoke) lands here in milestone 4.
+**The approvals app runs** (`approvals.html`, served by each house at `/owner/`): pair the phone, see each request, Allow or Deny, Your keys with Revoke. The owner's Ed25519 key is made and kept on the phone; grants are signed there. See [Your phone, your keys](https://lake.doneinfifty.com/docs/approvals).

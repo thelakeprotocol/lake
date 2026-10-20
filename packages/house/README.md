@@ -21,6 +21,10 @@ docker run --network lake_default --hostname house-you -v ./rules.yaml:/rules.ya
 | `--issuer-url` | `LAKE_ISSUER_URL` | `http://issuer:4300` | Who signs the synthetic record |
 | `--production` | | off | Turns sandbox off: domains must be proved |
 | `--json` | | off | Events as JSON lines |
+| `--owner-url` | `LAKE_OWNER_URL` | `--public-url` | Base URL the owner's phone uses for `/owner/` |
+| `--open-pairing` | `LAKE_OPEN_PAIRING=1` | off | Sandbox only: the first device to open the app becomes the owner |
+| `--auditor-url` | `LAKE_AUDITOR_URL` | `http://auditor:4400` | Who certifies this house's converter |
+| `--seed` | `LAKE_SEED` | none | Same seed, same randomised answers |
 
 | Module | Does |
 |---|---|
@@ -30,3 +34,5 @@ docker run --network lake_default --hostname house-you -v ./rules.yaml:/rules.ya
 | `housekeeper.ts` | Verifies card, domain, signature, replay; decides by rules; answers with a signed decision |
 | `server.ts` | A2A JSON-RPC at `/a2a`, signed card at `/.well-known/agent-card.json` |
 | `pod-mcp-stdio.ts` | `lake-pod-mcp`: the same MCP door for your own assistant |
+| `owner.ts` | The owner's desk: pairing, pending asks, live grants signed on the owner's phone, revocation |
+| `admin.ts` | Operator command: `node dist/admin.js revoke-all` |
