@@ -1,0 +1,20 @@
+# Stan: shares for good research, never his postcode, never for less than $4.
+owner: stan
+device: approvals-app        # where "ask me" requests go
+default: ask                 # join | decline | ask
+tags: [research-volunteers]
+rules:
+  - match: { purpose: research, sponsor_verified: true, ethics_approved: true }
+    allow_fields: [age_band, medications, readmissions]
+    deny_fields: [name, postcode, dob]
+    min_price_usd: 4
+    retention: none
+    decision: join
+  - match: { purpose: marketing }
+    decision: decline
+  - match: { requester: gp.example }
+    allow_fields: [medications]
+    grant_hours: 48
+    decision: join
+negotiation:
+  join_collectives: true     # may counter-offer together with other houses

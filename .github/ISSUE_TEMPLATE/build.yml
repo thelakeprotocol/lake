@@ -1,0 +1,11 @@
+name: I'm building…
+description: Claim a piece of work so nobody duplicates it.
+labels: [building]
+body:
+  - type: textarea
+    id: what
+    attributes: { label: What you're building, description: "A converter, an agent, a persona, a milestone piece…" }
+    validations: { required: true }
+  - type: textarea
+    id: spec
+    attributes: { label: Does it touch SPEC.md?, description: "If it changes the protocol, sketch the change." }

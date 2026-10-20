@@ -1,0 +1,50 @@
+/* One dark world: the Lake's palette across landing and docs. */
+:root, .dark {
+  --vp-c-bg: #070B12;
+  --vp-c-bg-alt: #0A1019;
+  --vp-c-bg-elv: #0D1420;
+  --vp-c-bg-soft: #0D1420;
+  --vp-c-divider: #1D2838;
+  --vp-c-border: #1D2838;
+  --vp-c-gutter: #1D2838;
+  --vp-c-text-1: #E6EDF2;
+  --vp-c-text-2: #A9B6C6;
+  --vp-c-text-3: #8B9BAE;
+  --vp-c-brand-1: #3DDC97;
+  --vp-c-brand-2: #5FE6AB;
+  --vp-c-brand-3: #2FB57B;
+  --vp-c-brand-soft: rgba(61, 220, 151, 0.14);
+  --vp-c-tip-1: #3DDC97;
+  --vp-c-warning-1: #F5C451;
+  --vp-c-danger-1: #FF4D6A;
+  --vp-code-color: #3DDC97;
+  --vp-code-block-bg: #0D1420;
+  --vp-font-family-base: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --vp-font-family-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --vp-nav-bg-color: #070B12;
+  --vp-sidebar-bg-color: #070B12;
+  --vp-button-brand-bg: #FF6A2B;
+  --vp-button-brand-text: #070B12;
+  --vp-button-brand-hover-bg: #FF7E47;
+  --vp-button-brand-hover-text: #070B12;
+  --vp-local-search-bg: #0D1420;
+}
+body { background: #070B12; }
+
+.VPNavBarTitle .title { font-family: 'Oswald', 'Arial Narrow', sans-serif; font-weight: 700; letter-spacing: 0.04em; font-size: 20px; }
+
+.vp-doc h1, .vp-doc h2 {
+  font-family: 'Oswald', 'Arial Narrow', sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: 0.01em;
+}
+.vp-doc h1 { font-size: 44px; line-height: 1; }
+.vp-doc h2 { font-size: 28px; line-height: 1.1; border-top-color: #1D2838; }
+.vp-doc h3 { letter-spacing: 0; }
+.vp-doc blockquote { border-left-color: #FF6A2B; }
+.vp-doc .lead { font-size: 19px; line-height: 1.6; color: var(--vp-c-text-1); }
+.status { display: inline-block; font: 500 11px/1 'IBM Plex Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 7px; border-radius: 3px; border: 1px solid; vertical-align: 3px; }
+.status.done { color: #3DDC97; border-color: rgba(61,220,151,0.5); }
+.status.next { color: #FF6A2B; border-color: rgba(255,106,43,0.5); }
+.status.later { color: #8B9BAE; border-color: #1D2838; }
+
+/* The landing page owns the full width. */
+.VPContent:has(.lk) { padding-top: var(--vp-nav-height) !important; }

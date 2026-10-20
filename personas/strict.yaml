@@ -1,0 +1,9 @@
+# Strict: says no to almost everything, and asks before anything else.
+owner: strict
+device: approvals-app
+default: decline
+rules:
+  - match: { purpose: research, ethics_approved: true, audit_certified: true }
+    decision: ask
+negotiation:
+  join_collectives: false

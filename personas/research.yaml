@@ -1,0 +1,16 @@
+# Research-friendly: joins approved studies, but wants a fair price.
+owner: research
+device: approvals-app
+default: ask
+tags: [research-volunteers, carers]
+rules:
+  - match: { purpose: research, ethics_approved: true }
+    allow_fields: [age_band, medications, readmissions, conditions]
+    deny_fields: [name, postcode, dob]
+    min_price_usd: 5
+    retention: none
+    decision: join
+  - match: { purpose: marketing }
+    decision: decline
+negotiation:
+  join_collectives: true

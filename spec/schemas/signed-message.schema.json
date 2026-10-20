@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lake.doneinfifty.com/schemas/v0/signed-message.json",
+  "title": "Signed Lake message envelope",
+  "type": "object",
+  "required": ["payload", "jws"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "required": ["kind", "nonce", "iat", "exp", "iss"],
+      "properties": {
+        "kind": { "enum": ["offer", "decision", "counter", "agreement", "grant", "result", "receipt", "revocation"] },
+        "nonce": { "type": "string", "minLength": 16 },
+        "iat": { "type": "integer" },
+        "exp": { "type": "integer" },
+        "iss": { "type": "string", "format": "uri" }
+      }
+    },
+    "jws": {
+      "type": "object",
+      "required": ["protected", "signature"],
+      "properties": { "protected": { "type": "string" }, "signature": { "type": "string" } },
+      "additionalProperties": false
+    }
+  }
+}

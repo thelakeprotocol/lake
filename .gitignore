@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.data/
+*.log
+.DS_Store
+site/.vitepress/cache/
+site/.vitepress/dist/
+coverage/
+.env
+*.tsbuildinfo

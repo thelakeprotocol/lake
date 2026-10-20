@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lake.doneinfifty.com/schemas/v0/offer.json",
+  "title": "Lake offer (flat view; on the wire it is an ODRL Offer)",
+  "type": "object",
+  "required": ["id", "requester", "purpose", "fields", "retention", "priceUsd", "credentials"],
+  "properties": {
+    "id": { "type": "string" },
+    "requester": { "type": "string", "description": "Proven owner domain of the visitor" },
+    "purpose": { "type": "string", "examples": ["research", "marketing", "care"] },
+    "fields": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "retention": { "type": "string", "description": "\"none\" or an ISO 8601 duration", "pattern": "^(none|P.+)$" },
+    "priceUsd": { "type": "number", "minimum": 0 },
+    "credentials": {
+      "type": "object",
+      "required": ["ethicsApproved", "sponsorVerified", "auditCertified"],
+      "properties": {
+        "ethicsApproved": { "type": "boolean" },
+        "sponsorVerified": { "type": "boolean" },
+        "auditCertified": { "type": "boolean" }
+      }
+    },
+    "minTier": { "enum": ["self-reported", "device-signed", "issuer-signed"] },
+    "note": { "type": "string", "description": "UNTRUSTED free text. Never evaluated; shown to humans only as a quote." }
+  }
+}

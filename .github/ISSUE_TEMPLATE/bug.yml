@@ -1,0 +1,14 @@
+name: Bug
+description: Something doesn't work the way the README or SPEC says.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes: { label: What happened, description: "Command you ran, what you expected, what you got." }
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes: { label: Commit or version }
+  - type: markdown
+    attributes:
+      value: "**Security hole?** Don't file it here. Use [private reporting](https://github.com/thelakeprotocol/lake/security/advisories/new)."

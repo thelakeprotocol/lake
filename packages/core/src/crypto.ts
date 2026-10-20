@@ -1,0 +1,102 @@
+import { randomUUID } from 'node:crypto';
+import * as jose from 'jose';
+import { canonicalize } from './canonical.js';
+
+export type PrivateKey = jose.CryptoKey | jose.KeyObject | jose.JWK;
+
+export interface Identity {
+  /** Key id; also the fragment of the key inside the owner's WebID profile. */
+  kid: string;
+  privateKey: PrivateKey;
+  publicJwk: jose.JWK;
+}
+
+const ALG = 'EdDSA';
+
+export async function generateIdentity(kid: string = randomUUID()): Promise<Identity> {
+  const { privateKey, publicKey } = await jose.generateKeyPair(ALG, { crv: 'Ed25519', extractable: true });
+  const publicJwk = { ...(await jose.exportJWK(publicKey)), kid, alg: ALG };
+  return { kid, privateKey, publicJwk };
+}
+
+export async function exportIdentity(id: Identity): Promise<{ kid: string; privateJwk: jose.JWK; publicJwk: jose.JWK }> {
+  const privateJwk = { ...(await jose.exportJWK(id.privateKey as jose.CryptoKey)), kid: id.kid, alg: ALG };
+  return { kid: id.kid, privateJwk, publicJwk: id.publicJwk };
+}
+
+export async function importIdentity(saved: { kid: string; privateJwk: jose.JWK; publicJwk: jose.JWK }): Promise<Identity> {
+  return { kid: saved.kid, privateKey: (await jose.importJWK(saved.privateJwk, ALG)) as jose.CryptoKey, publicJwk: saved.publicJwk };
+}
+
+/** A signed Lake message: the payload plus a detached-free flattened JWS over its canonical form. */
+export interface Signed<T> {
+  payload: T & { nonce: string; iat: number; exp: number; iss: string };
+  jws: { protected: string; signature: string };
+}
+
+export interface SignOptions {
+  /** Who signs: a WebID or agent card URL. */
+  iss: string;
+  /** Seconds until the message expires. Default 300. */
+  ttl?: number;
+  /** Override the clock (ms since epoch); used by seeded demo runs. */
+  now?: number;
+}
+
+export async function signMessage<T extends object>(payload: T, id: Identity, opts: SignOptions): Promise<Signed<T>> {
+  const iat = Math.floor((opts.now ?? Date.now()) / 1000);
+  const full = { ...payload, nonce: randomUUID(), iat, exp: iat + (opts.ttl ?? 300), iss: opts.iss };
+  const jws = await new jose.FlattenedSign(new TextEncoder().encode(canonicalize(full)))
+    .setProtectedHeader({ alg: ALG, kid: id.kid, typ: 'lake+jws' })
+    .sign(id.privateKey);
+  return { payload: full, jws: { protected: jws.protected!, signature: jws.signature } };
+}
+
+export type KeyResolver = (kid: string, iss: string) => Promise<PrivateKey | jose.JWK | null>;
+
+export class SignatureError extends Error {
+  constructor(public readonly code: 'bad-signature' | 'unknown-key' | 'expired' | 'replayed' | 'malformed', message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Verifies a signed message: signature, expiry and (if a guard is given) replay.
+ * Throws SignatureError; never returns a payload it could not verify.
+ */
+export async function verifyMessage<T>(msg: Signed<T>, resolveKey: KeyResolver, opts: { now?: number; replay?: ReplayGuard } = {}): Promise<Signed<T>['payload']> {
+  if (!msg?.payload || !msg.jws?.protected || !msg.jws.signature) throw new SignatureError('malformed', 'message is not a signed Lake message');
+  let header: jose.ProtectedHeaderParameters;
+  try {
+    header = jose.decodeProtectedHeader(msg.jws);
+  } catch {
+    throw new SignatureError('malformed', 'unreadable JWS header');
+  }
+  if (header.alg !== ALG || !header.kid) throw new SignatureError('malformed', 'unsupported JWS header');
+  const key = await resolveKey(header.kid, msg.payload.iss);
+  if (!key) throw new SignatureError('unknown-key', `no key ${header.kid} for ${msg.payload.iss}`);
+  const keyLike = 'kty' in (key as object) ? await jose.importJWK(key as jose.JWK, ALG) : (key as jose.CryptoKey);
+  try {
+    await jose.flattenedVerify(
+      { protected: msg.jws.protected, signature: msg.jws.signature, payload: jose.base64url.encode(canonicalize(msg.payload)) },
+      keyLike,
+    );
+  } catch {
+    throw new SignatureError('bad-signature', 'signature does not match the message');
+  }
+  const now = Math.floor((opts.now ?? Date.now()) / 1000);
+  if (msg.payload.exp < now) throw new SignatureError('expired', 'message expired');
+  if (opts.replay && !opts.replay.accept(msg.payload.nonce, msg.payload.exp)) throw new SignatureError('replayed', 'nonce already seen');
+  return msg.payload;
+}
+
+/** Remembers nonces until they expire, so a captured message cannot be sent twice. */
+export class ReplayGuard {
+  private seen = new Map<string, number>();
+  accept(nonce: string, exp: number, now = Math.floor(Date.now() / 1000)): boolean {
+    if (this.seen.size > 10_000) for (const [n, e] of this.seen) if (e < now) this.seen.delete(n);
+    if (this.seen.has(nonce)) return false;
+    this.seen.set(nonce, exp);
+    return true;
+  }
+}

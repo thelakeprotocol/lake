@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report (private)
+    url: https://github.com/thelakeprotocol/lake/security/advisories/new
+    about: Anything that lets data out, keys get minted, or forgeries through.

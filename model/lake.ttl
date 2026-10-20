@@ -1,0 +1,61 @@
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+
+# The canonical Lake model, v0.1. One small core every deal shares;
+# domain vocabularies add Claim subtypes inside it, never beside it.
+
+lake: a owl:Ontology ;
+  rdfs:label "The Lake canonical model" ;
+  owl:versionInfo "0.1.0" .
+
+# ---- Core -------------------------------------------------------------
+
+lake:Party      a owl:Class ; rdfs:comment "A person or organisation, identified by a WebID." .
+lake:Thing      a owl:Class ; rdfs:comment "Anything a claim is about: a body, a car, a meter, a flat." .
+lake:Claim      a owl:Class ; rdfs:comment "One statement about a thing, e.g. 'takes medication X'." .
+lake:Provenance a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:comment "Who signed a claim, how, and from what original." .
+lake:Offer      a owl:Class ; rdfs:comment "What a visitor proposes. Serialised as an ODRL Offer." .
+lake:Terms      a owl:Class ; rdfs:comment "The agreed terms. Serialised as an ODRL Agreement." .
+lake:Receipt    a owl:Class ; rdfs:comment "Proof of payment, stored in the owner's pod." .
+
+lake:about       a owl:ObjectProperty ; rdfs:domain lake:Claim ; rdfs:range lake:Thing .
+lake:subject     a owl:ObjectProperty ; rdfs:domain lake:Thing ; rdfs:range lake:Party .
+lake:provenance  a owl:ObjectProperty ; rdfs:domain lake:Claim ; rdfs:range lake:Provenance .
+lake:value       a owl:DatatypeProperty ; rdfs:domain lake:Claim .
+lake:observedAt  a owl:DatatypeProperty ; rdfs:domain lake:Claim ; rdfs:range xsd:dateTime .
+
+lake:tier            a owl:ObjectProperty ; rdfs:domain lake:Provenance ; rdfs:range lake:Tier .
+lake:issuer          a owl:ObjectProperty ; rdfs:domain lake:Provenance ; rdfs:range lake:Party .
+lake:originalHash    a owl:DatatypeProperty ; rdfs:domain lake:Provenance ; rdfs:comment "sha-256 of the original signed record, multibase." .
+lake:converter       a owl:DatatypeProperty ; rdfs:domain lake:Provenance ; rdfs:comment "Converter package name@version." .
+lake:converterCert   a owl:DatatypeProperty ; rdfs:domain lake:Provenance ; rdfs:comment "URL of the auditor certificate for the converter." .
+lake:signedBy        a owl:ObjectProperty ; rdfs:domain lake:Provenance ; rdfs:range lake:Party ; rdfs:comment "The housekeeper that signed the converted claim." .
+
+lake:Tier a owl:Class .
+lake:SelfReported  a lake:Tier ; rdfs:label "self-reported" .
+lake:DeviceSigned  a lake:Tier ; rdfs:label "device-signed" .
+lake:IssuerSigned  a lake:Tier ; rdfs:label "issuer-signed" .
+
+# ---- Health vocabulary -------------------------------------------------
+
+lake:Person       a owl:Class ; rdfs:subClassOf lake:Thing .
+lake:AgeBand      a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "Age as a band, e.g. '60-69'. Never a birth date." .
+lake:Medication   a owl:Class ; rdfs:subClassOf lake:Claim .
+lake:Condition    a owl:Class ; rdfs:subClassOf lake:Claim .
+lake:Readmission  a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "A hospital readmission within 30 days." .
+
+lake:code   a owl:DatatypeProperty ; rdfs:comment "A code from a public system (RxNorm, SNOMED CT), as a string." .
+
+# ---- Field names used in offers ---------------------------------------
+
+lake:age_band     a rdf:Property ; rdfs:range lake:AgeBand .
+lake:medications  a rdf:Property ; rdfs:range lake:Medication .
+lake:conditions   a rdf:Property ; rdfs:range lake:Condition .
+lake:readmissions a rdf:Property ; rdfs:range lake:Readmission .
+lake:postcode     a rdf:Property ; rdfs:comment "Identifying. Most personas deny it." .
+lake:dob          a rdf:Property ; rdfs:comment "Identifying. Most personas deny it." .
+lake:name         a rdf:Property ; rdfs:comment "Identifying. Most personas deny it." .

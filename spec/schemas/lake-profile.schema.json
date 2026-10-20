@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lake.doneinfifty.com/schemas/v0/lake-profile.json",
+  "title": "Lake profile (params of the Lake A2A extension)",
+  "type": "object",
+  "required": ["role", "webId", "ownerDomain", "publicJwk", "tags", "lakeVersion"],
+  "properties": {
+    "role": { "enum": ["house", "visitor", "specialist", "agent"] },
+    "webId": { "type": "string", "format": "uri" },
+    "ownerDomain": { "type": "string", "pattern": "^[a-z0-9.-]+$" },
+    "publicJwk": {
+      "type": "object",
+      "required": ["kty", "crv", "x", "kid"],
+      "properties": {
+        "kty": { "const": "OKP" },
+        "crv": { "const": "Ed25519" },
+        "x": { "type": "string" },
+        "kid": { "type": "string" },
+        "alg": { "const": "EdDSA" }
+      }
+    },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "lakeVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+  },
+  "additionalProperties": false
+}
