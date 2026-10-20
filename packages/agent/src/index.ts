@@ -5,7 +5,7 @@ import {
   generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage,
   type AgentCard, type Identity, type LakeData, type Offer, type Study,
 } from '@thelakeprotocol/core';
-import { dispatch, knock, makeHuman, makeVisitor, readmissionStudy, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
+import { ask, dispatch, knock, makeHuman, makeVisitor, readmissionStudy, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
 
 export type { MissionResult, Study };
 
@@ -49,6 +49,8 @@ export interface LakeAgent {
   find(q?: { skill?: string; tag?: string; role?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string }[]>;
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
+  /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
+  ask(agentUrl: string, payload: Record<string, unknown> & { kind: string }): Promise<Record<string, unknown>>;
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
   study(question: string, o?: StudyOptions): Promise<MissionResult>;
   close(): Promise<void>;
@@ -99,6 +101,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     },
     async knock(houseUrl, terms) {
       return (await knock(houseUrl, visitor, terms)).reply;
+    },
+    async ask(agentUrl, payload) {
+      return (await ask(agentUrl, visitor, payload)).reply;
     },
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;

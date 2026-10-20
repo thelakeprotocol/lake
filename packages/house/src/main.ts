@@ -19,9 +19,10 @@ const { values: a } = parseArgs({
     'pod-port': { type: 'string', default: process.env.LAKE_POD_PORT ?? '3000' },
     'public-url': { type: 'string', default: process.env.LAKE_PUBLIC_URL },
     'pod-url': { type: 'string', default: process.env.LAKE_POD_URL },
-    'issuer-url': { type: 'string', default: process.env.LAKE_ISSUER_URL ?? 'http://issuer:4300' },
+    'issuer-url': { type: 'string', default: process.env.LAKE_ISSUER_URL },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
-    'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
+    'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL },
+    join: { type: 'string', default: process.env.LAKE_JOIN },
     seed: { type: 'string', default: process.env.LAKE_SEED },
     'owner-url': { type: 'string', default: process.env.LAKE_OWNER_URL },
     'open-pairing': { type: 'boolean', default: process.env.LAKE_OPEN_PAIRING === '1' },
@@ -35,11 +36,21 @@ const { values: a } = parseArgs({
   },
 });
 
+// `--join https://sandbox.lake.example`: one flag for a house at home. That Lake's node, its issuer and
+// auditor (at /s/issuer, /s/auditor, as a sandbox serves them), reached through its relay.
+if (a.join) {
+  const lake = a.join.replace(/\/$/, '');
+  a.lake ??= lake;
+  a['issuer-url'] ??= `${lake}/s/issuer`;
+  a['auditor-url'] ??= `${lake}/s/auditor`;
+  a.relay = true;
+}
 const port = Number(a.port);
 const podPort = Number(a['pod-port']);
 // In Docker, other containers reach us by our hostname (set it with --hostname); elsewhere, localhost.
 const inDocker = existsSync('/.dockerenv');
-const baseUrl = (a['public-url'] ?? `http://${inDocker ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
+// Joining from home, only you open this address (your control panel); everyone else comes through the relay.
+const baseUrl = (a['public-url'] ?? `http://${inDocker && !a.join ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
 const podUrl = (a['pod-url'] ?? `http://localhost:${podPort}`).replace(/\/?$/, '/');
 // Solid-OIDC only trusts HTTPS issuers, or plain HTTP on localhost (solid.github.io/solid-oidc/#security-tls).
 const podHost = new URL(podUrl);
@@ -48,7 +59,7 @@ if (podHost.protocol === 'http:' && podHost.hostname.split('.').pop() !== 'local
   process.exit(2);
 }
 const sandbox = !a.production;
-const common = { issuerUrl: a['issuer-url']!, auditorUrl: a['auditor-url']!, lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
+const common = { issuerUrl: a['issuer-url'] ?? 'http://issuer:4300', auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
 
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();
@@ -115,7 +126,7 @@ async function hosted(n: number) {
     await mkdir(houseDir, { recursive: true });
     await writeFile(join(houseDir, 'rules.yaml'), rulesText);
     const house = await startHouse({
-      ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`,
+      ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'],
       emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true,
     });
     app.use(`/t/${name}`, house.app);

@@ -3,9 +3,10 @@ import { existsSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { cardUrlFor, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
-import { dispatch, makeHuman, readmissionStudy } from './dispatch.js';
+import { dispatch, makeHuman, readmissionStudy, SANDBOX_STUDIES } from './dispatch.js';
+import type { Study } from '@thelakeprotocol/core';
 import { attack, houseUrls, swarm } from './attack.js';
-import { knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
+import { ask, knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
 
 const HELP = `lake — talk to the Lake
 
@@ -21,7 +22,12 @@ const HELP = `lake — talk to the Lake
   lake demo [--pace 2000]          the on-stage script: dispatch (bloc, owner's tap), then an attacker
   lake reset                       demo reset: every node's counters, history and quarantines (needs LAKE_RESET_TOKEN)
   lake card <agent-url>            fetch and verify any agent's card from its own .well-known path (no node needed)
+  lake ask <agent-url> <kind|json> [--as <domain>]   one signed message to any agent; prints its verified reply
+                                   e.g. lake ask https://sandbox.lake.doneinfifty.com/s/guide/a2a hello
+                                        lake ask <guide>/a2a '{"kind":"tour","step":2}'
   lake attack [--count 10] [--node http://lake-node:7000] [<house-url> …]
+  lake sponsor [--every 600] [--as open-science.example]   sandbox life: a paid, certified study every few minutes,
+                                   rotating questions, prices and asks, so new houses get knocked, bargain and get paid
   lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -55,6 +61,7 @@ const { positionals, values: a } = parseArgs({
     traders: { type: 'string', default: '8' },
     attackers: { type: 'string', default: '1' },
     interval: { type: 'string', default: '2000' },
+    every: { type: 'string', default: '600' },
   },
 });
 
@@ -92,6 +99,16 @@ else if (cmd === 'reset') {
   role ${p.role} · owner ${p.ownerDomain} · WebID ${p.webId}
   key ${p.publicJwk.kid} · tags ${p.tags.join(', ') || 'none'}
   A2A ${card.supportedInterfaces[0]?.url}`);
+} else if (cmd === 'ask') {
+  const [to, what] = positionals;
+  if (!to || !what) throw new Error('lake ask <agent A2A url> <kind, or a JSON message>');
+  const payload = what.trim().startsWith('{') ? JSON.parse(what) : { kind: what };
+  const domain = a.as ?? 'cli.example';
+  const me = await makeVisitor(await loadOrCreateIdentity(`${homedir()}/.lake/visitor-${domain}.json`), domain);
+  const { reply, from } = await ask(to, me, payload);
+  if (!a.json) console.log(`✓ signed reply from ${from.ownerDomain} (key ${from.publicJwk.kid}), verified`);
+  const { nonce: _n, iat: _i, exp: _e, iss: _s, ...body } = reply;
+  console.log(JSON.stringify(body, null, 2));
 } else if (cmd === 'attack') {
   const houses = positionals.length ? positionals : await houseUrls(a.node!);
   const r = await attack({ houses, count: Number(a.count), log: (l) => console.log(l) });
@@ -99,6 +116,19 @@ else if (cmd === 'reset') {
 } else if (cmd === 'swarm') {
   console.log(`swarm: ${a.traders} traders, ${a.attackers} attacker(s), one move every ~${a.interval} ms. Ctrl-C to stop.`);
   await swarm({ node: a.node!, traders: Number(a.traders), attackers: Number(a.attackers), intervalMs: Number(a.interval), log: (l) => console.log(l) });
+}
+else if (cmd === 'sponsor') {
+  // Each run asks something else, at another price; every other one also asks for the postcode, so blocs form and counter.
+  a.as ??= 'open-science.example';
+  a.wait = a.wait === '0' ? '20' : a.wait;
+  for (let i = 0; ; i++) {
+    const study = SANDBOX_STUDIES[i % SANDBOX_STUDIES.length]!;
+    a.price = String(2 + (i % 4));
+    a['extra-fields'] = i % 2 ? 'postcode' : undefined;
+    console.log(`\nSPONSOR   run ${i + 1}: "${study.question}"`);
+    await dispatchCmd(study).catch((e: Error) => console.log(`FAILED    ${e.message}`));
+    await new Promise((r) => setTimeout(r, Number(a.every) * 1000));
+  }
 }
 else {
   console.log(HELP);
@@ -130,7 +160,7 @@ async function knockCmd() {
   for (const n of reply.notes as string[]) console.log(`  note: ${n}`);
 }
 
-async function dispatchCmd() {
+async function dispatchCmd(chosen?: Study) {
   const domain = a.as ?? 'uni.example';
   const port = Number(a.port);
   // Serve our card while the mission runs, so a node can verify it and show us on the map.
@@ -143,11 +173,12 @@ async function dispatchCmd() {
   await link.register(6);
 
   const say = (step: string, detail: string) => { if (!a.json) console.log(`${step.toUpperCase().padEnd(9)} ${detail}`); };
-  say('dispatch', `"${a.goal}"  (as ${domain}, $${a.price ?? 2} per participant)`);
+  const study = chosen ?? readmissionStudy(a.goal, Number(a.epsilon));
+  say('dispatch', `"${study.question}"  (as ${domain}, $${a.price ?? 2} per participant)`);
   try {
     const r = await dispatch({
       visitor, node: a.node!, ethics: a.ethics!, auditor: a.auditor!, link, log: say, houseCache: `${homedir()}/.lake/houses.json`,
-      study: readmissionStudy(a.goal, Number(a.epsilon)),
+      study,
       priceUsd: Number(a.price ?? 2),
       extraFields: a['extra-fields']?.split(',').filter(Boolean),
       waitSeconds: Number(a.wait),

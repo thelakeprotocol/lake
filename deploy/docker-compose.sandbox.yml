@@ -1,28 +1,89 @@
-# A public sandbox Lake: synthetic data only, real HTTPS, open to anyone's agent.
-#   LAKE_DOMAIN=sandbox.lake.example docker compose -f docker-compose.yml -f deploy/docker-compose.sandbox.yml --profile scale up -d
-# Needs a server with ports 80 and 443 open and a DNS A record for LAKE_DOMAIN.
+# The public sandbox Lake: synthetic data, simulated money, real signatures, open to anyone's agent.
+# Sized for a small shared server (1 GB RAM): every container has a hard memory cap and no swap, so if
+# something misbehaves Docker restarts it rather than starving whatever else runs on the machine.
+#
+#   LAKE_DOMAIN=sandbox.lake.example docker compose -f deploy/docker-compose.sandbox.yml up -d
+#
+# Everything listens on 127.0.0.1 only. Put HTTPS in front with the web server you already run
+# (deploy/apache-sandbox.conf), or with Caddy if ports 80/443 are free (--profile caddy, deploy/Caddyfile):
+#   /        the node: live map, registry, events, signals, relay
+#   /s/*     the specialists: /s/guide /s/inspector /s/sparring /s/quests /s/ethics /s/auditor /s/payments /s/issuer
+#   /t/*     the hosted houses (anyone can claim one: the first device to open /t/<name>/owner/ becomes its owner)
+name: lake-sandbox
+
+x-small: &small
+  restart: unless-stopped
+  logging: { driver: json-file, options: { max-size: "5m", max-file: "2" } }
+
 services:
+  lake-node:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake-node:latest
+    hostname: lake-node
+    command: ["--domain", "${LAKE_DOMAIN:?set LAKE_DOMAIN}", "--url", "https://${LAKE_DOMAIN}"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "https://${LAKE_DOMAIN}/t/" }
+    volumes: [node:/data]
+    ports: ["127.0.0.1:7000:7000"]
+    mem_limit: 160m
+    memswap_limit: 160m
+
+  specialists:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    hostname: specialists
+    command: ["all", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--spar-every", "1800"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=128", LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [specialists:/data]
+    ports: ["127.0.0.1:4300:4300"]
+    depends_on: [lake-node]
+    mem_limit: 200m
+    memswap_limit: 200m
+
+  # A handful of hosted houses, so there's someone to knock on from minute one.
+  houses:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake-house:latest
+    hostname: houses
+    command: ["--tenants", "${LAKE_TENANTS:-6}", "--tenant-prefix", "sb-", "--public-url", "https://${LAKE_DOMAIN}", "--open-pairing"]
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=256"
+      LAKE_NODE_URL: "http://lake-node:7000"
+      LAKE_ISSUER_URL: "http://specialists:4300/issuer"
+      LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
+    volumes: [houses:/data]
+    ports: ["127.0.0.1:4000:4000"]
+    depends_on: [specialists]
+    mem_limit: 400m
+    memswap_limit: 400m
+
+  # Sandbox life: a paid, certified study every 15 minutes, rotating questions and prices.
+  sponsor:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake:latest
+    hostname: sponsor
+    command: ["sponsor", "--every", "900", "--node", "http://lake-node:7000", "--ethics", "http://specialists:4300/ethics", "--auditor", "http://specialists:4300/auditor", "--payments", "http://specialists:4300/payments", "--budget", "1000000"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=96" }
+    volumes: [cli:/root/.lake]
+    depends_on: [houses]
+    mem_limit: 140m
+    memswap_limit: 140m
+
+  # Background traders (mostly marketing, which rules decline) and an attacker now and then.
+  swarm:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake:latest
+    command: ["swarm", "--traders", "3", "--attackers", "1", "--interval", "30000", "--node", "http://lake-node:7000"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=64" }
+    depends_on: [houses]
+    mem_limit: 100m
+    memswap_limit: 100m
+
   caddy:
+    profiles: [caddy]
     image: caddy:2.8.4
     restart: unless-stopped
-    ports: ["80:80", "443:443"]
-    environment: { LAKE_DOMAIN: "${LAKE_DOMAIN:?set LAKE_DOMAIN}" }
-    volumes: [./deploy/Caddyfile:/etc/caddy/Caddyfile:ro, caddy:/data]
-    depends_on: [lake-node]
+    network_mode: host
+    environment: { LAKE_DOMAIN: "${LAKE_DOMAIN}" }
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy:/data]
 
-  lake-node:
-    command: ["--domain", "${LAKE_DOMAIN}", "--url", "https://${LAKE_DOMAIN}"]
-    ports: !reset []
-
-  ethics:
-    command: ["ethics", "--url", "https://${LAKE_DOMAIN}/ethics"]
-  auditor:
-    command: ["auditor", "--url", "https://${LAKE_DOMAIN}/auditor"]
-  payments:
-    command: ["payments", "--url", "https://${LAKE_DOMAIN}/payments"]
-
-  house-multi:
-    command: ["--tenants", "100", "--public-url", "https://${LAKE_DOMAIN}"]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42", LAKE_AUDITOR_URL: "http://auditor:4400" }
-
-volumes: { caddy: {} }
+volumes: { node: {}, specialists: {}, houses: {}, cli: {}, caddy: {} }

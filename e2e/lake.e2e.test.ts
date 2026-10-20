@@ -23,6 +23,10 @@ let ethics: string;
 let auditor: string;
 let payments: string;
 let issuerUrl: string;
+let guide: string;
+let inspector: string;
+let sparring: string;
+let quests: string;
 const houses: Record<string, string> = {};
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
@@ -50,23 +54,17 @@ beforeAll(async () => {
   const nodeBPort = await port();
   nodeB = `http://localhost:${nodeBPort}`;
   await start(['packages/lake/dist/main.js', '--port', nodeBPort, '--data', join(dir, 'nodeB'), '--domain', 'b.lake.local', '--follow', node, '--sync-ms', '1000'], /Lake node on/);
-  const [ip, ap, ep, pp] = [await port(), await port(), await port(), await port()];
-  auditor = `http://localhost:${ap}`;
-  ethics = `http://localhost:${ep}`;
-  payments = `http://localhost:${pp}`;
-  issuerUrl = `http://localhost:${ip}`;
-  await Promise.all([
-    start(['packages/specialists/dist/main.js', 'issuer', '--port', ip, '--data', join(dir, 'issuer'), '--lake', node], /registered with the Lake node/),
-    start(['packages/specialists/dist/main.js', 'auditor', '--port', ap, '--data', join(dir, 'auditor'), '--lake', node], /registered with the Lake node/),
-    start(['packages/specialists/dist/main.js', 'ethics', '--port', ep, '--data', join(dir, 'ethics'), '--lake', node], /registered with the Lake node/),
-    start(['packages/specialists/dist/main.js', 'payments', '--port', pp, '--data', join(dir, 'payments'), '--lake', node], /registered with the Lake node/),
-  ]);
+  // Every specialist in one process, each under its own path: how the public sandbox runs them.
+  const sp = await port();
+  const at = (k: string) => `http://localhost:${sp}/${k}`;
+  [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
+  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node], /quests registered with the Lake node/);
   await Promise.all(
     ['stan', 'strict', 'research'].map(async (name) => {
       const [pp, hp] = [await port(), await port()];
       houses[name] = `http://localhost:${hp}`;
       await start(
-        ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${name}.yaml`, '--data', join(dir, 'houses'), '--issuer-url', `http://localhost:${ip}`,
+        ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${name}.yaml`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
           '--auditor-url', auditor, '--pod-port', pp, '--port', hp, '--lake', node, '--seed', '42'],
         /joined the Lake/,
       );
@@ -114,7 +112,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(4);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(8);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -222,6 +220,20 @@ describe('the owner', () => {
     expect(Date.now() - t0).toBeLessThan(1000);
   });
 
+  it('runs the control panel: overview, rules edited and saved in the pod, everything exported', async () => {
+    const o = await ownerCall({ kind: 'panel.overview' });
+    expect(o).toMatchObject({ name: 'strict', record: { ok: true }, relayed: false });
+    expect(o.holds).toContain('medications');
+    const { text } = await ownerCall({ kind: 'panel.rules' });
+    expect(await ownerCall({ kind: 'panel.rules.set', text: 'rules: [' })).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ntags: [panel-test]\n` })).toEqual({ ok: true });
+    expect((await ownerCall({ kind: 'panel.rules' })).rules.tags).toEqual(['panel-test']);
+    const x = await ownerCall({ kind: 'panel.export' });
+    expect(x.files['settings/rules.yaml']).toContain('panel-test');
+    expect(Object.keys(x.files)).toEqual(expect.arrayContaining(['wallet/identity.json']));
+    expect(await ownerCall({ kind: 'panel.rules.set', text })).toEqual({ ok: true });
+  });
+
   it('refuses owner requests not signed by the owner', async () => {
     const env = await signMessage({ kind: 'revoke', revoke: 'all' }, await generateIdentity('owner-phone'), { iss: webId });
     expect((await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) })).status).toBe(403);
@@ -280,7 +292,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_dispatch_study', 'lake_knock', 'lake_overview', 'lake_search']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_dispatch_study', 'lake_knock', 'lake_overview', 'lake_search']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -321,6 +333,52 @@ describe('a mission, no money', () => {
     const r = await run();
     expect(r.decisions).toEqual({ join: 1, decline: 1, ask: 1 });
     expect(r.participants).toBe(1);
+  });
+});
+
+describe('the sandbox specialists', () => {
+  it('the guide says what is here, and every tour step is a real message that works', async () => {
+    const me = await visitor('newcomer.example');
+    const { reply: hi } = await ask(`${guide}/a2a`, me, { kind: 'hello' });
+    expect(hi.kind).toBe('welcome');
+    expect(hi.lake.houses).toBe(3);
+    expect(hi.specialists.map((x: { name: string }) => x.name)).toEqual(expect.arrayContaining(['Guide', 'Inspector', 'Sparring partner', 'Quests']));
+    const { reply: step } = await ask(`${guide}/a2a`, me, { kind: 'tour', step: 2 });
+    expect(step).toMatchObject({ kind: 'tour', step: 2, of: 7, next: expect.any(String) });
+    const { reply: d } = await ask(step.try.to, me, step.try.send);
+    expect(d).toMatchObject({ kind: 'decision' });
+    const { reply: audit } = await ask(`${guide}/a2a`, me, { kind: 'tour', step: 5 }).then(({ reply: s5 }) => ask(s5.try.to, me, s5.try.send));
+    expect(audit.kind).toBe('certified');
+    expect((await ask(`${guide}/a2a`, me, { kind: 'explain', term: 'bloc' })).reply.kind).toBe('explained');
+  });
+
+  it('the inspector passes a real house, with a signed conformance credential, and fails what is not one', async () => {
+    const me = await visitor('builder.example');
+    const { reply } = await ask(`${inspector}/a2a`, me, { kind: 'inspect', url: `${houses.stan}/a2a` });
+    expect(reply.checks.filter((c: { status: string }) => c.status === 'fail')).toEqual([]);
+    expect(reply.checks.map((c: { check: string }) => c.check)).toEqual(expect.arrayContaining(['signature', 'endpoint', 'signed reply', 'refuses a replay', 'refuses a forged card', 'refuses an unsigned card', 'refuses an expired message']));
+    expect(String(reply.credential).split('.')).toHaveLength(3);
+    const { reply: bad } = await ask(`${inspector}/a2a`, me, { kind: 'inspect', url: `${node}/nowhere` });
+    expect(bad.passed).toBeLessThan(bad.of);
+    expect(bad.credential).toBeUndefined();
+  });
+
+  it('the sparring partner throws every trick at a house; none gets through, and the house drops its key', async () => {
+    const { reply } = await ask(`${sparring}/a2a`, await visitor('curious.example'), { kind: 'spar', house: `${houses.research}/a2a` });
+    expect(reply).toMatchObject({ kind: 'sparred', blocked: 5, of: 5 });
+    expect(reply.rounds.at(-1)).toMatchObject({ move: 'again', blocked: true });
+  }, 30_000);
+
+  it('quests are checked against what happened on the Lake', async () => {
+    const me = await visitor('player.example');
+    await new Promise((r) => setTimeout(r, 1500)); // the bout's events reach the node, then the quests agent
+    const { reply: house } = await ask(`${quests}/a2a`, me, { kind: 'progress', who: `${houses.research}/a2a` });
+    expect(house.track).toBe('house');
+    const done = house.quests.filter((q: { done: boolean }) => q.done).map((q: { id: string }) => q.id);
+    expect(done).toEqual(expect.arrayContaining(['open-the-door', 'hold-the-door', 'say-no', 'find-your-people']));
+    const { reply: agent } = await ask(`${quests}/a2a`, me, { kind: 'progress', who: 'curious.example' });
+    expect(agent.quests.find((q: { id: string }) => q.id === 'sparred').done).toBe(true);
+    expect((await ask(`${quests}/a2a`, me, { kind: 'leaderboard' })).reply.top.length).toBeGreaterThan(0);
   });
 });
 

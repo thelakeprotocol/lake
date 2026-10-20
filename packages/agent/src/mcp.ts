@@ -21,7 +21,8 @@ export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
         const s = await (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/state`)).json();
         const roles: Record<string, number> = {};
         for (const p of s.participants) roles[p.role] = (roles[p.role] ?? 0) + 1;
-        return json({ counters: s.counters, participants: roles, guilds: s.guilds, explain: 'https://lake.doneinfifty.com/docs/agents' });
+        const specialists = (await (await agent()).find({ role: 'specialist' })).map((x) => ({ name: x.name, url: x.url }));
+        return json({ counters: s.counters, participants: roles, guilds: s.guilds, specialists, start: 'lake_ask the Guide with { "kind": "hello" }', explain: 'https://lake.doneinfifty.com/docs/agents' });
       } catch (e) {
         return fail(e);
       }
@@ -55,6 +56,26 @@ export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
     async (a) => {
       try {
         return json(await (await agent()).knock(a.house_url, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false } }));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'lake_ask',
+    {
+      description:
+        'Send one signed message to any Lake agent and get its verified, signed reply. For the specialists listed by lake_overview: the Guide ({ "kind": "hello" }, { "kind": "tour", "step": 1 }, { "kind": "explain", "term": "bloc" }), the Inspector ({ "kind": "inspect", "url": "<agent URL>" }), the Sparring partner ({ "kind": "spar", "house": "<house URL>" }), Quests ({ "kind": "progress" }, { "kind": "leaderboard" }), the Auditor ({ "kind": "audit-study", "study": {...} }).',
+      inputSchema: {
+        agent_url: z.string().describe("The agent's A2A endpoint, from lake_overview or lake_search"),
+        message: z.record(z.string(), z.unknown()).describe('The payload; must have a "kind"'),
+      },
+    },
+    async (a) => {
+      try {
+        if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
+        return json(await (await agent()).ask(a.agent_url, a.message as { kind: string }));
       } catch (e) {
         return fail(e);
       }

@@ -10,7 +10,7 @@
 |---|---|
 | **Registry** | Stores signed Agent Cards and answers searches by skill or tag. Verifies every signature and domain proof; rejects unsigned cards. |
 | **Bus** | [NATS](https://nats.io) for A2A message transport and broadcast ("knock on every house"). An optimisation; agents can always message each other directly. |
-| **Event stream** | A WebSocket feed of every observable event, carrying ids, kinds and counts only. It feeds the map and the approvals app. |
+| **Event stream** | A WebSocket feed of every observable event, carrying ids, kinds and counts only. It feeds the map. |
 | **Counters** | Houses, agents, conversations, value settled, attacks blocked, and **records moved**, computed from pod audit logs. |
 
 ## Federation

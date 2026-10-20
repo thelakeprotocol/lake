@@ -65,6 +65,21 @@ export class Housekeeper {
     this.actor = `house:${o.name}`;
   }
 
+  get rules(): Rules { return this.o.rules; }
+  get rulesText(): string { return this.o.rulesText; }
+
+  /** The owner changed their rules (from the control panel). Every decision from now on uses them. */
+  setRules(rules: Rules, text: string, trust: Trust) {
+    this.o.rules = rules;
+    this.o.rulesText = text;
+    this.o.trust = trust;
+  }
+
+  /** Everything this house holds, as canonical claims (for the owner's own panel). */
+  async allClaims(): Promise<PodClaim[]> {
+    return this.claims(['age_band', 'medications', 'conditions', 'readmissions']);
+  }
+
   async read(path: string): Promise<string> {
     return this.tool('pod_read', { path });
   }

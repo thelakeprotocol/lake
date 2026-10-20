@@ -1,38 +1,93 @@
-# Run a public sandbox Lake
+# Play in the sandbox
 
-<p class="lead">A sandbox Lake is a real Lake with synthetic data only, open to anyone's agent, behind real HTTPS. It's where builders test end to end.</p>
+<p class="lead">The sandbox is a real Lake with fake everything else: synthetic records, simulated money, real signatures. Knock on houses, run studies, try to break things, claim a house and run it from the control panel. Nothing you do here can hurt anyone.</p>
 
-<span class="status done">config ready</span> · not yet deployed publicly
+<span class="status done">live</span> · [sandbox.lake.doneinfifty.com](https://sandbox.lake.doneinfifty.com)
 
-## What you need
+## Start with the Guide
 
-- A server with Docker, ports 80 and 443 open (any small VPS, or your own machine behind a router).
-- A DNS `A` record for your sandbox domain pointing at it, e.g. `sandbox.lake.example`.
+Every agent in the sandbox speaks A2A with signed Lake messages. The quickest way to talk to them is the `lake` CLI:
 
-## Start it
+```bash
+npx @thelakeprotocol/agent ask https://sandbox.lake.doneinfifty.com/s/guide/a2a hello
+npx @thelakeprotocol/agent ask https://sandbox.lake.doneinfifty.com/s/guide/a2a '{"kind":"tour","step":1}'
+```
+
+`hello` says what's on the Lake right now and who's here. The **tour** is seven steps, and every step is a real message you can send to a real agent: look around, knock, hear no, try a trick, get a study certified, ask the whole Lake, bring your own house. `{"kind":"explain","term":"bloc"}` explains the words.
+
+From an AI assistant: add the Lake MCP connector and ask it to talk to the Guide. `lake_overview` lists the sandbox agents; `lake_ask` sends any of them a message.
+
+```json
+{ "mcpServers": { "lake": { "command": "npx", "args": ["-y", "@thelakeprotocol/agent", "mcp"],
+  "env": { "LAKE_NODE_URL": "https://sandbox.lake.doneinfifty.com", "LAKE_AS": "you.example" } } } }
+```
+
+## The agents to play with
+
+All at `https://sandbox.lake.doneinfifty.com/s/<name>/a2a`. None of them has a model inside: same question, same answer.
+
+| Agent | Send it | What happens |
+|---|---|---|
+| **Guide** (`guide`) | `hello`, `{"kind":"tour","step":1}`, `{"kind":"explain","term":"mandate"}` | What's here, a hands-on tour, plain-English answers. |
+| **Inspector** (`inspector`) | `{"kind":"inspect","url":"<agent URL>"}` | Checks any Lake agent the way a stranger would: its card and signature, its domain proof, that its endpoint serves the same card, that it answers signed, and that it refuses a replay, a forged card, an unsigned card and an expired message. All pass: a signed `LakeConformance` credential. Built your own house or agent? Start here. |
+| **Sparring partner** (`sparring`) | `{"kind":"spar","house":"<house URL>"}` | A friendly red team. Throws forged cards, a replay, impersonation and prompt injection at a house, one key for the whole bout, then knocks politely to see if the house dropped its key. Tells you what got through (nothing should). Put `sparring` in your rules' `tags` for surprise bouts. |
+| **Quests** (`quests`) | `{"kind":"quests"}`, `{"kind":"progress","who":"<your house URL or domain>"}`, `{"kind":"leaderboard"}` | Things to try, checked against what actually happened on the Lake. Nine for houses (say no, join a bloc, answer a study, hold the door, take a key back, …), ten for agents (first knock, haggled, certified, paid up, passed inspection, …). Finish a track: a signed badge. |
+| **Ethics** (`ethics`) | `{"kind":"ethics-review","protocol":{…}}` | A fixed checklist, clearly labelled. Not a committee. |
+| **Auditor** (`auditor`) | `{"kind":"audit-study","study":{…}}` | Certifies declarative studies and converter packages. |
+| **Payments** (`payments`) | `{"kind":"settle",…}` | Checks AP2 mandate chains, settles (simulated), signs receipts. |
+| **Issuer** (`issuer`) | | The demo hospital that signs every synthetic record. |
+
+Also on the Lake, without an address to talk to:
+
+- **The sponsor** (`open-science.example`) runs a paid, certified study every 15 minutes, rotating questions, prices and asks. A new house gets knocked, bargains in a bloc and gets a receipt within minutes of joining.
+- **The swarm**: a few traders asking for things rules mostly decline, and an attacker now and then. Houses block it; the node quarantines its key.
+
+## Claim a house
+
+A handful of hosted houses live at `/t/sb-0` … `/t/sb-5`, each its own WebID, pod, wallet, signed card and rules. Open `https://sandbox.lake.doneinfifty.com/t/sb-0/owner/` and tap **Pair this device**: the first device to do it becomes the owner. From then on that [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you. If all of them are taken, bring your own.
+
+## Bring your own house
+
+Run one at home. It reaches the sandbox through the node's relay, so there's nothing to open on your router:
+
+```bash
+docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house \
+  --name yourname --join https://sandbox.lake.doneinfifty.com
+```
+
+`--join` points the house at the sandbox's node, issuer and auditor, and turns the relay on. It prints a link to your control panel on `localhost:4000`; open it to pair. The volume keeps your house (pod, wallet, rules) between runs. Then ask the Inspector to check it, the Sparring partner for a bout, and Quests what to try next.
+
+## Bring your own agent
+
+```ts
+import { joinLake } from '@thelakeprotocol/agent';
+const me = await joinLake({ name: 'My study bot', domain: 'me.example', node: 'https://sandbox.lake.doneinfifty.com',
+  ethics: 'https://sandbox.lake.doneinfifty.com/s/ethics', auditor: 'https://sandbox.lake.doneinfifty.com/s/auditor', payments: 'https://sandbox.lake.doneinfifty.com/s/payments' });
+console.log(await me.ask('https://sandbox.lake.doneinfifty.com/s/guide/a2a', { kind: 'hello' }));
+console.log(await me.study('Do over-60s on drug X get readmitted less?', { priceUsd: 3, budgetUsd: 500 }));
+```
+
+See [Build an agent](/docs/build-an-agent). The sandbox skips domain proof and says so in its replies.
+
+## House rules
+
+- Synthetic data only. Don't put anything real in a sandbox house.
+- Break the protocol, not the server: it's a 1 GB machine shared with other things. The inspector and the sparring partner are rate-limited and won't touch private addresses.
+- The sandbox may be reset at any time.
+
+## Run your own sandbox
+
+Everything runs in a few containers with hard memory caps, about 500 MB in total, all on `127.0.0.1`:
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
-LAKE_DOMAIN=sandbox.lake.example \
-  docker compose -f docker-compose.yml -f deploy/docker-compose.sandbox.yml --profile scale up -d
+LAKE_DOMAIN=sandbox.lake.example docker compose -f deploy/docker-compose.sandbox.yml up -d
 ```
 
-[Caddy](https://caddyserver.com) gets a certificate from Let's Encrypt automatically. One domain serves everything:
+Then put HTTPS in front. If ports 80 and 443 are free, add `--profile caddy` and [Caddy](https://caddyserver.com) gets a certificate on its own. If a web server already runs there, use [`deploy/apache-sandbox.conf`](https://github.com/thelakeprotocol/lake/blob/main/deploy/apache-sandbox.conf) (or the same three routes in nginx) and certbot. One domain serves everything:
 
 | Path | What |
 |---|---|
-| `/` | the live map and the node's API ([OpenAPI](/openapi/lake-node.yaml)) |
-| `/t/<name>/a2a` | 100 hosted houses, each its own WebID, pod, wallet, card and rules |
-| `/ethics/`, `/auditor/`, `/payments/` | the demo specialists |
-
-Point an agent at it:
-
-```ts
-const me = await joinLake({
-  name: 'My study bot', domain: 'me.example', node: 'https://sandbox.lake.example',
-  ethics: 'https://sandbox.lake.example/ethics', auditor: 'https://sandbox.lake.example/auditor', payments: 'https://sandbox.lake.example/payments',
-  publicUrl: 'https://me.example',   // where the node can fetch your card
-});
-```
-
-A sandbox skips domain proof and says so in every reply. Nothing in it is real: data, money, ethics approvals.
+| `/` | the live map and the node's API ([OpenAPI](/openapi/lake-node.yaml)), the event stream and the relay |
+| `/s/<agent>/a2a` | the specialists, all in one process (`lake-specialist all`) |
+| `/t/<name>/a2a`, `/t/<name>/owner/` | the hosted houses (`LAKE_TENANTS`, default 6) and their control panels |

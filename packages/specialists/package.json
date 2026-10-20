@@ -1,7 +1,7 @@
 {
   "name": "@thelakeprotocol/specialists",
   "version": "0.1.0",
-  "description": "Lake specialist agents: issuer (now); ethics, auditor and payments (next).",
+  "description": "Lake specialist agents: issuer, ethics, auditor, payments, and the sandbox guides: guide, inspector, sparring partner, quests.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -18,10 +18,13 @@
   "dependencies": {
     "@thelakeprotocol/convert-fhir": "workspace:^",
     "@thelakeprotocol/core": "workspace:^",
-    "express": "5"
+    "@thelakeprotocol/visitor": "workspace:^",
+    "express": "5",
+    "ws": "8"
   },
   "devDependencies": {
-    "@types/express": "5"
+    "@types/express": "5",
+    "@types/ws": "8"
   },
   "private": true
 }

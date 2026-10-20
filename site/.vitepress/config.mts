@@ -59,7 +59,7 @@ export default defineConfig({
           text: 'Owners',
           items: [
             { text: 'rules.yaml', link: '/docs/rules' },
-            { text: 'Your phone, your keys', link: '/docs/approvals' },
+            { text: 'Your control panel', link: '/docs/approvals' },
           ],
         },
         {
@@ -67,7 +67,7 @@ export default defineConfig({
           items: [
             { text: 'Build an agent', link: '/docs/build-an-agent' },
             { text: 'Run a node', link: '/docs/run-a-node' },
-            { text: 'Run a sandbox Lake', link: '/docs/sandbox' },
+            { text: 'Play in the sandbox', link: '/docs/sandbox' },
             { text: 'Data model & converters', link: '/docs/data-model' },
           ],
         },

@@ -1,10 +1,10 @@
-# Your phone, your keys
+# Your control panel
 
-<p class="lead">Your rules answer the easy knocks. The rest come to your phone. You tap Allow or Deny, and the key is cut <b>on your phone, with your key</b>. The housekeeper never holds anything that could mint one.</p>
+<p class="lead">Every house comes with a control panel: open source, served by the house itself at <code>/owner/</code>, on your phone or your laptop. Your rules answer the easy knocks; the rest come here. Every call it makes is signed <b>on your device, with your key</b>. The housekeeper never holds anything that could mint a key.</p>
 
 <span class="status done">runs</span>
 
-## Pair your phone
+## Pair your device
 
 When a house starts without an owner, it prints a link and a QR code:
 
@@ -12,7 +12,7 @@ When a house starts without an owner, it prints a link and a QR code:
 [house:strict] no owner yet. On your phone, open http://192.168.1.20:4001/owner/#pair=hTnSz3EZkE4NGIz2
 ```
 
-Open it on your phone and tap **Pair this phone**. A key pair is made on the phone; only its public half goes to your house, into your pod's `/wallet/`. The link works once. In a sandbox demo the house can be started with `LAKE_OPEN_PAIRING=1`, and then the first phone to open the app becomes the owner.
+Open it and tap **Pair this device**. A key pair is made on the device; only its public half goes to your house, into your pod's `/wallet/`. The link works once. In a sandbox the house can be started with `LAKE_OPEN_PAIRING=1` (or `--open-pairing`), and then the first device to open the panel becomes the owner: that's how you [claim a house in the public sandbox](/docs/sandbox#claim-a-house).
 
 From a phone on the same Wi-Fi, start the Lake with your laptop's address so links and the map's QR code point at it:
 
@@ -20,13 +20,20 @@ From a phone on the same Wi-Fi, start the Lake with your laptop's address so lin
 LAKE_PUBLIC_HOST=192.168.1.20 docker compose up -d
 ```
 
-## What you see
+## What's in it
 
-One card per request: who is asking, the question, the purpose, the exact fields, whether they keep anything, the price, how long the key lasts, and what your housekeeper recommends. Two buttons: **Allow** and **Deny**.
+| Tab | What you do there |
+|---|---|
+| **Home** | Knocks today, requests waiting, live keys, money earned, attacks blocked. Whether your record checks out (signed by a trusted issuer, unchanged, converted by a certified converter). How agents reach you: directly, or through the Lake's relay. What just happened at your door. |
+| **Requests** | One card per request your rules left to you: who is asking, the question, the purpose, the exact fields, whether they keep anything, the price, how long the key lasts, and what your housekeeper recommends. **Allow** or **Deny**. |
+| **Keys** | Every live key to your house: who holds it, for what, how long is left, and whether a rule or you issued it. **Revoke** one, or **Revoke every key**. |
+| **Rules** | Your `rules.yaml`, without the YAML. Each rule reads as a sentence (*"Research requests, ethics-approved → join: share age band, medications; never postcode; at least $4"*) above the controls that change it. Tap a field to cycle it: not mentioned → share → never. Reorder rules, set what happens when no rule fits, turn bargaining in blocs on or off, pick your interests (for guilds), and choose whose word counts: which ethics bodies, auditors, record issuers and payment agents you trust. **Save** checks the rules the same way the housekeeper does, files them in your pod at `/settings/rules.yaml`, and the housekeeper uses them from the next knock. |
+| **Agents** | Every agent that came to your door lately, what your house told it, how many of its tricks were blocked, and its reputation across the Lake. Plus the snippet to give your own AI assistant read access to your claims over MCP. |
+| **Money** | What you've earned, and every signed receipt in your pod. |
+| **Data** | What your house holds, claim by claim, where it came from (issuer, converter, auditor), and what's in each folder of your pod. |
+| **Move house** | Download everything in your pod, wallet included, in one file. Your house is yours: take it to another host or your own machine whenever you like. |
 
-**Allow** signs a `LakeAccessGrant` credential on your phone: this visitor, this study, these fields, this purpose, 48 hours. The house checks it is signed by your key and matches exactly what you were shown, stores it in your pod's `/agreements/`, and hands it to the visitor.
-
-**Your keys** lists every key to your house that is still live: who holds it, for what, how long is left, and whether a standing rule or you issued it. **Revoke** pulls one; **Revoke every key** pulls them all. A revoked key stops working at once: the next request with it is refused, and the map shows every line into your house snap.
+**Allow** signs a `LakeAccessGrant` credential on your device: this visitor, this study, these fields, this purpose, 48 hours. The house checks it is signed by your key and matches exactly what you were shown, stores it in your pod's `/agreements/`, and hands it to the visitor. A revoked key stops working at once: the next request with it is refused, and the map shows every line into your house snap.
 
 ## From the command line
 
@@ -36,7 +43,11 @@ Whoever runs the machine can pull every key of a house:
 docker compose exec house-stan node dist/admin.js revoke-all
 ```
 
+## The API under it
+
+The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.data`, `panel.export`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
+
 ## What it can't do yet
 
-- Push notifications. The app checks once a second while it is open, and vibrates on Android when something new arrives.
+- Push notifications. The panel checks every second and a half while it is open, and vibrates on Android when something new arrives.
 - Over-asking refused below the housekeeper. Visitors never touch your pod, but the housekeeper and your pod's MCP door run in one process, so a compromised housekeeper is not yet stopped by the pod itself. [Help wanted](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).

@@ -89,7 +89,7 @@ docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper for
 # ✗ REJECTED (forged-card): card signature does not verify
 ```
 
-Then run a whole study across the Lake and watch it on the map. Add `--wait 30` and open the strict house's approvals app at http://localhost:4001/owner/ (or scan the QR code on the map with your phone) to tap Allow when it asks:
+Then run a whole study across the Lake and watch it on the map. Add `--wait 30` and open the strict house's control panel at http://localhost:4001/owner/ (or scan the QR code on the map with your phone) to tap Allow when it asks:
 
 ```bash
 docker compose run --rm lake dispatch --extra-fields postcode
@@ -160,9 +160,11 @@ Honest, updated every merge.
 | ✅ | **M7 Scale**: hosted houses (`--tenants 250`, each still its own WebID, pod, wallet, card and rules); `docker compose --profile scale up --scale house-multi=4` | runs. Measured on a busy 4-core laptop: 250 houses, full paid mission in **57 s**; 1,000 houses, **737 paid answers in 10.6 min**, 0 records moved. The spec's 60 s at 1,000 needs dedicated cores or faster pod storage ([details](https://lake.doneinfifty.com/docs/architecture#scale-measured)) |
 | ✅ | **M8 Federation**: nodes follow peers (`--follow`), re-verify every card they learn, drop what peers drop, share blocklists; participants use several nodes; agents remember houses; `lake card <url>` finds anyone at their own address. Stop a node mid-study and the study finishes | runs, end-to-end tested and shown in Docker (`docker stop lake-node-a`) |
 | ✅ | **npm**: `@thelakeprotocol/core`, `convert-fhir`, `visitor`, `agent` 0.1.0, published from CI with provenance | live |
-| ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox config (Caddy + HTTPS) | runs, end-to-end tested. Sandbox not deployed yet; one-click hosted houses for non-developers are next |
+| ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox | runs, end-to-end tested. One-click hosted houses for non-developers are next |
 | ✅ | **M10 Polish**: map choreography like the reference (the agent visits each specialist, the $2 → $5 moment, payment threads, snapping keys); `lake demo` runs the on-stage script; `lake reset` in under a second; `--record` / `--replay` for a stage fallback; seeded runs; a [90-second recording](https://lake.doneinfifty.com/demo.mp4) | done. [Acceptance scorecard](https://lake.doneinfifty.com/docs/roadmap#acceptance-tests): 12 of 14 met; startup and 1,000-house timing miss their targets on a 4-core laptop |
 | ✅ | **Relay**: houses at home, behind any router, are reached through the nodes they follow (`--relay`); one signed outgoing connection per node; registration still proves control through the relay | runs, end-to-end tested through two nodes |
+| ✅ | **Control panel** (open source, served by every house at `/owner/`): home, requests, keys, a rules editor that reads like sentences and saves to your pod, agents and their reputation, money and receipts, your data and where it came from, and *move house* (export everything) | runs, end-to-end tested |
+| ✅ | **Public sandbox** at [sandbox.lake.doneinfifty.com](https://sandbox.lake.doneinfifty.com), with agents to play with: the **Guide** (a tour where every step is a real message), the **Inspector** (checks your house or agent like a stranger would), the **Sparring partner** (a friendly red team), **Quests** (signed badges), and a **sponsor** that runs a paid study every 15 minutes. Claim a hosted house, or bring your own with `--relay` | runs on a 1 GB droplet; end-to-end tested |
 
 ## Hack on it
 
@@ -185,7 +187,7 @@ packages/
   lake/          registry, event stream, counters (bus: M3)               ✅
   visitor/       `lake` CLI: knock, dispatch, attack, swarm               ✅
   specialists/   issuer, ethics, auditor, payments                        ✅
-  ui/            the live map ✅ · the approvals app                       M4
+  ui/            the live map ✅ · the control panel ✅                    M4
   agent/         SDK for outside agents + the Lake MCP connector          ✅
   convert-fhir/  FHIR → canonical Lake model                              ✅
 model/           canonical ontology (RDF) + SHACL shapes

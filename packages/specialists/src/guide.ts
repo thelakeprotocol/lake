@@ -1,0 +1,102 @@
+import { randomUUID } from 'node:crypto';
+import type { AgentCard, LakeProfile } from '@thelakeprotocol/core';
+import { PRESETS } from '@thelakeprotocol/visitor';
+import { fromNode } from './net.js';
+import { specialist, type SpecialistOptions, type Specialist } from './review.js';
+
+interface Step { title: string; text: string; try?: { to: string; send: Record<string, unknown> } | { run: string } }
+type Reply =
+  | { kind: 'welcome'; text: string; lake: Record<string, number> | null; specialists: { name: string; url: string; what: string }[]; next: string; docs: string }
+  | { kind: 'tour'; step: number; of: number; title: string; text: string; try?: Step['try']; next?: string }
+  | { kind: 'explained'; term: string; text: string; see?: string }
+  | { kind: 'glossary'; terms: string[] };
+
+const SITE = 'https://lake.doneinfifty.com';
+
+const GLOSSARY: Record<string, [string, string?]> = {
+  lake: ['The open network: houses, the agents that knock on them, and the nodes that help them find each other. Nobody owns it.', '/docs/'],
+  house: ['A person\'s Solid pod plus their housekeeper. The data lives there and never leaves.', '/docs/house'],
+  housekeeper: ['The agent at the door of a house. It answers every request by its owner\'s rules.yaml, in code. Nothing an agent writes can change its mind.'],
+  pod: ['A Solid pod: a personal data store with its own WebID and access control. Bring any Solid server.'],
+  node: ['A search index of signed Agent Cards, plus the public event stream and the blocklist. Anyone can run one; houses choose which to follow.', '/docs/node'],
+  card: ['An A2A Agent Card with the Lake extension, signed by the agent\'s key. Fetch anyone\'s at /.well-known/agent-card.json and verify it yourself.'],
+  knock: ['Sending a signed offer to a house over A2A: who you are, what fields, for what purpose, how long you keep it, what you pay.'],
+  offer: ['{ purpose, fields, retention, priceUsd, credentials }. Signed. The free-text note is never read by the rules.'],
+  rules: ['rules.yaml: the owner\'s standing orders. First matching rule decides: join, ask me, or decline.', '/docs/rules'],
+  bloc: ['Houses that bargain together: when enough of them counter the same offer, the agent gets one counter-offer from all of them.'],
+  counter: ['A house\'s answer "not at that price" or "not that field". In a bloc, the counters merge.'],
+  grant: ['A key: a signed credential letting one agent use certain fields for one purpose for a while. Cut by the owner\'s device or by a rule the owner wrote; never by an agent.'],
+  key: ['See grant. Owners revoke keys in the control panel; the agent is cut off on its next request.'],
+  study: ['A declarative question (1 to 4 yes/no predicates) the house runs on its own data. Only one randomised answer leaves.', '/docs/studies'],
+  epsilon: ['The privacy budget. Smaller means noisier answers and stronger deniability. The Lake caps it at 4.'],
+  'randomised response': ['Each house flips a biased coin before answering, so no single answer can be trusted, but a few hundred together still tell the truth.'],
+  ethics: ['An ethics agent approves study protocols. Owners choose which ethics domains count (trust.ethics). The sandbox one is a fixed checklist.'],
+  auditor: ['Certifies studies and the converters that turn records into claims. Owners choose whose certificate counts.'],
+  mandate: ['AP2: a human signs an Intent Mandate (budget, purpose, expiry); their agent signs Payment Mandates under it. Agents can\'t spend past what a human signed.'],
+  receipt: ['A signed credential from the payments agent, filed in the house\'s pod. In the sandbox, settlement is simulated.'],
+  quarantine: ['After three blocked attacks from one key, the node quarantines it and houses that follow the node drop it on sight. Keys are blamed, never names.'],
+  guild: ['Houses that share an interest tag. Enough of them and a guild forms on the map.'],
+  relay: ['For a house behind a home router: it keeps one outgoing connection to a node, and knocks reach it through that. Nothing to open or forward.'],
+  sandbox: ['This network: synthetic data, simulated money, real signatures. Break things.'],
+  mcp: ['Model Context Protocol. `npx @thelakeprotocol/agent mcp` gives your assistant tools to search the Lake, knock and run studies.', '/docs/agents'],
+};
+
+/**
+ * The Guide: the first agent to talk to. Says what's here, gives a short tour where every step is a real
+ * message you can send, and explains the words. No model inside: the same question gets the same answer.
+ */
+export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; publicNodeUrl?: string }): Promise<Specialist> {
+  const node = o.publicNodeUrl ?? o.nodeUrl ?? 'http://localhost:7000';
+  const s: Specialist = await specialist<Reply>(o, 'Guide', 'Start here. Send { kind: "hello" } for what\'s on this Lake, { kind: "tour", step: 1 } for a tour where every step is a real message, or { kind: "explain", term }.', 'guide', async (p, _from, caller) => {
+    if (p.kind === 'hello') {
+      const [state, specialists] = await Promise.all([
+        fromNode<{ counters: Record<string, number>; guilds: unknown[] }>(o.nodeUrl, '/state'),
+        fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards?role=specialist'),
+      ]);
+      return {
+        kind: 'welcome',
+        text: `Welcome, ${caller.ownerDomain}. This is a sandbox Lake: every record is synthetic, the money is simulated, the signatures are real. Houses here answer by their owners' rules; you can knock on any of them, run studies, try to break things. Nothing you do here can hurt anyone.`,
+        lake: state ? { ...state.counters, guilds: state.guilds.length } : null,
+        specialists: (specialists ?? []).map(({ card }) => ({ name: card.name, url: card.supportedInterfaces[0]!.url, what: card.description })),
+        next: 'send { kind: "tour", step: 1 }',
+        docs: `${SITE}/docs/`,
+      };
+    }
+    if (p.kind === 'tour') {
+      const steps = await tour(caller);
+      const n = Math.min(Math.max(1, Number(p.step) || 1), steps.length);
+      const step = steps[n - 1]!;
+      return { kind: 'tour', step: n, of: steps.length, ...step, next: n < steps.length ? `send { kind: "tour", step: ${n + 1} }` : undefined };
+    }
+    if (p.kind === 'explain') {
+      const term = String(p.term ?? '').toLowerCase().trim();
+      const hit = GLOSSARY[term] ?? Object.entries(GLOSSARY).find(([k]) => term.includes(k) || k.includes(term))?.[1];
+      if (!term || !hit) return { kind: 'glossary', terms: Object.keys(GLOSSARY) };
+      return { kind: 'explained', term, text: hit[0], see: hit[1] ? `${SITE}${hit[1]}` : undefined };
+    }
+    return { kind: 'refused', problems: ['send { kind: "hello" }, { kind: "tour", step: 1 } or { kind: "explain", term: "bloc" }'] };
+  }, [
+    { id: 'tour', name: 'Tour', description: 'Seven steps, each a real message to send to a real agent on this Lake.' },
+    { id: 'explain', name: 'Explain', description: 'Plain-English answers for Lake words: bloc, grant, epsilon, mandate…' },
+  ]);
+  return s;
+
+  async function tour(caller: LakeProfile): Promise<Step[]> {
+    const [houses, specialists] = await Promise.all([
+      fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards?role=house'),
+      fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards?role=specialist'),
+    ]);
+    const house = houses?.[Math.floor(Math.random() * houses.length)]?.card.supportedInterfaces[0]?.url ?? `${node}/t/<name>/a2a`;
+    const agent = (skill: string) => specialists?.find((c) => c.card.skills.some((k) => k.id === skill))?.card.supportedInterfaces[0]?.url ?? `<${skill} agent>`;
+    const offer = (preset: keyof typeof PRESETS) => ({ kind: 'offer', offer: { id: randomUUID(), requester: caller.ownerDomain, ...PRESETS[preset], note: undefined } });
+    return [
+      { title: 'Look around', text: `Every house and agent here is a signed Agent Card. List the houses at ${node}/cards?role=house, then verify one yourself: the card is at its own /.well-known/agent-card.json, so you never have to trust the node.`, try: { run: `npx @thelakeprotocol/agent card ${house}` } },
+      { title: 'Knock', text: 'Send a house a signed offer. This one asks for medications for care, the way a GP would. Your requester must be your own card\'s domain, or the house calls it impersonation.', try: { to: house, send: offer('gp') } },
+      { title: 'Hear no', text: 'Ask for something people don\'t give: postcode and age for marketing, kept a year. Rules decline it in code, and the house tells you why.', try: { to: house, send: offer('marketing') } },
+      { title: 'Try to trick it', text: 'Hide orders in the note. The note never reaches the rules; the house declines and logs the attempt. Or ask the sparring partner to throw the whole bag of tricks at a house.', try: { to: agent('spar'), send: { kind: 'spar', house } } },
+      { title: 'Get a study certified', text: 'Studies are declarative: a few yes/no questions, answered with randomised response. The auditor certifies them; owners choose which auditors count.', try: { to: agent('study-audit'), send: { kind: 'audit-study', study: { v: 1, question: 'Do over-60s on drug X get readmitted less?', kind: 'contingency', predicates: [{ name: 'over 60', field: 'age_band', op: 'age_at_least', value: 60 }, { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' }, { name: 'readmitted', field: 'readmissions', op: 'present' }], privacy: { mechanism: 'unary-randomized-response', epsilon: 2 }, minTier: 'issuer-signed' } } } },
+      { title: 'Ask the whole Lake', text: 'A research mission does it all: ethics, audit, knock on every house, bargain with the bloc, sign, compute inside each house, pay under a human\'s mandate. Watch it on the map.', try: { run: `npx @thelakeprotocol/agent dispatch --node ${node} --ethics ${agent('ethics-review').replace(/\/a2a$/, '')} --auditor ${agent('study-audit').replace(/\/a2a$/, '')} --payments ${agent('payments').replace(/\/a2a$/, '')} --price 2` } },
+      { title: 'Bring your own house', text: 'Run a house at home; it reaches the Lake through a relay, so there\'s nothing to open on your router. Then ask the inspector to check it, and the quests agent what to try next.', try: { run: `docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house --name <you> --join ${node}` } },
+    ];
+  }
+}

@@ -1,15 +1,23 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import express from 'express';
 import { LakeLinks, loadOrCreateIdentity, makeEvent, type AgentCard } from '@thelakeprotocol/core';
-import type express from 'express';
 import { createIssuer } from './issuer.js';
 import { createAuditor, createEthics, createPayments } from './review.js';
+import { createGuide } from './guide.js';
+import { createInspector } from './inspector.js';
+import { createSparring } from './sparring.js';
+import { createQuests } from './quests.js';
 
 const DEFAULTS: Record<string, { port: string; domain: string }> = {
   issuer: { port: '4300', domain: 'issuer.lake.local' },
   auditor: { port: '4400', domain: 'audit.lake.local' },
   ethics: { port: '4500', domain: 'ethics.lake.local' },
   payments: { port: '4600', domain: 'payments.lake.local' },
+  guide: { port: '4710', domain: 'guide.lake.local' },
+  inspector: { port: '4720', domain: 'inspector.lake.local' },
+  sparring: { port: '4730', domain: 'sparring.lake.local' },
+  quests: { port: '4740', domain: 'quests.lake.local' },
 };
 
 const { positionals, values } = parseArgs({
@@ -21,36 +29,65 @@ const { positionals, values } = parseArgs({
     data: { type: 'string', default: '/data' },
     seed: { type: 'string' },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
+    'public-node': { type: 'string', default: process.env.LAKE_PUBLIC_NODE_URL },
+    'spar-every': { type: 'string', default: '1800' },
     production: { type: 'boolean', default: false },
   },
 });
 
+// `lake-specialist all` (or a list: `guide,inspector`) runs several in one process, each under its own
+// path (/issuer, /guide, …): what a small server can afford.
 const kind = positionals[0] ?? 'issuer';
-const d = DEFAULTS[kind];
-if (!d) {
-  console.error(`lake-specialist: unknown agent "${kind}". Available: ${Object.keys(DEFAULTS).join(', ')}.`);
+const kinds = kind === 'all' ? Object.keys(DEFAULTS) : kind.split(',');
+const unknown = kinds.filter((k) => !DEFAULTS[k]);
+if (unknown.length) {
+  console.error(`lake-specialist: unknown agent "${unknown.join(', ')}". Available: ${Object.keys(DEFAULTS).join(', ')}, a comma-separated list, or all.`);
   process.exit(2);
 }
-const port = Number(values.port ?? d.port);
-const domain = values.domain ?? d.domain;
-const url = values.url ?? `http://localhost:${port}`;
-const id = await loadOrCreateIdentity(`${values.data}/${kind}-key.json`);
-const o = { id, url, domain, sandbox: !values.production, report: (e: import('@thelakeprotocol/core').LakeEvent) => link?.report(e) };
+const several = kinds.length > 1;
+const port = Number(values.port ?? (several ? '4300' : DEFAULTS[kind]!.port));
+const base = (values.url ?? `http://localhost:${port}`).replace(/\/$/, '');
+const nodes = (values.lake ?? '').split(',').map((u) => u.trim()).filter(Boolean);
+const log = (msg: string) => console.log(JSON.stringify({ at: new Date().toISOString(), msg }));
 
-let link: LakeLinks | null = null;
-let s: { app: express.Express; card: AgentCard; webId: string };
-if (kind === 'issuer') s = await createIssuer({ ...o, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined });
-else if (kind === 'ethics') s = await createEthics(o);
-else if (kind === 'payments') s = await createPayments({ ...o, onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) });
-else s = await createAuditor(o);
-
-s.app.listen(port, async () => {
-  const log = (msg: string) => console.log(JSON.stringify({ at: new Date().toISOString(), msg }));
-  log(`${kind} ${s.webId} listening on :${port}`);
-  if (values.lake) {
-    const nodes = values.lake.split(',').map((u) => u.trim()).filter(Boolean);
+async function start(k: string, url: string) {
+  const id = await loadOrCreateIdentity(`${values.data}/${k}-key.json`);
+  const domain = (several ? undefined : values.domain) ?? DEFAULTS[k]!.domain;
+  let link: LakeLinks | null = null;
+  const o = { id, url, domain, sandbox: !values.production, report: (e: import('@thelakeprotocol/core').LakeEvent) => link?.report(e) };
+  const s: { app: express.Express; card: AgentCard; webId: string } =
+    k === 'issuer' ? await createIssuer({ ...o, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
+    : k === 'ethics' ? await createEthics(o)
+    : k === 'payments' ? await createPayments({ ...o, onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
+    : k === 'guide' ? await createGuide({ ...o, nodeUrl: nodes[0], publicNodeUrl: values['public-node'] })
+    : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
+    : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })
+    : k === 'quests' ? await createQuests({ ...o, nodeUrl: nodes[0] ?? 'http://localhost:7000', dataDir: values.data! })
+    : await createAuditor(o);
+  const join = async () => {
+    log(`${k} ${s.webId} at ${url}`);
+    if (!nodes.length) return;
     link = new LakeLinks({ nodeUrls: nodes, card: s.card, identity: id, webId: s.webId, log });
-    (await link.register()).forEach((nodeId, i) => { if (nodeId) log(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
+    (await link.register()).forEach((nodeId, i) => { if (nodeId) log(`${k} registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
     link.keepAlive(5_000);
+  };
+  return { app: s.app, join };
+}
+
+if (several) {
+  const root = express();
+  const started: Awaited<ReturnType<typeof start>>[] = [];
+  for (const k of kinds) {
+    const s = await start(k, `${base}/${k}`);
+    root.use(`/${k}`, s.app);
+    started.push(s);
   }
-});
+  root.get('/health', (_req, res) => void res.json({ ok: true, agents: kinds }));
+  root.listen(port, async () => {
+    log(`${kinds.length} specialists listening on :${port}`);
+    for (const s of started) await s.join();
+  });
+} else {
+  const s = await start(kind, base);
+  s.app.listen(port, () => void s.join());
+}

@@ -75,6 +75,17 @@ services:
     environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     volumes: [payments:/data]
 
+  # The sandbox guides, in one process: guide, inspector, sparring partner, quests (SPEC: none of them decide anything).
+  #   docker compose run --rm lake ask http://guides:4700/guide/a2a hello
+  guides:
+    build: { context: ., target: specialists }
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    hostname: guides
+    command: ["guide,inspector,sparring,quests", "--port", "4700", "--url", "http://guides:4700", "--public-node", "http://localhost:7000", "--spar-every", "600"]
+    depends_on: [lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [guides:/data]
+
   house-stan:
     <<: *house
     hostname: house-stan
@@ -124,4 +135,4 @@ services:
     environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}" }
     volumes: [cli:/root/.lake]   # the agent's keys survive between runs
 
-volumes: { cli: {}, node: {}, node-b: {}, issuer: {}, auditor: {}, ethics: {}, payments: {}, stan: {}, strict: {}, research: {} }
+volumes: { cli: {}, node: {}, node-b: {}, issuer: {}, auditor: {}, ethics: {}, payments: {}, guides: {}, stan: {}, strict: {}, research: {} }

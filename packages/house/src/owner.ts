@@ -24,6 +24,18 @@ export interface PendingRequest {
   grant?: string;
 }
 
+/** The control panel's view of a house. Every call is signed by the owner's key. */
+export interface PanelProvider {
+  overview(): Promise<unknown>;
+  rules(): Promise<{ text: string; rules: unknown }>;
+  setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  activity(): unknown[];
+  agents(): unknown[];
+  money(): Promise<unknown>;
+  data(): Promise<unknown>;
+  exportAll(): Promise<unknown>;
+}
+
 export interface GrantRecord {
   id: string;
   jws: string;
@@ -58,6 +70,8 @@ export class OwnerDesk {
       openPairing: boolean;
       emit: (e: LakeEvent) => void;
       readOwnerKey: () => Promise<JWK | null>;
+      /** What the control panel shows and changes, beyond requests and keys. */
+      panel?: PanelProvider;
       saveOwnerKey: (jwk: JWK) => Promise<void>;
       writeGrant: (id: string, jws: string) => Promise<void>;
       saveRevoked: (ids: string[]) => Promise<void>;
@@ -129,6 +143,21 @@ export class OwnerDesk {
       if (p.kind === 'list') return void res.json(this.view());
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
       if (p.kind === 'revoke') return void res.json({ revoked: await this.revoke(p.revoke ?? 'all') });
+      const panel = this.o.panel;
+      if (panel && p.kind.startsWith('panel.')) {
+        const q = p as unknown as { text?: string };
+        const answer = await ({
+          'panel.overview': () => panel.overview(),
+          'panel.rules': () => panel.rules(),
+          'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
+          'panel.activity': async () => panel.activity(),
+          'panel.agents': async () => panel.agents(),
+          'panel.money': () => panel.money(),
+          'panel.data': () => panel.data(),
+          'panel.export': () => panel.exportAll(),
+        } as Record<string, () => Promise<unknown>>)[p.kind]?.();
+        if (answer !== undefined) return void res.json(answer);
+      }
       res.status(400).json({ error: 'unknown request' });
     });
 

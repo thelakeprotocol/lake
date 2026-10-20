@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
   auditStudy, buildCard, digestSRI, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  type AgentCard, type Identity, type LakeData, type Study,
+  type AgentCard, type Identity, type LakeData, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
-interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean; report?: (e: LakeEvent) => void }
+export interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean; report?: (e: LakeEvent) => void }
 type Reply =
   | { kind: 'approved' | 'certified'; credential: string; notes: string[] }
   | { kind: 'settled'; receipts: { payee: string; credential: string }[]; total: number; remaining: number }
@@ -16,14 +16,18 @@ const IDENTIFYING = ['name', 'dob', 'nhs_number', 'email', 'phone', 'address'];
 const CERTIFIED_CONVERTERS = ['@thelakeprotocol/convert-fhir@0.1.0'];
 const DAY = 86_400_000;
 
-async function specialist(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: { ownerDomain: string; publicJwk: import('@thelakeprotocol/core').JWK }) => Promise<Reply>) {
+export type Refused = { kind: 'refused'; problems: string[] };
+export interface Specialist { app: express.Express; card: AgentCard; webId: string; vc: (type: string, subject: Record<string, unknown> & { id: string }, days: number) => Promise<string> }
+
+/** A signed Lake agent with one skill: verifies every message before `decide` sees it, signs every reply. */
+export async function specialist<R extends { kind: string } = Reply>(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: LakeProfile) => Promise<R | Refused>, extraSkills: { id: string; name: string; description: string }[] = []): Promise<Specialist> {
   const webId = `${o.url}/#${skill}`;
   const card = await signCard(
-    buildCard({ name, description, url: `${o.url}/a2a`, skills: [{ id: skill, name, description }], profile: { role: 'specialist', webId, ownerDomain: o.domain, tags: [skill] } }, o.id),
+    buildCard({ name, description, url: `${o.url}/a2a`, skills: [{ id: skill, name, description }, ...extraSkills], profile: { role: 'specialist', webId, ownerDomain: o.domain, tags: [skill] } }, o.id),
     o.id,
   );
   const replay = new ReplayGuard();
-  const reply = async (body: Reply): Promise<LakeData> => ({ lake: '0.1', card, envelope: (await signMessage(body, o.id, { iss: webId })) as LakeData['envelope'] });
+  const reply = async (body: R | Refused): Promise<LakeData> => ({ lake: '0.1', card, envelope: (await signMessage(body, o.id, { iss: webId })) as LakeData['envelope'] });
   const app = lakeAgentApp(card, async (data) => {
     const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox });
     if (!v.ok) return reply({ kind: 'refused', problems: [`${v.rejection.code}: ${v.rejection.why}`] });
@@ -45,7 +49,7 @@ async function specialist(o: SpecialistOptions, name: string, description: strin
  * owners decide which ethics domains they trust (rules.yaml → trust.ethics).
  */
 export async function createEthics(o: SpecialistOptions): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
-  const s = await specialist(o, 'Ethics (demo checklist)', 'Reviews study protocols against a fixed checklist. A demo, not a human ethics committee.', 'ethics-review', async (p, from) => {
+  const s: Specialist = await specialist<Reply>(o, 'Ethics (demo checklist)', 'Reviews study protocols against a fixed checklist. A demo, not a human ethics committee.', 'ethics-review', async (p, from) => {
     if (p.kind !== 'ethics-review') return { kind: 'refused', problems: ['send { kind: "ethics-review", protocol }'] };
     const protocol = p.protocol as { study: Study; purpose: string; fields: string[]; retention: string } | undefined;
     const problems: string[] = [];
@@ -67,7 +71,7 @@ export async function createEthics(o: SpecialistOptions): Promise<{ app: express
 
 /** The demo Auditor: certifies declarative studies the Lake can run safely, and reviewed converter packages. */
 export async function createAuditor(o: SpecialistOptions): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
-  const s = await specialist(o, 'Auditor (demo)', 'Certifies studies (noisy aggregates of known questions) and converter packages.', 'study-audit', async (p) => {
+  const s: Specialist = await specialist<Reply>(o, 'Auditor (demo)', 'Certifies studies (noisy aggregates of known questions) and converter packages.', 'study-audit', async (p) => {
     if (p.kind === 'audit-study') {
       const study = p.study as Study;
       const audit = auditStudy(study);
@@ -94,7 +98,7 @@ export const newId = () => randomUUID();
  */
 export async function createPayments(o: SpecialistOptions & { onSettled?: (amount: number, count: number) => void }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
   const spent = new Map<string, number>();
-  const s = await specialist(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed.', 'payments', async (p, agentWebId, agent) => {
+  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed.', 'payments', async (p, agentWebId, agent) => {
     if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...] }'] };
     const intent = p.intent as { credential: string; card: AgentCard } | undefined;
     const payments = (p.payments as string[] | undefined) ?? [];

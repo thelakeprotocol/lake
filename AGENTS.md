@@ -12,7 +12,7 @@ The Lake: an open protocol and reference implementation where each person's data
 corepack enable && pnpm install
 pnpm build            # tsc -b for packages, vite for the map/approvals UI
 pnpm test             # unit tests (fast)
-pnpm test:e2e         # boots a whole Lake from source: node, 4 specialists, 3 houses with real Solid pods (~40 s)
+pnpm test:e2e         # boots a whole Lake from source: node, 8 specialists (one process), 3 houses with real Solid pods (~70 s)
 pnpm examples         # regenerate spec/examples (then commit; the unit tests verify them)
 pnpm site:dev         # website + docs (VitePress)
 docker compose up -d  # the demo Lake; map at http://localhost:7000
@@ -27,9 +27,9 @@ Run `pnpm build` before `pnpm test:e2e`: it runs the built `dist/` files.
 | `packages/core` | Cards (A2A 1.0 + Lake extension), signing, rules engine, ODRL, VCs, studies, AP2, A2A helpers. No I/O beyond fetch. |
 | `packages/house` | A house: Community Solid Server child process, housekeeper, MCP door to the pod, owner's desk. `--tenants N` hosts many. |
 | `packages/lake` | A node: registry, signed event intake, signals, WebSocket stream, serves the map. |
-| `packages/specialists` | issuer, ethics, auditor, payments (A2A agents). |
+| `packages/specialists` | issuer, ethics, auditor, payments, and the sandbox guides: guide, inspector, sparring partner, quests (A2A agents). `all` runs them in one process. |
 | `packages/visitor` | The `lake` CLI: knock, dispatch (research agent), attack, swarm. |
-| `packages/ui` | The live map and the phone approvals app (Vite). |
+| `packages/ui` | The live map and the control panel every house serves at /owner/ (Vite). |
 | `packages/convert-fhir` | FHIR R4 → canonical model; synthetic patient generator. |
 | `spec/`, `model/` | JSON Schemas, OpenAPI for the node, examples; RDF ontology and SHACL shapes. |
 | `site/` | lake.doneinfifty.com. `site/docs/*.md` are the docs. |

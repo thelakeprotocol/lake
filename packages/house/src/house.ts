@@ -3,12 +3,13 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  buildCard, exportIdentity, generateIdentity, importIdentity, LakeLinks, makeEvent, parseRules, signCard,
-  type AgentCard, type Identity, type LakeEvent,
+  buildCard, describe, exportIdentity, generateIdentity, importIdentity, LakeLinks, makeEvent, parseRules, signCard,
+  type AgentCard, type Identity, type LakeEvent, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
-import { OwnerDesk } from './owner.js';
+import { OwnerDesk, type PanelProvider } from './owner.js';
+import { Parser } from 'n3';
 import { createPodMcpServer } from './pod-mcp.js';
 import type { OwnerSession } from './pod.js';
 import { convertRecord, fetchConverterCert, fetchRecord, RECORD, type Trust } from './record.js';
@@ -74,21 +75,41 @@ function approvalsApp() {
 /** Sets up one house on a pod that is already running: folders, wallet, record, MCP door, housekeeper, owner's desk. */
 export async function startHouse(o: HouseOptions): Promise<House> {
   const { owner, say } = o;
-  const rules = parseRules(o.rulesText);
   const actor = `house:${o.name}`;
-  const t = rules.trust;
-  const trust: Trust = {
-    issuers: t?.issuers ?? (o.sandbox ? DEMO_TRUST.issuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
-    ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
+  const trustFrom = (rules: Rules): Trust => {
+    const t = rules.trust;
+    return {
+      issuers: t?.issuers ?? (o.sandbox ? DEMO_TRUST.issuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
+      ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
+    };
   };
   let link: LakeLinks | null = null;
+  // What happened at this door, for the owner's control panel. Kept in memory; the pod keeps the agreements and audit log.
+  const activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[] = [];
   const emit = (e: LakeEvent) => {
     o.emit(e);
     link?.report(e);
+    activity.unshift({ at: e.at, kind: e.kind, text: describe(e), subject: e.subject, data: e.data });
+    activity.length = Math.min(activity.length, 300);
   };
 
   // Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
-  for (const f of ['health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/']) await ensureContainer(owner, f);
+  for (const f of ['health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/']) await ensureContainer(owner, f);
+
+  // The owner's rules. Edits made in the control panel live in their pod and win over the file the house started with.
+  let rulesText = o.rulesText;
+  const saved = await owner.fetch(`${owner.podRoot}settings/rules.yaml`);
+  if (saved.ok) {
+    const text = await saved.text();
+    try {
+      parseRules(text);
+      rulesText = text;
+    } catch (e) {
+      say(`WARNING: the rules saved in your pod don't parse (${(e as Error).message}); using the file this house started with`);
+    }
+  } else await put(owner, 'settings/rules.yaml', rulesText, 'text/yaml');
+  const rules = parseRules(rulesText);
+  const trust = trustFrom(rules);
   const id = await walletIdentity(owner);
   const nodes = (o.lakeUrl ?? '').split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
   const relayed = o.relay && nodes.length ? nodes.map((n) => `${n}/relay/${id.kid.replace(/[^a-zA-Z0-9]/g, '')}/a2a`) : null;
@@ -145,7 +166,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   await podClient.connect(clientSide);
 
   // The owner's desk. The owner's key is made on their device; the house keeps only its public half, in the pod.
+  // Signals from the node this house follows: refreshed every 2 s, verified against the node's own card.
+  const signals = { blocklist: new Set<string>(), reputation: {} as Record<string, number> };
+  let keeperRef: Housekeeper | null = null;
+  const panel = panelFor({ o, owner, actor, activity, card, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed });
   const desk = new OwnerDesk({
+    panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit,
     readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
     saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),
@@ -163,12 +189,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     qrcode.generate(pairLink, { small: true }, (q: string) => console.log(q));
   }
 
-  // Signals from the node this house follows: refreshed every 2 s, verified against the node's own card.
-  const signals = { blocklist: new Set<string>(), reputation: {} as Record<string, number> };
   const keeper = new Housekeeper({
-    name: o.name, webId: owner.webId, id, card, rules, rulesText: o.rulesText, trust, pod: podClient, claimsUrl, sandbox: o.sandbox, seed: o.seed, emit, desk,
+    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox: o.sandbox, seed: o.seed, emit, desk,
     signals: () => signals,
   });
+  keeperRef = keeper;
   const check = await keeper.verifyOwnRecord();
   say(check.ok ? 'record chain verified: trusted issuer → original → certified converter → housekeeper' : `record chain BROKEN: ${check.why}`);
 
@@ -220,4 +245,120 @@ async function walletIdentity(o: OwnerSession): Promise<Identity> {
   const fresh = await generateIdentity();
   await put(o, 'wallet/identity.json', JSON.stringify(await exportIdentity(fresh)), 'application/json');
   return fresh;
+}
+
+const LDP_CONTAINS = 'http://www.w3.org/ns/ldp#contains';
+
+/** What a container holds, as paths relative to the pod root. */
+async function listContainer(o: OwnerSession, path: string): Promise<string[]> {
+  const res = await o.fetch(o.podRoot + path, { headers: { accept: 'text/turtle' } });
+  if (!res.ok) return [];
+  const quads = new Parser({ baseIRI: o.podRoot + path }).parse(await res.text());
+  return quads.filter((q) => q.predicate.value === LDP_CONTAINS).map((q) => q.object.value.slice(o.podRoot.length));
+}
+
+const decode = (jws: string) => {
+  try {
+    return JSON.parse(Buffer.from(jws.split('.')[1] ?? '', 'base64url').toString()) as Record<string, any>;
+  } catch {
+    return null;
+  }
+};
+
+/** Everything the owner's control panel shows and changes. Every call arrives signed by the owner's key. */
+function panelFor(x: {
+  o: HouseOptions; owner: OwnerSession; actor: string; activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
+  card: AgentCard; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
+  trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
+}): PanelProvider {
+  const { owner } = x;
+  const money = async () => {
+    const files = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
+    const receipts = (await Promise.all(files.map(async (f) => {
+      const r = await owner.fetch(owner.podRoot + f);
+      const vc = r.ok ? decode(await r.text()) : null;
+      const s = vc?.credentialSubject;
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
+    }))).filter(Boolean) as { amount: number; at: string }[];
+    receipts.sort((a, b) => (a.at < b.at ? 1 : -1));
+    return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts };
+  };
+  return {
+    async overview() {
+      const today = new Date().toISOString().slice(0, 10);
+      const claims = await x.keeper().allClaims();
+      const chain = await x.keeper().verifyOwnRecord();
+      const view = x.desk().view();
+      return {
+        name: x.o.name, webId: owner.webId, podRoot: owner.podRoot,
+        reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes,
+        holds: [...new Set(claims.map((c) => c.field))], claims: claims.length,
+        record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
+        knocksToday: x.activity.filter((a) => a.kind === 'knock' && a.at.startsWith(today)).length,
+        blockedToday: x.activity.filter((a) => a.kind === 'attack.blocked' && a.at.startsWith(today)).length,
+        pending: view.requests.length, keys: view.keys.length,
+        earned: (await money()).total,
+        rulesOwner: x.keeper().rules.owner,
+      };
+    },
+    async rules() {
+      return { text: x.keeper().rulesText, rules: x.keeper().rules };
+    },
+    async setRules(text: string) {
+      let rules: Rules;
+      try {
+        rules = parseRules(text);
+      } catch (e) {
+        return { ok: false as const, error: (e as Error).message };
+      }
+      await put(owner, 'settings/rules.yaml', text, 'text/yaml');
+      x.keeper().setRules(rules, text, x.trustFrom(rules));
+      x.o.say('the owner changed their rules in the control panel');
+      return { ok: true as const };
+    },
+    activity: () => x.activity.slice(0, 100),
+    agents() {
+      const by = new Map<string, { agent: string; knocks: number; last: string; lastDecision?: string; blocked: number }>();
+      for (const a of [...x.activity].reverse()) {
+        if (!a.subject) continue;
+        const e = by.get(a.subject) ?? { agent: a.subject, knocks: 0, last: a.at, blocked: 0 };
+        if (a.kind === 'knock') e.knocks++;
+        if (a.kind === 'decision') e.lastDecision = String(a.data?.decision ?? '');
+        if (a.kind === 'attack.blocked') e.blocked++;
+        e.last = a.at;
+        by.set(a.subject, e);
+      }
+      const rep = x.signals().reputation;
+      return [...by.values()].sort((a, b) => (a.last < b.last ? 1 : -1)).map((e) => ({ ...e, reputation: e.agent.startsWith('agent:') ? rep[e.agent.slice(6)] ?? null : null }));
+    },
+    money,
+    async data() {
+      const claims = await x.keeper().allClaims();
+      const chain = await x.keeper().verifyOwnRecord();
+      const issuer = await owner.fetch(owner.podRoot + RECORD.issuer).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { card?: AgentCard } | null;
+      const cert = await owner.fetch(owner.podRoot + RECORD.converterCert).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { card?: AgentCard } | null;
+      const folders: Record<string, number> = {};
+      for (const f of ['health/', 'agreements/', 'receipts/', 'audit/', 'wallet/', 'settings/']) folders[f] = (await listContainer(owner, f)).length;
+      return {
+        claims, record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
+        provenance: { issuer: issuer?.card?.name ?? null, converter: '@thelakeprotocol/convert-fhir@0.1.0', certifiedBy: cert?.card?.name ?? null },
+        folders,
+      };
+    },
+    async exportAll() {
+      // Everything in the pod, so the owner can move house. Includes the wallet: it is theirs.
+      const files: Record<string, string> = {};
+      const walk = async (path: string) => {
+        for (const child of await listContainer(owner, path)) {
+          if (child.endsWith('/')) await walk(child);
+          else {
+            const r = await owner.fetch(owner.podRoot + child);
+            if (r.ok) files[child] = await r.text();
+          }
+        }
+      };
+      await walk('');
+      return { lake: '0.1', exportedAt: new Date().toISOString(), webId: owner.webId, files };
+    },
+  };
 }

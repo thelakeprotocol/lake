@@ -21,6 +21,19 @@ export function readmissionStudy(question = 'Do over-60s on drug X get readmitte
   };
 }
 
+/** Questions the sandbox sponsor rotates through: a group, an exposure and an outcome, all certifiable. */
+export const SANDBOX_STUDIES: Study[] = [
+  readmissionStudy(),
+  cohortStudy('Are people with heart failure on drug Y readmitted more?', { name: 'with heart failure', field: 'conditions', op: 'has_code', value: '84114007' }, { name: 'on drug Y', field: 'medications', op: 'has_code', value: 'drug-y' }),
+  cohortStudy('Do over-50s on drug Z end up back in hospital?', { name: 'over 50', field: 'age_band', op: 'age_at_least', value: 50 }, { name: 'on drug Z', field: 'medications', op: 'has_code', value: 'drug-z' }),
+  cohortStudy('Diabetes and drug X: more readmissions?', { name: 'with type 2 diabetes', field: 'conditions', op: 'has_code', value: '44054006' }, { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' }),
+  cohortStudy('Hypertension and drug Y: more readmissions?', { name: 'with hypertension', field: 'conditions', op: 'has_code', value: '38341003' }, { name: 'on drug Y', field: 'medications', op: 'has_code', value: 'drug-y' }),
+];
+
+function cohortStudy(question: string, group: Study['predicates'][number], exposure: Study['predicates'][number], epsilon = 2): Study {
+  return { ...readmissionStudy(question, epsilon), predicates: [group, exposure, { name: 'readmitted', field: 'readmissions', op: 'present' }] };
+}
+
 /** The human at the research organisation who signs the spending mandate. Not the agent: a separate key. */
 export interface Human {
   id: Identity;
@@ -263,13 +276,14 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   }
 
   const { n, cells } = estimate(o.study, fragments);
-  // Bits: 0 over 60, 1 on drug X, 2 readmitted.
+  // Bits: 0 the group (over 60), 1 the exposure (on drug X), 2 the outcome (readmitted).
+  const [group, exposure, outcome] = o.study.predicates.map((p) => p.name);
   const rate = (readm: number, not: number) => ({ rate: readm + not > 0 ? readm / (readm + not) : 0, n: Math.round(readm + not) });
   const onX = rate(cells[0b111]!, cells[0b011]!);
   const notOnX = rate(cells[0b101]!, cells[0b001]!);
   const reliable = n >= 200;
   const pct = (x: number) => `${Math.round(x * 100)}%`;
-  const summary = `over-60s on drug X: ${pct(onX.rate)} readmitted (≈${onX.n}) vs ${pct(notOnX.rate)} not on it (≈${notOnX.n})`;
+  const summary = `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (≈${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (≈${notOnX.n})`;
   log('answer', `${summary}${reliable ? '' : `. Only ${n} answers: randomised answers need a few hundred houses before this means anything`}`);
   // Houses batch their reports for ~150 ms; let theirs land first so the log reads in order.
   await new Promise((r) => setTimeout(r, 400));
