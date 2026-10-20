@@ -87,6 +87,11 @@ export async function tenantSessions(o: { dataDir: string; baseUrl: string; name
   const need = o.names.filter((n) => !s.clients[n]);
   if (need.length) {
     const { auth, controls } = await accountLogin(o.baseUrl, s);
+    // The pod server makes pods from its seed only the first time it starts; houses added later get theirs here.
+    const pods = Object.keys((await json(await fetch(controls.account.pod, { headers: { authorization: auth } }))).pods ?? {});
+    for (const name of need.filter((n) => !pods.includes(`${o.baseUrl}${n}/`))) {
+      await json(await fetch(controls.account.pod, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify({ name }) }));
+    }
     await pool(need, o.concurrency ?? 16, async (name) => {
       const c = await createClient(controls, auth, `${o.baseUrl}${name}/profile/card#me`, `housekeeper-${name}`);
       s.clients[name] = { id: c.id, secret: c.secret };

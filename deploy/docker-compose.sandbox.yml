@@ -54,8 +54,9 @@ services:
     volumes: [houses:/data]
     ports: ["127.0.0.1:4000:4000"]
     depends_on: [specialists]
-    mem_limit: 400m
-    memswap_limit: 400m
+    # ~200 MB of pod server plus a little per house; give 50 MB more for every 4 houses past 6.
+    mem_limit: ${LAKE_HOUSES_MEM:-400m}
+    memswap_limit: ${LAKE_HOUSES_MEM:-400m}
 
   # Sandbox life: a paid, certified study every 15 minutes, rotating questions and prices.
   sponsor:
