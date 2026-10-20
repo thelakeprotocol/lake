@@ -13,6 +13,8 @@ export interface Offer {
   retention: string;
   priceUsd: number;
   credentials: { ethicsApproved: boolean; sponsorVerified: boolean; auditCertified: boolean };
+  /** Id of the study this offer is for (studyId of the declarative study), when there is one. */
+  study?: string;
   /** Lowest provenance tier the study accepts. */
   minTier?: 'self-reported' | 'device-signed' | 'issuer-signed';
   /**

@@ -3,19 +3,59 @@
   "$id": "https://lake.doneinfifty.com/schemas/v0/event.json",
   "title": "Lake event",
   "type": "object",
-  "required": ["id", "kind", "at", "actor"],
+  "required": [
+    "id",
+    "kind",
+    "at",
+    "actor"
+  ],
   "properties": {
-    "id": { "type": "string" },
-    "kind": {
-      "enum": ["house.joined", "house.left", "agent.registered", "knock", "offer", "counter", "decision", "agreement.signed", "grant.issued", "grant.revoked", "approval.requested", "approval.answered", "payment.settled", "attack.blocked", "agent.quarantined", "guild.formed", "study.result", "record.moved"]
+    "id": {
+      "type": "string"
     },
-    "at": { "type": "string", "format": "date-time" },
-    "actor": { "type": "string" },
-    "subject": { "type": "string" },
+    "kind": {
+      "enum": [
+        "house.joined",
+        "house.left",
+        "agent.registered",
+        "knock",
+        "offer",
+        "counter",
+        "decision",
+        "agreement.signed",
+        "grant.issued",
+        "grant.revoked",
+        "approval.requested",
+        "approval.answered",
+        "payment.settled",
+        "attack.blocked",
+        "agent.quarantined",
+        "guild.formed",
+        "study.result",
+        "compute.done",
+        "record.moved"
+      ]
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actor": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
     "data": {
       "type": "object",
       "description": "Numbers and short labels only. Never record contents.",
-      "additionalProperties": { "type": ["string", "number", "boolean"] }
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
     }
   },
   "additionalProperties": false

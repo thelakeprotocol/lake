@@ -26,8 +26,8 @@
 | Shared core: cards, signing, rules, offers, events | `packages/core` | <span class="status done">runs</span> |
 | House: pod, housekeeper, MCP pod door, wallet | `packages/house` | <span class="status done">runs</span> |
 | Lake node: registry, events, counters · bus | `packages/lake` | <span class="status done">runs</span> · bus in M3 |
-| Visitor: `lake knock` CLI · research agent | `packages/visitor` | <span class="status done">knock runs</span> |
-| Specialists: issuer · ethics, auditor, payments | `packages/specialists` | <span class="status done">issuer runs</span> |
+| Visitor: `lake knock`, `lake dispatch` (the research agent) | `packages/visitor` | <span class="status done">runs</span> |
+| Specialists: issuer, ethics, auditor · payments | `packages/specialists` | <span class="status done">runs</span> · payments in M5 |
 | Swarm: background traders and attackers | `packages/swarm` | <span class="status later">later</span> |
 | UI: live map · approvals app | `packages/ui` | <span class="status done">map runs</span> · approvals in M4 |
 | Agent SDK | `packages/agent` | <span class="status later">later</span> |

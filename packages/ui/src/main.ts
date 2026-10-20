@@ -4,7 +4,7 @@ import './style.css';
 // is a real event from a Lake node's stream. The stream carries ids, kinds and counts only.
 
 interface LakeEvent { id: string; kind: string; at: string; actor: string; subject?: string; data?: Record<string, string | number | boolean> }
-interface Participant { id: string; role: string; label: string; tags: string[] }
+interface Participant { id: string; role: string; label: string; tags: string[]; domain?: string }
 interface Counters { houses: number; agents: number; conversations: number; valueSettled: number; attacksBlocked: number; recordsMoved: number }
 type Wire =
   | { type: 'snapshot'; node: string; sandbox: boolean; participants: Participant[]; counters: Counters; recent: { event: LakeEvent; text: string }[] }
@@ -17,6 +17,7 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 interface House { id: string; label: string; nx: number; ny: number; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number }
 interface Spec { id: string; label: string; nx: number; ny: number }
+interface Agent { id: string; domain: string; label: string; x: number; y: number; trail: { x: number; y: number }[]; seen: number }
 interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number }
 interface Thread { ax: number; ay: number; h: House; life: number; col: string }
 interface Ripple { x: number; y: number; r: number; max: number; col: string; w: number }
@@ -29,6 +30,9 @@ let W = 800, H = 500, clock = 0;
 const houses = new Map<string, House>();
 const specs = new Map<string, Spec>();
 const visitors = new Map<string, Visitor>();
+/** Dispatched agents (registered visitors), drawn orange. Keyed by id; also found by `agent:<domain>`. */
+const agents = new Map<string, Agent>();
+const agentByLabel = (s?: string) => [...agents.values()].find((a) => s === `agent:${a.domain}` || s === a.id);
 let threads: Thread[] = [];
 let ripples: Ripple[] = [];
 
@@ -59,6 +63,9 @@ function addParticipant(p: Participant, fresh: boolean) {
     if (houses.has(p.id)) return;
     const pos = place(p.id, [...houses.values(), ...specs.values()]);
     houses.set(p.id, { id: p.id, label: p.label, ...pos, born: fresh ? clock : -10, resp: '', respT: 0, alert: 0, leaving: 0, phase: hash(p.id) * 6.28 });
+  } else if (p.role === 'visitor') {
+    if (agents.has(p.id)) return;
+    agents.set(p.id, { id: p.id, domain: p.domain ?? '', label: p.label, x: W / 2, y: H / 2, trail: [], seen: clock });
   } else if (p.role === 'specialist' || p.role === 'agent') {
     if (specs.has(p.id)) return;
     const slots = [[0.18, 0.28], [0.82, 0.28], [0.8, 0.74], [0.2, 0.74], [0.5, 0.18]];
@@ -91,18 +98,41 @@ function onEvent(e: LakeEvent, p?: Participant) {
     case 'house.left':
       if (h) h.leaving = clock;
       break;
-    case 'knock':
+    case 'knock': {
+      const ag = agents.get(e.actor);
+      if (ag) {
+        // A broadcast: one offer to every house that advertises the skill.
+        ag.seen = clock;
+        ripples.push({ x: ag.x, y: ag.y, r: 4, max: Math.hypot(W, H) * 0.7, col: COL.orange, w: 2 });
+        for (const x of houses.values()) if (Math.random() < 0.6) threads.push({ ax: ag.x, ay: ag.y, h: x, life: 0.9, col: COL.orange });
+        break;
+      }
+      if (h && agentByLabel(e.subject)) break; // the broadcast already drew it
       if (h && e.subject) {
         const v = visitor(e.subject);
         v.target = h;
         threads.push({ ax: v.x, ay: v.y, h, life: 1, col: COL.muted });
       }
       break;
+    }
+    case 'grant.issued':
+      if (h) { const { x, y } = at(h); ripples.push({ x, y, r: 4, max: 40, col: COL.mint, w: 1.5 }); }
+      break;
+    case 'compute.done': {
+      const ag = agentByLabel(e.subject);
+      if (h && ag) threads.push({ ax: ag.x, ay: ag.y, h, life: 1, col: COL.mint });
+      break;
+    }
+    case 'study.result': {
+      const ag = agents.get(e.actor);
+      if (ag) { ag.seen = clock; ripples.push({ x: ag.x, y: ag.y, r: 4, max: 120, col: COL.mint, w: 3 }); }
+      break;
+    }
     case 'decision':
       if (h) {
         h.resp = String(e.data?.decision ?? '') as House['resp'];
         h.respT = clock;
-        const v = e.subject ? visitors.get(e.subject) : undefined;
+        const v = e.subject ? visitors.get(e.subject) ?? agentByLabel(e.subject) : undefined;
         const col = h.resp === 'join' ? COL.mint : h.resp === 'ask' ? COL.amber : h.resp === 'counter' ? COL.violet : COL.muted;
         if (v) threads.push({ ax: v.x, ay: v.y, h, life: 1, col });
       }
@@ -127,6 +157,11 @@ function onEvent(e: LakeEvent, p?: Participant) {
 
 function update(dt: number) {
   clock += dt;
+  for (const [id, ag] of agents) {
+    if (clock - ag.seen > 60) { agents.delete(id); continue; }
+    ag.x += (W / 2 - ag.x) * Math.min(1, dt * 2);
+    ag.y += (H / 2 - ag.y) * Math.min(1, dt * 2);
+  }
   for (const [id, v] of visitors) {
     if (clock - v.seen > 40) { visitors.delete(id); continue; }
     if (v.target && !houses.has(v.target.id)) v.target = null;
@@ -187,12 +222,18 @@ function draw(now: number) {
     ctx.fillStyle = v.bad ? COL.threat : rgba(COL.muted, 0.85);
     ctx.beginPath(); ctx.arc(v.x, v.y, v.bad ? 3.4 : 2.2, 0, 6.283); ctx.fill();
   }
+  for (const ag of agents.values()) {
+    const rr = 12 + Math.sin(now / 180) * 2.5;
+    ctx.strokeStyle = COL.orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ag.x, ag.y, rr, 0, 6.283); ctx.stroke();
+    ctx.fillStyle = COL.orange; ctx.beginPath(); ctx.arc(ag.x, ag.y, 6, 0, 6.283); ctx.fill();
+    ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillText(ag.label.toUpperCase(), ag.x, ag.y + rr + 16);
+  }
 }
 
 // ---- Log and counters ----
 const logEl = $('log');
 const lines: { t: string; text: string; kind: string }[] = [];
-const KIND_CLASS: Record<string, string> = { 'attack.blocked': 'threat', 'agent.quarantined': 'threat', 'record.moved': 'threat', 'house.joined': 'mint', 'agent.registered': 'violet', 'approval.requested': 'amber', 'guild.formed': 'violet', 'payment.settled': 'violet', 'study.result': 'mint' };
+const KIND_CLASS: Record<string, string> = { 'knock': '', 'offer': 'orange', 'compute.done': 'mint', 'grant.issued': 'mint', 'attack.blocked': 'threat', 'agent.quarantined': 'threat', 'record.moved': 'threat', 'house.joined': 'mint', 'agent.registered': 'violet', 'approval.requested': 'amber', 'guild.formed': 'violet', 'payment.settled': 'violet', 'study.result': 'mint' };
 function log(e: LakeEvent, text: string) {
   lines.unshift({ t: new Date(e.at).toLocaleTimeString([], { hour12: false }), text, kind: KIND_CLASS[e.kind] ?? (e.kind === 'decision' && e.data?.decision === 'join' ? 'mint' : '') });
   lines.length = Math.min(lines.length, 5);

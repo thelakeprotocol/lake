@@ -1,14 +1,12 @@
 # @thelakeprotocol/specialists
 
-Image: `ghcr.io/thelakeprotocol/lake-specialists`.
+Image: `ghcr.io/thelakeprotocol/lake-specialists`. `lake-specialist <issuer|ethics|auditor>`.
 
 | Agent | Status | Does |
 |---|---|---|
-| **issuer** | runs | Plays the hospital: makes a synthetic FHIR record for a WebID and signs it as a W3C VC (VC-JOSE-COSE) whose `relatedResource.digestSRI` pins the record. Keeps nothing. |
-| ethics | milestone 3 | Reviews a study protocol; signs an approval credential |
-| auditor | milestone 3 | Checks study code and converters; signs certificates |
+| **issuer** | runs | Plays the hospital: makes a synthetic FHIR record for a WebID and signs it as a W3C VC whose `relatedResource.digestSRI` pins the record. Keeps nothing. |
+| **ethics** | runs (demo) | A2A. Reviews `{ kind: "ethics-review", protocol }` against a fixed checklist and signs a `LakeEthicsApproval` for that study and those fields. A demo, not a human committee; it counts only with owners who trust its domain. |
+| **auditor** | runs (demo) | A2A. Certifies declarative studies (`LakeStudyCertificate`) and reviewed converter packages (`LakeConverterCertificate`). |
 | payments | milestone 5 | Verifies AP2 mandate chains; records simulated settlements |
 
-```bash
-docker run -p 4300:4300 ghcr.io/thelakeprotocol/lake-specialists issuer --url http://localhost:4300
-```
+Default domains in sandbox: `issuer.lake.local`, `ethics.lake.local`, `audit.lake.local`.

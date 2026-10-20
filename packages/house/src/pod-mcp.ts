@@ -15,6 +15,8 @@ export interface PodMcpOptions {
   deny?: string[];
   /** Called for every pod access, for the audit trail. */
   onAccess?: (tool: string, path: string) => void;
+  /** Path prefixes this door may write to (e.g. agreements/, audit/). None by default: read-only. */
+  allowWrite?: string[];
 }
 
 export interface PodClaim {
@@ -93,6 +95,25 @@ export function createPodMcpServer(o: PodMcpOptions): McpServer {
       }
     },
   );
+
+  if (o.allowWrite?.length) {
+    server.registerTool(
+      'pod_write',
+      { description: `Write one resource under ${o.allowWrite.join(', ')}.`, inputSchema: { path: z.string(), content: z.string(), contentType: z.string().default('application/json') } },
+      async ({ path, content, contentType }) => {
+        try {
+          const { url, rel } = resolve(path);
+          if (!o.allowWrite!.some((w) => rel.startsWith(w))) throw new Error(`${rel} is not writable through this door`);
+          o.onAccess?.('pod_write', rel);
+          const res = await o.fetch(url, { method: 'PUT', headers: { 'content-type': contentType }, body: content });
+          if (!res.ok) throw new Error(`${rel}: ${res.status}`);
+          return text('ok');
+        } catch (e) {
+          return fail(e);
+        }
+      },
+    );
+  }
 
   return server;
 }

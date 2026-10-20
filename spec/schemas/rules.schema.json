@@ -3,42 +3,125 @@
   "$id": "https://lake.doneinfifty.com/schemas/v0/rules.json",
   "title": "rules.yaml: an owner's standing rules",
   "type": "object",
-  "required": ["owner"],
+  "required": [
+    "owner"
+  ],
   "properties": {
-    "owner": { "type": "string" },
-    "device": { "type": "string" },
-    "default": { "enum": ["join", "decline", "ask"], "default": "ask" },
-    "tags": { "type": "array", "items": { "type": "string" } },
+    "owner": {
+      "type": "string"
+    },
+    "device": {
+      "type": "string"
+    },
+    "default": {
+      "enum": [
+        "join",
+        "decline",
+        "ask"
+      ],
+      "default": "ask"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "rules": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["decision"],
+        "required": [
+          "decision"
+        ],
         "properties": {
           "match": {
             "type": "object",
             "properties": {
-              "purpose": { "type": "string" },
-              "requester": { "type": "string" },
-              "sponsor_verified": { "type": "boolean" },
-              "ethics_approved": { "type": "boolean" },
-              "audit_certified": { "type": "boolean" }
+              "purpose": {
+                "type": "string"
+              },
+              "requester": {
+                "type": "string"
+              },
+              "sponsor_verified": {
+                "type": "boolean"
+              },
+              "ethics_approved": {
+                "type": "boolean"
+              },
+              "audit_certified": {
+                "type": "boolean"
+              }
             },
             "additionalProperties": false
           },
-          "allow_fields": { "type": "array", "items": { "type": "string" } },
-          "deny_fields": { "type": "array", "items": { "type": "string" } },
-          "min_price_usd": { "type": "number", "minimum": 0 },
-          "retention": { "type": "string" },
-          "grant_hours": { "type": "integer", "minimum": 1 },
-          "decision": { "enum": ["join", "decline", "ask"] }
+          "allow_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "deny_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_price_usd": {
+            "type": "number",
+            "minimum": 0
+          },
+          "retention": {
+            "type": "string"
+          },
+          "grant_hours": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "decision": {
+            "enum": [
+              "join",
+              "decline",
+              "ask"
+            ]
+          }
         },
         "additionalProperties": false
       }
     },
     "negotiation": {
       "type": "object",
-      "properties": { "join_collectives": { "type": "boolean" } },
+      "properties": {
+        "join_collectives": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "trust": {
+      "type": "object",
+      "description": "Whose signatures count. Anyone not listed counts as no one.",
+      "properties": {
+        "issuers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auditors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ethics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
       "additionalProperties": false
     }
   },

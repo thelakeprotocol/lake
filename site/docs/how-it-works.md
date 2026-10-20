@@ -48,7 +48,9 @@ Each joining house signs the final **ODRL Agreement** and stores it in `/agreeme
 
 ## 8. Compute in place
 
-The certified study code runs **inside each house**, sandboxed, with no network and no writes. Before using any value it verifies the chain: the issuer's signature on the original record, the hash match, and the converter's certificate. Tampered or unsigned values are excluded, and that house isn't paid. It returns only statistical fragments.
+The study is a declaration, not code: a few yes/no questions about canonical fields. It runs **inside each house**. Before answering, the house re-verifies its chain: a trusted issuer signed the original, the original is unchanged, a trusted auditor certified the converter, the converted record is the housekeeper's signed copy. A tampered house drops out.
+
+Then it reads only the granted fields through its pod's MCP door, works out which cell of the table its owner falls in, and sends back **one randomised answer** (local differential privacy). One answer is deniable; a thousand cancel out the noise. Every computation goes in the house's audit log with `recordsOut: 0`.
 
 ## 9. Pay
 

@@ -7,3 +7,7 @@ rules:
     decision: ask
 negotiation:
   join_collectives: false
+trust:                       # whose signatures count; anyone else's approval counts as none
+  issuers: [issuer.lake.local]
+  auditors: [audit.lake.local]
+  ethics: [ethics.lake.local]

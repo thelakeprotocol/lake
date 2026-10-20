@@ -14,3 +14,7 @@ rules:
     decision: decline
 negotiation:
   join_collectives: true
+trust:                       # whose signatures count; anyone else's approval counts as none
+  issuers: [issuer.lake.local]
+  auditors: [audit.lake.local]
+  ethics: [ethics.lake.local]

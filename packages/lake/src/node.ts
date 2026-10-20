@@ -29,7 +29,7 @@ export interface Counters {
 type Wire =
   | { type: 'snapshot'; node: string; sandbox: boolean; participants: Participant[]; counters: Counters; recent: Line[] }
   | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
-interface Participant { id: string; role: string; label: string; tags: string[] }
+interface Participant { id: string; role: string; label: string; tags: string[]; domain: string }
 interface Line { event: LakeEvent; text: string }
 
 /**
@@ -59,7 +59,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     o.id,
   );
 
-  const participant = (e: Entry): Participant => ({ id: e.id, role: e.profile.role, label: e.label, tags: e.profile.tags });
+  const participant = (e: Entry): Participant => ({ id: e.id, role: e.profile.role, label: e.label, tags: e.profile.tags, domain: e.profile.ownerDomain });
   const recount = () => {
     const all = registry.all();
     counters.houses = all.filter((e) => e.profile.role === 'house').length;
@@ -69,12 +69,21 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   function publish(event: LakeEvent, p?: Participant) {
     switch (event.kind) {
-      case 'knock':
-        counters.conversations++;
-        if (event.subject && !registry.get(event.subject)) seenVisitors.add(event.subject);
+      case 'knock': {
+        // A registered agent reports its own broadcast (with a count); a house reports each knock it gets.
+        // Count a house's report only when the knocker didn't already report its broadcast here.
+        const knocker = event.subject && registry.all().some((e) => `agent:${e.profile.ownerDomain}` === event.subject);
+        if (event.data?.count !== undefined) counters.conversations += Number(event.data.count);
+        else if (!knocker) {
+          counters.conversations++;
+          if (event.subject) seenVisitors.add(event.subject);
+        }
         break;
+      }
       case 'attack.blocked': counters.attacksBlocked++; break;
       case 'payment.settled': counters.valueSettled += Number(event.data?.amount ?? 0); break;
+      // Computed from what each house's audit log says left it, never assumed.
+      case 'compute.done': counters.recordsMoved += Number(event.data?.recordsOut ?? 0); break;
       case 'record.moved': counters.recordsMoved += Number(event.data?.count ?? 1); break;
     }
     recount();

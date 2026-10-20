@@ -1,13 +1,12 @@
 # @thelakeprotocol/visitor
 
-The `lake` CLI. Image: `ghcr.io/thelakeprotocol/lake`.
+The `lake` CLI and the research agent. Image: `ghcr.io/thelakeprotocol/lake`.
 
 ```bash
-lake knock <house-url> [--offer research|gp|marketing|injection] [--as <domain>]
-           [--purpose p --fields a,b --price 2 --retention none] [--note "..."]
-           [--tamper forge-card|unsigned|replay|impersonate] [--json]
+lake knock <house-url> [--offer research|gp|marketing|injection] [--tamper forge-card|unsigned|replay|impersonate]
+lake dispatch [--goal "..."] [--price 5] [--extra-fields postcode] [--epsilon 2] [--node …] [--ethics …] [--auditor …]
 ```
 
-`knock` signs an offer with a visitor key (kept in `~/.lake/`), sends it over A2A declaring the Lake extension, and verifies the house's signed reply. `--tamper` sends the attacks a house must reject.
+`dispatch` runs the mission: ethics approval → study certificate → discover houses on the node → knock on each over A2A with the offer, the study and both credentials → collect decisions and grants → ask each joining house to run the study → de-bias the randomised answers → report the result. It serves its own card while it runs, so the node can verify it and show it on the map.
 
-Coming: `lake dispatch` (milestone 3), `lake attack` (6), `lake revoke` (4), `lake reset`.
+Coming: `lake attack` (6), `lake revoke` (4), `lake reset`.

@@ -2,7 +2,7 @@
 export const EVENT_KINDS = [
   'house.joined', 'house.left', 'agent.registered', 'knock', 'offer', 'counter', 'decision',
   'agreement.signed', 'grant.issued', 'grant.revoked', 'approval.requested', 'approval.answered',
-  'payment.settled', 'attack.blocked', 'agent.quarantined', 'guild.formed', 'study.result', 'record.moved',
+  'payment.settled', 'attack.blocked', 'agent.quarantined', 'guild.formed', 'study.result', 'compute.done', 'record.moved',
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -46,7 +46,8 @@ export function describe(e: LakeEvent): string {
     case 'attack.blocked': return `${e.actor} blocked ${e.subject}: ${d.why}.`;
     case 'agent.quarantined': return `${e.subject} quarantined after ${d.blocks} blocked attempts. No human involved.`;
     case 'guild.formed': return `Guild formed: ${d.members} houses for ${d.tag} now bargain as one.`;
-    case 'study.result': return `Study answered from ${d.participants} houses. Records moved: ${d.recordsMoved}.`;
+    case 'study.result': return `${e.actor} got its answer from ${d.participants} houses${d.summary ? `: ${d.summary}` : ''}.`;
+    case 'compute.done': return `${e.actor} ran ${e.subject}'s certified study inside its pod. Records out: ${d.recordsOut}.`;
     case 'record.moved': return `ALERT: a record left ${e.actor}.`;
   }
 }

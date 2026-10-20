@@ -54,7 +54,7 @@ const flow = [
   ['Decide', 'Each housekeeper runs its owner’s rules in code: join, decline, or ask the owner.'],
   ['Bargain', 'Housekeepers see the identical offer and counter as one bloc: $5, and drop the postcode.'],
   ['Grant', 'Owners’ standing rules or live taps issue 48-hour keys that match the signed agreement exactly.'],
-  ['Compute', 'Certified code runs inside each house, verifies every signature, returns only statistics.'],
+  ['Compute', 'The certified study runs inside each house, re-checks every signature, and sends back one randomised answer.'],
   ['Pay', 'The Payments agent settles under the mandate. A receipt lands in every pod.'],
   ['Answer', 'Fragments combine into one answer. Records moved: 0.'],
 ];
@@ -70,7 +70,7 @@ const standards = [
 ];
 
 const milestones = [
-  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'next'], ['Approvals', ''],
+  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'done'], ['Approvals', 'next'],
   ['Money', ''], ['Wild life', ''], ['1,000 houses', ''], ['Federation', ''], ['Open door', ''],
 ];
 </script>
@@ -220,7 +220,7 @@ await me.offer(houses, terms)</code></pre>
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Days old. Built in the open.</h2>
-      <p class="kicker">The protocol, the house, the node and the live map are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">Houses, the node, the live map and a full study across the Lake are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>

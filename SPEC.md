@@ -113,6 +113,8 @@ An offer is an ODRL 2.2 `Offer`. Its targets are canonical Lake fields. It MUST 
 
 Offers carry the visitor's credentials (ethics approval, audit certificate) as Verifiable Credentials.
 
+An offer for a study carries the study itself, its id in `offer.study`, and two attachments: an ethics approval and an audit certificate, each a Verifiable Credential together with the signed card of whoever issued it (§5.2).
+
 An offer MAY include a free-text `note`. It is **untrusted**. A housekeeper MUST NOT let it change a decision. It may be shown to a human, quoted, and nothing else.
 
 An **agreement** is the ODRL `Agreement` both parties sign, built from the final accepted offer. Both parties MUST store it: the house in its pod at `/agreements/`.
@@ -132,7 +134,31 @@ A housekeeper answers every offer with exactly one of:
 
 Decisions MUST be computed in code from the owner's rules (see [`rules.yaml`](https://lake.doneinfifty.com/docs/rules)). A model MAY write the plain-English reason shown to the owner. A model MUST NOT decide, and MUST NOT hold the power to issue a grant.
 
-### 5.1 Collective counter-offers
+### 5.1 Trust
+
+A credential counts only if its issuer's card verifies, its domain is proved, **and that domain is on the owner's trust list**:
+
+```yaml
+trust:
+  issuers: [hospital.example]      # who may sign records
+  auditors: [audit.example]        # who may certify studies and converters
+  ethics: [ethics.university.example]
+```
+
+An approval from a domain the owner does not list counts as no approval. Nobody appoints ethics bodies or auditors for the Lake; owners choose. Nodes MAY publish suggested trust lists, like blocklists; owners opt in.
+
+### 5.2 Credentials a house checks
+
+| Credential | `type` | `credentialSubject.id` | Issued by |
+|---|---|---|---|
+| Health record | `LakeHealthRecordCredential` | the owner's WebID; `relatedResource.digestSRI` pins the original | a trusted issuer |
+| Converter certificate | `LakeConverterCertificate` | `urn:lake:converter:<package>@<version>` | a trusted auditor |
+| Ethics approval | `LakeEthicsApproval` | the study id; lists approved `fields` | a trusted ethics body |
+| Study certificate | `LakeStudyCertificate` | the study id | a trusted auditor |
+
+A study without a valid certificate from a trusted auditor MUST be declined, whatever the owner's rules say.
+
+### 5.3 Collective counter-offers
 
 Houses that counter the same offer (same offer `uid`) and opted in with `join_collectives: true` MAY form a bloc. The bloc's counter asks for the **highest** minimum price among members and **only the fields every member accepts**. One signed counter goes back to the visitor, listing member count but not member identities.
 
@@ -143,11 +169,16 @@ Houses that counter the same offer (same offer `uid`) and opted in with `join_co
 - An agent MUST NOT be able to mint, widen or extend a grant. The pod's access layer MUST enforce this, not only agent code.
 - Revocation is immediate. A revoked grant MUST stop working within 1 second on the reference implementation.
 
+A grant is a `LakeAccessGrant` credential signed by the house, with `credentialSubject`: the visitor's WebID (`id`), `offer`, `study`, `fields`, `purpose`, `authorizedBy` (the standing rule, or the owner's live approval) and `rules` (the digest of the rules that authorised it), and a `validUntil`. The house stores it in `/agreements/`.
+
 ## 7. Data never moves
 
-- Study code runs inside the house, against the pod, and returns only aggregate fragments.
-- Code without a valid auditor certificate MUST NOT run. Certified code runs with no network and no writes.
-- Every read of a pod resource by a visitor is logged in the pod. A node's **Records moved** counter is computed from those logs and MUST be published, even when it is not zero.
+In v0 a **study is a declaration, not code**: up to four yes/no questions about canonical fields (`age_at_least`, `has_code`, `present`). Its id is `urn:lake:study:` + the digest of its canonical JSON.
+
+- The visitor sends `{ kind: "compute", grant, study }`. The house checks the grant is its own, unexpired, for this visitor and this study, re-verifies its record chain, and reads only the granted fields.
+- The house answers with **one randomised fragment**: the one-hot cell its owner falls in, perturbed by unary randomised response with the study's privacy budget ε (at most 4). Any single fragment is deniable; the visitor de-biases the sum across houses.
+- Every computation is written to the house's `/audit/` log (`fieldsRead`, `claimsRead`, `recordsOut`) and reported as a `compute.done` event. A node's **Records moved** counter is the sum of `recordsOut` and MUST be published, even when it is not zero.
+- Arbitrary study code needs attested execution; it is a stretch goal, not v0.
 
 ## 8. Events
 
@@ -161,7 +192,7 @@ Participants report events to a node as a signed batch (`{ kind: "events", event
 
 Kinds in v0:
 
-`house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `record.moved`
+`house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved`
 
 ## 9. Federation
 

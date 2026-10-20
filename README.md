@@ -85,6 +85,18 @@ docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper for
 # ✗ REJECTED (forged-card): card signature does not verify
 ```
 
+Then run a whole study across the Lake and watch it on the map:
+
+```bash
+docker compose run --rm lake dispatch --price 5
+# ETHICS   asking http://ethics:4500 to review the protocol
+# AUDIT    asking http://auditor:4400 to certify the study
+# KNOCK    knocking on 4 houses: $5 for age_band, medications, readmissions
+# DECIDE   3 join · 1 ask
+# COMPUTE  running the certified study inside 3 houses
+# ANSWER   …
+```
+
 Your `rules.yaml` is the note on the fridge:
 
 ```yaml
@@ -127,8 +139,8 @@ Honest, updated every merge.
 | ✅ | **Website + docs** | [lake.doneinfifty.com](https://lake.doneinfifty.com) |
 | ✅ | **M1 House**: real Solid pod + WebID, issuer-signed synthetic record, FHIR → canonical model (SHACL-valid), housekeeper answering A2A through MCP, `lake knock` | runs, end-to-end tested. Fresh house joins in ~11 s on a busy 4-core box; target is 5 s ([help wanted](https://github.com/thelakeprotocol/lake/issues)) |
 | ✅ | **M2 Lake node**: registry that verifies every card and checks the registrant serves it, signed event intake (the node stamps who said it), counters, WebSocket stream, live map | runs, end-to-end tested. The NATS bus arrives with broadcast knocks in M3 |
-| 🔨 | **M3 Mission**: ethics, audit, knock, decide, grant, compute in place | next |
-| ⬜ | **M4 Approvals app**: Allow from your phone, revoke in under 1 second | |
+| ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and returns one randomised answer; de-biased result; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
+| 🔨 | **M4 Approvals app**: Allow from your phone, revoke in under 1 second | next |
 | ⬜ | **M5 Money**: ODRL agreements, collective bargaining, AP2 mandates | |
 | ⬜ | **M6 Wild life**: swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | |
 | ⬜ | **M7 Scale**: 1,000 houses on one laptop | |
@@ -154,8 +166,8 @@ packages/
   core/          signing, Lake cards, rules engine, ODRL, VCs, events     ✅
   house/         Solid pod + housekeeper + MCP pod door                   ✅
   lake/          registry, event stream, counters (bus: M3)               ✅
-  visitor/       `lake` CLI (knock ✅) + research agent                    M3
-  specialists/   issuer ✅ · ethics, auditor, payments                     M3–M5
+  visitor/       `lake` CLI: knock, dispatch (the research agent)         ✅
+  specialists/   issuer, ethics, auditor ✅ · payments                     M5
   swarm/         background traders and attackers                        M6
   ui/            the live map ✅ · the approvals app                       M4
   agent/         SDK for outside agents                                   M9

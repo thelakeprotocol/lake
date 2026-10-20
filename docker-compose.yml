@@ -2,6 +2,7 @@
 #   docker compose up                 (pulls images; add --build to build from source)
 #   open http://localhost:7000        (the live map)
 #   docker compose run --rm lake knock http://house-stan:4000 --offer gp
+#   docker compose run --rm lake dispatch --price 5
 # Join from anywhere on this machine:
 #   docker run --network lake_default --hostname house-you \
 #     -v ./personas/research.yaml:/rules.yaml ghcr.io/thelakeprotocol/lake-house --name you
@@ -10,9 +11,9 @@ name: lake
 x-house: &house
   build: { context: ., target: house }
   image: ghcr.io/thelakeprotocol/lake-house:latest
-  depends_on: [issuer, lake-node]
+  depends_on: [issuer, auditor, lake-node]
   restart: unless-stopped
-  environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+  environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42" }
 
 services:
   lake-node:
@@ -30,6 +31,24 @@ services:
     depends_on: [lake-node]
     environment: { LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [issuer:/data]
+
+  auditor:
+    build: { context: ., target: specialists }
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    hostname: auditor
+    command: ["auditor", "--url", "http://auditor:4400"]
+    depends_on: [lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [auditor:/data]
+
+  ethics:
+    build: { context: ., target: specialists }
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    hostname: ethics
+    command: ["ethics", "--url", "http://ethics:4500"]
+    depends_on: [lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [ethics:/data]
 
   house-stan:
     <<: *house
@@ -54,5 +73,6 @@ services:
     build: { context: ., target: cli }
     image: ghcr.io/thelakeprotocol/lake:latest
     profiles: [cli]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
 
-volumes: { node: {}, issuer: {}, stan: {}, strict: {}, research: {} }
+volumes: { node: {}, issuer: {}, auditor: {}, ethics: {}, stan: {}, strict: {}, research: {} }

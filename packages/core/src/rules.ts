@@ -13,6 +13,8 @@ export interface Rules {
   rules: Rule[];
   negotiation?: { join_collectives?: boolean };
   tags?: string[];
+  /** Whose signatures count. An approval from anyone not listed counts as no approval. */
+  trust?: { ethics?: string[]; auditors?: string[]; issuers?: string[] };
 }
 
 export interface Rule {
@@ -45,6 +47,9 @@ export function parseRules(text: string): Rules {
     }
     return { ...r, match: r.match ?? {} };
   });
+  for (const k of Object.keys(raw.trust ?? {})) {
+    if (!['ethics', 'auditors', 'issuers'].includes(k)) throw new RulesError(`trust: unknown list "${k}" (allowed: ethics, auditors, issuers)`);
+  }
   return { ...raw, owner: raw.owner, default: def, rules } as Rules;
 }
 

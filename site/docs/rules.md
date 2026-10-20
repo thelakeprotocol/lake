@@ -62,6 +62,19 @@ A `default: join` with no matching rule becomes **ask**, because without a rule 
 | `rules[].decision` | `join` \| `decline` \| `ask` | |
 | `negotiation.join_collectives` | boolean | Allow your housekeeper to bargain with neighbours as one bloc |
 
+### Trust
+
+```yaml
+trust:
+  issuers: [issuer.lake.local]     # who may sign your records
+  auditors: [audit.lake.local]     # who may certify studies and converters
+  ethics: [ethics.lake.local]      # whose ethics approvals count
+```
+
+`ethics_approved: true` in a rule means *approved by an ethics body you list here*. An approval from anyone else counts as none. Nobody appoints these for the Lake; you choose. A sandbox house with no `trust` section trusts the demo specialists and says so in its log; outside the sandbox, an empty list trusts nobody.
+
+Whatever your rules say, a study without a certificate from an auditor you trust never runs in your house.
+
 Machine-readable: [`spec/schemas/rules.schema.json`](https://github.com/thelakeprotocol/lake/blob/main/spec/schemas/rules.schema.json).
 
 ## Safety properties

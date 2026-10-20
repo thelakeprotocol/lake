@@ -12,7 +12,7 @@ import {
 import { Housekeeper } from './housekeeper.js';
 import { createPodMcpServer } from './pod-mcp.js';
 import { ownerSession, startPod, type OwnerSession } from './pod.js';
-import { convertRecord, fetchRecord, RECORD } from './record.js';
+import { convertRecord, fetchConverterCert, fetchRecord, RECORD } from './record.js';
 import { createHouseServer } from './server.js';
 
 const { values: a } = parseArgs({
@@ -26,13 +26,16 @@ const { values: a } = parseArgs({
     'pod-url': { type: 'string', default: process.env.LAKE_POD_URL },
     'issuer-url': { type: 'string', default: process.env.LAKE_ISSUER_URL ?? 'http://issuer:4300' },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
+    'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
+    seed: { type: 'string', default: process.env.LAKE_SEED },
     domain: { type: 'string', default: process.env.LAKE_DOMAIN },
     production: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
   },
 });
 
-const rules = parseRules(await readFile(a.rules!, 'utf8').catch(() => readFile(new URL('../../../personas/stan.yaml', import.meta.url), 'utf8')));
+const rulesText = await readFile(a.rules!, 'utf8').catch(() => readFile(new URL('../../../personas/stan.yaml', import.meta.url), 'utf8'));
+const rules = parseRules(rulesText);
 const name = (a.name ?? rules.owner ?? hostname()).toLowerCase().replace(/[^a-z0-9-]/g, '-');
 const port = Number(a.port);
 const podPort = Number(a['pod-port']);
@@ -48,6 +51,9 @@ if (podHost.protocol === 'http:' && podHost.hostname.split('.').pop() !== 'local
 }
 const sandbox = !a.production;
 const actor = `house:${name}`;
+// Whose signatures count. A sandbox house with no trust section trusts the demo specialists, and says so.
+const DEMO_TRUST = { issuers: ['issuer.lake.local'], auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'] };
+const trust = { issuers: rules.trust?.issuers ?? (sandbox ? DEMO_TRUST.issuers : []), auditors: rules.trust?.auditors ?? (sandbox ? DEMO_TRUST.auditors : []), ethics: rules.trust?.ethics ?? (sandbox ? DEMO_TRUST.ethics : []) };
 
 let link: LakeLink | null = null;
 const emit = (e: LakeEvent) => {
@@ -64,33 +70,9 @@ const owner = await ownerSession(podOpts);
 say(`pod up: ${owner.podRoot} (WebID ${owner.webId})`);
 
 // 2. Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
-for (const f of ['health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/']) await ensureContainer(owner, f);
+for (const f of ['health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/']) await ensureContainer(owner, f);
 const id = await walletIdentity(owner);
-
-// 3. The record: signed by the issuer, converted in the pod, signed again by the housekeeper.
-const claimsUrl = `${owner.podRoot}${RECORD.claims}`;
-if ((await owner.fetch(`${owner.podRoot}${RECORD.claims}`, { method: 'HEAD' })).status === 404) {
-  say(`asking the issuer at ${a['issuer-url']} for a signed synthetic record`);
-  try {
-    const r = await fetchRecord(a['issuer-url']!, owner.webId);
-    const c = await convertRecord(r, { webId: owner.webId, claimsUrl, id });
-    await put(owner, RECORD.bundle, r.bundle, 'application/json');
-    await put(owner, RECORD.credential, r.credential, 'text/plain');
-    await put(owner, RECORD.issuer, JSON.stringify({ issuer: r.issuer, recordId: r.recordId, jwk: r.issuerJwk }), 'application/json');
-    await put(owner, RECORD.claims, c.turtle, 'text/turtle');
-    await put(owner, RECORD.claimsCredential, c.credential, 'text/plain');
-    say(`record stored: ${c.claims.length} claims (${[...new Set(c.claims.map((x) => x.field))].join(', ')})`);
-  } catch (e) {
-    say(`WARNING: ${(e as Error).message}. This house holds no signed record and will not join studies.`);
-  }
-}
-
-// 4. The housekeeper, its MCP door to the pod, and its signed card.
-const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch });
-const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-await mcp.connect(serverSide);
-const podClient = new Client({ name: `housekeeper-${name}`, version: '0.1.0' });
-await podClient.connect(clientSide);
+if (!rules.trust && sandbox) say(`no trust section in rules.yaml; sandbox default: issuer ${DEMO_TRUST.issuers}, auditor ${DEMO_TRUST.auditors}, ethics ${DEMO_TRUST.ethics}`);
 
 const card = await signCard(
   buildCard(
@@ -105,9 +87,45 @@ const card = await signCard(
   ),
   id,
 );
-const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, pod: podClient, claimsUrl, sandbox, emit });
+
+// 3. The record: signed by the issuer, converted in the pod, signed again by the housekeeper.
+const claimsUrl = `${owner.podRoot}${RECORD.claims}`;
+const missing = async (path: string) => (await owner.fetch(owner.podRoot + path, { method: 'HEAD' })).status === 404;
+if (await missing(RECORD.converterCert)) {
+  say(`asking the auditor at ${a['auditor-url']} to certify this house's converter`);
+  try {
+    const cert = await fetchConverterCert(a['auditor-url']!, { id, card, webId: owner.webId });
+    await put(owner, RECORD.converterCert, JSON.stringify(cert), 'application/json');
+  } catch (e) {
+    say(`WARNING: ${(e as Error).message}. Uncertified converter: this house's data can't be used in studies.`);
+  }
+}
+if (await missing(RECORD.claims)) {
+  say(`asking the issuer at ${a['issuer-url']} for a signed synthetic record`);
+  try {
+    const r = await fetchRecord(a['issuer-url']!, owner.webId);
+    const c = await convertRecord(r, { webId: owner.webId, claimsUrl, id, converterCert: owner.podRoot + RECORD.converterCert });
+    await put(owner, RECORD.bundle, r.bundle, 'application/json');
+    await put(owner, RECORD.credential, r.credential, 'text/plain');
+    await put(owner, RECORD.issuer, JSON.stringify({ recordId: r.recordId, card: r.issuerCard }), 'application/json');
+    await put(owner, RECORD.claims, c.turtle, 'text/turtle');
+    await put(owner, RECORD.claimsCredential, c.credential, 'text/plain');
+    say(`record stored: ${c.claims.length} claims (${[...new Set(c.claims.map((x) => x.field))].join(', ')})`);
+  } catch (e) {
+    say(`WARNING: ${(e as Error).message}. This house holds no signed record and will not join studies.`);
+  }
+}
+
+// 4. The housekeeper and its MCP door to the pod: reads anything, writes only agreements and its audit log.
+const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/'] });
+const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+await mcp.connect(serverSide);
+const podClient = new Client({ name: `housekeeper-${name}`, version: '0.1.0' });
+await podClient.connect(clientSide);
+
+const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox, seed: a.seed, emit });
 const check = await keeper.verifyOwnRecord();
-say(check.ok ? 'record chain verified: issuer → original → converted → housekeeper' : `record chain BROKEN: ${check.why}`);
+say(check.ok ? 'record chain verified: trusted issuer → original → certified converter → housekeeper' : `record chain BROKEN: ${check.why}`);
 
 const server = createHouseServer(card, keeper).listen(port, async () => {
   say(`A2A on ${publicUrl}/a2a · card at ${publicUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
