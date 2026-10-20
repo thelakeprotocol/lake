@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  buildCard, exportIdentity, generateIdentity, importIdentity, LakeLink, makeEvent, parseRules, signCard,
+  buildCard, exportIdentity, generateIdentity, importIdentity, LakeLinks, makeEvent, parseRules, signCard,
   type AgentCard, type Identity, type LakeEvent,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -26,6 +26,7 @@ export interface HouseOptions {
   ownerUrl?: string;
   issuerUrl: string;
   auditorUrl: string;
+  /** One or more Lake nodes, comma-separated. The house registers with and reports to each. */
   lakeUrl?: string;
   seed?: string;
   sandbox: boolean;
@@ -43,7 +44,7 @@ export interface House {
   keeper: Housekeeper;
   desk: OwnerDesk;
   app: express.Express;
-  link: LakeLink | null;
+  link: LakeLinks | null;
   /** Register with the node (if any), follow its signals, and announce the house. */
   join: () => Promise<void>;
   leave: () => Promise<void>;
@@ -74,7 +75,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     issuers: t?.issuers ?? (o.sandbox ? DEMO_TRUST.issuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
     ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
   };
-  let link: LakeLink | null = null;
+  let link: LakeLinks | null = null;
   const emit = (e: LakeEvent) => {
     o.emit(e);
     link?.report(e);
@@ -168,9 +169,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     get link() { return link; },
     join: async () => {
       if (o.lakeUrl) {
-        link = new LakeLink({ nodeUrl: o.lakeUrl.replace(/\/$/, ''), card, identity: id, webId: owner.webId, log: say });
-        const nodeId = await link.register();
-        if (nodeId) say(`registered with the Lake node at ${o.lakeUrl} as ${nodeId}`);
+        const nodes = o.lakeUrl.split(',').map((u) => u.trim()).filter(Boolean);
+        link = new LakeLinks({ nodeUrls: nodes, card, identity: id, webId: owner.webId, log: say });
+        const ids = await link.register();
+        ids.forEach((nodeId, i) => { if (nodeId) say(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
         setInterval(async () => {
           const s = await link?.signals();
           if (s) { signals.blocklist = new Set(s.blocklist); signals.reputation = s.reputation; }

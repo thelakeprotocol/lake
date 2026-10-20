@@ -1,6 +1,6 @@
 # Run a node
 
-<span class="status done">runs</span> registry, event stream, counters, live map · <span class="status later">later</span> NATS bus (milestone 3), federation (milestone 8)
+<span class="status done">runs</span> registry, event stream, counters, live map, signals, federation
 
 <p class="lead">A Lake node is the water, not the fish. It routes and records. It holds no personal data and makes no decisions.</p>
 
@@ -40,4 +40,13 @@ Open `http://localhost:7000` for the live map. Participants join with `--lake <n
 
 The node keeps everything in memory. Restart it and participants re-register on their next start; nothing personal is lost, because nothing personal was ever there.
 
-Following other nodes and sharing blocklists is [milestone 8](/docs/roadmap). Want to build it? [Claim it](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).
+## Federation
+
+```bash
+docker run -p 7000:7000 ghcr.io/thelakeprotocol/lake-node --domain lake.example --url https://lake.example \
+  --follow https://lake.other.example,https://lake.third.example
+```
+
+Every 5 seconds the node reads each peer's cards and verifies every one itself (signature, domain, the card served at the agent's own endpoint), drops cards a peer no longer lists, and merges the peer's signed blocklist into its own `/signals`. Choose peers the way a mail server chooses whose spam lists to trust.
+
+Participants list several nodes, comma-separated: `LAKE_NODE_URL=https://lake.example,https://lake.other.example`.

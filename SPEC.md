@@ -215,6 +215,9 @@ Kinds in v0:
 ## 9. Federation
 
 - Anyone may run a node. Nodes follow peers they choose and exchange signed cards and revocation notices.
+- A node that follows a peer reads the peer's `/cards` and MUST verify each card itself exactly as for a direct registration (signature, domain, and the card served at the agent's own endpoint). A peer can point a node at agents; it can't vouch for them. When a peer stops listing a card it supplied, the node drops it (that is the revocation notice), unless the agent registered there directly.
+- A node MAY republish the blocklists of peers it follows in its own signed `/signals`.
+- Participants MAY register with, report to, and follow several nodes. Visitors SHOULD try several nodes for discovery and MAY remember houses they found, to reach them when every node is down.
 - Registries are search indexes, not gatekeepers. Any agent MUST be reachable through its `.well-known` card with every registry offline.
 - Nodes MAY publish and subscribe to blocklists and reputation signals. Each node chooses which lists it trusts.
 - A node publishes its signals at `/signals`, signed with its card's key: `{ kind: "signals", blocklist: [key ids], reputation: { domain: 0..1 } }`. A house follows the nodes it chooses and MUST verify the signature.

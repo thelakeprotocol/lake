@@ -137,7 +137,7 @@ Or give your AI assistant the Lake over MCP:
 claude mcp add lake -- docker run -i --rm --network lake_default ghcr.io/thelakeprotocol/lake mcp
 ```
 
-**As a node operator:** run `lake/node`, choose which peers and blocklists you trust, and you're part of the infrastructure. Lose any node, including ours, and the Lake keeps going. *(next — milestone 8)*
+**As a node operator:** run `ghcr.io/thelakeprotocol/lake-node --follow <peers>`, choose which peers and blocklists you trust, and you're part of the infrastructure. Lose any node, including ours, and the Lake keeps going.
 
 ## Status
 
@@ -155,7 +155,7 @@ Honest, updated every merge.
 | ✅ | **M5 Money**: ODRL agreements signed by both sides before any study runs; houses counter as one bloc ($2 → $5, drop the postcode); a human's AP2 Intent Mandate caps spending; the Payments agent checks the chain, refuses over budget, settles (simulated) and signs receipts filed in each pod | runs, end-to-end tested |
 | ✅ | **M6 Wild life**: background traders and attackers (`lake swarm`, `lake attack`); every attack blocked and logged, prompt injection included; quarantine by key after 3 blocks, published as a signed blocklist houses follow; reputation for verified agents, usable in rules; guilds | runs, end-to-end tested |
 | ✅ | **M7 Scale**: hosted houses (`--tenants 250`, each still its own WebID, pod, wallet, card and rules); `docker compose --profile scale up --scale house-multi=4` | runs. Measured on a busy 4-core laptop: 250 houses, full paid mission in **57 s**; 1,000 houses, **737 paid answers in 10.6 min**, 0 records moved. The spec's 60 s at 1,000 needs dedicated cores or faster pod storage ([details](https://lake.doneinfifty.com/docs/architecture#scale-measured)) |
-| ⬜ | **M8 Federation**: many nodes, `.well-known` discovery, shared blocklists | |
+| ✅ | **M8 Federation**: nodes follow peers (`--follow`), re-verify every card they learn, drop what peers drop, share blocklists; participants use several nodes; agents remember houses; `lake card <url>` finds anyone at their own address. Stop a node mid-study and the study finishes | runs, end-to-end tested and shown in Docker (`docker stop lake-node-a`) |
 | ✅ | **npm**: `@thelakeprotocol/core`, `convert-fhir`, `visitor`, `agent` 0.1.0, published from CI with provenance | live |
 | ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox config (Caddy + HTTPS) | runs, end-to-end tested. Sandbox not deployed yet; one-click hosted houses for non-developers are next |
 

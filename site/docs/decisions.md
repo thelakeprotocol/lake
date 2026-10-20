@@ -19,6 +19,8 @@
 | Broadcast | **Direct A2A** to every discovered house, 32 at a time; no NATS | Direct messaging is required anyway (SPEC §9); a bus is an optimisation to revisit at 1,000 houses (milestone 7) |
 | Converter certificates | The auditor certifies `name@version` from an allowlist | Pinning the package digest is a follow-up |
 | Grants | A `join` is the owner's standing pre-approval; keys are minted by the owner's approval flow (milestone 4) | Agents never mint keys |
+| Federation | Pull: a node reads its peers' `/cards` and `/signals` every 5 s, and re-verifies every card itself | Peers can point at agents but never vouch for them; no new protocol beyond what every node already serves |
+| Discovery with every node down | Agents remember the houses they found; every card lives at its owner's address | Registries are search indexes, not gatekeepers |
 | Record checks under load | Full chain once a minute; in between, re-read the two data files and compare with the digests the verified credentials pin | Tampering with either file is still caught; a forger can't swap credential files without the issuer's key |
 | Busy, not broken | A house that can't read its pod in time answers `busy`; agents retry three times | Overload must never be mistaken for a tampered record |
 | Payments at scale | Settled in batches of 100 under one Intent Mandate | The budget holds across batches; no message gets too large |

@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
   buildCard, cardUrlFor, cellLabels, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
-  type AgentCard, type Attachment, type Identity, type LakeLink, type Offer, type SignedAgreement, type Study,
+  type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
+import { readFile, writeFile } from 'node:fs/promises';
 import { ask, type Visitor } from './knock.js';
 
 export function readmissionStudy(question = 'Do over-60s on drug X get readmitted less?', epsilon = 2): Study {
@@ -38,7 +39,10 @@ export async function makeHuman(id: Identity, domain: string): Promise<Human> {
 
 export interface DispatchOptions {
   visitor: Visitor;
-  node: string;
+  /** One or more Lake nodes (comma-separated or an array). Discovery tries each in turn. */
+  node: string | string[];
+  /** Remember discovered houses here, so a study can still find them with every node offline. */
+  houseCache?: string;
   ethics: string;
   auditor: string;
   study: Study;
@@ -50,7 +54,7 @@ export interface DispatchOptions {
   waitSeconds?: number;
   /** Money: the human who signs the mandate, the cap, and who settles. Without it the mission runs unpaid. */
   money?: { human: Human; budgetUsd: number; payments: string };
-  link?: LakeLink | null;
+  link?: { report(e: LakeEvent): void; flush(): Promise<void> } | null;
   log?: (step: string, detail: string) => void;
 }
 
@@ -115,9 +119,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   if (audit.reply.kind !== 'certified') throw new Error(`auditor refused: ${(audit.reply.problems ?? []).join('; ')}`);
   const auditAtt: Attachment = { credential: audit.reply.credential, card: await cardOf(o.auditor) };
 
-  log('discover', `searching ${o.node} for houses with the health-study skill`);
-  const found = (await (await fetch(`${o.node}/cards?skill=health-study&role=house`)).json()) as { id: string; card: AgentCard }[];
-  const houses: House[] = found.map((f) => ({ id: f.id, name: f.card.name, url: f.card.supportedInterfaces[0]!.url }));
+  const houses = await discover(o, log);
 
   const decisions: Record<string, number> = {};
   const joined = new Map<string, Joined>();
@@ -273,6 +275,30 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     seconds: Math.round((Date.now() - t0) / 100) / 10,
     grants: [...joined.values()].map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
   };
+}
+
+/** Ask each node in turn; fall back to the houses remembered last time. Nodes are search indexes, not gatekeepers. */
+async function discover(o: DispatchOptions, log: (step: string, detail: string) => void): Promise<House[]> {
+  const nodes = (Array.isArray(o.node) ? o.node : o.node.split(',')).map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
+  for (const node of nodes) {
+    try {
+      log('discover', `searching ${node} for houses with the health-study skill`);
+      const found = (await (await fetch(`${node}/cards?skill=health-study&role=house`, { signal: AbortSignal.timeout(5000) })).json()) as { id: string; card: AgentCard }[];
+      const houses = found.map((f) => ({ id: f.id, name: f.card.name, url: f.card.supportedInterfaces[0]!.url }));
+      if (o.houseCache) await writeFile(o.houseCache, JSON.stringify(houses)).catch(() => {});
+      return houses;
+    } catch {
+      log('discover', `${node} is unreachable`);
+    }
+  }
+  if (o.houseCache) {
+    const cached = JSON.parse(await readFile(o.houseCache, 'utf8').catch(() => '[]')) as House[];
+    if (cached.length) {
+      log('discover', `every node is down: using ${cached.length} houses remembered from last time (their cards live at their own .well-known)`);
+      return cached;
+    }
+  }
+  throw new Error('no node reachable and no houses remembered');
 }
 
 const cardCache = new Map<string, Promise<AgentCard>>();

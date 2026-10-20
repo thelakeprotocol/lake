@@ -75,3 +75,39 @@ export class LakeLink {
     }
   }
 }
+
+/**
+ * Lines to several nodes at once (SPEC §9): register with each, report to each, and follow the signals
+ * of all of them. Any node can vanish; the others carry on, and so does every conversation.
+ */
+export class LakeLinks {
+  readonly links: LakeLink[];
+
+  constructor(o: { nodeUrls: string[]; card: AgentCard; identity: Identity; webId: string; log?: (msg: string) => void }) {
+    this.links = o.nodeUrls.map((u) => new LakeLink({ ...o, nodeUrl: u.replace(/\/$/, '') }));
+  }
+
+  /** Registers with every node; returns the ids each one gave (null where a node refused or was down). */
+  async register(tries = 60): Promise<(string | null)[]> {
+    return Promise.all(this.links.map((l) => l.register(tries)));
+  }
+
+  report(e: LakeEvent) {
+    for (const l of this.links) l.report(e);
+  }
+
+  async flush() {
+    await Promise.all(this.links.map((l) => l.flush()));
+  }
+
+  /** Union of the blocklists, average of the reputations, across the nodes that answered. */
+  async signals(): Promise<Signals | null> {
+    const all = (await Promise.all(this.links.map((l) => l.signals()))).filter((s): s is Signals => !!s);
+    if (!all.length) return null;
+    const blocklist = [...new Set(all.flatMap((s) => s.blocklist))];
+    const sums = new Map<string, number[]>();
+    for (const s of all) for (const [d, r] of Object.entries(s.reputation)) sums.set(d, [...(sums.get(d) ?? []), r]);
+    const reputation = Object.fromEntries([...sums].map(([d, rs]) => [d, Math.round((rs.reduce((a, b) => a + b, 0) / rs.length) * 100) / 100]));
+    return { blocklist, reputation };
+  }
+}

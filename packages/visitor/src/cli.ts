@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
-import { lakeAgentApp, LakeLink, loadOrCreateIdentity, signMessage, type LakeData } from '@thelakeprotocol/core';
+import { cardUrlFor, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
 import { dispatch, makeHuman, readmissionStudy } from './dispatch.js';
 import { attack, houseUrls, swarm } from './attack.js';
 import { knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
@@ -18,6 +18,7 @@ const HELP = `lake — talk to the Lake
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
                 [--wait 30] [--unpaid] [--concurrency 32] [--port 4800] [--json]
 
+  lake card <agent-url>            fetch and verify any agent's card from its own .well-known path (no node needed)
   lake attack [--count 10] [--node http://lake-node:7000] [<house-url> …]
   lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
 
@@ -56,7 +57,18 @@ const { positionals, values: a } = parseArgs({
 
 if (cmd === 'knock') await knockCmd();
 else if (cmd === 'dispatch') await dispatchCmd();
-else if (cmd === 'attack') {
+else if (cmd === 'card') {
+  // Registries are search indexes, not gatekeepers: every agent can be found at its own address.
+  const at = positionals[0];
+  if (!at) throw new Error('lake card <agent url, e.g. https://house.example/a2a or https://house.example>');
+  const url = at.endsWith('/a2a') ? cardUrlFor(at) : `${at.replace(/\/$/, '')}/.well-known/agent-card.json`;
+  const card = await (await fetch(url, { headers: { 'A2A-Version': '1.0' } })).json();
+  const p = await verifyLakeCard(card);
+  console.log(a.json ? JSON.stringify(card, null, 2) : `✓ ${card.name} — signed card verified
+  role ${p.role} · owner ${p.ownerDomain} · WebID ${p.webId}
+  key ${p.publicJwk.kid} · tags ${p.tags.join(', ') || 'none'}
+  A2A ${card.supportedInterfaces[0]?.url}`);
+} else if (cmd === 'attack') {
   const houses = positionals.length ? positionals : await houseUrls(a.node!);
   const r = await attack({ houses, count: Number(a.count), log: (l) => console.log(l) });
   console.log(`DONE      attacker ${r.domain}: ${Object.entries(r.tally).map(([k, n]) => `${n} ${k}`).join(', ')}`);
@@ -103,14 +115,14 @@ async function dispatchCmd() {
   const visitor = await makeVisitor(id, domain, `Research agent (${domain})`, url);
   const reply = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'a research agent on a mission' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
   const server = lakeAgentApp(visitor.card, reply).listen(port);
-  const link = new LakeLink({ nodeUrl: a.node!.replace(/\/$/, ''), card: visitor.card, identity: id, webId: visitor.webId, log: (m) => { if (!a.json) console.log(`NODE      ${m}`); } });
+  const link = new LakeLinks({ nodeUrls: a.node!.split(',').map((u) => u.trim()), card: visitor.card, identity: id, webId: visitor.webId, log: (m) => { if (!a.json) console.log(`NODE      ${m}`); } });
   await link.register(6);
 
   const say = (step: string, detail: string) => { if (!a.json) console.log(`${step.toUpperCase().padEnd(9)} ${detail}`); };
   say('dispatch', `"${a.goal}"  (as ${domain}, $${a.price ?? 2} per participant)`);
   try {
     const r = await dispatch({
-      visitor, node: a.node!, ethics: a.ethics!, auditor: a.auditor!, link, log: say,
+      visitor, node: a.node!, ethics: a.ethics!, auditor: a.auditor!, link, log: say, houseCache: `${homedir()}/.lake/houses.json`,
       study: readmissionStudy(a.goal, Number(a.epsilon)),
       priceUsd: Number(a.price ?? 2),
       extraFields: a['extra-fields']?.split(',').filter(Boolean),

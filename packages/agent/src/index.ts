@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  generateIdentity, lakeAgentApp, LakeLink, loadOrCreateIdentity, signMessage,
+  generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage,
   type AgentCard, type Identity, type LakeData, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { dispatch, knock, makeHuman, makeVisitor, readmissionStudy, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
@@ -14,7 +14,7 @@ export interface LakeAgentOptions {
   name: string;
   /** The domain that answers for this agent. Outside a sandbox it must publish your key (SPEC §2.3). */
   domain: string;
-  /** A Lake node to register with and search. */
+  /** One or more Lake nodes (comma-separated) to register with and search. */
   node: string;
   /** Port to serve this agent's card on. Default 4800. */
   port?: number;
@@ -67,13 +67,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const base = (o.publicUrl ?? `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
   const id: Identity = o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity();
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
-  const node = o.node.replace(/\/$/, '');
+  const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
   // Serve our card while we're around, so a node can verify it and others can look us up.
   const busy = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'this agent visits; it does not take offers' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
   const server: Server = lakeAgentApp(visitor.card, busy).listen(port);
   await new Promise((ok) => server.once('listening', ok));
-  const link = new LakeLink({ nodeUrl: node, card: visitor.card, identity: id, webId: visitor.webId });
+  const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
 
   return {
@@ -82,7 +82,16 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     domain: o.domain,
     async find(q = {}) {
       const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
-      const found = (await (await fetch(`${node}/cards?${params}`)).json()) as { card: AgentCard }[];
+      let found: { card: AgentCard }[] | null = null;
+      for (const node of nodes) {
+        try {
+          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
+          break;
+        } catch {
+          // try the next node
+        }
+      }
+      if (!found) throw new Error('no Lake node reachable');
       return found.map(({ card }) => {
         const p = card.capabilities?.extensions?.[0]?.params as { role: string; ownerDomain: string; tags: string[] };
         return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url };
@@ -94,7 +103,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;
       return dispatch({
-        visitor, node, link, log: s.log,
+        visitor, node: nodes, link, log: s.log, houseCache: o.keyFile ? `${o.keyFile}.houses.json` : undefined,
         ethics: o.ethics ?? 'http://ethics:4500',
         auditor: o.auditor ?? 'http://auditor:4400',
         study: s.study ?? readmissionStudy(question),

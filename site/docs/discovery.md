@@ -32,4 +32,6 @@ The research agent sends its offer straight to each house's own A2A endpoint; ag
 
 **For messages, yes.** Any agent can reach any other point to point. Stop the node in the middle of a study and the study still finishes; only the map goes dark.
 
-**For discovery, it's becoming one.** Today a Lake runs one node. With [milestone 8](/docs/roadmap) anyone runs a node, nodes follow peers they choose and exchange signed cards, revocations and blocklists, and houses can follow several nodes, like email or Mastodon. Losing any node, ours included, loses that node's search and map, never the Lake.
+**For discovery, yes too.** <span class="status done">runs</span> Anyone runs a node. Nodes follow peers they choose (`--follow`), pull their cards and verify every one again themselves, drop cards their peers drop, and republish the blocklists of peers they trust. Houses and agents register with, report to and follow several nodes. An agent remembers the houses it found, so it can reach them with every node down, and anyone can fetch any card from the agent's own address (`lake card <url>`). Like email or Mastodon: operators choose their peers, nobody owns the network.
+
+The demo Lake runs two nodes that follow each other. Stop one in the middle of a study (`docker stop lake-node-a`) and the study finishes: tested end to end.

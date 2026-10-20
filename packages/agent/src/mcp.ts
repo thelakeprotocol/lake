@@ -18,7 +18,7 @@ export function createLakeMcpServer(o: LakeAgentOptions): McpServer {
     { description: 'What is happening in this Lake right now: houses, agents, conversations, value settled, attacks blocked, records moved (the target is 0), guilds.', inputSchema: {} },
     async () => {
       try {
-        const s = await (await fetch(`${o.node.replace(/\/$/, '')}/state`)).json();
+        const s = await (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/state`)).json();
         const roles: Record<string, number> = {};
         for (const p of s.participants) roles[p.role] = (roles[p.role] ?? 0) + 1;
         return json({ counters: s.counters, participants: roles, guilds: s.guilds, explain: 'https://lake.doneinfifty.com/docs/agents' });

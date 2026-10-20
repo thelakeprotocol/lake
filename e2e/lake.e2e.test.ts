@@ -18,6 +18,7 @@ import { ask, knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.
 const procs: ChildProcess[] = [];
 let dir: string;
 let node: string;
+let nodeB: string;
 let ethics: string;
 let auditor: string;
 let payments: string;
@@ -44,6 +45,10 @@ beforeAll(async () => {
   const nodePort = await port();
   node = `http://localhost:${nodePort}`;
   await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2'], /Lake node on/);
+  // A second node that follows the first: anyone can run one (SPEC §9).
+  const nodeBPort = await port();
+  nodeB = `http://localhost:${nodeBPort}`;
+  await start(['packages/lake/dist/main.js', '--port', nodeBPort, '--data', join(dir, 'nodeB'), '--domain', 'b.lake.local', '--follow', node, '--sync-ms', '1000'], /Lake node on/);
   const [ip, ap, ep, pp] = [await port(), await port(), await port(), await port()];
   auditor = `http://localhost:${ap}`;
   ethics = `http://localhost:${ep}`;
@@ -314,5 +319,43 @@ describe('a mission, no money', () => {
     const r = await run();
     expect(r.decisions).toEqual({ join: 1, decline: 1, ask: 1 });
     expect(r.participants).toBe(1);
+  });
+});
+
+describe('federation (runs last: it stops the nodes)', () => {
+  const houseCache = () => join(dir, 'houses-cache.json');
+
+  it('a second node learns every house from the node it follows, verifying each card itself', async () => {
+    let n = 0;
+    for (let i = 0; i < 20 && n < 3; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      n = (await (await fetch(`${nodeB}/cards?role=house`)).json()).length;
+    }
+    expect(n).toBe(3);
+  });
+
+  it("shares the blocklists of the nodes it follows", async () => {
+    const own = (await (await fetch(`${node}/signals`)).json()).payload.blocklist as string[];
+    expect(own.length).toBeGreaterThan(0);
+    const followed = (await (await fetch(`${nodeB}/signals`)).json()).payload.blocklist as string[];
+    expect(followed).toEqual(expect.arrayContaining(own));
+  });
+
+  it('a mission finishes when a node dies in the middle of it', async () => {
+    const mission = dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5 });
+    await new Promise((r) => setTimeout(r, 300));
+    procs[0]!.kill('SIGTERM'); // the first node, gone
+    const r = await mission;
+    expect(r.participants).toBeGreaterThan(0);
+  });
+
+  it('with every node offline, houses are still found at their own .well-known address, and a study still runs', async () => {
+    procs[1]!.kill('SIGTERM'); // the second node, gone too
+    await new Promise((r) => setTimeout(r, 300));
+    const card = await (await fetch(`${houses.stan}/.well-known/agent-card.json`)).json();
+    expect((await verifyLakeCard(card)).role).toBe('house');
+    const r = await dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5 });
+    expect(r.houses).toBe(3);
+    expect(r.participants).toBeGreaterThan(0);
   });
 });

@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  buildCard, describe, EVENT_KINDS, makeEvent, ReplayGuard, signCard, signMessage, verifyMessage,
+  buildCard, describe, EVENT_KINDS, makeEvent, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
   type AgentCard, type Identity, type LakeEvent, type Signed,
 } from '@thelakeprotocol/core';
 import { Registry, type Entry } from './registry.js';
@@ -21,6 +21,9 @@ export interface NodeOptions {
   quarantineAfter?: number;
   /** Houses sharing an interest tag before they count as a guild. Default 3. */
   guildMin?: number;
+  /** Peer nodes to follow: their cards (re-verified here) and their blocklists. */
+  follow?: string[];
+  syncMs?: number;
 }
 
 /** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
@@ -166,8 +169,9 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList() }));
 
   // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
+  // A node republishes the blocklists of the peers it chose to follow, alongside its own.
   app.get('/signals', async (_req, res) => {
-    const body: Signals = { kind: 'signals', blocklist: [...quarantined], reputation: reputation() };
+    const body: Signals = { kind: 'signals', blocklist: [...new Set([...quarantined, ...peerBlocked])], reputation: reputation() };
     res.json(await signMessage(body, o.id, { iss: `${o.url}/#node`, ttl: 60 }));
   });
 
@@ -195,6 +199,48 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   });
 
   if (o.uiDir) app.use(express.static(o.uiDir));
+
+  // Federation (SPEC §9): follow peers. Their cards are verified again here, from the agents' own endpoints,
+  // so a peer can point us at agents but can't vouch for them. A card disappears when its peer drops it.
+  const peerBlocked = new Set<string>();
+  const peerKeys = new Map<string, import('@thelakeprotocol/core').JWK>();
+  async function syncPeer(peer: string) {
+    try {
+      const listed = (await (await fetch(`${peer}/cards`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
+      const seen = new Set<string>();
+      for (const { card } of listed) {
+        const webId = (card.capabilities?.extensions?.[0]?.params as { webId?: string } | undefined)?.webId;
+        if (!webId) continue;
+        seen.add(webId);
+        const known = registry.byWebId(webId);
+        if (known && JSON.stringify(known.card.signatures) === JSON.stringify(card.signatures)) continue;
+        if (known?.via === 'direct') continue; // registered here directly: that copy wins
+        const r = await registry.register(card, peer);
+        if (r.ok) {
+          const p = participant(r.entry);
+          publish(r.entry.profile.role === 'house' ? makeEvent('house.joined', r.entry.id, undefined, { label: r.entry.label, via: 'peer' }) : makeEvent('agent.registered', r.entry.id, undefined, { role: r.entry.profile.role, label: r.entry.label, via: 'peer' }), p);
+          if (r.entry.profile.role === 'house') guildCheck();
+        }
+      }
+      for (const e of registry.all()) {
+        if (e.via === peer && !seen.has(e.profile.webId)) {
+          registry.remove(e.id);
+          publish(makeEvent(e.profile.role === 'house' ? 'house.left' : 'agent.registered', e.id, undefined, { via: 'peer' }));
+        }
+      }
+      if (!peerKeys.has(peer)) peerKeys.set(peer, (await verifyLakeCard(await (await fetch(`${peer}/.well-known/agent-card.json`)).json())).publicJwk);
+      const key = peerKeys.get(peer)!;
+      const signals = (await verifyMessage(await (await fetch(`${peer}/signals`, { signal: AbortSignal.timeout(5000) })).json(), async () => key)) as unknown as Signals;
+      for (const k of signals.blocklist ?? []) peerBlocked.add(k);
+    } catch {
+      // A peer that's down is just a peer that's down. We carry on.
+    }
+  }
+  for (const peer of o.follow ?? []) {
+    const p = peer.replace(/\/$/, '');
+    setInterval(() => void syncPeer(p), o.syncMs ?? 5000).unref();
+    setTimeout(() => void syncPeer(p), 500).unref();
+  }
 
   const server = createServer(app);
   const wss = new WebSocketServer({ server, path: '/events' });

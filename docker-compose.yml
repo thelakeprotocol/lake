@@ -14,24 +14,36 @@ x-house: &house
   image: ghcr.io/thelakeprotocol/lake-house:latest
   depends_on: [issuer, auditor, lake-node]
   restart: unless-stopped
-  environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42" }
+  environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_SEED: "42" }
 
 services:
+  # Two nodes that follow each other. Anyone can run one; stop either and the Lake carries on:
+  #   docker stop lake-node-a
   lake-node:
     build: { context: ., target: node }
     image: ghcr.io/thelakeprotocol/lake-node:latest
+    container_name: lake-node-a
     hostname: lake-node
-    command: ["--domain", "lake.local", "--url", "http://lake-node:7000"]
+    command: ["--domain", "lake.local", "--url", "http://lake-node:7000", "--follow", "http://lake-node-b:7000"]
     environment: { LAKE_APPROVALS_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001/owner/" }
     volumes: [node:/data]
     ports: ["7000:7000"]
+
+  lake-node-b:
+    image: ghcr.io/thelakeprotocol/lake-node:latest
+    container_name: lake-node-b
+    hostname: lake-node-b
+    command: ["--domain", "b.lake.local", "--url", "http://lake-node-b:7000", "--follow", "http://lake-node:7000"]
+    volumes: [node-b:/data]
+    ports: ["7001:7000"]
+    depends_on: [lake-node]
 
   issuer:
     build: { context: ., target: specialists }
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     command: ["issuer", "--url", "http://issuer:4300"]
     depends_on: [lake-node]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     volumes: [issuer:/data]
 
   auditor:
@@ -40,7 +52,7 @@ services:
     hostname: auditor
     command: ["auditor", "--url", "http://auditor:4400"]
     depends_on: [lake-node]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     volumes: [auditor:/data]
 
   ethics:
@@ -49,7 +61,7 @@ services:
     hostname: ethics
     command: ["ethics", "--url", "http://ethics:4500"]
     depends_on: [lake-node]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     volumes: [ethics:/data]
 
   payments:
@@ -58,7 +70,7 @@ services:
     hostname: payments
     command: ["payments", "--url", "http://payments:4600"]
     depends_on: [lake-node]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     volumes: [payments:/data]
 
   house-stan:
@@ -75,7 +87,7 @@ services:
     volumes: [strict:/data, ./personas/strict.yaml:/rules.yaml:ro]
     ports: ["4001:4000"]
     # Sandbox demo: the first phone to open the approvals app becomes the owner.
-    environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42", LAKE_OPEN_PAIRING: "1", LAKE_OWNER_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_SEED: "42", LAKE_OPEN_PAIRING: "1", LAKE_OWNER_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001" }
 
   house-research:
     <<: *house
@@ -91,7 +103,7 @@ services:
     profiles: [scale]
     command: ["--tenants", "250"]
     depends_on: [issuer, auditor, lake-node]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_SEED: "42" }
     restart: unless-stopped
 
   # Background life: ordinary traders, and an attacker now and then. The Lake defends itself.
@@ -100,14 +112,14 @@ services:
     image: ghcr.io/thelakeprotocol/lake:latest
     command: ["swarm", "--traders", "6", "--attackers", "1", "--interval", "2500"]
     depends_on: [house-stan, house-strict, house-research]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     restart: unless-stopped
 
   lake:
     build: { context: ., target: cli }
     image: ghcr.io/thelakeprotocol/lake:latest
     profiles: [cli]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
     volumes: [cli:/root/.lake]   # the agent's keys survive between runs
 
-volumes: { cli: {}, node: {}, issuer: {}, auditor: {}, ethics: {}, payments: {}, stan: {}, strict: {}, research: {} }
+volumes: { cli: {}, node: {}, node-b: {}, issuer: {}, auditor: {}, ethics: {}, payments: {}, stan: {}, strict: {}, research: {} }

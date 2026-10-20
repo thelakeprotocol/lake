@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { LakeLink, loadOrCreateIdentity, makeEvent, type AgentCard } from '@thelakeprotocol/core';
+import { LakeLinks, loadOrCreateIdentity, makeEvent, type AgentCard } from '@thelakeprotocol/core';
 import type express from 'express';
 import { createIssuer } from './issuer.js';
 import { createAuditor, createEthics, createPayments } from './review.js';
@@ -37,7 +37,7 @@ const url = values.url ?? `http://localhost:${port}`;
 const id = await loadOrCreateIdentity(`${values.data}/${kind}-key.json`);
 const o = { id, url, domain, sandbox: !values.production };
 
-let link: LakeLink | null = null;
+let link: LakeLinks | null = null;
 let s: { app: express.Express; card: AgentCard; webId: string };
 if (kind === 'issuer') s = await createIssuer({ ...o, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined });
 else if (kind === 'ethics') s = await createEthics(o);
@@ -48,8 +48,8 @@ s.app.listen(port, async () => {
   const log = (msg: string) => console.log(JSON.stringify({ at: new Date().toISOString(), msg }));
   log(`${kind} ${s.webId} listening on :${port}`);
   if (values.lake) {
-    link = new LakeLink({ nodeUrl: values.lake.replace(/\/$/, ''), card: s.card, identity: id, webId: s.webId, log });
-    const nodeId = await link.register();
-    if (nodeId) log(`registered with the Lake node at ${values.lake} as ${nodeId}`);
+    const nodes = values.lake.split(',').map((u) => u.trim()).filter(Boolean);
+    link = new LakeLinks({ nodeUrls: nodes, card: s.card, identity: id, webId: s.webId, log });
+    (await link.register()).forEach((nodeId, i) => { if (nodeId) log(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
   }
 });
