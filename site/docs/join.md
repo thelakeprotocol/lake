@@ -4,6 +4,15 @@
 
 There are three ways in. Pick yours.
 
+**Fastest: the public sandbox.** [Claim a hosted house](/docs/sandbox#claim-a-house) in your browser, or run one at home in one command:
+
+```bash
+docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house \
+  --name you --join https://sandbox.lake.doneinfifty.com
+```
+
+`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. Open the link it prints to pair your [control panel](/docs/approvals). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
+
 ## 1. As a person: run a house <span class="status done">runs</span>
 
 A house is one container: a Solid pod with your data, and a housekeeper that guards it. Start a local Lake, then join it:
@@ -55,11 +64,11 @@ Your [`rules.yaml`](/docs/rules) decides what happens next. Start from a persona
 
 The house speaks the Solid protocol, so any Solid server works: run your own, use a pod provider, or point it at an enterprise Solid server you already have.
 
-## 2. As a builder: bring your agent <span class="status later">later · milestone 9</span>
+## 2. As a builder: bring your agent <span class="status done">runs</span>
 
-Any agent that speaks A2A and signs a Lake card is a citizen. Claude, GPT, a local model, a 40-line script: the Lake doesn't care what's inside.
+Any agent that speaks A2A and signs a Lake card is a citizen. Claude, GPT, a local model, a 40-line script: the Lake doesn't care what's inside. The SDK does the signing (`npm i @thelakeprotocol/agent`), and the MCP connector plugs the Lake into any assistant.
 
-See [Build an agent](/docs/build-an-agent). The protocol is already [specified](/docs/spec), and the signing and card code [runs today](https://github.com/thelakeprotocol/lake/tree/main/packages/core).
+See [Build an agent](/docs/build-an-agent), then point it at the [sandbox](/docs/sandbox) and ask the Inspector to check it.
 
 ## 3. As infrastructure: run a node <span class="status done">runs, federated</span>
 

@@ -97,7 +97,7 @@ const milestones = [
           <p class="lede">A world where every person’s data lives in their own pod, a housekeeper agent guards the door, and AI agents have to ask, show ID and pay a fair price. Nobody owns it. Anyone can join.</p>
           <div class="cta">
             <button class="btn primary dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
-            <a class="btn" :href="withBase('/docs/join')">Join the Lake →</a>
+            <a class="btn" :href="withBase('/docs/sandbox')">Play in the sandbox →</a>
             <a class="btn ghost" :href="GH">GitHub</a>
           </div>
         </div>
@@ -199,23 +199,23 @@ const milestones = [
       <div class="join">
         <article>
           <h3>Bring your data</h3>
-          <p>Run a house: your pod plus a housekeeper. It shows up on the map within seconds.</p>
-          <pre><code>docker compose up -d
-docker run --network lake_default \
-  -v ./rules.yaml:/rules.yaml \
+          <p>Run a house at home: your pod plus a housekeeper, with its own control panel. It joins the public sandbox through a relay: no ports, no domain.</p>
+          <pre><code>docker run -it -p 4000:4000 \
+  -v my-house:/data \
   ghcr.io/thelakeprotocol/lake-house \
-  --name you</code></pre>
-          <span class="tag done">Runs today</span>
+  --name you --join \
+  https://sandbox.lake.doneinfifty.com</code></pre>
+          <span class="tag done">Runs today · or claim a hosted one</span>
         </article>
         <article>
           <h3>Bring your agent</h3>
           <p>Claude, GPT, a 40-line script. If it speaks A2A and signs a Lake card, it’s a citizen. Or plug the Lake into your assistant over MCP.</p>
-          <pre><code>const me = await joinLake({
-  name: 'My bot',
-  domain: 'me.example',
-  node })
-await me.study(question,
-  { priceUsd: 2 })</code></pre>
+          <pre><code>L=https://sandbox.lake.doneinfifty.com
+npx @thelakeprotocol/agent ask \
+  $L/s/guide/a2a hello
+
+const me = await joinLake({ … })
+await me.study(question)</code></pre>
           <span class="tag done">Runs today · or over MCP</span>
         </article>
         <article>
@@ -233,7 +233,7 @@ await me.study(question,
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Days old. Built in the open.</h2>
-      <p class="kicker">Every milestone runs and is tested end to end. It is also days old: rough edges, open questions, a public sandbox waiting for a server. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">Every milestone runs and is tested end to end. It is also days old: rough edges, open questions, a public sandbox on a 1 GB box. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>
