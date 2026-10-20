@@ -49,7 +49,7 @@ Lake fields live inside an A2A extension so the card signature covers them. The 
 
 | Field | Required | Meaning |
 |---|---|---|
-| `role` | yes | `house`, `visitor`, `specialist` or `agent` |
+| `role` | yes | `house`, `visitor`, `specialist`, `agent` or `node` |
 | `webId` | yes | The owner's WebID: the human or organisation that answers for this agent |
 | `ownerDomain` | yes | A domain the owner proves control of (§2.3) |
 | `publicJwk` | yes | Ed25519 public key (JWK) used for the card and every message |
@@ -152,6 +152,8 @@ Houses that counter the same offer (same offer `uid`) and opted in with `join_co
 ## 8. Events
 
 Nodes publish an event stream (WebSocket, JSON). Events carry ids, kinds and counts, never record contents.
+
+Participants report events to a node as a signed batch (`{ kind: "events", events: [...] }`, §3). A node MUST accept reports only from registered participants, MUST set each event's `actor` to the reporter's own id, and SHOULD truncate free-text values. A node registering a card MUST fetch the card from the endpoint it names and refuse it unless the same signed card is served there.
 
 ```json
 { "id": "lx3k9-1f", "kind": "grant.issued", "at": "2026-10-20T12:00:00Z", "actor": "house:stan", "subject": "agent:uni.example", "data": { "hours": 48 } }

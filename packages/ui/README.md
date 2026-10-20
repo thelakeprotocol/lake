@@ -1,5 +1,9 @@
 # @thelakeprotocol/ui
 
-**Status: milestones 2 and 4.** Not built yet. [Claim it](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).
+**The live map runs.** Served by every Lake node at `/`. It draws only what the node's event stream says: houses appear on `house.joined`, threads on `knock`, colours on `decision`, red rings on `attack.blocked`. The counter strip includes **Records moved**, which turns red if it is ever above zero.
 
-The **Lake map** (presenter screen, driven by real events, same look as the landing-page simulation) and the **approvals app** (phone-first: who's asking, what for, which fields, the price, Allow / Deny, your active keys with Revoke).
+```bash
+pnpm --filter @thelakeprotocol/ui dev   # proxies /events to a node on :7000
+```
+
+The approvals app (phone-first Allow / Deny, your keys, Revoke) lands here in milestone 4.

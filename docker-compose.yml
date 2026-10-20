@@ -1,5 +1,6 @@
-# The Lake, milestone 1: an issuer and three houses with different rules.
+# The Lake: a node with the live map, an issuer, and three houses with different rules.
 #   docker compose up                 (pulls images; add --build to build from source)
+#   open http://localhost:7000        (the live map)
 #   docker compose run --rm lake knock http://house-stan:4000 --offer gp
 # Join from anywhere on this machine:
 #   docker run --network lake_default --hostname house-you \
@@ -9,14 +10,25 @@ name: lake
 x-house: &house
   build: { context: ., target: house }
   image: ghcr.io/thelakeprotocol/lake-house:latest
-  depends_on: [issuer]
+  depends_on: [issuer, lake-node]
   restart: unless-stopped
+  environment: { LAKE_NODE_URL: "http://lake-node:7000" }
 
 services:
+  lake-node:
+    build: { context: ., target: node }
+    image: ghcr.io/thelakeprotocol/lake-node:latest
+    hostname: lake-node
+    command: ["--domain", "lake.local", "--url", "http://lake-node:7000"]
+    volumes: [node:/data]
+    ports: ["7000:7000"]
+
   issuer:
     build: { context: ., target: specialists }
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     command: ["issuer", "--url", "http://issuer:4300"]
+    depends_on: [lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [issuer:/data]
 
   house-stan:
@@ -43,4 +55,4 @@ services:
     image: ghcr.io/thelakeprotocol/lake:latest
     profiles: [cli]
 
-volumes: { issuer: {}, stan: {}, strict: {}, research: {} }
+volumes: { node: {}, issuer: {}, stan: {}, strict: {}, research: {} }

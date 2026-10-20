@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>The Lake · live</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23070B12'/%3E%3Crect x='11' y='11' width='10' height='10' fill='%233DDC97'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500&display=swap">
+</head>
+<body>
+  <header class="gutter">
+    <div>
+      <div class="eyebrow"><span id="status" class="dot"></span><span id="where">connecting…</span></div>
+      <h1>The Lake</h1>
+    </div>
+    <p class="lede">Every square is a home: a pod with a housekeeper inside. Every dot is an agent. This map shows only ids, kinds and counts. <b>No record ever reaches it.</b></p>
+  </header>
+  <main class="stage" id="stage">
+    <canvas id="lake" aria-label="Live Lake map. Events are listed in the log and counters below."></canvas>
+    <div class="empty" id="empty" hidden>
+      <p class="big">The Lake is empty.</p>
+      <p>Join it:</p>
+      <pre><code>docker run --network lake_default ghcr.io/thelakeprotocol/lake-house --name you</code></pre>
+    </div>
+    <ol class="log" id="log" aria-live="polite"></ol>
+  </main>
+  <footer class="gutter">
+    <dl class="stats">
+      <div class="stat"><dt>Houses</dt><dd id="c-houses">0</dd></div>
+      <div class="stat"><dt>Agents</dt><dd id="c-agents">0</dd></div>
+      <div class="stat"><dt>Conversations</dt><dd id="c-conv">0</dd></div>
+      <div class="stat"><dt>Value settled</dt><dd id="c-value">0</dd></div>
+      <div class="stat threat"><dt>Attacks blocked</dt><dd id="c-blocked">0</dd></div>
+      <div class="stat zero"><dt>Records moved</dt><dd id="c-moved">0</dd></div>
+    </dl>
+    <div class="legend" aria-hidden="true">
+      <span class="sq" style="--c: var(--mint)">Home</span>
+      <span style="--c: var(--muted)">Agent</span>
+      <span style="--c: var(--violet)">Specialist</span>
+      <span style="--c: var(--threat)">Attacker</span>
+      <span class="sq" style="--c: var(--amber)">Asking its owner</span>
+    </div>
+  </footer>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

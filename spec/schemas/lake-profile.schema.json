@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["role", "webId", "ownerDomain", "publicJwk", "tags", "lakeVersion"],
   "properties": {
-    "role": { "enum": ["house", "visitor", "specialist", "agent"] },
+    "role": { "enum": ["house", "visitor", "specialist", "agent", "node"] },
     "webId": { "type": "string", "format": "uri" },
     "ownerDomain": { "type": "string", "pattern": "^[a-z0-9.-]+$" },
     "publicJwk": {

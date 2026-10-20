@@ -11,3 +11,4 @@ export * from './a2a.js';
 export * from './identity-file.js';
 export type { AgentCard, Message } from '@a2a-js/sdk';
 export type { JWK } from 'jose';
+export * from './lake-link.js';

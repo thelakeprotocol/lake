@@ -3,7 +3,7 @@ import * as jose from 'jose';
 import type { Identity } from './crypto.js';
 import { LAKE_EXTENSION_URI, LAKE_VERSION } from './lake.js';
 
-export type LakeRole = 'house' | 'specialist' | 'visitor' | 'agent';
+export type LakeRole = 'house' | 'specialist' | 'visitor' | 'agent' | 'node';
 
 /** Lake profile fields. They live inside an A2A extension so the card signature covers them. */
 export interface LakeProfile {

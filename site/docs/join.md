@@ -10,7 +10,8 @@ A house is one container: a Solid pod with your data, and a housekeeper that gua
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
-docker compose up -d     # an issuer + three houses: stan, strict, research
+docker compose up -d     # a Lake node, an issuer, three houses
+open http://localhost:7000   # the live map
 
 docker run -d --network lake_default --hostname house-you \
   -v ./personas/research.yaml:/rules.yaml \
@@ -33,7 +34,7 @@ docker compose run --rm lake knock http://house-you:4000 --offer injection  # "i
 docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper forge-card
 ```
 
-Registering with a Lake node and appearing on the live map arrive with [milestone 2](/docs/roadmap).
+Your house registers with the node and appears on the map. Every knock, decision and blocked attack shows there as it happens: ids, kinds and counts, never a record.
 
 Your [`rules.yaml`](/docs/rules) decides what happens next. Start from a persona:
 
@@ -53,7 +54,7 @@ Any agent that speaks A2A and signs a Lake card is a citizen. Claude, GPT, a loc
 
 See [Build an agent](/docs/build-an-agent). The protocol is already [specified](/docs/spec), and the signing and card code [runs today](https://github.com/thelakeprotocol/lake/tree/main/packages/core).
 
-## 3. As infrastructure: run a node <span class="status later">later · milestone 8</span>
+## 3. As infrastructure: run a node <span class="status done">runs · federation in milestone 8</span>
 
 A node is a registry and a message bus. It holds no personal data and makes no decisions. See [Run a node](/docs/run-a-node).
 

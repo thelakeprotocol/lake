@@ -4,13 +4,15 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { generateIdentity } from '../packages/core/src/index.js';
+import WebSocket from 'ws';
+import { buildCard, generateIdentity, signCard, signMessage } from '../packages/core/src/index.js';
 import { knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
 
-// Boots a real Issuer and a real house (Community Solid Server + housekeeper) and knocks over A2A.
+// Boots a real Lake node, Issuer and house (Community Solid Server + housekeeper) and knocks over A2A.
 const procs: ChildProcess[] = [];
 let dir: string;
 let house: string;
+let node: string;
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
 
@@ -29,10 +31,12 @@ function start(args: string[], ready: RegExp): Promise<void> {
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'lake-e2e-'));
-  const [issuerPort, podPort, port] = await Promise.all([freePort(), freePort(), freePort()]);
-  await start(['packages/specialists/dist/main.js', 'issuer', '--port', String(issuerPort), '--data', join(dir, 'issuer')], /listening/);
+  const [issuerPort, podPort, port, nodePort] = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
+  node = `http://localhost:${nodePort}`;
+  await start(['packages/lake/dist/main.js', '--port', String(nodePort), '--data', join(dir, 'node')], /Lake node on/);
+  await start(['packages/specialists/dist/main.js', 'issuer', '--port', String(issuerPort), '--data', join(dir, 'issuer'), '--lake', node], /registered with the Lake node/);
   await start(
-    ['packages/house/dist/main.js', '--name', 'stan', '--rules', 'personas/stan.yaml', '--data', join(dir, 'houses'), '--issuer-url', `http://localhost:${issuerPort}`, '--pod-port', String(podPort), '--port', String(port)],
+    ['packages/house/dist/main.js', '--name', 'stan', '--rules', 'personas/stan.yaml', '--data', join(dir, 'houses'), '--issuer-url', `http://localhost:${issuerPort}`, '--pod-port', String(podPort), '--port', String(port), '--lake', node],
     /joined the Lake/,
   );
   house = `http://localhost:${port}`;
@@ -79,5 +83,44 @@ describe('one house', () => {
     const { reply } = await knock(house, await visitor('gp.example'), PRESETS.gp!);
     expect(reply).toMatchObject({ decision: 'decline' });
     expect(String(reply.reason)).toContain('signature check');
+  });
+});
+
+describe('the Lake node', () => {
+  it('registered the house and the issuer after verifying them', async () => {
+    const state = await (await fetch(`${node}/state`)).json();
+    expect(state.participants.map((p: { role: string }) => p.role).sort()).toEqual(['house', 'specialist']);
+    const found = await (await fetch(`${node}/cards?skill=health-study`)).json();
+    expect(found).toHaveLength(1);
+  });
+
+  it('streams what happens at a door: ids, kinds and counts', async () => {
+    const ws = new WebSocket(`${node.replace('http', 'ws')}/events`);
+    const kinds: string[] = [];
+    await new Promise((ok) => ws.once('message', ok)); // snapshot
+    ws.on('message', (m) => kinds.push(JSON.parse(String(m)).event.kind));
+    await knock(house, await visitor('gp.example'), PRESETS.gp!);
+    await new Promise((r) => setTimeout(r, 600));
+    ws.close();
+    expect(kinds).toEqual(expect.arrayContaining(['knock', 'decision']));
+  });
+
+  it('refuses forged cards, and cards for endpoints the registrant does not control', async () => {
+    const id = await generateIdentity();
+    const input = { name: 'Fake', description: 'x', url: `${house}/a2a`, skills: [], profile: { role: 'house' as const, webId: 'https://fake.example/#me', ownerDomain: 'fake.example', tags: [] } };
+    const card = await signCard(buildCard(input, id), id);
+    const notMine = await fetch(`${node}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ card }) });
+    expect((await notMine.json()).code).toBe('card-mismatch');
+    card.name = 'Edited after signing';
+    const forged = await fetch(`${node}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ card }) });
+    expect((await forged.json()).code).toBe('forged-card');
+  });
+
+  it('refuses events from anyone not registered', async () => {
+    const id = await generateIdentity();
+    const env = await signMessage({ kind: 'events', events: [{ id: 'x', kind: 'record.moved', at: new Date().toISOString(), actor: 'house:stan' }] }, id, { iss: 'https://fake.example/#me' });
+    const res = await fetch(`${node}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) });
+    expect(res.status).toBe(403);
+    expect((await (await fetch(`${node}/state`)).json()).counters.recordsMoved).toBe(0);
   });
 });

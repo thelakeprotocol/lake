@@ -32,10 +32,11 @@ export function describe(e: LakeEvent): string {
     case 'house.joined': return `${e.actor} joined the Lake.`;
     case 'house.left': return `${e.actor} left the Lake.`;
     case 'agent.registered': return `${e.actor} registered (${d.role ?? 'agent'}).`;
-    case 'knock': return `${e.actor} knocked on ${e.subject ?? `${d.count} houses`}.`;
+    // Reported by the house that was knocked on (actor), about the visitor (subject); or broadcast by a visitor.
+    case 'knock': return d.count !== undefined ? `${e.actor} knocked on ${d.count} houses.` : `${e.subject} knocked on ${e.actor}.`;
     case 'offer': return `${e.actor} offered $${d.price} for ${d.fields} (${d.purpose}).`;
     case 'counter': return `${d.members ?? 1} housekeepers countered together: $${d.price}, not $${d.was}.`;
-    case 'decision': return `${e.actor} said ${d.decision}${d.reason ? `: ${d.reason}` : '.'}`;
+    case 'decision': return `${e.actor} told ${e.subject}: ${d.decision}${d.reason ? ` (${d.reason})` : ''}.`;
     case 'agreement.signed': return `${e.actor} and ${e.subject} signed an agreement.`;
     case 'grant.issued': return `${e.actor} issued a ${d.hours}-hour key to ${e.subject}.`;
     case 'grant.revoked': return `${e.actor} revoked ${d.count ?? 1} key(s). Connections cut.`;

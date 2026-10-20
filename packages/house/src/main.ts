@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  buildCard, describe, exportIdentity, importIdentity, makeEvent, parseRules, signCard,
+  buildCard, describe, exportIdentity, importIdentity, LakeLink, makeEvent, parseRules, signCard,
   type Identity, type LakeEvent,
 } from '@thelakeprotocol/core';
 import { Housekeeper } from './housekeeper.js';
@@ -25,6 +25,7 @@ const { values: a } = parseArgs({
     'public-url': { type: 'string', default: process.env.LAKE_PUBLIC_URL },
     'pod-url': { type: 'string', default: process.env.LAKE_POD_URL },
     'issuer-url': { type: 'string', default: process.env.LAKE_ISSUER_URL ?? 'http://issuer:4300' },
+    lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     domain: { type: 'string', default: process.env.LAKE_DOMAIN },
     production: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
@@ -48,7 +49,11 @@ if (podHost.protocol === 'http:' && podHost.hostname.split('.').pop() !== 'local
 const sandbox = !a.production;
 const actor = `house:${name}`;
 
-const emit = (e: LakeEvent) => console.log(a.json ? JSON.stringify(e) : `[${actor}] ${describe(e)}`);
+let link: LakeLink | null = null;
+const emit = (e: LakeEvent) => {
+  console.log(a.json ? JSON.stringify(e) : `[${actor}] ${describe(e)}`);
+  link?.report(e);
+};
 const say = (msg: string) => console.log(a.json ? JSON.stringify({ at: new Date().toISOString(), actor, msg }) : `[${actor}] ${msg}`);
 
 // 1. The pod.
@@ -104,13 +109,19 @@ const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, pod:
 const check = await keeper.verifyOwnRecord();
 say(check.ok ? 'record chain verified: issuer → original → converted → housekeeper' : `record chain BROKEN: ${check.why}`);
 
-const server = createHouseServer(card, keeper).listen(port, () => {
+const server = createHouseServer(card, keeper).listen(port, async () => {
   say(`A2A on ${publicUrl}/a2a · card at ${publicUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
+  if (a.lake) {
+    link = new LakeLink({ nodeUrl: a.lake.replace(/\/$/, ''), card, identity: id, webId: owner.webId, log: say });
+    const nodeId = await link.register();
+    if (nodeId) say(`registered with the Lake node at ${a.lake} as ${nodeId}`);
+  }
   emit(makeEvent('house.joined', actor, undefined, { tags: (rules.tags ?? []).join(',') }));
 });
 
-const stop = () => {
+const stop = async () => {
   emit(makeEvent('house.left', actor));
+  await link?.flush();
   server.close();
   pod.stop();
   setTimeout(() => process.exit(0), 300).unref();

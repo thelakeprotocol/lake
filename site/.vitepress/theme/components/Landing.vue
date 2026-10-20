@@ -70,7 +70,7 @@ const standards = [
 ];
 
 const milestones = [
-  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'next'], ['Mission', ''], ['Approvals', ''],
+  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'next'], ['Approvals', ''],
   ['Money', ''], ['Wild life', ''], ['1,000 houses', ''], ['Federation', ''], ['Open door', ''],
 ];
 </script>
@@ -220,7 +220,7 @@ await me.offer(houses, terms)</code></pre>
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Days old. Built in the open.</h2>
-      <p class="kicker">The protocol, the core and the house are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">The protocol, the house, the node and the live map are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>

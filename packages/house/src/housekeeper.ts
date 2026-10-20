@@ -51,7 +51,9 @@ export class Housekeeper {
   async handle(data: LakeData | null): Promise<LakeData> {
     const v = await verifyLakeData(data as LakeData<{ kind: string; offer?: Offer }> | null, { replay: this.replay, sandbox: this.o.sandbox });
     if (!v.ok) {
-      const who = data?.card?.name ?? 'unknown agent';
+      // Unverified, so only a label: the domain the card claims, or its name.
+      const claimed = (data?.card?.capabilities?.extensions?.[0]?.params as { ownerDomain?: unknown } | undefined)?.ownerDomain;
+      const who = typeof claimed === 'string' ? `agent:${claimed.slice(0, 60)}` : String(data?.card?.name ?? 'unknown agent').slice(0, 60);
       this.o.emit(makeEvent('attack.blocked', this.actor, who, { why: v.rejection.code }));
       return this.reply({ kind: 'rejected', code: v.rejection.code, why: v.rejection.why });
     }
@@ -62,7 +64,7 @@ export class Housekeeper {
       this.o.emit(makeEvent('attack.blocked', this.actor, visitor, { why: 'impersonation' }));
       return this.reply({ kind: 'rejected', code: 'impersonation', why: `card is for ${profile.ownerDomain}, offer claims ${payload.offer.requester}` });
     }
-    this.o.emit(makeEvent('knock', visitor, this.actor, { purpose: payload.offer.purpose }));
+    this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: payload.offer.purpose }));
 
     // Credentials are believed only when they can be verified. Ethics approvals and audit certificates
     // arrive as signed credentials from milestone 3; until then they count as absent, whatever the offer says.
