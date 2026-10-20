@@ -24,15 +24,15 @@
 | Component | Package | Status |
 |---|---|---|
 | Shared core: cards, signing, rules, offers, events | `packages/core` | <span class="status done">runs</span> |
-| House: pod, housekeeper, MCP pod tools, wallet | `packages/house` | <span class="status next">next</span> |
-| Lake node: registry, bus, events, counters | `packages/lake` | <span class="status later">later</span> |
-| Visitor: research agent + `lake` CLI | `packages/visitor` | <span class="status later">later</span> |
-| Specialists: ethics, auditor, payments, issuer | `packages/specialists` | <span class="status later">later</span> |
+| House: pod, housekeeper, MCP pod door, wallet | `packages/house` | <span class="status done">runs</span> |
+| Lake node: registry, bus, events, counters | `packages/lake` | <span class="status next">next</span> |
+| Visitor: `lake knock` CLI · research agent | `packages/visitor` | <span class="status done">knock runs</span> |
+| Specialists: issuer · ethics, auditor, payments | `packages/specialists` | <span class="status done">issuer runs</span> |
 | Swarm: background traders and attackers | `packages/swarm` | <span class="status later">later</span> |
 | UI: map + approvals app | `packages/ui` | <span class="status later">later</span> |
 | Agent SDK | `packages/agent` | <span class="status later">later</span> |
 | Lake MCP connector | `packages/mcp` | <span class="status later">later</span> |
-| FHIR converter | `packages/convert-fhir` | <span class="status later">later</span> |
+| FHIR converter | `packages/convert-fhir` | <span class="status done">runs</span> |
 
 ## Scale
 

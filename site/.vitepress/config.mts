@@ -66,6 +66,7 @@ export default defineConfig({
             { text: 'Spec (Lake profile v0.1)', link: '/docs/spec' },
             { text: 'Architecture', link: '/docs/architecture' },
             { text: 'Security & threat model', link: '/docs/security' },
+            { text: 'Decisions', link: '/docs/decisions' },
             { text: 'Roadmap', link: '/docs/roadmap' },
             { text: 'Contributing', link: '/docs/contributing' },
           ],

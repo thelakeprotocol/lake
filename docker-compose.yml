@@ -1,0 +1,46 @@
+# The Lake, milestone 1: an issuer and three houses with different rules.
+#   docker compose up                 (pulls images; add --build to build from source)
+#   docker compose run --rm lake knock http://house-stan:4000 --offer gp
+# Join from anywhere on this machine:
+#   docker run --network lake_default --hostname house-you \
+#     -v ./personas/research.yaml:/rules.yaml ghcr.io/thelakeprotocol/lake-house --name you
+name: lake
+
+x-house: &house
+  build: { context: ., target: house }
+  image: ghcr.io/thelakeprotocol/lake-house:latest
+  depends_on: [issuer]
+  restart: unless-stopped
+
+services:
+  issuer:
+    build: { context: ., target: specialists }
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    command: ["issuer", "--url", "http://issuer:4300"]
+    volumes: [issuer:/data]
+
+  house-stan:
+    <<: *house
+    hostname: house-stan
+    command: ["--name", "stan"]
+    volumes: [stan:/data, ./personas/stan.yaml:/rules.yaml:ro]
+    ports: ["4000:4000"]
+
+  house-strict:
+    <<: *house
+    hostname: house-strict
+    command: ["--name", "strict"]
+    volumes: [strict:/data, ./personas/strict.yaml:/rules.yaml:ro]
+
+  house-research:
+    <<: *house
+    hostname: house-research
+    command: ["--name", "research"]
+    volumes: [research:/data, ./personas/research.yaml:/rules.yaml:ro]
+
+  lake:
+    build: { context: ., target: cli }
+    image: ghcr.io/thelakeprotocol/lake:latest
+    profiles: [cli]
+
+volumes: { issuer: {}, stan: {}, strict: {}, research: {} }

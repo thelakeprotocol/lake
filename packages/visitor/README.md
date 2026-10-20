@@ -1,12 +1,13 @@
 # @thelakeprotocol/visitor
 
-**Status: milestone 3.** Not built yet. [Claim it](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).
+The `lake` CLI. Image: `ghcr.io/thelakeprotocol/lake`.
 
-The research agent and the `lake` CLI.
-
+```bash
+lake knock <house-url> [--offer research|gp|marketing|injection] [--as <domain>]
+           [--purpose p --fields a,b --price 2 --retention none] [--note "..."]
+           [--tamper forge-card|unsigned|replay|impersonate] [--json]
 ```
-lake dispatch --goal "Do over-60s on drug X get readmitted less?" --price 2 --budget 5000
-lake attack · lake revoke --house stan · lake reset
-```
 
-Runs the mission: AP2 mandate → ethics → audit → discover → knock → bargain → agree → compute in place → pay → answer.
+`knock` signs an offer with a visitor key (kept in `~/.lake/`), sends it over A2A declaring the Lake extension, and verifies the house's signed reply. `--tamper` sends the attacks a house must reject.
+
+Coming: `lake dispatch` (milestone 3), `lake attack` (6), `lake revoke` (4), `lake reset`.

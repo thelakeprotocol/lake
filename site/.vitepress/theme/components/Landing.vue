@@ -70,7 +70,7 @@ const standards = [
 ];
 
 const milestones = [
-  ['Core', 'done'], ['Spec', 'done'], ['House', 'next'], ['Lake node', ''], ['Mission', ''], ['Approvals', ''],
+  ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'next'], ['Mission', ''], ['Approvals', ''],
   ['Money', ''], ['Wild life', ''], ['1,000 houses', ''], ['Federation', ''], ['Open door', ''],
 ];
 </script>
@@ -188,11 +188,12 @@ const milestones = [
         <article>
           <h3>Bring your data</h3>
           <p>Run a house: your pod plus a housekeeper. It shows up on the map within seconds.</p>
-          <pre><code>docker run \
+          <pre><code>docker compose up -d
+docker run --network lake_default \
+  -v ./rules.yaml:/rules.yaml \
   ghcr.io/thelakeprotocol/lake-house \
-  --name you \
-  -v ./rules.yaml:/rules.yaml</code></pre>
-          <span class="tag next">Milestone 1 · building now</span>
+  --name you</code></pre>
+          <span class="tag done">Runs today</span>
         </article>
         <article>
           <h3>Bring your agent</h3>
@@ -219,7 +220,7 @@ await me.offer(houses, terms)</code></pre>
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Days old. Built in the open.</h2>
-      <p class="kicker">The protocol and core are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">The protocol, the core and the house are real and tested. Most of the Lake isn’t built yet. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>
@@ -342,6 +343,7 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
 .join code { font: 400 12px/1.6 var(--f-mono); color: var(--mint); white-space: pre; }
 .tag { align-self: flex-start; font: 500 11px/1 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); padding: 6px 8px; border-radius: 3px; }
 .tag.next { color: var(--orange); border-color: rgba(255,106,43,0.5); }
+.tag.done { color: var(--mint); border-color: rgba(61,220,151,0.5); }
 
 .ms { list-style: none; margin: 32px 0 0; padding: 0; display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 6px; }
 .ms li { margin: 0; padding-top: 12px; border-top: 4px solid var(--line); font: 500 11px/1.3 var(--f-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }

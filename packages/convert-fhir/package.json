@@ -1,0 +1,29 @@
+{
+  "name": "@thelakeprotocol/convert-fhir",
+  "version": "0.1.0",
+  "description": "FHIR R4 → canonical Lake model. Runs inside the house; raw records never leave the pod.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "n3": "1"
+  },
+  "devDependencies": {
+    "@types/n3": "^1.26.4",
+    "@zazuko/env": "^3.0.2",
+    "rdf-validate-shacl": "0.6.5"
+  }
+}

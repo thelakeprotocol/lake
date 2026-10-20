@@ -1,0 +1,26 @@
+{
+  "name": "@thelakeprotocol/specialists",
+  "version": "0.1.0",
+  "description": "Lake specialist agents: issuer (now); ethics, auditor and payments (next).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "lake-specialist": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@thelakeprotocol/convert-fhir": "workspace:^",
+    "@thelakeprotocol/core": "workspace:^",
+    "express": "5"
+  },
+  "devDependencies": {
+    "@types/express": "5"
+  }
+}

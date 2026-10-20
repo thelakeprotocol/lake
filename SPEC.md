@@ -75,11 +75,15 @@ A card claiming `ownerDomain: example.org` MUST be backed by one of:
 - a DNS TXT record at `_lake.example.org` containing `lake-key=<publicJwk.kid>`, or
 - `https://example.org/.well-known/lake.json` containing `{ "keys": ["<publicJwk.kid>"] }`.
 
-A node MUST reject a card whose domain proof fails. `localhost` is accepted only by nodes in sandbox mode.
+A node MUST reject a card whose domain proof fails.
+
+**Transport.** Outside sandbox mode, cards, A2A endpoints and pods MUST be served over HTTPS. Solid-OIDC already requires it for pods (plain HTTP is allowed only on `localhost`).
+
+**Sandbox Lakes.** A Lake that holds only synthetic data MAY run in sandbox mode, where domain proof is skipped and every such card is marked `sandbox`. A participant MUST NOT treat a sandbox-proved domain as verified outside the sandbox.
 
 ## 3. Messages
 
-Every Lake message is an A2A message whose data part carries a **signed envelope**:
+Every Lake message is an A2A message that declares the Lake extension (the `A2A-Extensions` header carries the extension URI; Lake cards mark it `required`) and whose data part carries the sender's card and a **signed envelope**:
 
 ```json
 {

@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+site/.vitepress
+site/docs
+site/public
+.git
+e2e
+*.log
+**/*.tsbuildinfo

@@ -5,8 +5,8 @@
 | # | Milestone | Done when | Status |
 |---|---|---|---|
 | 0 | **Core + spec** | Signed cards, signed messages, rules engine, collective counter, ODRL offers, `SPEC.md`, schemas, model | <span class="status done">done</span> |
-| 1 | **One house** | Pod, WebID, issuer-signed synthetic record, housekeeper answering an A2A request through MCP | <span class="status next">next</span> |
-| 2 | **The Lake** | A federatable node: verified cards, bus, event stream, a bare map where houses appear | <span class="status later">later</span> |
+| 1 | **One house** | Pod, WebID, issuer-signed synthetic record, housekeeper answering an A2A request through MCP | <span class="status done">done</span> |
+| 2 | **The Lake** | A federatable node: verified cards, bus, event stream, a bare map where houses appear | <span class="status next">next</span> |
 | 3 | **Mission, no money** | Ethics, audit, knock, decide, grant, verify signatures, compute in place, answer | <span class="status later">later</span> |
 | 4 | **Approvals app** | Live Allow on a phone; revocation in under 1 second | <span class="status later">later</span> |
 | 5 | **Money** | ODRL agreements, collective counter-offer, AP2 mandates, Payments agent | <span class="status later">later</span> |

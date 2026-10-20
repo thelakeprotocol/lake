@@ -1,5 +1,13 @@
 # @thelakeprotocol/convert-fhir
 
-**Status: milestone 3.** Not built yet. [Claim it](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).
+**Status: runs, tested against the SHACL shapes.**
 
-FHIR → canonical Lake model. Runs inside the house. Output carries the original's hash, this package's name, version and auditor certificate, and the housekeeper's signature. Must pass the SHACL shapes in `model/shapes.ttl`.
+FHIR R4 → canonical Lake model, inside the house. Reads Synthea exports and the built-in seeded generator.
+
+| Export | Does |
+|---|---|
+| `syntheticPatient(seed, asOf?)` | One deterministic synthetic patient (Patient, Condition, MedicationRequest, inpatient Encounters) |
+| `extractClaims(bundle)` | Age band, medications, conditions, readmissions (an inpatient stay within 30 days of the last discharge) |
+| `fhirToLake(bundle, opts)` | Turtle in the canonical model, with provenance: issuer, original hash, converter name@version, certificate |
+
+The certificate is `urn:lake:cert:uncertified` until the Auditor (milestone 3) signs this converter.

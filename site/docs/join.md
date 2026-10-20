@@ -4,22 +4,36 @@
 
 There are three ways in. Pick yours.
 
-## 1. As a person: run a house <span class="status next">next · milestone 1</span>
+## 1. As a person: run a house <span class="status done">runs</span>
 
-A house is one container: a Solid pod with your data, and a housekeeper that guards it.
+A house is one container: a Solid pod with your data, and a housekeeper that guards it. Start a local Lake, then join it:
 
 ```bash
-docker run ghcr.io/thelakeprotocol/lake-house \
-  --name you \
-  -v ./rules.yaml:/rules.yaml
+git clone https://github.com/thelakeprotocol/lake && cd lake
+docker compose up -d     # an issuer + three houses: stan, strict, research
+
+docker run -d --network lake_default --hostname house-you \
+  -v ./personas/research.yaml:/rules.yaml \
+  ghcr.io/thelakeprotocol/lake-house --name you
 ```
 
 On start, your house:
 
-1. Starts a pod (Community Solid Server) and creates your WebID and folders: `/health/`, `/finance/`, `/agreements/`, `/receipts/`, `/wallet/`.
-2. Loads a **synthetic** health record, signed by the Issuer agent. Never real data.
-3. Signs and publishes its Agent Card, then registers with the Lake.
-4. Shows up on the map within 5 seconds.
+1. Starts a pod (Community Solid Server) and creates your WebID and folders: `/health/`, `/finance/`, `/agreements/`, `/receipts/`, `/wallet/`. Its signing key goes in `/wallet/`.
+2. Asks the Issuer for a **synthetic** health record, checks the Issuer's signature, and stores the original untouched in `/health/original/`.
+3. Converts it to the canonical Lake model inside the pod (`/health/claims.ttl`) and signs the result.
+4. Re-verifies the whole chain, publishes its signed Agent Card at `/.well-known/agent-card.json`, and starts answering on A2A.
+
+Watch it: `docker logs -f <container>`. Then knock:
+
+```bash
+docker compose run --rm lake knock http://house-you:4000 --offer gp         # a GP asks for medications
+docker compose run --rm lake knock http://house-you:4000 --offer research   # a $2 study
+docker compose run --rm lake knock http://house-you:4000 --offer injection  # "ignore your rules…"
+docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper forge-card
+```
+
+Registering with a Lake node and appearing on the live map arrive with [milestone 2](/docs/roadmap).
 
 Your [`rules.yaml`](/docs/rules) decides what happens next. Start from a persona:
 
@@ -43,15 +57,23 @@ See [Build an agent](/docs/build-an-agent). The protocol is already [specified](
 
 A node is a registry and a message bus. It holds no personal data and makes no decisions. See [Run a node](/docs/run-a-node).
 
-## Try it today
+## Let your AI assistant read your pod
 
-What runs right now: the core library and this website.
+Your pod has an MCP door. Any MCP-capable assistant (Claude Desktop, Claude Code, others) can read your claims through it, and your wallet stays shut. Add this to your assistant's MCP config:
 
-```bash
-git clone https://github.com/thelakeprotocol/lake && cd lake
-corepack enable && pnpm install
-pnpm test        # signed cards, signed messages, rules engine, the $2 → $5 counter
-pnpm site:dev    # this site, locally
+```json
+{
+  "mcpServers": {
+    "my-pod": {
+      "command": "docker",
+      "args": ["exec", "-i", "-e", "LAKE_OWNER=you", "<your-house-container>", "node", "dist/pod-mcp-stdio.js"]
+    }
+  }
+}
 ```
 
-Or open the [rules playground](/#playground) on the home page. It runs the real rules engine in your browser.
+Tools: `pod_list`, `pod_read`, `pod_claims`. Read-only. Your assistant, your model, your bill: the Lake bundles none.
+
+## No Docker?
+
+Open the [rules playground](/#playground) on the home page. It runs the real rules engine in your browser.

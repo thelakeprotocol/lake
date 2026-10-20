@@ -29,7 +29,7 @@ Every value carries a tier, and offers state the minimum they accept:
 2. The **converted** claim carries the original's hash, the converter's package name, version and certificate, and the housekeeper's signature.
 3. **Study code verifies all three** before using a value. Any failure drops the value, and that house isn't paid.
 
-## Write a converter <span class="status next">first one: FHIR, next</span>
+## Write a converter <span class="status done">first one: FHIR, runs</span>
 
 A converter is a package that maps one external standard into the canonical model: `@thelakeprotocol/convert-fhir` first, then whatever you need.
 

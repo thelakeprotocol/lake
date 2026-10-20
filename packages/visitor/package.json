@@ -1,0 +1,22 @@
+{
+  "name": "@thelakeprotocol/visitor",
+  "version": "0.1.0",
+  "description": "The `lake` CLI and the research agent.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "lake": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "1.3.0",
+    "@thelakeprotocol/core": "workspace:^"
+  }
+}

@@ -62,14 +62,29 @@ Joining is publishing a signed card on a domain you control and announcing it to
 > [!WARNING]
 > **Wild west.** This repo is days old and built in the open. Read the status table before you trust anything. If something below is marked *next*, it doesn't run yet: come build it.
 
-**As a person (a house):**
+**As a person (a house):** start a local Lake, then join it.
 
 ```bash
-# next — milestone 1
-docker run ghcr.io/thelakeprotocol/lake-house --name you -v ./personas/stan.yaml:/rules.yaml
+git clone https://github.com/thelakeprotocol/lake && cd lake
+docker compose up -d          # an issuer + three houses: stan, strict, research
+
+docker run -d --network lake_default --hostname house-you \
+  -v ./personas/research.yaml:/rules.yaml \
+  ghcr.io/thelakeprotocol/lake-house --name you
 ```
 
-Your house starts a pod, creates your WebID, publishes its card, registers with the Lake and shows up on the map. Your `rules.yaml` is the note on the fridge:
+Your house starts a real Solid pod, creates your WebID, gets a **synthetic** health record signed by the Issuer, converts it inside the pod, verifies the whole signature chain, and starts answering knocks by your rules. Now knock on it:
+
+```bash
+docker compose run --rm lake knock http://house-you:4000 --offer gp
+# ← JOIN: matches your rule 3 …
+docker compose run --rm lake knock http://house-you:4000 --offer injection
+# ← DECLINE: your rule 2 declines marketing requests
+docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper forge-card
+# ✗ REJECTED (forged-card): card signature does not verify
+```
+
+Your `rules.yaml` is the note on the fridge:
 
 ```yaml
 owner: you
@@ -106,11 +121,11 @@ Honest, updated every merge.
 
 | | Piece | Status |
 |---|---|---|
-| ✅ | **Core**: signed Lake cards on the official A2A signer, signed messages with replay and expiry checks, rules engine, collective counter-offers, ODRL offers, event schema | runs, tested |
+| ✅ | **Core**: signed Lake cards on the official A2A signer, signed messages with replay and expiry checks, rules engine, collective counter-offers, ODRL offers, Verifiable Credentials, domain proof | runs, tested |
 | ✅ | **Spec**: `SPEC.md` + JSON Schemas + canonical model | v0.1 draft |
 | ✅ | **Website + docs** | [lake.doneinfifty.com](https://lake.doneinfifty.com) |
-| 🔨 | **M1 House**: pod, WebID, issuer-signed synthetic record, housekeeper over MCP | next |
-| ⬜ | **M2 Lake node**: registry, bus, event stream, live map | |
+| ✅ | **M1 House**: real Solid pod + WebID, issuer-signed synthetic record, FHIR → canonical model (SHACL-valid), housekeeper answering A2A through MCP, `lake knock` | runs, end-to-end tested. Fresh house joins in ~11 s on a busy 4-core box; target is 5 s ([help wanted](https://github.com/thelakeprotocol/lake/issues)) |
+| 🔨 | **M2 Lake node**: registry, bus, event stream, live map | next |
 | ⬜ | **M3 Mission**: ethics, audit, knock, decide, grant, compute in place | |
 | ⬜ | **M4 Approvals app**: Allow from your phone, revoke in under 1 second | |
 | ⬜ | **M5 Money**: ODRL agreements, collective bargaining, AP2 mandates | |
@@ -119,31 +134,32 @@ Honest, updated every merge.
 | ⬜ | **M8 Federation**: many nodes, `.well-known` discovery, shared blocklists | |
 | ⬜ | **M9 Open door**: agent SDK, Lake MCP connector, public sandbox | |
 
-## Run what exists
+## Hack on it
 
 ```bash
-git clone https://github.com/thelakeprotocol/lake && cd lake
-corepack enable && pnpm install
-pnpm test           # core: cards, signatures, rules, the $2 → $5 counter
-pnpm site:dev       # the website and docs, locally
+corepack enable && pnpm install && pnpm build
+pnpm test           # unit: cards, signatures, rules, VCs, converter + SHACL, the MCP door
+pnpm test:e2e       # boots a real issuer + house (Solid pod) and knocks over A2A
+pnpm site:dev       # the website and docs
+docker compose up --build   # the whole thing from source
 ```
 
-Node 20+ and pnpm 9. Docker once the house lands.
+Node 20+, pnpm 9, Docker.
 
 ## Repo map
 
 ```
 packages/
-  core/          signing, Lake cards, rules engine, ODRL offers, events   ✅
-  house/         pod + housekeeper + MCP pod tools                        M1
+  core/          signing, Lake cards, rules engine, ODRL, VCs, events     ✅
+  house/         Solid pod + housekeeper + MCP pod door                   ✅
   lake/          registry, bus, event stream, counters                    M2
-  visitor/       research agent + `lake` CLI                              M3
-  specialists/   ethics, auditor, payments, issuer                        M3–M5
+  visitor/       `lake` CLI (knock ✅) + research agent                    M3
+  specialists/   issuer ✅ · ethics, auditor, payments                     M3–M5
   swarm/         background traders and attackers                        M6
   ui/            the map + the approvals app                              M2, M4
   agent/         SDK for outside agents                                   M9
   mcp/           Lake MCP connector: any assistant can use the Lake       M9
-  convert-fhir/  FHIR → canonical Lake model                              M3
+  convert-fhir/  FHIR → canonical Lake model                              ✅
 model/           canonical ontology (RDF) + SHACL shapes
 spec/schemas/    JSON Schemas for cards, offers, events
 personas/        example rules.yaml files
