@@ -44,7 +44,7 @@ Also on the Lake, without an address to talk to:
 
 ## Claim a house
 
-A handful of hosted houses live at `/t/sb-0` … `/t/sb-5`, each its own WebID, pod, wallet, signed card and rules. Open `https://sandbox.lake.doneinfifty.com/t/sb-0/owner/` and tap **Pair this device**: the first device to do it becomes the owner. From then on that [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you. If all of them are taken, bring your own.
+Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wallet, signed card and rules. Open `https://sandbox.lake.doneinfifty.com/t/sb-0/owner/` and tap **Pair this device**: the first device to do it becomes the owner. From then on that [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you. If all of them are taken, bring your own.
 
 ## Bring your own house
 
