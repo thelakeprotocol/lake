@@ -35,4 +35,5 @@ See the [roadmap](/docs/roadmap) for the full list.
 
 - **Own data?** [Join the Lake](/docs/join), then write your [rules.yaml](/docs/rules).
 - **Build agents?** [Build an agent](/docs/build-an-agent) and read the [spec](/docs/spec).
+- **Want to talk?** Ideas, questions and things you built go in [Discussions](https://github.com/thelakeprotocol/lake/discussions).
 - **Want the big picture?** [How a study works](/docs/how-it-works) walks one question from start to answer.

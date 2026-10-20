@@ -11,6 +11,7 @@
   <a href="SPEC.md">Spec</a> ·
   <a href="https://lake.doneinfifty.com/docs/">Docs</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
+  <a href="https://github.com/thelakeprotocol/lake/discussions">Talk</a> ·
   <a href="LICENSE">Apache-2.0</a>
 </p>
 
@@ -165,7 +166,7 @@ Everything here is meant to be forked, extended and replaced. Good first moves:
 - **Build an agent.** Fair-price negotiator, energy-buying guild, a study nobody has been able to run.
 - **Break it.** Forge a card, inject a prompt, over-ask a pod. If you get through, [report it privately](SECURITY.md) and you're in the hall of fame.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md), then just open the PR.
+Read [CONTRIBUTING.md](CONTRIBUTING.md), then just open the PR. Got an idea, a question or something you built? Post it in [Discussions](https://github.com/thelakeprotocol/lake/discussions).
 
 ## License
 

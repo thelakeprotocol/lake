@@ -35,6 +35,7 @@ export default defineConfig({
       { text: 'Spec', link: '/docs/spec' },
       { text: 'Join', link: '/docs/join' },
       { text: 'Contribute', link: '/docs/contributing' },
+      { text: 'Talk', link: 'https://github.com/thelakeprotocol/lake/discussions' },
     ],
     socialLinks: [{ icon: 'github', link: GH }],
     sidebar: {

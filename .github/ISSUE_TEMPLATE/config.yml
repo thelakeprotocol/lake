@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ideas, questions, show and tell
+    url: https://github.com/thelakeprotocol/lake/discussions
+    about: Talk about the Lake. Not sure it's a bug? Start here.
   - name: Security report (private)
     url: https://github.com/thelakeprotocol/lake/security/advisories/new
     about: Anything that lets data out, keys get minted, or forgeries through.

@@ -11,8 +11,9 @@ pnpm test
 ```
 
 1. Pick something: an issue labelled [`good first issue`](https://github.com/thelakeprotocol/lake/labels/good%20first%20issue), a milestone in the [status table](https://github.com/thelakeprotocol/lake/blob/main/README.md#status), or your own idea.
-2. If it's big, open an issue first and say what you're building, so two people don't build the same thing.
-3. Open a PR. Small and working beats big and perfect.
+2. Ideas, questions, half-baked plans: post them in [Discussions](https://github.com/thelakeprotocol/lake/discussions). No idea is too early.
+3. If it's big, open an issue first and say what you're building, so two people don't build the same thing.
+4. Open a PR. Small and working beats big and perfect.
 
 ## What we merge
 

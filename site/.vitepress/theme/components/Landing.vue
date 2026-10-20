@@ -232,6 +232,7 @@ await me.offer(houses, terms)</code></pre>
         <a class="btn primary" :href="GH">Star &amp; fork on GitHub</a>
         <a class="btn" :href="GH + '/blob/main/SPEC.md'">Read the spec</a>
         <a class="btn ghost" :href="withBase('/docs/contributing')">How to contribute</a>
+        <a class="btn ghost" :href="GH + '/discussions'">Say something</a>
       </div>
       <p class="fine">Apache-2.0 · Synthetic data only, everywhere · No company, no token, no sign-up.</p>
     </section>
