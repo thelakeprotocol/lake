@@ -12,6 +12,7 @@ import { OwnerDesk } from './owner.js';
 import { createPodMcpServer } from './pod-mcp.js';
 import type { OwnerSession } from './pod.js';
 import { convertRecord, fetchConverterCert, fetchRecord, RECORD, type Trust } from './record.js';
+import { connectRelay } from './relay.js';
 import { createHouseServer } from './server.js';
 
 export interface HouseOptions {
@@ -36,6 +37,11 @@ export interface HouseOptions {
   say: (msg: string) => void;
   /** Hosted houses skip the terminal QR code. */
   quiet?: boolean;
+  /**
+   * Behind a home router: be reached through the nodes instead of directly. The card then names a relay
+   * address on each node, and `join()` opens the outgoing connections before registering.
+   */
+  relay?: { localPort: number };
 }
 
 export interface House {
@@ -84,6 +90,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
   for (const f of ['health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/']) await ensureContainer(owner, f);
   const id = await walletIdentity(owner);
+  const nodes = (o.lakeUrl ?? '').split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
+  const relayed = o.relay && nodes.length ? nodes.map((n) => `${n}/relay/${id.kid.replace(/[^a-zA-Z0-9]/g, '')}/a2a`) : null;
   if (!rules.trust && o.sandbox) say(`no trust section in rules.yaml; sandbox default: issuer ${DEMO_TRUST.issuers}, auditor ${DEMO_TRUST.auditors}, ethics ${DEMO_TRUST.ethics}`);
 
   const card = await signCard(
@@ -91,7 +99,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       {
         name: `House ${o.name}`,
         description: `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
-        url: `${o.publicUrl}/a2a`,
+        url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
+        alsoAt: relayed?.slice(1),
         skills: [{ id: 'health-study', name: 'Health study', description: "Considers research offers by its owner's rules", tags: rules.tags ?? [] }],
         profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: rules.tags ?? [] },
       },
@@ -168,8 +177,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     name: o.name, card, keeper, desk, app,
     get link() { return link; },
     join: async () => {
+      if (relayed && o.relay) {
+        // Open the way in first: the node checks our card through it when we register.
+        const relays = nodes.map((n) => connectRelay({ nodeUrl: n, card, id, webId: owner.webId, localPort: o.relay!.localPort, log: say }));
+        await Promise.race([Promise.all(relays.map((r) => r.connected)), new Promise((ok) => setTimeout(ok, 15_000))]);
+      }
       if (o.lakeUrl) {
-        const nodes = o.lakeUrl.split(',').map((u) => u.trim()).filter(Boolean);
         link = new LakeLinks({ nodeUrls: nodes, card, identity: id, webId: owner.webId, log: say });
         const ids = await link.register();
         ids.forEach((nodeId, i) => { if (nodeId) say(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });

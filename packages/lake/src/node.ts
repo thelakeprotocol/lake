@@ -239,6 +239,11 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     res.json({ accepted: n });
   });
 
+  // Relay (SPEC §9.1): a house behind a home router keeps one outgoing connection here, and knocks for it
+  // arrive at /relay/<its key>/… and travel down that connection. Messages stay signed end to end.
+  const relay = relayHub(replay);
+  app.use('/relay/:kid', (req, res) => void relay.forward(String(req.params.kid), req, res));
+
   if (o.uiDir) app.use(express.static(o.uiDir));
 
   // Federation (SPEC §9): follow peers. Their cards are verified again here, from the agents' own endpoints,
@@ -283,7 +288,15 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   }
 
   const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: '/events' });
+  const wss = new WebSocketServer({ noServer: true });
+  const relayWss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (req, socket, head) => {
+    const path = (req.url ?? '').split('?')[0];
+    if (path === '/events') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    else if (path === '/relay') relayWss.handleUpgrade(req, socket, head, (ws) => relayWss.emit('connection', ws, req));
+    else socket.destroy();
+  });
+  relayWss.on('connection', (ws) => relay.accept(ws));
   wss.on('connection', (ws) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
@@ -345,3 +358,53 @@ export async function replayNode(o: { file: string; uiDir?: string; speed?: numb
   setTimeout(play, 1500);
   return server;
 }
+
+/** Holds relay connections from houses that can't take incoming connections, and forwards requests to them. */
+function relayHub(replay: ReplayGuard) {
+  const channels = new Map<string, { ws: WebSocket; pending: Map<string, (r: { status: number; headers: Record<string, string>; body: string }) => void> }>();
+  let seq = 0;
+  return {
+    accept(ws: WebSocket) {
+      let kid = '';
+      ws.on('message', async (raw) => {
+        let m: any;
+        try { m = JSON.parse(String(raw)); } catch { return ws.close(); }
+        if (m.type === 'hello') {
+          // Only the holder of the card's key can open its channel.
+          try {
+            const profile = await verifyLakeCard(m.card);
+            const p = await verifyMessage(m.envelope, async (k) => (k === profile.publicJwk.kid ? profile.publicJwk : null), { replay });
+            if ((p as unknown as { kind: string }).kind !== 'relay-hello' || p.iss !== profile.webId) throw new Error('bad hello');
+            kid = relayId(profile.publicJwk.kid!);
+            channels.get(kid)?.ws.close();
+            channels.set(kid, { ws, pending: new Map() });
+            ws.send(JSON.stringify({ type: 'ready', path: `/relay/${kid}` }));
+          } catch {
+            ws.close();
+          }
+        } else if (m.type === 'res' && kid) {
+          channels.get(kid)?.pending.get(m.id)?.(m);
+        }
+      });
+      ws.on('close', () => { if (kid && channels.get(kid)?.ws === ws) channels.delete(kid); });
+    },
+    async forward(kid: string, req: express.Request, res: express.Response) {
+      const ch = channels.get(kid);
+      if (!ch) return void res.status(502).json({ error: 'that house is not connected to this node right now' });
+      const id = String(++seq);
+      const done = new Promise<{ status: number; headers: Record<string, string>; body: string }>((ok) => ch.pending.set(id, ok));
+      const headers: Record<string, string> = {};
+      for (const h of ['content-type', 'a2a-version', 'a2a-extensions', 'x-a2a-extensions', 'accept']) if (req.get(h)) headers[h] = req.get(h)!;
+      ch.ws.send(JSON.stringify({ type: 'req', id, method: req.method, path: req.url, headers, body: req.body && Object.keys(req.body).length ? JSON.stringify(req.body) : undefined }));
+      const timeout = new Promise<null>((ok) => setTimeout(() => ok(null), 30_000));
+      const r = await Promise.race([done, timeout]);
+      ch.pending.delete(id);
+      if (!r) return void res.status(504).json({ error: 'the house did not answer in time' });
+      for (const [k, v] of Object.entries(r.headers)) if (k !== 'content-length' && k !== 'transfer-encoding') res.set(k, v);
+      res.status(r.status).send(r.body);
+    },
+  };
+}
+
+/** The path segment a house is reached at through a relay: its key id, made URL-safe. */
+export const relayId = (kid: string) => kid.replace(/[^a-zA-Z0-9]/g, '');

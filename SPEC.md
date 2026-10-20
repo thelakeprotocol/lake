@@ -226,6 +226,15 @@ Kinds in v0:
 - Houses sharing an interest tag form a **guild**; a node announces it (`guild.formed`) when enough members exist (reference: 3).
 - Losing any node MUST NOT stop a mission that is already running.
 
+### 9.1 Relay
+
+A participant that cannot accept incoming connections (a house behind a home router) MAY be reached through a node:
+
+- It opens a WebSocket to `<node>/relay` and sends `{ type: "hello", card, envelope }`, where `envelope` is a signed envelope (§3) with payload `{ kind: "relay-hello" }` issued by the card's WebID. The node MUST verify both before opening the channel.
+- Its card lists `<node>/relay/<key id>/a2a` as an A2A endpoint, one per node it relays through. Its card is served at `<node>/relay/<key id>/.well-known/agent-card.json`, through the same channel, so registration still proves control (§2).
+- The node forwards requests on those paths down the channel as `{ type: "req", id, method, path, headers, body }` and returns `{ type: "res", id, status, headers, body }`.
+- Messages stay signed end to end: a relaying node can't forge or alter them. It can read them (offers, decisions, fragments; never records, which don't leave the house). Encrypting A2A payloads end to end is future work.
+
 ## 10. Canonical data model
 
 The Lake supports exactly one data model, in RDF, with SHACL shapes for validation. Other standards (FHIR, bank CSVs, wearables) are converted into it at the edge, inside the house, by signed and audited **converter** packages.

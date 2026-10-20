@@ -24,6 +24,8 @@ export interface CardInput {
   description: string;
   /** A2A endpoint (JSON-RPC binding). */
   url: string;
+  /** More endpoints for the same agent, e.g. a relay through each node a house follows. */
+  alsoAt?: string[];
   skills: { id: string; name: string; description: string; tags?: string[] }[];
   profile: Omit<LakeProfile, 'lakeVersion' | 'publicJwk'>;
 }
@@ -33,7 +35,7 @@ export function buildCard(input: CardInput, id: Identity): AgentCard {
   return {
     name: input.name,
     description: input.description,
-    supportedInterfaces: [{ url: input.url, protocolBinding: 'JSONRPC', tenant: '', protocolVersion: '1.0' }],
+    supportedInterfaces: [input.url, ...(input.alsoAt ?? [])].map((url) => ({ url, protocolBinding: 'JSONRPC', tenant: '', protocolVersion: '1.0' })),
     provider: { url: `https://${input.profile.ownerDomain}`, organization: input.profile.ownerDomain },
     version: LAKE_VERSION,
     capabilities: {

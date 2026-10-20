@@ -76,6 +76,8 @@ docker run -d --network lake_default --hostname house-you \
   ghcr.io/thelakeprotocol/lake-house --name you
 ```
 
+At home behind a router? Add `--relay`: your house is reached through the nodes it follows, with nothing to open or forward.
+
 Your house starts a real Solid pod, creates your WebID, gets a **synthetic** health record signed by the Issuer, converts it inside the pod, verifies the whole signature chain, registers with the Lake node and pops onto the map. Now knock on it, and watch the map:
 
 ```bash
@@ -160,6 +162,7 @@ Honest, updated every merge.
 | ✅ | **npm**: `@thelakeprotocol/core`, `convert-fhir`, `visitor`, `agent` 0.1.0, published from CI with provenance | live |
 | ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox config (Caddy + HTTPS) | runs, end-to-end tested. Sandbox not deployed yet; one-click hosted houses for non-developers are next |
 | ✅ | **M10 Polish**: map choreography like the reference (the agent visits each specialist, the $2 → $5 moment, payment threads, snapping keys); `lake demo` runs the on-stage script; `lake reset` in under a second; `--record` / `--replay` for a stage fallback; seeded runs; a [90-second recording](https://lake.doneinfifty.com/demo.mp4) | done. [Acceptance scorecard](https://lake.doneinfifty.com/docs/roadmap#acceptance-tests): 12 of 14 met; startup and 1,000-house timing miss their targets on a 4-core laptop |
+| ✅ | **Relay**: houses at home, behind any router, are reached through the nodes they follow (`--relay`); one signed outgoing connection per node; registration still proves control through the relay | runs, end-to-end tested through two nodes |
 
 ## Hack on it
 

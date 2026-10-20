@@ -28,6 +28,10 @@ To be found by strangers, an agent registers its card with a Lake node. The node
 
 The research agent sends its offer straight to each house's own A2A endpoint; agreements, computations and receipts go the same way. Nodes never relay messages. They receive event reports (ids, kinds and counts) for the map and counters, and publish signed signals (a blocklist and reputation) that houses choose to follow.
 
+## Houses at home
+
+A house on a home laptop can make outgoing connections but can't accept incoming ones. With `--relay` it keeps one outgoing connection to each node it follows, and its card names an address on each node: `https://<node>/relay/<its key>/a2a`. Knocks arrive there and travel down the connection. Messages stay signed end to end, so a relaying node can't forge or change them; it can read offers and decisions, never records. Houses with a public address talk directly, as before.
+
 ## Is it a mesh?
 
 **For messages, yes.** Any agent can reach any other point to point. Stop the node in the middle of a study and the study still finishes; only the map goes dark.

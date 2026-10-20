@@ -292,7 +292,8 @@ async function discover(o: DispatchOptions, log: (step: string, detail: string) 
     try {
       log('discover', `searching ${node} for houses with the health-study skill`);
       const found = (await (await fetch(`${node}/cards?skill=health-study&role=house`, { signal: AbortSignal.timeout(5000) })).json()) as { id: string; card: AgentCard }[];
-      const houses = found.map((f) => ({ id: f.id, name: f.card.name, url: f.card.supportedInterfaces[0]!.url }));
+      // A relayed house lists one address per node; use the one on the node that answered.
+      const houses = found.map((f) => ({ id: f.id, name: f.card.name, url: (f.card.supportedInterfaces.find((i) => i.url.startsWith(node)) ?? f.card.supportedInterfaces[0]!).url }));
       if (o.houseCache) await writeFile(o.houseCache, JSON.stringify(houses)).catch(() => {});
       return houses;
     } catch {

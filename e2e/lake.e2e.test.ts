@@ -22,6 +22,7 @@ let nodeB: string;
 let ethics: string;
 let auditor: string;
 let payments: string;
+let issuerUrl: string;
 const houses: Record<string, string> = {};
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
@@ -53,6 +54,7 @@ beforeAll(async () => {
   auditor = `http://localhost:${ap}`;
   ethics = `http://localhost:${ep}`;
   payments = `http://localhost:${pp}`;
+  issuerUrl = `http://localhost:${ip}`;
   await Promise.all([
     start(['packages/specialists/dist/main.js', 'issuer', '--port', ip, '--data', join(dir, 'issuer'), '--lake', node], /registered with the Lake node/),
     start(['packages/specialists/dist/main.js', 'auditor', '--port', ap, '--data', join(dir, 'auditor'), '--lake', node], /registered with the Lake node/),
@@ -322,12 +324,42 @@ describe('a mission, no money', () => {
   });
 });
 
+describe('relay: a house behind a home router', () => {
+  let relayed: ChildProcess | undefined;
+  let card: { supportedInterfaces: { url: string }[] };
+
+  it('is reached through the nodes it follows, with nothing to open or forward', async () => {
+    const [pp, hp] = [await freePort(), await freePort()];
+    await start(
+      ['packages/house/dist/main.js', '--name', 'homebody', '--rules', 'personas/stan.yaml', '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
+        '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', `${node},${nodeB}`, '--relay', '--seed', '42'],
+      /joined the Lake/,
+    );
+    relayed = procs[procs.length - 1];
+    const found = await (await fetch(`${node}/cards?role=house`)).json() as { card: typeof card & { name: string } }[];
+    card = found.find((f) => f.card.name === 'House homebody')!.card;
+    expect(card.supportedInterfaces.map((i) => i.url)).toEqual([expect.stringMatching(new RegExp(`^${node}/relay/`)), expect.stringMatching(new RegExp(`^${nodeB}/relay/`))]);
+    const { reply } = await knock(card.supportedInterfaces[0]!.url, await visitor('gp.example'), PRESETS.gp!);
+    expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });
+  });
+
+  it('can be reached through either node', async () => {
+    const { reply } = await knock(card.supportedInterfaces[1]!.url, await visitor('gp.example'), PRESETS.gp!);
+    expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });
+  });
+
+  afterAll(async () => {
+    relayed?.kill('SIGTERM');
+    await new Promise((r) => setTimeout(r, 2500)); // let both nodes drop it before the federation tests count houses
+  });
+});
+
 describe('federation (runs last: it stops the nodes)', () => {
   const houseCache = () => join(dir, 'houses-cache.json');
 
   it('a second node learns every house from the node it follows, verifying each card itself', async () => {
     let n = 0;
-    for (let i = 0; i < 20 && n < 3; i++) {
+    for (let i = 0; i < 20 && n !== 3; i++) {
       await new Promise((r) => setTimeout(r, 500));
       n = (await (await fetch(`${nodeB}/cards?role=house`)).json()).length;
     }

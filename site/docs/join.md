@@ -34,6 +34,13 @@ docker compose run --rm lake knock http://house-you:4000 --offer injection  # "i
 docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper forge-card
 ```
 
+**At home, behind a router?** Add `--relay`. Your house keeps one outgoing connection to each node it follows, and is reached through them: no port forwarding, no domain, no certificates. A laptop, a Raspberry Pi or a home server all work.
+
+```bash
+docker run -d -e LAKE_NODE_URL=https://lake.example,https://lake.other.example \
+  -v ./rules.yaml:/rules.yaml ghcr.io/thelakeprotocol/lake-house --name you --relay
+```
+
 Your house registers with the node and appears on the map. Every knock, decision and blocked attack shows there as it happens: ids, kinds and counts, never a record.
 
 Your [`rules.yaml`](/docs/rules) decides what happens next. Start from a persona:

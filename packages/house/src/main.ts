@@ -31,6 +31,7 @@ const { values: a } = parseArgs({
     tenants: { type: 'string', default: process.env.LAKE_TENANTS },
     'tenant-prefix': { type: 'string', default: process.env.LAKE_TENANT_PREFIX },
     'personas-dir': { type: 'string', default: process.env.LAKE_PERSONAS ?? '/personas' },
+    relay: { type: 'boolean', default: process.env.LAKE_RELAY === '1' },
   },
 });
 
@@ -67,9 +68,10 @@ async function single() {
   const owner = await ownerSession(podOpts);
   say(`pod up: ${owner.podRoot} (WebID ${owner.webId})`);
 
-  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], openPairing: a['open-pairing'], emit, say, quiet: a.json });
+  if (a.relay && !a.lake) throw new Error('--relay needs at least one Lake node (--lake or LAKE_NODE_URL) to relay through');
+  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], openPairing: a['open-pairing'], emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
   const server = house.app.listen(port, async () => {
-    say(`A2A on ${baseUrl}/a2a · card at ${baseUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
+    say(a.relay ? `reached through the Lake's relay: ${house.card.supportedInterfaces.map((i) => i.url).join(' · ')}` : `A2A on ${baseUrl}/a2a · card at ${baseUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
     await house.join();
   });
   const stop = async () => {
