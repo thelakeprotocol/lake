@@ -1,0 +1,36 @@
+name: Release
+# Push a tag like v0.1.0 to publish @thelakeprotocol/{core,convert-fhir,visitor,agent} to npm,
+# with provenance: each package is signed and linked to the exact commit and CI run that built it.
+on:
+  push: { tags: ['v*'] }
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    env: { NPM_TOKEN: '${{ secrets.NPM_TOKEN }}' }
+    steps:
+      - if: env.NPM_TOKEN == ''
+        run: echo "::notice::No NPM_TOKEN secret yet; nothing published." && exit 0
+      - uses: actions/checkout@v4
+        if: env.NPM_TOKEN != ''
+      - uses: pnpm/action-setup@v4
+        if: env.NPM_TOKEN != ''
+      - uses: actions/setup-node@v4
+        if: env.NPM_TOKEN != ''
+        with: { node-version: 22, cache: pnpm, registry-url: 'https://registry.npmjs.org' }
+      - if: env.NPM_TOKEN != ''
+        run: pnpm install --frozen-lockfile
+      - if: env.NPM_TOKEN != ''
+        run: pnpm build
+      - if: env.NPM_TOKEN != ''
+        run: pnpm test
+      - name: Version from tag
+        if: env.NPM_TOKEN != ''
+        run: pnpm -r --filter "./packages/*" exec npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+      - if: env.NPM_TOKEN != ''
+        run: pnpm -r --filter "./packages/*" publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'

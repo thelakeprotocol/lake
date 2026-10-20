@@ -22,5 +22,6 @@
   },
   "devDependencies": {
     "@types/express": "5"
-  }
+  },
+  "private": true
 }

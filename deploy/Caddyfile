@@ -1,0 +1,22 @@
+# The public sandbox Lake behind automatic HTTPS (Let's Encrypt). One domain:
+#   /            the live map and the node's API (register, cards, events, signals, state)
+#   /t/<name>/   hosted houses (A2A at /t/<name>/a2a, card at /t/<name>/.well-known/agent-card.json)
+#   /ethics/ /auditor/ /payments/   the demo specialists
+{$LAKE_DOMAIN} {
+	encode zstd gzip
+	handle_path /ethics/* {
+		reverse_proxy ethics:4500
+	}
+	handle_path /auditor/* {
+		reverse_proxy auditor:4400
+	}
+	handle_path /payments/* {
+		reverse_proxy payments:4600
+	}
+	handle /t/* {
+		reverse_proxy house-multi:4000
+	}
+	handle {
+		reverse_proxy lake-node:7000
+	}
+}

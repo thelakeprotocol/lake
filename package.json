@@ -17,6 +17,7 @@
     "examples": "node scripts/make-examples.mjs"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@types/node": "^22.20.5",
     "@types/ws": "8",
     "typescript": "^5.9.3",

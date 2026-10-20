@@ -66,6 +66,7 @@ export default defineConfig({
           items: [
             { text: 'Build an agent', link: '/docs/build-an-agent' },
             { text: 'Run a node', link: '/docs/run-a-node' },
+            { text: 'Run a sandbox Lake', link: '/docs/sandbox' },
             { text: 'Data model & converters', link: '/docs/data-model' },
           ],
         },

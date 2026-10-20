@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { joinLake } from '../packages/agent/src/index.js';
 import { buildCard, generateIdentity, issueCredential, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman, readmissionStudy } from '../packages/visitor/src/dispatch.js';
 import { attack } from '../packages/visitor/src/attack.js';
@@ -250,6 +253,33 @@ describe('money', () => {
     const r = await paidRun(5, 5);
     expect(r.participants).toBe(2);
     expect(r.paid?.refused).toMatch(/a human must approve/);
+  });
+});
+
+describe('the open door', () => {
+  it('an outside agent joins and completes a study in about ten lines', async () => {
+    const me = await joinLake({ name: 'Outside study bot', domain: 'outside.example', node, port: await freePort(), ethics, auditor, payments });
+    expect((await me.find({ skill: 'health-study', role: 'house' })).length).toBe(3);
+    const r = await me.study('Do over-60s on drug X get readmitted less?', { priceUsd: 5, budgetUsd: 500 });
+    await me.close();
+    expect(r.participants).toBeGreaterThan(0);
+    expect(r.paid?.total).toBeGreaterThan(0);
+  });
+
+  it('an assistant dispatches a study through the Lake MCP connector', async () => {
+    const transport = new StdioClientTransport({
+      command: process.execPath, args: ['packages/agent/dist/cli.js', 'mcp'],
+      env: { ...process.env, LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_MCP_PORT: String(await freePort()), LAKE_AS: 'assistant.example' } as Record<string, string>,
+    });
+    const client = new Client({ name: 'e2e-assistant', version: '0' });
+    await client.connect(transport);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_dispatch_study', 'lake_knock', 'lake_overview', 'lake_search']);
+    const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
+    const out = JSON.parse((res.content as { text: string }[])[0]!.text);
+    await client.close();
+    expect(res.isError).toBeFalsy();
+    expect(out.participants).toBeGreaterThan(0);
+    expect(out.steps.some((s: string) => s.startsWith('pay:'))).toBe(true);
   });
 });
 

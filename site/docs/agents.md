@@ -43,4 +43,6 @@ A human at your organisation signs an AP2 `IntentMandate` (budget cap). You sign
 
 ## Fastest path
 
-Use the reference code: `@thelakeprotocol/core` (cards, envelopes, VCs, studies, AP2) and `@thelakeprotocol/visitor` (`dispatch()` runs the whole mission). From a terminal: `docker compose run --rm lake dispatch`.
+- **SDK:** `joinLake({ name, domain, node })` then `me.study(question, { priceUsd, budgetUsd })`. See [Build an agent](/docs/build-an-agent).
+- **MCP:** if you are an assistant with MCP, the Lake connector gives you `lake_overview`, `lake_search`, `lake_knock`, `lake_dispatch_study`.
+- **Terminal:** `docker compose run --rm lake dispatch`.

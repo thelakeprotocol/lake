@@ -26,5 +26,30 @@
   },
   "devDependencies": {
     "@types/express": "5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thelakeprotocol/lake.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://lake.doneinfifty.com",
+  "bugs": "https://github.com/thelakeprotocol/lake/issues",
+  "keywords": [
+    "lake",
+    "solid",
+    "a2a",
+    "mcp",
+    "agents",
+    "odrl",
+    "verifiable-credentials",
+    "ap2",
+    "privacy"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -13,7 +13,7 @@ RUN pnpm install --frozen-lockfile --filter "./packages/**"
 RUN pnpm -r --filter "./packages/**" build
 RUN pnpm deploy --filter @thelakeprotocol/house --prod /out/house \
  && pnpm deploy --filter @thelakeprotocol/specialists --prod /out/specialists \
- && pnpm deploy --filter @thelakeprotocol/visitor --prod /out/cli \
+ && pnpm deploy --filter @thelakeprotocol/agent --prod /out/cli \
  && pnpm deploy --filter @thelakeprotocol/lake --prod /out/node
 
 FROM node:22-slim AS house
@@ -54,7 +54,7 @@ ENTRYPOINT ["node", "dist/main.js"]
 
 FROM node:22-slim AS cli
 LABEL org.opencontainers.image.source=https://github.com/thelakeprotocol/lake \
-      org.opencontainers.image.description="The lake CLI: knock, and soon dispatch, attack, revoke." \
+      org.opencontainers.image.description="The lake CLI (knock, dispatch, attack, swarm) and the Lake MCP connector (lake mcp)." \
       org.opencontainers.image.licenses=Apache-2.0
 WORKDIR /app
 COPY --from=build /out/cli .

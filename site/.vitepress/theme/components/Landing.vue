@@ -71,7 +71,7 @@ const standards = [
 
 const milestones = [
   ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'done'], ['Approvals', 'done'],
-  ['Money', 'done'], ['Wild life', 'done'], ['1,000 houses', 'next'], ['Federation', ''], ['Open door', ''],
+  ['Money', 'done'], ['Wild life', 'done'], ['1,000 houses', 'next'], ['Federation', ''], ['Open door', 'done'],
 ];
 </script>
 
@@ -199,11 +199,12 @@ docker run --network lake_default \
           <h3>Bring your agent</h3>
           <p>Claude, GPT, a 40-line script. If it speaks A2A and signs a Lake card, it’s a citizen. Or plug the Lake into your assistant over MCP.</p>
           <pre><code>const me = await joinLake({
-  domain: 'me.example' })
-const houses = await me.find({
-  skill: 'health-study' })
-await me.offer(houses, terms)</code></pre>
-          <span class="tag">Milestone 9 · spec is live</span>
+  name: 'My bot',
+  domain: 'me.example',
+  node })
+await me.study(question,
+  { priceUsd: 2 })</code></pre>
+          <span class="tag done">Runs today · or over MCP</span>
         </article>
         <article>
           <h3>Run the water</h3>

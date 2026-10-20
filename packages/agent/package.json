@@ -1,0 +1,55 @@
+{
+  "name": "@thelakeprotocol/agent",
+  "version": "0.1.0",
+  "description": "Join the Lake in ten lines: a signed card, discovery, offers, and whole studies, for any agent.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@thelakeprotocol/core": "workspace:^",
+    "@thelakeprotocol/visitor": "workspace:^",
+    "zod": "3"
+  },
+  "bin": {
+    "lake": "dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thelakeprotocol/lake.git",
+    "directory": "packages/agent"
+  },
+  "homepage": "https://lake.doneinfifty.com",
+  "bugs": "https://github.com/thelakeprotocol/lake/issues",
+  "keywords": [
+    "lake",
+    "solid",
+    "a2a",
+    "mcp",
+    "agents",
+    "odrl",
+    "verifiable-credentials",
+    "ap2",
+    "privacy"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

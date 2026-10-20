@@ -18,5 +18,30 @@
   "dependencies": {
     "@a2a-js/sdk": "1.3.0",
     "@thelakeprotocol/core": "workspace:^"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thelakeprotocol/lake.git",
+    "directory": "packages/visitor"
+  },
+  "homepage": "https://lake.doneinfifty.com",
+  "bugs": "https://github.com/thelakeprotocol/lake/issues",
+  "keywords": [
+    "lake",
+    "solid",
+    "a2a",
+    "mcp",
+    "agents",
+    "odrl",
+    "verifiable-credentials",
+    "ap2",
+    "privacy"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -19,6 +19,9 @@
 | Broadcast | **Direct A2A** to every discovered house, 32 at a time; no NATS | Direct messaging is required anyway (SPEC §9); a bus is an optimisation to revisit at 1,000 houses (milestone 7) |
 | Converter certificates | The auditor certifies `name@version` from an allowlist | Pinning the package digest is a follow-up |
 | Grants | A `join` is the owner's standing pre-approval; keys are minted by the owner's approval flow (milestone 4) | Agents never mint keys |
+| MCP connector | Part of `@thelakeprotocol/agent`; the assistant joins the Lake as its own signed agent | The assistant is a visitor like any other: same card, same rules, same reputation |
+| npm publishing | From CI on a version tag, with npm provenance | Each package is signed and linked to the exact commit and run that built it |
+| Hosted cards | The card lives next to the A2A endpoint (`…/t/<name>/.well-known/agent-card.json`) | Many houses can share one host; every card still verifies on its own |
 | Quarantine | By key, after 3 independent blocks; signed blocklist at `/signals` | Blocking by claimed domain would let forgers frame real organisations |
 | Reputation | 0.5 + 0.05 per kept deal − 0.15 per blocked attempt, clamped to 0–1, verified identities only | Simple, explainable, and impossible to dent by impersonation |
 | Injection detection | A pattern check that only labels attempts | Safety comes from rules not reading free text; a classifier would be a second line, not the first |

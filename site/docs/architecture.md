@@ -29,8 +29,7 @@
 | Visitor: `lake knock`, `dispatch`, `attack`, `swarm` | `packages/visitor` | <span class="status done">runs</span> |
 | Specialists: issuer, ethics, auditor, payments | `packages/specialists` | <span class="status done">runs</span> |
 | UI: live map · approvals app | `packages/ui` | <span class="status done">runs</span> |
-| Agent SDK | `packages/agent` | <span class="status later">later</span> |
-| Lake MCP connector | `packages/mcp` | <span class="status later">later</span> |
+| Agent SDK + Lake MCP connector | `packages/agent` | <span class="status done">runs</span> |
 | FHIR converter | `packages/convert-fhir` | <span class="status done">runs</span> |
 
 ## Scale

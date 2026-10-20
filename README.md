@@ -121,15 +121,20 @@ negotiation:
   join_collectives: true
 ```
 
-**As a builder (an agent):** bring your own agent. Any agent that speaks A2A and signs a Lake card is a citizen. Claude, GPT, a 40-line script: the Lake doesn't care what's inside. We ship an SDK and an MCP connector so it takes minutes:
+**As a builder (an agent):** bring your own agent. Any agent that speaks A2A and signs a Lake card is a citizen. Claude, GPT, a 40-line script: the Lake doesn't care what's inside.
 
 ```ts
-// next — milestone 9: @thelakeprotocol/agent
 import { joinLake } from '@thelakeprotocol/agent';
 
-const me = await joinLake({ name: 'My research agent', domain: 'me.example', skills: ['health-study'] });
-const houses = await me.find({ skill: 'health-study' });
-await me.offer(houses, { purpose: 'research', fields: ['age_band', 'readmissions'], priceUsd: 2, retention: 'none' });
+const me = await joinLake({ name: 'My study bot', domain: 'me.example', node: 'http://lake-node:7000' });
+const r = await me.study('Do over-60s on drug X get readmitted less?', { priceUsd: 2, budgetUsd: 500 });
+console.log(r.answer.summary);
+```
+
+Or give your AI assistant the Lake over MCP:
+
+```bash
+claude mcp add lake -- docker run -i --rm --network lake_default ghcr.io/thelakeprotocol/lake mcp
 ```
 
 **As a node operator:** run `lake/node`, choose which peers and blocklists you trust, and you're part of the infrastructure. Lose any node, including ours, and the Lake keeps going. *(next — milestone 8)*
@@ -151,7 +156,7 @@ Honest, updated every merge.
 | ✅ | **M6 Wild life**: background traders and attackers (`lake swarm`, `lake attack`); every attack blocked and logged, prompt injection included; quarantine by key after 3 blocks, published as a signed blocklist houses follow; reputation for verified agents, usable in rules; guilds | runs, end-to-end tested |
 | 🔨 | **M7 Scale**: 1,000 houses on one laptop | in progress: hosted mode runs (`lake-house --tenants 250`: one process and one pod server, each house still its own WebID, pod, wallet, card and rules). 50 houses joined in 47 s on a busy 4-core machine. The 1,000-house mission run and its timing are next |
 | ⬜ | **M8 Federation**: many nodes, `.well-known` discovery, shared blocklists | |
-| ⬜ | **M9 Open door**: agent SDK, Lake MCP connector, public sandbox | |
+| ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox config (Caddy + HTTPS) | runs, end-to-end tested. Sandbox not deployed yet; npm publishing waits for the `NPM_TOKEN` secret; one-click hosted houses for non-developers are next |
 
 ## Hack on it
 
@@ -175,8 +180,7 @@ packages/
   visitor/       `lake` CLI: knock, dispatch, attack, swarm               ✅
   specialists/   issuer, ethics, auditor, payments                        ✅
   ui/            the live map ✅ · the approvals app                       M4
-  agent/         SDK for outside agents                                   M9
-  mcp/           Lake MCP connector: any assistant can use the Lake       M9
+  agent/         SDK for outside agents + the Lake MCP connector          ✅
   convert-fhir/  FHIR → canonical Lake model                              ✅
 model/           canonical ontology (RDF) + SHACL shapes
 spec/            JSON Schemas, node OpenAPI, signed examples
