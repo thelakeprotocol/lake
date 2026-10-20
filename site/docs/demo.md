@@ -30,6 +30,21 @@ Open the map at `http://localhost:7000` on the big screen. Scan its QR code with
 | 10 | "I changed my mind." | **Revoke every key** on your phone; the lines snap. |
 | 11 | "And nobody owns the water." | `docker stop lake-node-a`. The map on `:7001` (node B) keeps going; studies keep working. |
 
+## Making a smooth video
+
+Screen-recording a live Lake on a busy laptop drops frames. Record the events instead, then render the video frame by frame: the map has a capture mode that plays a recording on a virtual clock.
+
+```bash
+# 1. record a real run: LAKE_RECORD=/data/run.jsonl on lake-node, run the script, copy the file out
+docker cp lake-node-a:/data/run.jsonl .
+# 2. serve it, and open the map in capture mode
+lake-node --replay run.jsonl --port 7730
+#    http://localhost:7730/?capture&replay=/replay.jsonl&from=<ms into the run>
+# 3. step it from a browser driver: window.__lakeStep(1000 / 30) then a screenshot, 30 times a second of video
+```
+
+The video on the home page was made this way: a real run, rendered at a steady 30 frames a second.
+
 ## If something goes wrong
 
 - **Reset in under a second:** `docker compose run --rm lake reset` clears counters, history and quarantines on every node. Houses stay.

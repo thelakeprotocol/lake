@@ -379,12 +379,54 @@ function connect(delay = 500) {
     setTimeout(() => connect(Math.min(delay * 2, 8000)), delay);
   };
 }
-connect();
-
-let last = performance.now();
-function frame(now: number) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt); draw(now);
+const params = new URLSearchParams(location.search);
+if (params.has('capture')) void capture(params.get('replay') ?? './replay.jsonl', Number(params.get('from') ?? 0));
+else {
+  connect();
+  let last = performance.now();
+  const frame = (now: number) => {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    update(dt); draw(now);
+    requestAnimationFrame(frame);
+  };
   requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
+
+/**
+ * Capture mode (?capture&replay=run.jsonl&from=ms): a recorded run (node --record), played on a virtual
+ * clock that only moves when told to, so a video can be rendered frame by frame at a steady rate however
+ * busy the machine is. Same events, same timing as they happened.
+ */
+async function capture(src: string, fromMs: number) {
+  type Line = { t: number; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
+  const lines = (await (await fetch(src)).text()).split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line);
+  const start = (lines[0]?.t ?? 0) + fromMs;
+  $('status').className = 'dot live';
+  $('where').textContent = 'live · node lake.local · sandbox';
+  let i = 0;
+  // Everything before the window: the Lake as it stood, without animation.
+  for (; i < lines.length && lines[i]!.t < start; i++) {
+    const l = lines[i]!;
+    if (l.participant) addParticipant(l.participant, false);
+    if (l.event.kind === 'house.left') houses.delete(l.event.actor);
+    if (l.event.kind === 'guild.formed' && !guilds.some((g) => g.tag === l.event.data?.tag)) guilds.push({ tag: String(l.event.data?.tag), born: -10 });
+    counters(l.counters);
+  }
+  let vt = start;
+  const w = window as unknown as { __lakeStep: (ms: number) => boolean };
+  w.__lakeStep = (ms: number) => {
+    vt += ms;
+    for (; i < lines.length && lines[i]!.t <= vt; i++) {
+      const l = lines[i]!;
+      onEvent(l.event, l.participant);
+      log(l.event, l.text);
+      counters(l.counters);
+    }
+    update(ms / 1000);
+    draw(vt);
+    return i < lines.length;
+  };
+  // Settle the first frame so the canvas isn't blank.
+  for (let k = 0; k < 30; k++) { update(1 / 30); draw(vt); }
+  document.body.dataset.ready = '1';
+}

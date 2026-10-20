@@ -314,6 +314,8 @@ export async function replayNode(o: { file: string; uiDir?: string; speed?: numb
   const { readFileSync } = await import('node:fs');
   const lines = readFileSync(o.file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line & { t: number; counters: Counters; participant?: Participant });
   const app = express();
+  // The recording itself, for the map's capture mode (frame-by-frame video).
+  app.get('/replay.jsonl', (_req, res) => void res.type('application/x-ndjson').send(readFileSync(o.file, 'utf8')));
   if (o.uiDir) app.use(express.static(o.uiDir));
   const server = createServer(app);
   const wss = new WebSocketServer({ server, path: '/events' });

@@ -96,7 +96,7 @@ const milestones = [
           <p class="sub">Agents knock. <b>Only humans cut keys.</b></p>
           <p class="lede">A world where every person’s data lives in their own pod, a housekeeper agent guards the door, and AI agents have to ask, show ID and pay a fair price. Nobody owns it. Anyone can join.</p>
           <div class="cta">
-            <button class="btn primary" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
+            <button class="btn primary dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
             <a class="btn" :href="withBase('/docs/join')">Join the Lake →</a>
             <a class="btn ghost" :href="GH">GitHub</a>
           </div>
@@ -112,6 +112,8 @@ const milestones = [
           <div class="zero"><dt>Records moved</dt><dd>{{ stats.moved }}</dd></div>
         </dl>
         <div class="controls">
+          <!-- On phones the hero's button is far above the Lake; dispatch sits with the other controls instead. -->
+          <button class="btn sm primary dispatch-bar" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
           <button class="btn sm" type="button" @click="lake?.spawnHouse()">Spawn a house</button>
           <button class="btn sm" type="button" @click="lake?.releaseAttacker()">Release an attacker</button>
           <button class="btn sm" type="button" @click="lake?.revoke()">Revoke keys</button>
@@ -132,7 +134,7 @@ const milestones = [
     <section class="block gutter real">
       <div class="eyebrow">Not a simulation</div>
       <h2>The map above is a simulation.<br><span class="mint">This one is real.</span></h2>
-      <p class="kicker">Ninety seconds of a running Lake: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 owners get paid, an attacker is quarantined, an owner revokes every key. Records moved: 0.</p>
+      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 owners get paid, an attacker is quarantined, an owner revokes every key. Records moved: 0.</p>
       <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
         <source src="/demo.mp4" type="video/mp4">
       </video>
@@ -163,7 +165,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">One study, end to end</div>
       <h2>“Do over-60s on drug X get readmitted less?”</h2>
-      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute, and nothing gets copied. Hit <b>Dispatch an agent</b> above to watch it.</p>
+      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute, and nothing gets copied. Hit <b>Dispatch an agent</b> on the Lake above to watch it.</p>
       <ol class="flow">
         <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
           <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>
@@ -311,6 +313,7 @@ h1 { margin-top: 14px; font-size: clamp(56px, 11vw, 148px); line-height: 0.88; }
 .stats dt { font: 400 11px/1.2 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .stats .zero dd { color: var(--mint); } .stats .threat dd { color: var(--threat); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dispatch-bar { display: none; }
 .legend { display: inline-flex; flex-wrap: wrap; gap: 6px 14px; margin-left: 8px; font: 400 11px/1 var(--f-mono); color: var(--muted); }
 .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--c); }
 .legend .sq::before { border-radius: 1px; }
@@ -379,6 +382,8 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
   .water { position: relative; inset: auto; height: 380px; border-top: 1px solid var(--line); }
   .shade { display: none; }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dispatch-hero { display: none; }
+  .dispatch-bar { display: inline-flex; }
   .log { left: 16px; right: 16px; max-width: none; text-align: left; font-size: 11px; }
   .legend { margin-left: 0; }
   .lede { font-size: 16px; }
