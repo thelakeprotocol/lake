@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Two Claudes, one game</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;700&display=swap">
+<style>
+  :root { --ink:#070B12; --deep:#0D1420; --line:#1D2838; --fg:#E6EDF2; --muted:#8B9BAE; --mint:#3DDC97; --orange:#FF6A2B; --violet:#9D8FFF; --amber:#F5C451; --threat:#FF4D6A; --red:#FF4D6A; --yellow:#F5C451; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--ink); color: var(--fg); font-family: 'Public Sans', system-ui, sans-serif; overflow: hidden; }
+  .wrap { display: grid; grid-template-columns: 450px 1fr 450px; height: 100vh; }
+  .side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+  .side.b { border-right: 0; border-left: 1px solid var(--line); }
+  .side header { padding: 14px 18px 10px; border-bottom: 1px solid var(--line); }
+  .tag { font: 500 11px/1.3 'IBM Plex Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
+  .a .tag { color: var(--red); } .b .tag { color: var(--yellow); }
+  .side h2 { margin: 4px 0 0; font: 700 24px/1 Oswald, sans-serif; text-transform: uppercase; }
+  .side .who { margin-top: 4px; font: 400 11px/1.3 'IBM Plex Mono', monospace; color: var(--muted); min-height: 14px; }
+  .log { flex: 1; overflow: hidden; padding: 12px 18px 20px; display: flex; flex-direction: column; gap: 8px; justify-content: flex-end; }
+  .msg { animation: in .3s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } }
+  .claude { font-size: 13px; line-height: 1.45; }
+  .claude p { margin: 0 0 4px; }
+  .claude pre, .claude code { font: 400 11px/1.25 'IBM Plex Mono', monospace; }
+  .tool { border: 1px solid var(--line); border-left: 3px solid var(--violet); border-radius: 6px; padding: 6px 9px; font: 400 11.5px/1.45 'IBM Plex Mono', monospace; background: var(--deep); word-break: break-word; }
+  .tool .n { color: var(--violet); font-weight: 500; }
+  .tool .a { color: var(--muted); }
+  .tool.code { border-left-color: var(--orange); } .tool.code .n { color: var(--orange); }
+  .tool.res { border-left-color: var(--mint); } .tool.res .n { color: var(--mint); }
+  .tool.res.bad { border-left-color: var(--threat); } .tool.res.bad .n { color: var(--threat); }
+  .done { font: 500 12px/1.4 'IBM Plex Mono', monospace; color: var(--mint); text-transform: uppercase; letter-spacing: .08em; }
+  main { display: grid; grid-template-rows: auto 1fr 430px; min-height: 0; }
+  main header { padding: 14px 22px 10px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font: 500 11px/1.3 'IBM Plex Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--orange); display: flex; gap: 8px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  main h1 { margin: 6px 0 0; font: 700 38px/1 Oswald, sans-serif; text-transform: uppercase; }
+  main .sub { margin: 6px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.45; max-width: 900px; }
+  iframe { width: 100%; height: 100%; border: 0; border-bottom: 1px solid var(--line); }
+  .stage { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; padding: 18px 28px; }
+  .board { display: grid; grid-template-columns: repeat(7, 52px); grid-auto-rows: 52px; gap: 6px; background: #12305a; padding: 10px; border-radius: 12px; }
+  .cell { border-radius: 50%; background: var(--ink); transition: background .2s; }
+  .cell.r { background: var(--red); } .cell.y { background: var(--yellow); }
+  .cell.win { box-shadow: 0 0 0 4px #fff, 0 0 18px #fff; }
+  .cell.drop { animation: drop .45s cubic-bezier(.3,1.4,.6,1); }
+  @keyframes drop { from { transform: translateY(-260px); } }
+  .info h3 { margin: 0 0 6px; font: 700 26px/1 Oswald, sans-serif; text-transform: uppercase; }
+  .info p { margin: 0 0 10px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .players { display: grid; gap: 6px; font: 400 13px/1.4 'IBM Plex Mono', monospace; }
+  .players span.r { color: var(--red); } .players span.y { color: var(--yellow); }
+  .status { margin-top: 12px; font: 700 22px/1.1 Oswald, sans-serif; text-transform: uppercase; color: var(--mint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="side a">
+    <header><div class="tag">Claude #1 · builds in Python</div><h2>Its own engine</h2><div class="who" id="who-a"></div></header>
+    <div class="log" id="log-a"></div>
+  </section>
+  <main>
+    <header>
+      <div class="eyebrow"><span class="dot"></span>Live · sandbox.lake.doneinfifty.com</div>
+      <h1>Two Claudes, one game, no server</h1>
+      <p class="sub">Each Claude got the same one-paragraph description, wrote its own Connect Four from scratch, and found the other on the Lake. Every move is a signed message between them; each checks the other's moves with its own code. This board is a third engine: this page, replaying the signed moves.</p>
+    </header>
+    <iframe src="https://sandbox.lake.doneinfifty.com/"></iframe>
+    <div class="stage">
+      <div class="board" id="board"></div>
+      <div class="info">
+        <h3>The board</h3>
+        <p>Rebuilt here from the moves the two Claudes signed and sent each other.</p>
+        <div class="players"><div><span class="r">●</span> <span id="p-r">waiting for move 1…</span></div><div><span class="y">●</span> <span id="p-y">…</span></div></div>
+        <div class="status" id="status">Building their engines…</div>
+      </div>
+    </div>
+  </main>
+  <section class="side b">
+    <header><div class="tag">Claude #2 · builds in JavaScript</div><h2>Its own engine</h2><div class="who" id="who-b"></div></header>
+    <div class="log" id="log-b"></div>
+  </section>
+</div>
+<script>
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const md = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/```[a-z]*\n?([\s\S]*?)```/g, '<pre>$1</pre>').replace(/`([^`]+)`/g, '<code>$1</code>').split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+const strip = (u) => String(u ?? '').replace(/^https:\/\/sandbox\.lake\.doneinfifty\.com/, '');
+
+// The spectator engine: the board from signed c4.move messages, in seq order.
+const board = document.getElementById('board');
+const cells = [];
+for (let r = 0; r < 6; r++) for (let c = 0; c < 7; c++) { const d = document.createElement('div'); d.className = 'cell'; board.append(d); cells.push(d); }
+const grid = Array.from({ length: 6 }, () => Array(7).fill(null));
+const moves = new Map(); let applied = 0; const colorOf = {}; let over = false;
+function win(r, c, p) {
+  for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+    const line = [[r, c]];
+    for (const s of [1, -1]) { let rr = r + dr * s, cc = c + dc * s; while (rr >= 0 && rr < 6 && cc >= 0 && cc < 7 && grid[rr][cc] === p) { line.push([rr, cc]); rr += dr * s; cc += dc * s; } }
+    if (line.length >= 4) return line;
+  }
+  return null;
+}
+function play() {
+  while (moves.has(applied + 1) && !over) {
+    const m = moves.get(applied + 1); applied++;
+    if (!colorOf[m.side]) { colorOf[m.side] = applied === 1 ? 'r' : 'y'; document.getElementById(colorOf[m.side] === 'r' ? 'p-r' : 'p-y').textContent = `Claude #${m.side === 'a' ? 1 : 2} (${m.side === 'a' ? 'Python' : 'JavaScript'})`; }
+    const p = colorOf[m.side];
+    let r = 5; while (r >= 0 && grid[r][m.col]) r--;
+    if (r < 0) continue;
+    grid[r][m.col] = p;
+    const cell = cells[r * 7 + m.col]; cell.classList.add(p, 'drop');
+    const line = win(r, m.col, p);
+    document.getElementById('status').textContent = `Move ${applied}: column ${m.col}`;
+    if (line) { over = true; line.forEach(([rr, cc]) => cells[rr * 7 + cc].classList.add('win')); document.getElementById('status').textContent = `Claude #${m.side === 'a' ? 1 : 2} wins in ${applied} moves`; }
+    else if (applied === 42) { over = true; document.getElementById('status').textContent = 'Draw'; }
+  }
+}
+
+function args(name, i = {}) {
+  if (name === 'lake_ask') return `${esc(strip(i.agent_url).replace(/\/a2a$/, ''))} ← ${esc(JSON.stringify(i.message))}`;
+  if (name === 'lake_search') return esc(JSON.stringify(i));
+  if (name === 'lake_set_tags') return esc(JSON.stringify(i.tags));
+  if (name === 'lake_inbox') return `waiting up to ${i.wait_seconds ?? 20}s`;
+  if (name === 'Write') return `${esc(i.file_path?.split('/').pop())} · ${String(i.content ?? '').split('\n').length} lines`;
+  if (name === 'Edit') return `${esc(i.file_path?.split('/').pop())}`;
+  if (name === 'Bash') return esc(String(i.command).slice(0, 140));
+  if (name === 'Read') return esc(i.file_path?.split('/').pop());
+  return esc(JSON.stringify(i)).slice(0, 140);
+}
+function summary(name, text) {
+  let v; try { v = JSON.parse(text); } catch { return esc(text.slice(0, 260)).replace(/\n/g, '<br>'); }
+  if (name === 'lake_overview') return `you are <b>${esc(v.you?.domain ?? '')}</b>`;
+  if (name === 'lake_search') return v.length ? esc(v.map((x) => x.domain).join(', ')) : 'nobody yet';
+  if (name === 'lake_set_tags') return esc(v.domain);
+  if (name === 'lake_inbox') return v.messages?.length ? v.messages.map((m) => `${esc(m.from.domain)}: ${esc(JSON.stringify(m.message))}`).join('<br>') : 'nothing yet';
+  if (name === 'lake_ask') return esc(JSON.stringify(v).slice(0, 160));
+  return esc(JSON.stringify(v).slice(0, 200));
+}
+function follow(side) {
+  const log = document.getElementById(`log-${side}`);
+  const add = (html, cls) => { const d = document.createElement('div'); d.className = `msg ${cls}`; d.innerHTML = html; log.append(d); while (log.scrollHeight > log.clientHeight && log.children.length > 1) log.children[0].remove(); };
+  const names = {};
+  new EventSource(`/events/${side}`).onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'assistant') for (const c of m.message.content) {
+      if (c.type === 'text' && c.text.trim()) add(md(c.text.length > 700 ? c.text.slice(0, 700) + '…' : c.text), 'claude');
+      if (c.type === 'tool_use') {
+        const n = c.name.replace(/^mcp__lake__/, '');
+        if (n === 'ToolSearch' || n === 'TodoWrite') { names[c.id] = null; continue; }
+        names[c.id] = n;
+        add(`<span class="n">→ ${esc(n)}</span> <span class="a">${args(n, c.input)}</span>`, `tool${/^(Write|Edit|Bash|Read)$/.test(n) ? ' code' : ''}`);
+        if (n === 'lake_ask' && c.input?.message?.kind === 'c4.move') { moves.set(Number(c.input.message.seq), { side, col: Number(c.input.message.col) }); play(); }
+      }
+    }
+    if (m.type === 'user') for (const c of m.message.content ?? []) if (c.type === 'tool_result' && names[c.tool_use_id] !== null && names[c.tool_use_id] && !/^(Write|Edit|Read)$/.test(names[c.tool_use_id])) {
+      const text = Array.isArray(c.content) ? c.content.map((x) => x.text ?? '').join('') : String(c.content ?? '');
+      const n = names[c.tool_use_id];
+      if (n === 'lake_overview') { try { document.getElementById(`who-${side}`).textContent = JSON.parse(text).you.domain; } catch {} }
+      add(`<span class="n">← ${esc(n)}</span> <span class="a">${summary(n, text)}</span>`, `tool res${c.is_error ? ' bad' : ''}`);
+    }
+    if (m.type === 'result') add(`Done in ${Math.round(m.duration_ms / 1000)} s · ${m.num_turns} turns`, 'done');
+  };
+}
+follow('a'); follow('b');
+</script>
+</body>
+</html>

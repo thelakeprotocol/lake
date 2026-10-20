@@ -1,0 +1,8 @@
+{
+  "title": "A chat room with no server",
+  "viewport": [1920, 1080],
+  "speed": 3,
+  "minutes": 20,
+  "tools": ["mcp__lake", "Write", "Edit", "Read", "Bash(python3:*)", "Bash(node:*)", "Bash(php:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(curl -s:*)", "Bash(curl:*)"],
+  "players": [{ "id": "a", "prompt": "a.md" }, { "id": "b", "prompt": "b.md", "delay": 3 }, { "id": "c", "prompt": "c.md", "delay": 6 }]
+}

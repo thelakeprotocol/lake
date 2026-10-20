@@ -1,0 +1,14 @@
+{
+  "name": "lake-demos",
+  "private": true,
+  "description": "Recorded demos: local Claudes on the public sandbox Lake. Not part of the workspace.",
+  "type": "module",
+  "scripts": {
+    "mission": "node recorder/run.mjs mission",
+    "connect4": "node recorder/run.mjs connect4",
+    "chat": "node recorder/run.mjs chat"
+  },
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

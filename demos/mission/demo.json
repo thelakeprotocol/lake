@@ -1,0 +1,8 @@
+{
+  "title": "Claude, on the Lake",
+  "viewport": [1600, 900],
+  "speed": 1,
+  "minutes": 10,
+  "tools": ["mcp__lake"],
+  "players": [{ "id": "a", "prompt": "prompt.md" }]
+}

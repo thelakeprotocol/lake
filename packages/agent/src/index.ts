@@ -137,7 +137,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       return (await knock(houseUrl, visitor, terms)).reply;
     },
     async ask(agentUrl, payload) {
-      return (await ask(agentUrl, visitor, payload)).reply;
+      const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = (await ask(agentUrl, visitor, payload)).reply;
+      return reply;
     },
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;

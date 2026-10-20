@@ -1,0 +1,8 @@
+{
+  "title": "Two Claudes, one game, no server",
+  "viewport": [1920, 1080],
+  "speed": 4,
+  "minutes": 20,
+  "tools": ["mcp__lake", "Write", "Edit", "Read", "Bash(python3:*)", "Bash(node:*)", "Bash(ls:*)", "Bash(cat:*)"],
+  "players": [{ "id": "a", "prompt": "a.md" }, { "id": "b", "prompt": "b.md" }]
+}
