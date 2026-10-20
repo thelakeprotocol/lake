@@ -11,8 +11,8 @@
 | 4 | **Approvals app** | Live Allow on a phone; revocation in under 1 second | <span class="status done">done</span> |
 | 5 | **Money** | ODRL agreements, collective counter-offer, AP2 mandates, Payments agent | <span class="status done">done</span> |
 | 6 | **Wild life** | Swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | <span class="status done">done</span> |
-| 7 | **Scale** | 1,000 houses, a full mission in about 60 seconds | <span class="status next">next</span> |
-| 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-mission and finish anyway | <span class="status later">later</span> |
+| 7 | **Scale** | 1,000 houses, a full mission in about 60 seconds | <span class="status done">runs</span> 1,000 houses complete a paid mission; 10.6 min on a busy 4-core laptop, [measured](/docs/architecture#scale-measured) |
+| 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-mission and finish anyway | <span class="status next">next</span> |
 | 9 | **Open door** | Agent SDK, Lake MCP connector, public sandbox Lake | <span class="status done">done</span> (sandbox config ready, not yet deployed) |
 | 10 | **Polish** | Map matches the reference, seeded demo mode, 90-second recording | <span class="status later">later</span> |
 

@@ -5,7 +5,7 @@ import {
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
-import { checkRecord, type RecordCheck, type Trust } from './record.js';
+import { checkRecord, quickCheck, type RecordCheck, type Trust } from './record.js';
 import type { OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
 
@@ -36,6 +36,7 @@ export type Reply =
   | { kind: 'rejected'; code: string; why: string }
   | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[] }
   | { kind: 'filed'; receipt: string }
+  | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'fragment'; study: string; fragment: number[] }
   | { kind: 'excluded'; study: string; why: string };
 
@@ -54,6 +55,10 @@ const HOUR = 3_600_000;
 export class Housekeeper {
   private replay = new ReplayGuard();
   private record: RecordCheck = { ok: false, why: 'not checked yet' };
+  private fullCheckAt = 0;
+  /** Agreements this house signed, so a countersignature doesn't need a pod read. The pod copy is the record. */
+  private agreements = new Map<string, SignedAgreement & { grant?: string }>();
+  private claimCache: { at: number; claims: PodClaim[] } | null = null;
   private actor: string;
 
   constructor(private o: HousekeeperOptions) {
@@ -64,9 +69,16 @@ export class Housekeeper {
     return this.tool('pod_read', { path });
   }
 
+  /** The whole chain once a minute; in between, the data files against the digests the chain pins. */
   async verifyOwnRecord(): Promise<RecordCheck> {
-    this.record = await checkRecord((p) => this.read(p), { claimsUrl: this.o.claimsUrl, ownJwk: this.o.id.publicJwk as JWK, webId: this.o.webId, trust: this.o.trust, sandbox: this.o.sandbox });
-    return this.record;
+    const read = (p: string) => this.read(p);
+    const r = this.record.ok && Date.now() - this.fullCheckAt < 60_000
+      ? await quickCheck(read, this.record.pins)
+      : await checkRecord(read, { claimsUrl: this.o.claimsUrl, ownJwk: this.o.id.publicJwk as JWK, webId: this.o.webId, trust: this.o.trust, sandbox: this.o.sandbox });
+    if (!r.ok && r.transient) return r; // busy, not broken: keep what we knew
+    if (r.ok && !(this.record.ok && Date.now() - this.fullCheckAt < 60_000)) this.fullCheckAt = Date.now();
+    this.record = r;
+    return r;
   }
 
   async handle(data: LakeData | null): Promise<LakeData> {
@@ -147,11 +159,12 @@ export class Housekeeper {
     }
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
     const chain = await this.verifyOwnRecord();
+    if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
     if (!chain.ok) return decide('decline', `my own record failed its checks (${chain.why}), so I won't take part`);
 
     // The terms and the key are cut from the same cloth: one ODRL agreement, one grant that names it.
     const until = new Date(Date.now() + d.grantHours * HOUR);
-    const agreement = await this.agree({ ...offer, fields: d.fields }, visitorWebId, until);
+    const agreement = await this.agree({ ...offer, fields: d.fields }, visitorWebId, until, false);
     const grant = await issueCredential(
       {
         '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -166,7 +179,8 @@ export class Housekeeper {
       } as never,
       this.o.id,
     );
-    await this.tool('pod_write', { path: `agreements/${offer.id}.grant.jwt`, content: grant, contentType: 'text/plain' });
+    // One file per deal: the agreement with its signatures, and the grant cut from it.
+    await this.file(offer.id, { ...agreement, grant });
     this.o.desk.record({ id: offer.id, jws: grant, visitor: domain, fields: d.fields, purpose: offer.purpose, until: new Date(Date.now() + d.grantHours * HOUR).toISOString(), authorizedBy: `standing rule ${d.rule}` });
     this.o.emit(makeEvent('grant.issued', this.actor, visitor, { hours: d.grantHours }));
     return decide('join', d.reason, { grantHours: d.grantHours, grant, agreement });
@@ -201,6 +215,7 @@ export class Housekeeper {
     const signed = await this.countersign(g.offer, p.countersignature, profile);
     if (!signed.ok) return excluded(signed.why);
     const chain = await this.verifyOwnRecord();
+    if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
     if (!chain.ok) return excluded(`my record failed its checks: ${chain.why}`);
 
     // Inside the house: read only the granted fields, through the pod's MCP door, and randomise.
@@ -214,24 +229,24 @@ export class Housekeeper {
     return this.reply({ kind: 'fragment', study: id, fragment });
   }
 
-  private async agree(offer: Offer, visitorWebId: string, until: Date): Promise<SignedAgreement> {
+  private async agree(offer: Offer, visitorWebId: string, until: Date, save = true): Promise<SignedAgreement> {
     const agreement = agreementFor(offer, this.o.webId, visitorWebId, until);
     const signed: SignedAgreement = { agreement, signatures: [{ by: this.o.webId, jws: await signAgreement(agreement, this.o.id) }] };
-    await this.tool('pod_write', { path: `agreements/${offer.id}.agreement.json`, content: JSON.stringify(signed) });
+    if (save) await this.file(offer.id, signed);
     return signed;
   }
 
+  private async file(offerId: string, signed: SignedAgreement & { grant?: string }) {
+    this.agreements.set(offerId, signed);
+    await this.tool('pod_write', { path: `agreements/${offerId}.agreement.json`, content: JSON.stringify(signed) });
+  }
+
   private async countersign(offerId: string, jws: string | undefined, visitor: LakeProfile): Promise<{ ok: true } | { ok: false; why: string }> {
-    let signed: SignedAgreement;
-    try {
-      signed = JSON.parse(await this.read(`agreements/${offerId}.agreement.json`));
-    } catch {
-      return { ok: false, why: 'no agreement on file for this grant' };
-    }
+    const signed = await this.agreementOnFile(offerId);
+    if (!signed) return { ok: false, why: 'no agreement on file for this grant' };
     if (signed.signatures.some((s) => s.by === visitor.webId)) return { ok: true };
     if (!jws || !(await verifyAgreementSignature(signed.agreement, jws, visitor.publicJwk))) return { ok: false, why: 'countersign the agreement first' };
-    signed.signatures.push({ by: visitor.webId, jws });
-    await this.tool('pod_write', { path: `agreements/${offerId}.agreement.json`, content: JSON.stringify(signed) });
+    await this.file(offerId, { ...signed, signatures: [...signed.signatures, { by: visitor.webId, jws }] });
     this.o.emit(makeEvent('agreement.signed', this.actor, `agent:${visitor.ownerDomain}`, {}));
     return { ok: true };
   }
@@ -262,7 +277,9 @@ export class Housekeeper {
     return this.reply({ ...base, decision: 'ask', reason: 'still waiting for the owner' });
   }
 
-  private async agreementOnFile(offerId: string): Promise<SignedAgreement | null> {
+  private async agreementOnFile(offerId: string): Promise<(SignedAgreement & { grant?: string }) | null> {
+    const known = this.agreements.get(offerId);
+    if (known) return known;
     try {
       return JSON.parse(await this.read(`agreements/${offerId}.agreement.json`));
     } catch {
@@ -277,12 +294,16 @@ export class Housekeeper {
     return t;
   }
 
+  /** Claims change only when the record does, and every join and computation re-checks the record first. */
   private async claims(fields: string[]): Promise<PodClaim[]> {
-    try {
-      return JSON.parse(await this.tool('pod_claims', { fields })) as PodClaim[];
-    } catch {
-      return [];
+    if (!this.claimCache || Date.now() - this.claimCache.at > 30_000) {
+      try {
+        this.claimCache = { at: Date.now(), claims: JSON.parse(await this.tool('pod_claims', {})) as PodClaim[] };
+      } catch {
+        return [];
+      }
     }
+    return this.claimCache.claims.filter((c) => fields.includes(c.field));
   }
 
   private async reply(body: Reply): Promise<LakeData> {

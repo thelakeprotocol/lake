@@ -95,6 +95,8 @@ Every Lake message is an A2A message that declares the Lake extension (the `A2A-
 
 Message kinds in v0: `offer`, `decision`, `counter`, `agreement`, `grant`, `result`, `receipt`, `revocation`.
 
+A participant that cannot serve a request right now (for example, its pod is slow to answer) SHOULD reply `{ kind: "busy", why, retryAfterMs }` rather than a refusal. Visitors SHOULD retry a few times with backoff. `busy` is never a decision.
+
 ## 4. Offers and agreements (ODRL)
 
 An offer is an ODRL 2.2 `Offer`. Its targets are canonical Lake fields. It MUST state:

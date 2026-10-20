@@ -73,6 +73,20 @@ export interface MissionResult {
   grants: { house: string; url: string; grant: string }[];
 }
 
+/** Asks, and if the house is busy or doesn't answer in time, asks again (up to 3 tries, jittered backoff). */
+async function askPatiently(url: string, v: Visitor, payload: Record<string, unknown>) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const r = await ask(url, v, payload);
+      if (r.reply.kind !== 'busy' || attempt === 3) return r;
+      await new Promise((ok) => setTimeout(ok, Number(r.reply.retryAfterMs ?? 1500)));
+    } catch (e) {
+      if (attempt === 3) throw e;
+      await new Promise((ok) => setTimeout(ok, 1000 + Math.random() * 2000 * attempt));
+    }
+  }
+}
+
 /** The research mission: mandate → ethics → audit → discover → knock → bargain → agree → compute in place → pay → answer. */
 export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const t0 = Date.now();
@@ -109,10 +123,11 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const joined = new Map<string, Joined>();
   const asked: House[] = [];
   const counters: { house: House; counter: { fields: string[]; priceUsd: number } }[] = [];
+  const lost: string[] = [];
   const knockAll = async (targets: House[], offer: Offer, tally: boolean) => {
     await pool(targets, o.concurrency ?? 32, async (h) => {
       try {
-        const { reply } = await ask(h.url, o.visitor, { kind: 'offer', offer, study: o.study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
+        const { reply } = await askPatiently(h.url, o.visitor, { kind: 'offer', offer, study: o.study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
         const d = reply.kind === 'decision' ? String(reply.decision) : 'rejected';
         if (tally) decisions[d] = (decisions[d] ?? 0) + 1;
         if (d === 'join' && reply.grant) joined.set(h.url, { house: h, grant: reply.grant, agreement: reply.agreement, priceUsd: offer.priceUsd });
@@ -120,6 +135,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
         if (d === 'counter' && reply.counter && reply.bloc) counters.push({ house: h, counter: reply.counter });
       } catch {
         if (tally) decisions.unreachable = (decisions.unreachable ?? 0) + 1;
+        else lost.push(h.name);
       }
     });
   };
@@ -152,6 +168,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
       log('bargain', `accepted: everyone who joined or countered gets the bloc's terms`);
       joined.clear();
       await knockAll(everyone, terms(b.priceUsd, b.fields), false);
+      if (lost.length) log('bargain', `${lost.length} house(s) did not answer the bloc's terms (busy or unreachable)`);
     }
   }
 
@@ -185,7 +202,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   await pool([...joined.values()], o.concurrency ?? 32, async (j) => {
     try {
       const countersignature = j.agreement ? await signAgreement(j.agreement.agreement, o.visitor.id) : undefined;
-      const { reply } = await ask(j.house.url, o.visitor, { kind: 'compute', grant: j.grant, study: o.study, countersignature });
+      const { reply } = await askPatiently(j.house.url, o.visitor, { kind: 'compute', grant: j.grant, study: o.study, countersignature });
       if (reply.kind === 'fragment' && reply.study === id && Array.isArray(reply.fragment)) {
         fragments.push(reply.fragment as number[]);
         answered.push(j);
@@ -201,23 +218,37 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     const webIdOf = (j: Joined) => String(j.agreement?.agreement.assigner ?? '');
     const payable = answered.filter((j) => j.agreement && j.priceUsd > 0);
     const payments = await Promise.all(payable.map((j) => signPaymentMandate(o.visitor.id, o.visitor.webId, { payee: webIdOf(j), amount: j.priceUsd, intentMandate: intent!.credential, agreement: j.agreement!.agreement.uid })));
-    const { reply } = await ask(o.money.payments, o.visitor, { kind: 'settle', intent, payments });
-    if (reply.kind !== 'settled') {
-      paid = { total: 0, houses: 0, receiptsFiled: 0, refused: (reply.problems ?? []).join('; ') };
+    // Settle in batches; the payments agent keeps the running total against the human's budget.
+    const receipts: { payee: string; credential: string }[] = [];
+    let total = 0;
+    let remaining = o.money.budgetUsd;
+    let refused: string | undefined;
+    for (let i = 0; i < payments.length && !refused; i += 100) {
+      try {
+        const { reply } = await askPatiently(o.money.payments, o.visitor, { kind: 'settle', intent, payments: payments.slice(i, i + 100) });
+        if (reply.kind !== 'settled') refused = (reply.problems ?? []).join('; ');
+        else { receipts.push(...reply.receipts); total += reply.total; remaining = reply.remaining; }
+      } catch (e) {
+        refused = (e as Error).message.slice(0, 200);
+      }
+    }
+    if (refused && !receipts.length) {
+      paid = { total: 0, houses: 0, receiptsFiled: 0, refused };
       log('pay', `refused: ${paid.refused}`);
     } else {
+      const reply = { total, remaining, receipts };
       const paymentsCard = await cardOf(o.money.payments);
       let filed = 0;
       const notFiled: string[] = [];
       await pool(payable, o.concurrency ?? 32, async (j) => {
-        const r = (reply.receipts as { payee: string; credential: string }[]).find((x) => x.payee === webIdOf(j));
+        const r = reply.receipts.find((x) => x.payee === webIdOf(j));
         if (!r) return;
-        const { reply: ack } = await ask(j.house.url, o.visitor, { kind: 'receipt', receipt: { credential: r.credential, card: paymentsCard } }).catch((e: Error) => ({ reply: { kind: 'error', why: e.message } as Record<string, any> }));
+        const { reply: ack } = await askPatiently(j.house.url, o.visitor, { kind: 'receipt', receipt: { credential: r.credential, card: paymentsCard } }).catch((e: Error) => ({ reply: { kind: 'error', why: e.message } as Record<string, any> }));
         if (ack.kind === 'filed') filed++;
         else notFiled.push(`${j.house.name}: ${ack.why ?? ack.kind}`);
       });
-      paid = { total: reply.total, houses: payable.length, receiptsFiled: filed, ...(notFiled.length ? { notFiled } : {}) };
-      log('pay', `Payments settled $${reply.total} with ${payable.length} participants; ${filed} receipts filed in their pods. $${reply.remaining} of the mandate left`);
+      paid = { total: reply.total, houses: reply.receipts.length, receiptsFiled: filed, ...(notFiled.length ? { notFiled } : {}), ...(refused ? { refused } : {}) };
+      log('pay', `Payments settled $${reply.total} with ${reply.receipts.length} participants; ${filed} receipts filed in their pods. $${reply.remaining} of the mandate left${refused ? `. Then refused: ${refused}` : ''}`);
     }
   }
 

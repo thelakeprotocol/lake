@@ -16,7 +16,7 @@ const HELP = `lake — talk to the Lake
   lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--budget 5000] [--as uni.example]
                 [--extra-fields postcode] [--epsilon 2] [--node http://lake-node:7000]
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
-                [--wait 30] [--unpaid] [--port 4800] [--json]
+                [--wait 30] [--unpaid] [--concurrency 32] [--port 4800] [--json]
 
   lake attack [--count 10] [--node http://lake-node:7000] [<house-url> …]
   lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
@@ -42,6 +42,7 @@ const { positionals, values: a } = parseArgs({
     auditor: { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
     port: { type: 'string', default: '4800' },
     wait: { type: 'string', default: '0' },
+    concurrency: { type: 'string', default: '32' },
     budget: { type: 'string', default: '5000' },
     payments: { type: 'string', default: process.env.LAKE_PAYMENTS_URL ?? 'http://payments:4600' },
     unpaid: { type: 'boolean', default: false },
@@ -114,6 +115,7 @@ async function dispatchCmd() {
       priceUsd: Number(a.price ?? 2),
       extraFields: a['extra-fields']?.split(',').filter(Boolean),
       waitSeconds: Number(a.wait),
+      concurrency: Number(a.concurrency),
       money: a.unpaid ? undefined : {
         human: await makeHuman(await loadOrCreateIdentity(`${homedir()}/.lake/human-${domain}.json`), domain),
         budgetUsd: Number(a.budget),

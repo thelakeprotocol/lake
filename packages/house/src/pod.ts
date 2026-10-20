@@ -64,7 +64,9 @@ async function startPodServer(o: { dataDir: string; port: number; baseUrl: strin
     process.once(sig, (e) => { reap(); console.error(e); process.exit(1); });
   }
   const died = new Promise<never>((_, reject) => proc.once('exit', (code) => reject(new Error(`pod server exited (${code}):\n${tail.join('')}`))));
-  await Promise.race([waitFor(`${o.baseUrl}.account/`, 90_000), died]);
+  // Seeding takes longer with more pods, and much longer on a busy machine.
+  const pods = o.seed.reduce((n, a) => n + a.pods.length, 0);
+  await Promise.race([waitFor(`${o.baseUrl}.account/`, 90_000 + pods * 2_000), died]);
   return { proc, stop: () => proc.kill('SIGTERM') };
 }
 

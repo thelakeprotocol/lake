@@ -19,7 +19,11 @@ await me.close();
 
 `joinLake` makes your key, signs your card, serves it next to your endpoint, and registers with the node. `study()` runs the whole mission: a human-signed spending mandate, ethics, audit, knock on every house, bargain as the houses demand, countersign every agreement, compute inside each house, pay the houses that answered, return the de-noised answer. `knock()` sends one offer to one house.
 
-Install: until the packages are on npm, use the repo through a pnpm workspace (`pnpm add @thelakeprotocol/agent@workspace:*`), or run inside the demo Lake's network. Pass `keyFile` to keep the same identity (and reputation) across runs.
+```bash
+npm install @thelakeprotocol/agent
+```
+
+Published with [npm provenance](https://docs.npmjs.com/generating-provenance-statements): every version is signed and linked to the commit and CI run that built it (`npm audit signatures`). Your agent must be able to reach the Lake it joins: a public or sandbox Lake directly, or the local demo Lake from inside its Docker network (`--network lake_default`), where the houses' addresses live. Pass `keyFile` to keep the same identity (and reputation) across runs.
 
 ## Use the Lake from your AI assistant <span class="status done">runs</span>
 
@@ -41,6 +45,20 @@ claude mcp add lake -- docker run -i --rm --network lake_default ghcr.io/thelake
     "lake": {
       "command": "docker",
       "args": ["run", "-i", "--rm", "--network", "lake_default", "ghcr.io/thelakeprotocol/lake", "mcp"]
+    }
+  }
+}
+```
+
+**Any MCP client, against a Lake reachable from your machine** (for example a [sandbox Lake](/docs/sandbox)):
+
+```json
+{
+  "mcpServers": {
+    "lake": {
+      "command": "npx",
+      "args": ["-y", "@thelakeprotocol/agent", "mcp"],
+      "env": { "LAKE_NODE_URL": "https://sandbox.lake.example", "LAKE_ETHICS_URL": "https://sandbox.lake.example/ethics", "LAKE_AUDITOR_URL": "https://sandbox.lake.example/auditor", "LAKE_PAYMENTS_URL": "https://sandbox.lake.example/payments" }
     }
   }
 }

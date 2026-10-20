@@ -81,24 +81,53 @@ export async function convertRecord(r: Issued, o: { webId: string; claimsUrl: st
   return { turtle, claims, credential };
 }
 
-export type RecordCheck = { ok: true } | { ok: false; why: string };
+/** On success, the digests the verified credentials pin for the original and the converted record. */
+export type RecordCheck = { ok: true; pins: { bundle: string; claims: string } } | { ok: false; why: string; transient?: boolean };
+
+/** A pod that can't be read right now is busy, not broken: say so, and let the visitor come back. */
+const unreadable = (e: unknown): RecordCheck => ({ ok: false, why: `could not read my record just now (${(e as Error).message})`, transient: true });
 
 /**
  * Re-verifies the whole chain from what is in the pod right now (SPEC §10): a trusted issuer signed
  * the original, the original is unchanged, a trusted auditor certified the converter, and the
  * converted record is the housekeeper's signed conversion of exactly that original.
  */
-export async function checkRecord(read: (path: string) => Promise<string>, o: { claimsUrl: string; ownJwk: JWK; webId: string; trust: Trust; sandbox: boolean }): Promise<RecordCheck> {
+/**
+ * Between full checks: re-read the two data files and compare them with the digests the verified
+ * credentials pin. Any change to the original or the converted record is caught; swapping a credential
+ * file can't help a forger, because the pins come from the credentials as they were verified.
+ */
+export async function quickCheck(read: (path: string) => Promise<string>, pins: { bundle: string; claims: string }): Promise<RecordCheck> {
+  let bundle: string, turtle: string;
   try {
-    const [bundle, credential, issuerRaw, turtle, claimsCredential] = await Promise.all([
-      read(RECORD.bundle), read(RECORD.credential), read(RECORD.issuer), read(RECORD.claims), read(RECORD.claimsCredential),
+    [bundle, turtle] = await Promise.all([read(RECORD.bundle), read(RECORD.claims)]);
+  } catch (e) {
+    return unreadable(e);
+  }
+  try {
+    if (digestSRI(bundle) !== pins.bundle) return { ok: false, why: `${RECORD.bundle} was changed after it was signed` };
+    if (digestSRI(turtle) !== pins.claims) return { ok: false, why: `${RECORD.claims} was changed after it was signed` };
+    return { ok: true, pins };
+  } catch (e) {
+    return { ok: false, why: (e as Error).message };
+  }
+}
+
+export async function checkRecord(read: (path: string) => Promise<string>, o: { claimsUrl: string; ownJwk: JWK; webId: string; trust: Trust; sandbox: boolean }): Promise<RecordCheck> {
+  let bundle: string, credential: string, issuerRaw: string, turtle: string, claimsCredential: string, certRaw: string;
+  try {
+    [bundle, credential, issuerRaw, turtle, claimsCredential, certRaw] = await Promise.all([
+      read(RECORD.bundle), read(RECORD.credential), read(RECORD.issuer), read(RECORD.claims), read(RECORD.claimsCredential), read(RECORD.converterCert).catch(() => ''),
     ]);
+  } catch (e) {
+    return unreadable(e);
+  }
+  try {
     const issuer = JSON.parse(issuerRaw) as { recordId: string; card: AgentCard };
     const signed = await checkAttachment({ credential, card: issuer.card }, { trusted: o.trust.issuers, type: 'LakeHealthRecordCredential', subject: o.webId, sandbox: o.sandbox });
     if (!signed.ok) return { ok: false, why: `original record: ${signed.why}` };
     await verifyCredential(credential, (await verifyLakeCard(issuer.card)).publicJwk, { id: issuer.recordId, bytes: bundle });
 
-    const certRaw = await read(RECORD.converterCert).catch(() => '');
     if (!certRaw) return { ok: false, why: `converter ${CONVERTER} has no auditor certificate` };
     const cert = JSON.parse(certRaw) as { credential: string; card: AgentCard };
     const certified = await checkAttachment(cert, { trusted: o.trust.auditors, type: 'LakeConverterCertificate', subject: `urn:lake:converter:${CONVERTER}`, sandbox: o.sandbox });
@@ -107,7 +136,7 @@ export async function checkRecord(read: (path: string) => Promise<string>, o: { 
     const converted = await verifyCredential(claimsCredential, o.ownJwk, { id: o.claimsUrl, bytes: turtle });
     if (converted.credentialSubject.originalHash !== digestSRI(bundle)) return { ok: false, why: 'converted record does not match the original' };
     if (converted.credentialSubject.converter !== CONVERTER) return { ok: false, why: 'converted by an uncertified converter' };
-    return { ok: true };
+    return { ok: true, pins: { bundle: digestSRI(bundle), claims: digestSRI(turtle) } };
   } catch (e) {
     return { ok: false, why: (e as Error).message };
   }

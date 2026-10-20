@@ -2,6 +2,10 @@
 
 **Status: runs, end-to-end tested.** Join the Lake in ten lines, or give any MCP assistant the Lake.
 
+```bash
+npm install @thelakeprotocol/agent
+```
+
 ```ts
 import { joinLake } from '@thelakeprotocol/agent';
 

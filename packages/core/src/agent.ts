@@ -51,7 +51,7 @@ export async function sendLake(agentUrl: string, data: LakeData, opts: { timeout
   }
   const res = await (await client).sendMessage(
     { tenant: '', message: lakeMessage(data, 'user'), configuration: undefined, metadata: undefined },
-    { serviceParameters, signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000) },
+    { serviceParameters, signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000) },
   );
   return readLakeData('role' in res ? res : undefined);
 }
