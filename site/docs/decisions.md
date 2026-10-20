@@ -19,4 +19,7 @@
 | Broadcast | **Direct A2A** to every discovered house, 32 at a time; no NATS | Direct messaging is required anyway (SPEC §9); a bus is an optimisation to revisit at 1,000 houses (milestone 7) |
 | Converter certificates | The auditor certifies `name@version` from an allowlist | Pinning the package digest is a follow-up |
 | Grants | A `join` is the owner's standing pre-approval; keys are minted by the owner's approval flow (milestone 4) | Agents never mint keys |
+| The owner's key | Ed25519, made on the phone with `@noble/curves` | Phones on a home network load the app over plain HTTP, where browsers disable WebCrypto |
+| Pairing | One-time token in the printed link; sandbox may allow first-come | A stranger on the Wi-Fi can't claim your house |
+| Live updates in the app | Polling once a second | Works everywhere with no push service; push notifications are a follow-up |
 | LLM | **None bundled.** Rules decide; templates write reasons | People bring their own agents through MCP or A2A |

@@ -15,6 +15,8 @@ export interface NodeOptions {
   sandbox: boolean;
   /** Folder with the built map (packages/ui/dist); served at /. */
   uiDir?: string;
+  /** A house's approvals app, shown as a QR code on the map so an owner can scan it on stage. */
+  approvalsUrl?: string;
 }
 
 export interface Counters {
@@ -27,7 +29,7 @@ export interface Counters {
 }
 
 type Wire =
-  | { type: 'snapshot'; node: string; sandbox: boolean; participants: Participant[]; counters: Counters; recent: Line[] }
+  | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: Line[] }
   | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
 interface Participant { id: string; role: string; label: string; tags: string[]; domain: string }
 interface Line { event: LakeEvent; text: string }
@@ -146,7 +148,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   wss.on('connection', (ws) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    send(ws, { type: 'snapshot', node: o.domain, sandbox: o.sandbox, participants: registry.all().map(participant), counters, recent: recent.slice(-20) });
+    send(ws, { type: 'snapshot', node: o.domain, sandbox: o.sandbox, approvalsUrl: o.approvalsUrl, participants: registry.all().map(participant), counters, recent: recent.slice(-20) });
   });
   return { server, card, registry, publish };
 }

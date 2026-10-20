@@ -169,6 +169,12 @@ Houses that counter the same offer (same offer `uid`) and opted in with `join_co
 - An agent MUST NOT be able to mint, widen or extend a grant. The pod's access layer MUST enforce this, not only agent code.
 - Revocation is immediate. A revoked grant MUST stop working within 1 second on the reference implementation.
 
+### 6.1 The owner's key
+
+The owner's signing key is made on the owner's device and never leaves it. The house holds only its public half (in `/wallet/` of the owner's pod). A grant minted outside a standing rule MUST be signed by the owner's key; the house MUST check that it matches the request the owner was shown (visitor, offer, study, purpose, fields no wider, expiry no later than 48 hours) before storing or delivering it. Requests from the owner's device to the house are signed envelopes (§3).
+
+A visitor whose offer got `ask` MAY send `{ kind: "status", offerId }` to collect the outcome: the grant once the owner allows, or `decline`.
+
 A grant is a `LakeAccessGrant` credential signed by the house, with `credentialSubject`: the visitor's WebID (`id`), `offer`, `study`, `fields`, `purpose`, `authorizedBy` (the standing rule, or the owner's live approval) and `rules` (the digest of the rules that authorised it), and a `validUntil`. The house stores it in `/agreements/`.
 
 ## 7. Data never moves

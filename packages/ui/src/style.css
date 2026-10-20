@@ -19,13 +19,18 @@ h1 { margin: 6px 0 0; font: 700 clamp(34px, 6vw, 56px)/0.95 var(--f-display); te
 .lede { margin: 0; max-width: 58ch; font-size: 14px; line-height: 1.5; color: var(--muted); }
 .lede b { color: var(--fg); font-weight: 500; }
 .stage { position: relative; flex: 1; min-height: 240px; border-block: 1px solid var(--line); }
-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#lake { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 16px; pointer-events: none; }
 .empty[hidden] { display: none; }
 .empty .big { margin: 0; font: 700 clamp(28px, 4vw, 44px)/1 var(--f-display); text-transform: uppercase; }
 .empty p { margin: 0; color: var(--muted); }
 .empty pre { margin: 6px 0 0; padding: 12px 14px; max-width: 100%; overflow-x: auto; background: var(--deep); border: 1px solid var(--line); border-radius: 4px; pointer-events: auto; }
 .empty code { font: 400 13px/1.5 var(--f-mono); color: var(--mint); }
+.qr { position: absolute; right: 16px; top: 14px; z-index: 2; margin: 0; width: 140px; padding: 12px 12px 10px; background: #fff; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
+.qr[hidden] { display: none; }
+.qr canvas { display: block; width: 116px !important; height: 116px !important; }
+.qr figcaption { margin-top: 8px; font: 500 10px/1.35 var(--f-mono); color: #070B12; text-align: center; text-transform: uppercase; letter-spacing: 0.04em; }
+@media (max-width: 720px) { .qr { display: none; } }
 .log { position: absolute; left: max(16px, env(safe-area-inset-left)); bottom: 12px; right: 16px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column-reverse; gap: 4px; font: 400 12px/1.4 var(--f-mono); pointer-events: none; max-width: 640px; }
 .log li { text-shadow: 0 1px 6px var(--ink), 0 0 2px var(--ink); overflow-wrap: anywhere; }
 .log li:nth-child(n+2) { opacity: 0.65; } .log li:nth-child(n+4) { opacity: 0.4; }

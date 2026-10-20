@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#070B12">
+  <title>Your house · The Lake</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23070B12'/%3E%3Crect x='11' y='11' width='10' height='10' fill='%233DDC97'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500&display=swap">
+</head>
+<body class="owner">
+  <header>
+    <div class="eyebrow"><span id="status" class="dot"></span><span id="who">your house</span></div>
+    <h1>Your house</h1>
+    <p class="lede">Agents knock here. Your rules answer the easy ones. The rest wait for you. <b>Only you cut keys.</b></p>
+  </header>
+  <section id="pair" hidden>
+    <p class="big">Make this phone the key to your house.</p>
+    <p class="muted">A key pair is made on this phone. Only its public half goes to your house.</p>
+    <button id="pair-btn" class="btn primary" type="button">Pair this phone</button>
+    <p id="pair-msg" class="muted"></p>
+  </section>
+  <section id="main" hidden>
+    <h2>Waiting for you <span id="n-req" class="count">0</span></h2>
+    <div id="requests"></div>
+    <p id="no-req" class="muted">Nothing to decide. Your rules are handling it.</p>
+    <h2>Your keys <span id="n-keys" class="count">0</span></h2>
+    <ul id="keys"></ul>
+    <p id="no-keys" class="muted">No one holds a key to your house.</p>
+    <button id="revoke-all" class="btn danger" type="button" hidden>Revoke every key</button>
+  </section>
+  <script type="module" src="./src/approvals.ts"></script>
+</body>
+</html>

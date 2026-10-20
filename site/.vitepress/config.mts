@@ -50,7 +50,10 @@ export default defineConfig({
         },
         {
           text: 'Owners',
-          items: [{ text: 'rules.yaml', link: '/docs/rules' }],
+          items: [
+            { text: 'rules.yaml', link: '/docs/rules' },
+            { text: 'Your phone, your keys', link: '/docs/approvals' },
+          ],
         },
         {
           text: 'Builders',

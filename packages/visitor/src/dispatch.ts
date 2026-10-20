@@ -30,6 +30,8 @@ export interface DispatchOptions {
   /** Extra fields to ask for beyond what the study reads (e.g. postcode, to test the houses). */
   extraFields?: string[];
   concurrency?: number;
+  /** How long to wait for owners who were asked to tap Allow. 0: don't wait. */
+  waitSeconds?: number;
   link?: LakeLink | null;
   log?: (step: string, detail: string) => void;
 }
@@ -44,6 +46,8 @@ export interface MissionResult {
   cells: { label: string; estimate: number }[];
   answer: { onX: { rate: number; n: number }; notOnX: { rate: number; n: number }; summary: string; reliable: boolean };
   seconds: number;
+  /** The keys this agent was given, by house. Its own to keep until they expire or are revoked. */
+  grants: { house: string; url: string; grant: string }[];
 }
 
 /** The research mission, without money: ethics → audit → discover → knock → decide → grant → compute in place → answer. */
@@ -74,17 +78,42 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
 
   const decisions: Record<string, number> = {};
   const joined: { house: (typeof houses)[number]; grant: string }[] = [];
+  const asked: (typeof houses)[number][] = [];
   await pool(houses, o.concurrency ?? 32, async (h) => {
     try {
       const { reply } = await ask(h.url, o.visitor, { kind: 'offer', offer, study: o.study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
       const d = reply.kind === 'decision' ? String(reply.decision) : 'rejected';
       decisions[d] = (decisions[d] ?? 0) + 1;
       if (d === 'join' && reply.grant) joined.push({ house: h, grant: reply.grant });
+      if (d === 'ask') asked.push(h);
     } catch {
       decisions.unreachable = (decisions.unreachable ?? 0) + 1;
     }
   });
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));
+
+  if (asked.length && (o.waitSeconds ?? 0) > 0) {
+    log('wait', `${asked.length} house(s) asked their owners; waiting up to ${o.waitSeconds}s for a tap`);
+    const end = Date.now() + o.waitSeconds! * 1000;
+    let waiting = [...asked];
+    while (waiting.length && Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const still: typeof waiting = [];
+      await pool(waiting, o.concurrency ?? 32, async (h) => {
+        try {
+          const { reply } = await ask(h.url, o.visitor, { kind: 'status', offerId: offer.id });
+          if (reply.decision === 'join' && reply.grant) {
+            joined.push({ house: h, grant: reply.grant });
+            log('allow', `the owner of ${h.name} tapped Allow`);
+          } else if (reply.decision === 'decline') log('deny', `the owner of ${h.name} said no`);
+          else still.push(h);
+        } catch {
+          still.push(h);
+        }
+      });
+      waiting = still;
+    }
+  }
 
   log('compute', `running the certified study inside ${joined.length} houses`);
   const fragments: number[][] = [];
@@ -118,6 +147,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     cells: cellLabels(o.study).map((label, i) => ({ label, estimate: Math.round(cells[i]! * 10) / 10 })),
     answer: { onX, notOnX, summary, reliable },
     seconds: Math.round((Date.now() - t0) / 100) / 10,
+    grants: joined.map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
   };
 }
 

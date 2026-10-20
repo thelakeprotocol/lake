@@ -14,7 +14,7 @@ const HELP = `lake — talk to the Lake
 
   lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--as uni.example]
                 [--extra-fields postcode] [--epsilon 2] [--node http://lake-node:7000]
-                [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--port 4800] [--json]
+                [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--wait 30] [--port 4800] [--json]
 
 Coming: lake attack · lake revoke · lake reset (milestones 4–6)`;
 
@@ -38,6 +38,7 @@ const { positionals, values: a } = parseArgs({
     ethics: { type: 'string', default: process.env.LAKE_ETHICS_URL ?? 'http://ethics:4500' },
     auditor: { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
     port: { type: 'string', default: '4800' },
+    wait: { type: 'string', default: '0' },
     json: { type: 'boolean', default: false },
   },
 });
@@ -94,8 +95,9 @@ async function dispatchCmd() {
       study: readmissionStudy(a.goal, Number(a.epsilon)),
       priceUsd: Number(a.price ?? 2),
       extraFields: a['extra-fields']?.split(',').filter(Boolean),
+      waitSeconds: Number(a.wait),
     });
-    if (a.json) console.log(JSON.stringify(r, null, 2));
+    if (a.json) console.log(JSON.stringify({ ...r, grants: r.grants.map((g) => g.house) }, null, 2));
     else {
       for (const x of r.excluded) console.log(`EXCLUDED  ${x.house}: ${x.why}`);
       console.log(`DONE      ${r.participants} answers from ${r.houses} houses in ${r.seconds}s. Records moved: see the map (computed from each house's audit log).`);

@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { buildCard, generateIdentity, signCard, signMessage } from '../packages/core/src/index.js';
+import { buildCard, generateIdentity, issueCredential, signCard, signMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, readmissionStudy } from '../packages/visitor/src/dispatch.js';
-import { knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
+import { ask, knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
 
 // Boots a whole Lake from source: a node, the issuer, auditor and ethics specialists, and three houses
 // (each a real Community Solid Server + housekeeper), then knocks and runs a mission over A2A.
@@ -130,6 +130,61 @@ describe('the Lake node', () => {
     const env = await signMessage({ kind: 'events', events: [{ id: 'x', kind: 'record.moved', at: new Date().toISOString(), actor: 'house:stan' }] }, id, { iss: 'https://fake.example/#me' });
     const res = await fetch(`${node}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('the owner', () => {
+  let owner: Identity;
+  let webId = '';
+  const ownerCall = async (payload: Record<string, unknown>) => {
+    const env = await signMessage(payload, owner, { iss: webId || 'owner' });
+    return (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) })).json();
+  };
+  const pairWith = async (id: Identity, token?: string) =>
+    fetch(`${houses.strict}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: id.publicJwk, token }) });
+
+  it('pairs one device with the one-time token, and no other', async () => {
+    owner = await generateIdentity('owner-phone');
+    expect((await pairWith(owner, 'wrong')).status).toBe(403);
+    const token = (await readFile(join(dir, 'houses', 'strict', 'pairing-token'), 'utf8')).trim();
+    const ok = await pairWith(owner, token);
+    expect(ok.status).toBe(200);
+    webId = (await ok.json()).webId;
+    expect((await pairWith(await generateIdentity(), token)).status).toBe(403);
+  });
+
+  it("waits for the owner's tap, and the study includes the house once the owner allows it", async () => {
+    const v = await visitor('uni.example');
+    const mission = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20 });
+    let req: { id: string; offerId: string; visitor: { webId: string }; fields: string[]; purpose: string; study: string } | undefined;
+    for (let i = 0; i < 40 && !req; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      req = (await ownerCall({ kind: 'list' })).requests[0];
+    }
+    expect(req).toBeDefined();
+    const vc = (fields: string[]) => ({
+      '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeAccessGrant'], issuer: webId,
+      validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+      credentialSubject: { id: req!.visitor.webId, offer: req!.offerId, study: req!.study, fields, purpose: req!.purpose, authorizedBy: 'owner, live' },
+    });
+    // A grant wider than what the owner was shown is refused.
+    expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc([...req!.fields, 'dob']) as never, owner) })).toMatchObject({ error: expect.any(String) });
+    expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc(req!.fields) as never, owner) })).toEqual({ ok: true });
+    const r = await mission;
+    expect(r.participants).toBe(3);
+
+    // Revoking cuts the agent off at once.
+    const strict = r.grants.find((g) => g.url.startsWith(houses.strict!))!;
+    const t0 = Date.now();
+    expect((await ownerCall({ kind: 'revoke', revoke: 'all' })).revoked).toBeGreaterThan(0);
+    const { reply } = await ask(strict.url, v, { kind: 'compute', grant: strict.grant, study: readmissionStudy() });
+    expect(reply).toMatchObject({ kind: 'excluded', why: 'the owner revoked this key' });
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('refuses owner requests not signed by the owner', async () => {
+    const env = await signMessage({ kind: 'revoke', revoke: 'all' }, await generateIdentity('owner-phone'), { iss: webId });
+    expect((await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) })).status).toBe(403);
   });
 });
 

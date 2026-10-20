@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import './style.css';
 
 // The live Lake: the same picture as the simulation on the website, but every square, dot and thread
@@ -7,7 +8,7 @@ interface LakeEvent { id: string; kind: string; at: string; actor: string; subje
 interface Participant { id: string; role: string; label: string; tags: string[]; domain?: string }
 interface Counters { houses: number; agents: number; conversations: number; valueSettled: number; attacksBlocked: number; recordsMoved: number }
 type Wire =
-  | { type: 'snapshot'; node: string; sandbox: boolean; participants: Participant[]; counters: Counters; recent: { event: LakeEvent; text: string }[] }
+  | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: { event: LakeEvent; text: string }[] }
   | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant };
 
 const COL = { ink: '#070B12', mint: '#3DDC97', orange: '#FF6A2B', violet: '#9D8FFF', threat: '#FF4D6A', muted: '#8B9BAE', fg: '#E6EDF2', amber: '#F5C451' };
@@ -21,6 +22,7 @@ interface Agent { id: string; domain: string; label: string; x: number; y: numbe
 interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number }
 interface Thread { ax: number; ay: number; h: House; life: number; col: string }
 interface Ripple { x: number; y: number; r: number; max: number; col: string; w: number }
+interface Spark { x: number; y: number; vx: number; vy: number; life: number }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const stage = $('stage'), cv = $<HTMLCanvasElement>('lake'), ctx = cv.getContext('2d')!;
@@ -35,6 +37,7 @@ const agents = new Map<string, Agent>();
 const agentByLabel = (s?: string) => [...agents.values()].find((a) => s === `agent:${a.domain}` || s === a.id);
 let threads: Thread[] = [];
 let ripples: Ripple[] = [];
+let sparks: Spark[] = [];
 
 function resize() {
   const r = stage.getBoundingClientRect();
@@ -115,6 +118,19 @@ function onEvent(e: LakeEvent, p?: Participant) {
       }
       break;
     }
+    case 'grant.revoked':
+      if (h) {
+        // Keys pulled: every line into this house snaps.
+        const { x, y } = at(h);
+        threads = threads.filter((t) => t.h !== h);
+        for (let i = 0; i < 22; i++) sparks.push({ x, y, vx: rand(-110, 110), vy: rand(-110, 110), life: 1 });
+        ripples.push({ x, y, r: 4, max: 110, col: COL.fg, w: 2 });
+        h.resp = '';
+      }
+      break;
+    case 'approval.answered':
+      if (h) { const { x, y } = at(h); ripples.push({ x, y, r: 4, max: 80, col: e.data?.answer === 'Allow' ? COL.mint : COL.muted, w: 2 }); h.resp = e.data?.answer === 'Allow' ? 'join' : 'decline'; h.respT = clock; }
+      break;
     case 'grant.issued':
       if (h) { const { x, y } = at(h); ripples.push({ x, y, r: 4, max: 40, col: COL.mint, w: 1.5 }); }
       break;
@@ -181,6 +197,7 @@ function update(dt: number) {
   }
   threads = threads.filter((t) => (t.life -= dt * 0.6) > 0);
   ripples = ripples.filter((r) => (r.r += dt * 160) < r.max);
+  sparks = sparks.filter((p) => { p.life -= dt * 1.3; p.x += p.vx * dt; p.y += p.vy * dt; return p.life > 0; });
 }
 
 function draw(now: number) {
@@ -222,6 +239,7 @@ function draw(now: number) {
     ctx.fillStyle = v.bad ? COL.threat : rgba(COL.muted, 0.85);
     ctx.beginPath(); ctx.arc(v.x, v.y, v.bad ? 3.4 : 2.2, 0, 6.283); ctx.fill();
   }
+  for (const p of sparks) { ctx.fillStyle = rgba(COL.fg, p.life); ctx.fillRect(p.x, p.y, 2, 2); }
   for (const ag of agents.values()) {
     const rr = 12 + Math.sin(now / 180) * 2.5;
     ctx.strokeStyle = COL.orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ag.x, ag.y, rr, 0, 6.283); ctx.stroke();
@@ -233,7 +251,7 @@ function draw(now: number) {
 // ---- Log and counters ----
 const logEl = $('log');
 const lines: { t: string; text: string; kind: string }[] = [];
-const KIND_CLASS: Record<string, string> = { 'knock': '', 'offer': 'orange', 'compute.done': 'mint', 'grant.issued': 'mint', 'attack.blocked': 'threat', 'agent.quarantined': 'threat', 'record.moved': 'threat', 'house.joined': 'mint', 'agent.registered': 'violet', 'approval.requested': 'amber', 'guild.formed': 'violet', 'payment.settled': 'violet', 'study.result': 'mint' };
+const KIND_CLASS: Record<string, string> = { 'grant.revoked': 'threat', 'approval.answered': 'mint', 'knock': '', 'offer': 'orange', 'compute.done': 'mint', 'grant.issued': 'mint', 'attack.blocked': 'threat', 'agent.quarantined': 'threat', 'record.moved': 'threat', 'house.joined': 'mint', 'agent.registered': 'violet', 'approval.requested': 'amber', 'guild.formed': 'violet', 'payment.settled': 'violet', 'study.result': 'mint' };
 function log(e: LakeEvent, text: string) {
   lines.unshift({ t: new Date(e.at).toLocaleTimeString([], { hour12: false }), text, kind: KIND_CLASS[e.kind] ?? (e.kind === 'decision' && e.data?.decision === 'join' ? 'mint' : '') });
   lines.length = Math.min(lines.length, 5);
@@ -266,6 +284,7 @@ function connect(delay = 500) {
     const w = JSON.parse(m.data) as Wire;
     if (w.type === 'snapshot') {
       where.textContent = `live · node ${w.node}${w.sandbox ? ' · sandbox' : ''}`;
+      if (w.approvalsUrl) { $('qr').hidden = false; void QRCode.toCanvas($<HTMLCanvasElement>('qr-canvas'), w.approvalsUrl, { width: 232, margin: 0 }); }
       for (const p of w.participants) addParticipant(p, false);
       for (const r of w.recent) log(r.event, r.text);
       counters(w.counters);

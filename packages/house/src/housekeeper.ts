@@ -6,6 +6,7 @@ import {
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type Offer, type Rules, type Study,
 } from '@thelakeprotocol/core';
 import { checkRecord, type RecordCheck, type Trust } from './record.js';
+import type { OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
 
 export interface HousekeeperOptions {
@@ -23,6 +24,8 @@ export interface HousekeeperOptions {
   sandbox: boolean;
   /** Seeded demo runs: the same seed gives the same randomised answers. */
   seed?: string;
+  /** The owner's side: pending asks, live grants, revocations. */
+  desk: OwnerDesk;
   emit: (e: LakeEvent) => void;
 }
 
@@ -35,6 +38,7 @@ export type Reply =
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study }
+interface StatusPayload { kind: 'status'; offerId: string }
 
 const HOUR = 3_600_000;
 
@@ -62,7 +66,7 @@ export class Housekeeper {
   }
 
   async handle(data: LakeData | null): Promise<LakeData> {
-    const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
+    const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload | StatusPayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
     if (!v.ok) {
       // Unverified, so only a label: the domain the card claims, or its name.
       const claimed = (data?.card?.capabilities?.extensions?.[0]?.params as { ownerDomain?: unknown } | undefined)?.ownerDomain;
@@ -73,6 +77,7 @@ export class Housekeeper {
     const visitor = `agent:${v.profile.ownerDomain}`;
     if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor);
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile.webId, visitor);
+    if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer or a compute request' });
   }
 
@@ -114,6 +119,12 @@ export class Housekeeper {
     if (this.o.sandbox) notes.push('sandbox Lake: the visitor domain was not proved');
 
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } });
+    if (d.decision === 'ask') {
+      this.o.desk.ask({
+        offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
+        priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, recommendation: [d.reason, ...notes].join('. '),
+      });
+    }
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter } : {});
     const chain = await this.verifyOwnRecord();
     if (!chain.ok) return decide('decline', `my own record failed its checks (${chain.why}), so I won't take part`);
@@ -130,6 +141,7 @@ export class Housekeeper {
       this.o.id,
     );
     await this.tool('pod_write', { path: `agreements/${offer.id}.grant.jwt`, content: grant, contentType: 'text/plain' });
+    this.o.desk.record({ id: offer.id, jws: grant, visitor: domain, fields: d.fields, purpose: offer.purpose, until: new Date(Date.now() + d.grantHours * HOUR).toISOString(), authorizedBy: `standing rule ${d.rule}` });
     this.o.emit(makeEvent('grant.issued', this.actor, visitor, { hours: d.grantHours }));
     return decide('join', d.reason, { grantHours: d.grantHours, grant });
   }
@@ -140,13 +152,20 @@ export class Housekeeper {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision: 'excluded', reason: why }));
       return this.reply({ kind: 'excluded', study: id, why });
     };
+    // A grant is either the housekeeper's record of a standing rule, or signed live on the owner's device.
     let grant;
     try {
       grant = await verifyCredential(p.grant, this.o.id.publicJwk as JWK);
     } catch {
-      return excluded('that is not a grant this house issued');
+      try {
+        if (!this.o.desk.ownerJwk) throw new Error();
+        grant = await verifyCredential(p.grant, this.o.desk.ownerJwk);
+      } catch {
+        return excluded('that is not a grant this house or its owner issued');
+      }
     }
-    const g = grant.credentialSubject as { id: string; study: string | null; fields: string[] };
+    const g = grant.credentialSubject as { id: string; offer: string; study: string | null; fields: string[] };
+    if (this.o.desk.isRevoked(g.offer)) return excluded('the owner revoked this key');
     const until = (grant as { validUntil?: string }).validUntil;
     if (!grant.type.includes('LakeAccessGrant') || g.id !== requester) return excluded('the grant belongs to someone else');
     if (until && Date.parse(until) < Date.now()) return excluded('the grant has expired');
@@ -163,6 +182,16 @@ export class Housekeeper {
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
     return this.reply({ kind: 'fragment', study: id, fragment });
+  }
+
+  /** A visitor waiting on an "ask" checks back: has the owner answered? */
+  private async status(p: StatusPayload, requester: string): Promise<LakeData> {
+    const req = this.o.desk.pending.get(p.offerId);
+    if (!req || req.visitor.webId !== requester) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such request from you' });
+    const base = { kind: 'decision' as const, offerId: req.offerId, holds: [], notes: [] };
+    if (req.status === 'allowed') return this.reply({ ...base, decision: 'join', reason: 'your owner tapped Allow', grant: req.grant, grantHours: 48 });
+    if (req.status === 'denied') return this.reply({ ...base, decision: 'decline', reason: 'the owner said no' });
+    return this.reply({ ...base, decision: 'ask', reason: 'still waiting for the owner' });
   }
 
   private async tool(name: string, args: Record<string, unknown>): Promise<string> {

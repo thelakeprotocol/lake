@@ -9,7 +9,11 @@ import {
   buildCard, describe, exportIdentity, importIdentity, LakeLink, makeEvent, parseRules, signCard,
   type Identity, type LakeEvent,
 } from '@thelakeprotocol/core';
+import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import qrcode from 'qrcode-terminal';
 import { Housekeeper } from './housekeeper.js';
+import { OwnerDesk } from './owner.js';
 import { createPodMcpServer } from './pod-mcp.js';
 import { ownerSession, startPod, type OwnerSession } from './pod.js';
 import { convertRecord, fetchConverterCert, fetchRecord, RECORD } from './record.js';
@@ -28,6 +32,8 @@ const { values: a } = parseArgs({
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
     seed: { type: 'string', default: process.env.LAKE_SEED },
+    'owner-url': { type: 'string', default: process.env.LAKE_OWNER_URL },
+    'open-pairing': { type: 'boolean', default: process.env.LAKE_OPEN_PAIRING === '1' },
     domain: { type: 'string', default: process.env.LAKE_DOMAIN },
     production: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
@@ -123,11 +129,35 @@ await mcp.connect(serverSide);
 const podClient = new Client({ name: `housekeeper-${name}`, version: '0.1.0' });
 await podClient.connect(clientSide);
 
-const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox, seed: a.seed, emit });
+// 5. The owner's desk. The owner's key is made on their device; the house keeps only its public half, in the pod.
+const desk = new OwnerDesk({
+  dataDir: podOpts.dataDir, webId: owner.webId, actor, openPairing: a['open-pairing']! && sandbox, emit,
+  readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
+  saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),
+  writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),
+  saveRevoked: (ids) => put(owner, 'agreements/revoked.json', JSON.stringify(ids), 'application/json'),
+  loadRevoked: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/revoked.json`); return r.ok ? r.json() : []; },
+});
+const pairing = await desk.init();
+const ownerUrl = `${(a['owner-url'] ?? publicUrl).replace(/\/$/, '')}/owner/`;
+if (pairing.paired) say(`owner paired. Approvals app: ${ownerUrl}`);
+else {
+  const link = `${ownerUrl}#pair=${pairing.token}`;
+  say(`no owner yet. On your phone, open ${link}${a['open-pairing'] && sandbox ? ' (sandbox: the first device to open it becomes the owner)' : ''}`);
+  if (!a.json) qrcode.generate(link, { small: true }, (q: string) => console.log(q));
+}
+let appDir: string | undefined;
+try {
+  appDir = join(dirname(createRequire(import.meta.url).resolve('@thelakeprotocol/ui/package.json')), 'dist');
+} catch {
+  // no approvals app built; the API still works
+}
+
+const keeper = new Housekeeper({ name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox, seed: a.seed, emit, desk });
 const check = await keeper.verifyOwnRecord();
 say(check.ok ? 'record chain verified: trusted issuer → original → certified converter → housekeeper' : `record chain BROKEN: ${check.why}`);
 
-const server = createHouseServer(card, keeper).listen(port, async () => {
+const server = createHouseServer(card, keeper, desk, appDir).listen(port, async () => {
   say(`A2A on ${publicUrl}/a2a · card at ${publicUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
   if (a.lake) {
     link = new LakeLink({ nodeUrl: a.lake.replace(/\/$/, ''), card, identity: id, webId: owner.webId, log: say });

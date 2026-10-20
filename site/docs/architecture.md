@@ -29,7 +29,7 @@
 | Visitor: `lake knock`, `lake dispatch` (the research agent) | `packages/visitor` | <span class="status done">runs</span> |
 | Specialists: issuer, ethics, auditor · payments | `packages/specialists` | <span class="status done">runs</span> · payments in M5 |
 | Swarm: background traders and attackers | `packages/swarm` | <span class="status later">later</span> |
-| UI: live map · approvals app | `packages/ui` | <span class="status done">map runs</span> · approvals in M4 |
+| UI: live map · approvals app | `packages/ui` | <span class="status done">runs</span> |
 | Agent SDK | `packages/agent` | <span class="status later">later</span> |
 | Lake MCP connector | `packages/mcp` | <span class="status later">later</span> |
 | FHIR converter | `packages/convert-fhir` | <span class="status done">runs</span> |

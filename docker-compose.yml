@@ -2,7 +2,8 @@
 #   docker compose up                 (pulls images; add --build to build from source)
 #   open http://localhost:7000        (the live map)
 #   docker compose run --rm lake knock http://house-stan:4000 --offer gp
-#   docker compose run --rm lake dispatch --price 5
+#   docker compose run --rm lake dispatch --price 5 --wait 30
+#   open http://localhost:4001/owner/    (strict's owner: tap Allow; from a phone, set LAKE_PUBLIC_HOST=<laptop LAN IP>)
 # Join from anywhere on this machine:
 #   docker run --network lake_default --hostname house-you \
 #     -v ./personas/research.yaml:/rules.yaml ghcr.io/thelakeprotocol/lake-house --name you
@@ -21,6 +22,7 @@ services:
     image: ghcr.io/thelakeprotocol/lake-node:latest
     hostname: lake-node
     command: ["--domain", "lake.local", "--url", "http://lake-node:7000"]
+    environment: { LAKE_APPROVALS_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001/owner/" }
     volumes: [node:/data]
     ports: ["7000:7000"]
 
@@ -62,6 +64,9 @@ services:
     hostname: house-strict
     command: ["--name", "strict"]
     volumes: [strict:/data, ./personas/strict.yaml:/rules.yaml:ro]
+    ports: ["4001:4000"]
+    # Sandbox demo: the first phone to open the approvals app becomes the owner.
+    environment: { LAKE_NODE_URL: "http://lake-node:7000", LAKE_SEED: "42", LAKE_OPEN_PAIRING: "1", LAKE_OWNER_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001" }
 
   house-research:
     <<: *house

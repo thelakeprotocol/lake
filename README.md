@@ -85,10 +85,10 @@ docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper for
 # ✗ REJECTED (forged-card): card signature does not verify
 ```
 
-Then run a whole study across the Lake and watch it on the map:
+Then run a whole study across the Lake and watch it on the map. Open the strict house's approvals app at http://localhost:4001/owner/ (or scan the QR code on the map with your phone) and tap Allow when it asks:
 
 ```bash
-docker compose run --rm lake dispatch --price 5
+docker compose run --rm lake dispatch --price 5 --wait 30
 # ETHICS   asking http://ethics:4500 to review the protocol
 # AUDIT    asking http://auditor:4400 to certify the study
 # KNOCK    knocking on 4 houses: $5 for age_band, medications, readmissions
@@ -140,8 +140,8 @@ Honest, updated every merge.
 | ✅ | **M1 House**: real Solid pod + WebID, issuer-signed synthetic record, FHIR → canonical model (SHACL-valid), housekeeper answering A2A through MCP, `lake knock` | runs, end-to-end tested. Fresh house joins in ~11 s on a busy 4-core box; target is 5 s ([help wanted](https://github.com/thelakeprotocol/lake/issues)) |
 | ✅ | **M2 Lake node**: registry that verifies every card and checks the registrant serves it, signed event intake (the node stamps who said it), counters, WebSocket stream, live map | runs, end-to-end tested. The NATS bus arrives with broadcast knocks in M3 |
 | ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and returns one randomised answer; de-biased result; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
-| 🔨 | **M4 Approvals app**: Allow from your phone, revoke in under 1 second | next |
-| ⬜ | **M5 Money**: ODRL agreements, collective bargaining, AP2 mandates | |
+| ✅ | **M4 Approvals app**: phone-first; the owner's key is made on the phone and signs every live Allow; the house checks the grant matches what the owner saw; Your keys with Revoke; revocation refuses the next request at once (tested under 1 s); QR code on the map; the research agent waits for taps | runs, end-to-end tested. No push notifications yet; over-asking is stopped by the housekeeper, not yet below it |
+| 🔨 | **M5 Money**: ODRL agreements, collective bargaining, AP2 mandates | next |
 | ⬜ | **M6 Wild life**: swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | |
 | ⬜ | **M7 Scale**: 1,000 houses on one laptop | |
 | ⬜ | **M8 Federation**: many nodes, `.well-known` discovery, shared blocklists | |

@@ -13,6 +13,7 @@ const { values: a } = parseArgs({
     data: { type: 'string', default: process.env.LAKE_DATA ?? '/data' },
     ui: { type: 'string', default: process.env.LAKE_UI_DIR },
     production: { type: 'boolean', default: false },
+    'approvals-url': { type: 'string', default: process.env.LAKE_APPROVALS_URL },
   },
 });
 
@@ -26,5 +27,5 @@ if (!uiDir) {
   }
 }
 const id = await loadOrCreateIdentity(`${a.data}/node-key.json`);
-const { server } = await createNode({ id, url: a.url ?? `http://localhost:${port}`, domain: a.domain!, sandbox: !a.production, uiDir });
+const { server } = await createNode({ id, url: a.url ?? `http://localhost:${port}`, domain: a.domain!, sandbox: !a.production, uiDir, approvalsUrl: a['approvals-url'] });
 server.listen(port, () => console.log(`[node:${a.domain}] Lake node on :${port} · map at http://localhost:${port}/ · ${a.production ? 'production' : 'sandbox'}`));

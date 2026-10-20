@@ -8,8 +8,8 @@
 | 1 | **One house** | Pod, WebID, issuer-signed synthetic record, housekeeper answering an A2A request through MCP | <span class="status done">done</span> |
 | 2 | **The Lake** | A federatable node: verified cards, bus, event stream, a bare map where houses appear | <span class="status done">done</span> (bus moves to M3, with broadcast) |
 | 3 | **Mission, no money** | Ethics, audit, knock, decide, grant, verify signatures, compute in place, answer | <span class="status done">done</span> |
-| 4 | **Approvals app** | Live Allow on a phone; revocation in under 1 second | <span class="status next">next</span> |
-| 5 | **Money** | ODRL agreements, collective counter-offer, AP2 mandates, Payments agent | <span class="status later">later</span> |
+| 4 | **Approvals app** | Live Allow on a phone; revocation in under 1 second | <span class="status done">done</span> |
+| 5 | **Money** | ODRL agreements, collective counter-offer, AP2 mandates, Payments agent | <span class="status next">next</span> |
 | 6 | **Wild life** | Swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | <span class="status later">later</span> |
 | 7 | **Scale** | 1,000 houses, a full mission in about 60 seconds | <span class="status later">later</span> |
 | 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-mission and finish anyway | <span class="status later">later</span> |
