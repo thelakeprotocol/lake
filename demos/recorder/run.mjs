@@ -17,8 +17,8 @@ mkdirSync(run, { recursive: true });
 writeFileSync(join(run, 'mcp.json'), JSON.stringify({ mcpServers: { lake: { type: 'http', url: `${lake}/mcp` } } }));
 
 // Each player gets its own empty folder: whatever it builds, it builds there.
-const blueprints = process.env.LAKE_BLUEPRINTS ?? 'https://raw.githubusercontent.com/thelakeprotocol/lake/main/demos/blueprints';
-const fill = (text) => text.replaceAll('{{lake}}', lake).replace(/\{\{blueprint_url:([\w.-]+)\}\}/g, (_, f) => `${blueprints}/${f}`).replace(/\{\{blueprint:([\w.-]+)\}\}/g, (_, f) => readFileSync(join(root, 'blueprints', f), 'utf8').trim());
+const blueprints = process.env.LAKE_BLUEPRINTS ?? 'https://lake.doneinfifty.com/blueprints';
+const fill = (text) => text.replaceAll('{{lake}}', lake).replace(/\{\{blueprint_url:([\w.-]+)\}\}/g, (_, f) => `${blueprints}/${f}`).replace(/\{\{blueprint:([\w.-]+)\}\}/g, (_, f) => readFileSync(join(root, '..', 'spec', 'blueprints', f), 'utf8').trim());
 for (const p of config.players) {
   mkdirSync(join(run, p.id), { recursive: true });
   writeFileSync(join(run, `${p.id}.jsonl`), '');

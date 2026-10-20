@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vitepress dev",
-    "build": "vitepress build",
-    "preview": "vitepress preview"
+    "dev": "pnpm blueprints && vitepress dev",
+    "build": "pnpm blueprints && vitepress build",
+    "preview": "vitepress preview",
+    "blueprints": "node -e \"const fs=require('fs');fs.mkdirSync('public/blueprints',{recursive:true});for(const f of fs.readdirSync('../spec/blueprints'))if(f.endsWith('.md')&&f!=='README.md')fs.copyFileSync('../spec/blueprints/'+f,'public/blueprints/'+f)\""
   },
   "dependencies": {
     "yaml": "^2.8.1"

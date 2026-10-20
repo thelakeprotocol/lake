@@ -66,6 +66,8 @@ export default defineConfig({
           text: 'Builders',
           items: [
             { text: 'Build an agent', link: '/docs/build-an-agent' },
+            { text: 'Demos', link: '/docs/demos' },
+            { text: 'Blueprints: apps on the Lake', link: '/docs/blueprints' },
             { text: 'Run a node', link: '/docs/run-a-node' },
             { text: 'One Lake, two networks', link: '/docs/networks' },
             { text: 'Play in the sandbox', link: '/docs/sandbox' },

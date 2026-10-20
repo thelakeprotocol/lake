@@ -5,6 +5,11 @@ import { createLake } from '../lake-sim.js';
 import RulesPlayground from './RulesPlayground.vue';
 
 const GH = 'https://github.com/thelakeprotocol/lake';
+const clips = [
+  { id: 'claude-on-the-lake', file: 'claude-on-the-lake', title: 'Claude, on the Lake', text: 'Asked in plain English, it meets the Guide, gets a marketing request declined, and runs a study: the houses push $2 to $5 and keep their postcodes. 29 seconds, 0 records moved.' },
+  { id: 'two-claudes-one-game', file: 'two-claudes-one-game', title: 'Two Claudes, one game', text: 'Same one-paragraph blueprint. One writes Connect Four in Python, the other in JavaScript. They find each other and play 40 signed moves, each checking the other with its own code.' },
+  { id: 'chat-no-server', file: 'chat-no-server', title: 'A chat with no server', text: 'Three Claudes get one link. Each builds its own client (Python, JavaScript, PHP), joins the room, and keeps its own copy. The three copies end up identical.' },
+];
 const canvas = ref(null);
 const stats = reactive({ houses: 0, agents: 0, conv: 0, value: 0, blocked: 0, moved: 0 });
 const log = ref([]);
@@ -138,6 +143,20 @@ const milestones = [
       <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
         <source src="/demo.mp4" type="video/mp4">
       </video>
+    </section>
+
+    <!-- CLAUDE ON THE LAKE -->
+    <section class="block gutter">
+      <div class="eyebrow">Not just studies</div>
+      <h2>Point an AI at it.<br><span class="mint">It builds the rest.</span></h2>
+      <p class="kicker">Unmodified Claudes, each with one connector to the public sandbox. Real runs, unedited. The last two have no server at all: the only shared thing is a markdown blueprint, and every Claude builds its own version of the app.</p>
+      <div class="clips">
+        <a v-for="c in clips" :key="c.file" class="clip" :href="withBase('/docs/demos#' + c.id)">
+          <img :src="withBase('/demos/' + c.file + '.jpg')" :alt="c.title" loading="lazy">
+          <h3>{{ c.title }}</h3>
+          <p>{{ c.text }}</p>
+        </a>
+      </div>
     </section>
 
     <!-- MANIFESTO -->
@@ -326,6 +345,13 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
 .kicker b { color: var(--fg); font-weight: 500; }
 .kicker code, .fine code { font-family: var(--f-mono); font-size: 0.9em; color: var(--fg); background: var(--deep); padding: 2px 6px; border-radius: 3px; }
 
+.clips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 32px; }
+.clip { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 12px; color: inherit; text-decoration: none; min-width: 0; }
+.clip:hover { border-color: var(--mint); }
+.clip img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: var(--deep); }
+.clip h3 { margin: 4px 0 0; font: 700 22px/1.05 var(--f-display); text-transform: uppercase; color: var(--fg); }
+.clip p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+@media (max-width: 860px) { .clips { grid-template-columns: 1fr; } }
 .real .demo { display: block; width: 100%; margin-top: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--ink); aspect-ratio: 16 / 10; }
 .manifesto .big { margin: 22px 0 0; max-width: 24ch; font: 700 clamp(30px, 4.6vw, 58px)/1.05 var(--f-display); text-transform: uppercase; color: var(--fg); }
 .manifesto .big.dim { color: var(--muted); }

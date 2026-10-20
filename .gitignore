@@ -8,3 +8,4 @@ site/.vitepress/dist/
 coverage/
 .env
 *.tsbuildinfo
+site/public/blueprints/

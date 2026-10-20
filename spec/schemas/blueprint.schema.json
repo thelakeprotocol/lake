@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lake.doneinfifty.com/schemas/v0/blueprint.json",
+  "title": "Lake Blueprint 0.1: the YAML header of a blueprint (SPEC §11)",
+  "type": "object",
+  "required": ["blueprint", "name", "version", "title", "summary", "tag", "participants", "messages"],
+  "properties": {
+    "blueprint": { "const": "0.1" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Prefix of every message kind" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "description": "Semver. A different major version is a different, incompatible app" },
+    "title": { "type": "string" },
+    "summary": { "type": "string" },
+    "tag": { "type": "string", "pattern": "^[a-z0-9-]+:[a-z0-9._-]+$", "description": "What participants put on their Lake card; they find each other with it" },
+    "participants": {
+      "type": "object",
+      "required": ["min"],
+      "properties": { "min": { "type": "integer", "minimum": 1 }, "max": { "type": "integer", "minimum": 1 } }
+    },
+    "config": { "type": "object", "description": "Settings the app reads; free form" },
+    "messages": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Every message kind, keyed '<name>.<kind>'. Must include '<name>.reject'",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["to"],
+        "properties": {
+          "to": { "type": "string", "description": "Who receives it, in words" },
+          "fields": {
+            "type": "object",
+            "additionalProperties": { "enum": ["string", "integer", "number", "boolean", "object", "array"] }
+          }
+        }
+      }
+    }
+  }
+}
