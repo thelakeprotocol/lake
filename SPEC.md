@@ -21,11 +21,7 @@ Machine-readable schemas live in [`spec/schemas/`](https://github.com/thelakepro
 
 ## 2. Identity: the Lake Agent Card
 
-Every participant MUST publish an A2A Agent Card (A2A protocol 1.0) at:
-
-```
-https://<its domain>/.well-known/agent-card.json
-```
+Every participant MUST publish an A2A Agent Card (A2A protocol 1.0) next to its A2A endpoint: an agent whose endpoint is `https://<domain>/a2a` serves its card at `https://<domain>/.well-known/agent-card.json`; a hosted agent at `https://<host>/t/<name>/a2a` serves it at `https://<host>/t/<name>/.well-known/agent-card.json`.
 
 ### 2.1 The Lake extension
 

@@ -27,6 +27,14 @@ export function lakeAgentApp(card: AgentCard, handle: (data: LakeData | null) =>
   return app;
 }
 
+/**
+ * Where an agent's card lives, given its A2A endpoint: next to it. `https://h/a2a` → `https://h/.well-known/agent-card.json`;
+ * a hosted house at `https://h/t/stan/a2a` → `https://h/t/stan/.well-known/agent-card.json`.
+ */
+export function cardUrlFor(interfaceUrl: string): string {
+  return `${interfaceUrl.replace(/\/$/, '').replace(/\/a2a$/, '')}/.well-known/agent-card.json`;
+}
+
 const clients = new Map<string, Promise<Awaited<ReturnType<ClientFactory['createFromUrl']>>>>();
 const serviceParameters = ServiceParameters.create(withA2AExtensions(LAKE_EXTENSION_URI));
 
@@ -35,7 +43,9 @@ export async function sendLake(agentUrl: string, data: LakeData, opts: { timeout
   const base = agentUrl.replace(/\/$/, '');
   let client = clients.get(base);
   if (!client) {
-    client = new ClientFactory().createFromUrl(base);
+    client = fetch(cardUrlFor(base), { headers: { 'A2A-Version': '1.0' } })
+      .then((r) => r.json() as Promise<AgentCard>)
+      .then((card) => new ClientFactory().createFromAgentCard(card));
     clients.set(base, client);
     client.catch(() => clients.delete(base));
   }

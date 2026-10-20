@@ -1,4 +1,4 @@
-import { canonicalize, proveDomain, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { canonicalize, cardUrlFor, proveDomain, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 export interface Entry {
   /** Short, stable id the map and events use: role plus the start of the key id. */
@@ -35,7 +35,7 @@ export class Registry {
     // The registrant must control the endpoint it names: that endpoint must serve this exact card.
     const url = card.supportedInterfaces[0]?.url;
     if (!url) return { ok: false, refusal: { code: 'not-lake', why: 'card names no endpoint' } };
-    const wellKnown = new URL('/.well-known/agent-card.json', url).href;
+    const wellKnown = cardUrlFor(url);
     try {
       const res = await (this.o.fetch ?? fetch)(wellKnown, { signal: AbortSignal.timeout(5000), headers: { 'A2A-Version': '1.0' } });
       const served = (await res.json()) as AgentCard;

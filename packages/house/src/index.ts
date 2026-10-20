@@ -1,3 +1,4 @@
+export * from './house.js';
 export * from './housekeeper.js';
 export * from './pod.js';
 export * from './pod-mcp.js';

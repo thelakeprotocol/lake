@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, cellLabels, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  buildCard, cardUrlFor, cellLabels, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
   type AgentCard, type Attachment, type Identity, type LakeLink, type Offer, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
@@ -246,7 +246,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
 
 const cardCache = new Map<string, Promise<AgentCard>>();
 function cardOf(agentUrl: string): Promise<AgentCard> {
-  const u = new URL('/.well-known/agent-card.json', agentUrl).href;
+  const u = agentUrl.endsWith('/a2a') ? cardUrlFor(agentUrl) : `${agentUrl.replace(/\/$/, '')}/.well-known/agent-card.json`;
   if (!cardCache.has(u)) cardCache.set(u, fetch(u, { headers: { 'A2A-Version': '1.0' } }).then((r) => r.json() as Promise<AgentCard>));
   return cardCache.get(u)!;
 }
