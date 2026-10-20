@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage,
-  type AgentCard, type Identity, type LakeData, type Offer, type Study,
+  buildCard, generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signMessage, verifyLakeData,
+  type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ask, dispatch, knock, makeHuman, makeVisitor, readmissionStudy, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
 
@@ -27,6 +27,17 @@ export interface LakeAgentOptions {
    * agent's routes (card at /.well-known/agent-card.json, A2A at /a2a). Set `publicUrl` to where they land.
    */
   mount?: (app: import('express').Express) => void;
+  /** Interest tags on this agent's card: others find it by them (e.g. `game:connect4`). */
+  tags?: string[];
+  /** Use this key instead of keyFile or a fresh one (to re-join with a new card under the same identity). */
+  identity?: Identity;
+  /**
+   * Messages other agents send this one. Each arrives verified (signed card, signed envelope, not replayed,
+   * not expired); whatever you return is signed and sent back. Without it, the agent answers "busy".
+   */
+  onMessage?: (m: { from: LakeProfile; card: AgentCard; payload: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+  /** A sandbox Lake: skip domain proof when checking who sent a message. Default true. */
+  sandbox?: boolean;
   /** Specialists to use. Defaults are the demo Lake's (docker compose). */
   ethics?: string;
   auditor?: string;
@@ -72,13 +83,25 @@ export interface LakeAgent {
 export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const port = o.port ?? 4800;
   const base = (o.publicUrl ?? `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
-  const id: Identity = o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity();
+  const id: Identity = o.identity ?? (o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity());
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
+  if (o.tags?.length) {
+    // Same identity, a card that also lists what this agent is up for.
+    const webId = `https://${o.domain}/#agent`;
+    visitor.card = await signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'health-study', name: 'Health study', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId, ownerDomain: o.domain, tags: o.tags } }, id), id);
+  }
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
   // Serve our card while we're around, so a node can verify it and others can look us up.
-  const busy = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'this agent visits; it does not take offers' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
-  const app = lakeAgentApp(visitor.card, busy);
+  const reply = async (body: Record<string, unknown>): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage(body, id, { iss: visitor.webId })) as LakeData['envelope'] });
+  const replay = new ReplayGuard();
+  const app = lakeAgentApp(visitor.card, async (data) => {
+    if (!o.onMessage) return reply({ kind: 'rejected', code: 'busy', why: 'this agent visits; it does not take offers' });
+    const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox ?? true });
+    if (!v.ok) return reply({ kind: 'rejected', code: v.rejection.code, why: v.rejection.why });
+    const { nonce: _n, iat: _i, exp: _e, iss: _s, ...payload } = v.payload;
+    return reply(await o.onMessage({ from: v.profile, card: (data as LakeData).card, payload }));
+  });
   let server: Server | null = null;
   if (o.mount) o.mount(app);
   else {
@@ -87,6 +110,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   }
   const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
+  if (o.onMessage) link.keepAlive(20_000); // an agent that takes messages stays findable
 
   return {
     card: visitor.card,
@@ -131,6 +155,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       });
     },
     async close() {
+      link.stop();
       await link.flush();
       if (server) await new Promise((ok) => server!.close(ok));
     },

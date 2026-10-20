@@ -55,8 +55,11 @@ export class LakeLink {
   }
 
   /** Nodes forget (restarts, resets). Check now and then, and register again if this one has forgotten us. */
+  private alive: ReturnType<typeof setInterval> | null = null;
+
   keepAlive(everyMs = 15_000) {
-    setInterval(async () => {
+    this.stop();
+    this.alive = setInterval(async () => {
       try {
         const r = (await (await fetch(`${this.o.nodeUrl}/registered?webId=${encodeURIComponent(this.o.webId)}`, { signal: AbortSignal.timeout(3000) })).json()) as { registered: boolean };
         if (!r.registered) {
@@ -67,6 +70,12 @@ export class LakeLink {
         // node down; try again later
       }
     }, everyMs).unref();
+  }
+
+  /** Stop checking in (a participant that's leaving, or replacing its card). */
+  stop() {
+    if (this.alive) clearInterval(this.alive);
+    this.alive = null;
   }
 
   report(e: LakeEvent) {
@@ -113,6 +122,10 @@ export class LakeLinks {
 
   keepAlive(everyMs?: number) {
     for (const l of this.links) l.keepAlive(everyMs);
+  }
+
+  stop() {
+    for (const l of this.links) l.stop();
   }
 
   async flush() {

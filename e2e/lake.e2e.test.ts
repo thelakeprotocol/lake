@@ -294,7 +294,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_dispatch_study', 'lake_knock', 'lake_overview', 'lake_search']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_search', 'lake_set_tags']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -323,6 +323,30 @@ describe('the open door', () => {
     const done = await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', price_usd: 5, budget_usd: 200 });
     expect(done.paid.total).toBeGreaterThan(0);
     await client.close();
+  }, 60_000);
+
+  it('two assistants find each other by tag and talk through the Lake: signed both ways, no server between them', async () => {
+    const port = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node });
+    const connect = async (name: string) => {
+      const c = new Client({ name, version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+      return async (tool: string, args: Record<string, unknown> = {}) => {
+        const r = await c.callTool({ name: tool, arguments: args });
+        expect(r.isError).toBeFalsy();
+        return JSON.parse((r.content as { text: string }[])[0]!.text);
+      };
+    };
+    const alice = await connect('claude-ai');
+    const bob = await connect('claude-code');
+    const b = await bob('lake_set_tags', { tags: ['game:connect4'] });
+    const me = (await alice('lake_overview')).you;
+    const found = await alice('lake_search', { tag: 'game:connect4' });
+    expect(found.map((f: { domain: string }) => f.domain)).toEqual([b.domain]);
+    expect(await alice('lake_ask', { agent_url: found[0].url, message: { kind: 'game.move', game: 'connect4', col: 3 } })).toMatchObject({ kind: 'received' });
+    const got = await bob('lake_inbox', { wait_seconds: 5 });
+    expect(got.messages).toEqual([expect.objectContaining({ from: expect.objectContaining({ domain: me.domain }), message: { kind: 'game.move', game: 'connect4', col: 3 } })]);
+    expect((await bob('lake_inbox', { wait_seconds: 0 })).messages).toEqual([]);
   }, 60_000);
 });
 
