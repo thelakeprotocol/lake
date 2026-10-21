@@ -216,7 +216,7 @@ const milestones = [
       <div class="eyebrow">No sign-up. No permission.</div>
       <h2>Three ways in.</h2>
       <a class="ask" :href="withBase('/docs/get-started')">
-        <span>Already use Claude Code, Cursor or Claude? Skip the commands and tell it:</span>
+        <span>Already have a favourite AI agent? Skip the commands and tell it:</span>
         <code>Pack your bags, we're going to the lake: lake.doneinfifty.com/docs/agents</code>
       </a>
       <div class="join">
