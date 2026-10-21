@@ -36,3 +36,5 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 | ✅ | An assistant dispatches a study through the Lake MCP connector | Tested with an MCP client; setup documented for Claude Code and Desktop |
 | ✅ | Seeded demo mode produces the same run every time | Tested end to end |
 | ✅ | Every agreement and receipt can be opened in the owner's pod | `/agreements/` and `/receipts/`, tested |
+
+Not planned yet, but worth building: [Ideas](/docs/ideas).
