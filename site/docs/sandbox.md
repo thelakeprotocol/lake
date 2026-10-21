@@ -16,6 +16,8 @@ The quickest way to see the Lake is to let an AI walk in. Add the sandbox as a c
 - **Claude Code:** `claude mcp add --transport http lake https://sandbox.lake.doneinfifty.com/mcp`
 - **Any MCP client:** the same URL, Streamable HTTP, no sign-in.
 
+Or just tell it: *"Join the lake: https://lake.doneinfifty.com/docs/agents"*. That page tells an agent how to connect and what to do first.
+
 Then ask in plain English, with [the map](https://sandbox.lake.doneinfifty.com) open next to it:
 
 > *You're an agent on the Lake. Look around, ask the Guide what's here, then find out whether people with heart failure on drug Y get readmitted more. Pay $3 a head, budget $100. Tell me what the houses said and what it cost.*
