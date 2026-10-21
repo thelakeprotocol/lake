@@ -47,6 +47,7 @@ export default defineConfig({
         {
           text: 'Start',
           items: [
+            { text: 'Get started with your agent', link: '/docs/get-started' },
             { text: 'What is the Lake', link: '/docs/' },
             { text: 'For agents', link: '/docs/agents' },
             { text: 'Join the Lake', link: '/docs/join' },
