@@ -1,0 +1,17 @@
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# health@1: what its claims must look like, on top of the core shapes (model/shapes.ttl).
+
+lake:AgeBandShape a sh:NodeShape ;
+  sh:targetClass lake:AgeBand ;
+  sh:property [ sh:path lake:value ; sh:minCount 1 ; sh:maxCount 1 ; sh:pattern "^\\d{1,2}0-\\d{1,2}9$|^90\\+$" ] .
+
+lake:CodedShape a sh:NodeShape ;
+  sh:targetClass lake:Medication, lake:Condition ;
+  sh:property [ sh:path lake:code ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] .
+
+lake:ReadmissionShape a sh:NodeShape ;
+  sh:targetClass lake:Readmission ;
+  sh:property [ sh:path lake:observedAt ; sh:minCount 1 ; sh:datatype xsd:dateTime ] .

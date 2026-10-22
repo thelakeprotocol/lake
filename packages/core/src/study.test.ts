@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { auditStudy, buildCard, cellOf, estimate, generateIdentity, issueCredential, randomize, signCard, checkAttachment, studyId, type Study } from './index.js';
+import { auditStudy, buildCard, cellOf, estimate, generateIdentity, issueCredential, randomize, registerPack, signCard, checkAttachment, studyId, type Study } from './index.js';
+
+// A fixture pack: the core knows no fields of its own, so its tests bring some.
+registerPack({
+  id: 'fixture', version: '1.0.0', title: 'Fixture', vocab: 'urn:fixture#', folder: 'fixture/', recordClass: 'urn:fixture#Record',
+  fields: {
+    age_band: { class: 'urn:fixture#AgeBand', kind: 'band', label: 'age band' },
+    medications: { class: 'urn:fixture#Medication', kind: 'code', label: 'medications' },
+    readmissions: { class: 'urn:fixture#Readmission', kind: 'flag', label: 'readmissions' },
+  },
+  identifying: ['name'],
+});
 
 const study: Study = {
   v: 1,

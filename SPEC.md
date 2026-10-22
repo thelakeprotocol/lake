@@ -235,16 +235,32 @@ A participant that cannot accept incoming connections (a house behind a home rou
 - The node forwards requests on those paths down the channel as `{ type: "req", id, method, path, headers, body }` and returns `{ type: "res", id, status, headers, body }`.
 - Messages stay signed end to end: a relaying node can't forge or alter them. It can read them (offers, decisions, fragments; never records, which don't leave the house). Encrypting A2A payloads end to end is future work.
 
-## 10. Canonical data model
+## 10. Canonical data model and packs
 
-The Lake supports exactly one data model, in RDF, with SHACL shapes for validation. Other standards (FHIR, bank CSVs, wearables) are converted into it at the edge, inside the house, by signed and audited **converter** packages.
+The Lake supports exactly one data model, in RDF, with SHACL shapes for validation. Other standards (FHIR, bank statements, wearables) are converted into it at the edge, inside the house, by signed and audited **converter** packages.
 
-- Core classes: `Party`, `Thing`, `Claim`, `Provenance`, `Offer`, `Terms`, `Receipt`.
-- Domain vocabularies (health, energy, rentals) add `Claim` subtypes inside the core.
+- Core classes: `Party`, `Thing`, `Claim`, `Provenance`, `Offer`, `Terms`, `Receipt`. The core names no use case.
 - A converted claim carries the hash of the original signed record, the converter's name, version and certificate, and the housekeeper's signature. Study code MUST verify all three and drop any value that fails.
 - Every field carries a provenance tier: `self-reported`, `device-signed` or `issuer-signed`.
 
-See [`model/lake.ttl`](https://github.com/thelakeprotocol/lake/blob/main/model/lake.ttl) and [`model/shapes.ttl`](https://github.com/thelakeprotocol/lake/blob/main/model/shapes.ttl).
+### 10.1 Packs
+
+Each use case is a **pack** (`health@1`, `mortgage@1`), versioned with semver. A pack declares:
+
+- **fields:** the coarse, safe fields programs may read and offers may name, each a claim class in the pack's vocabulary, ideally mapped to an existing standard (FHIR, FIBO, schema.org), with a kind: `band`, `number`, `code` or `flag`;
+- **identifying fields** no program may ever read;
+- **shapes:** SHACL that every converted claims document MUST pass, on top of the core shapes;
+- **a source:** the credential type its issuer signs, the converter (`package@version`) an auditor certifies, and the media type of the original.
+
+A house:
+
+- MUST check a pack's claims against the core shapes and the pack's shapes before any program reads them, and hold nothing for that pack if they fail;
+- SHOULD register each pack's data in the owner's Solid **Type Index** (`solid:forClass` the pack's record class, `solid:instanceContainer` its folder), and find it there;
+- lists the packs it takes part in on its card (`packs`, e.g. `["health@1"]`) and advertises one skill per pack (`<pack>-study`).
+
+A study's predicates compare by field kind: `at_least` / `at_most` on bands (by their lower bound) and numbers, `has_code` on codes, `present` on anything. `age_at_least` is the v0.1 spelling of `at_least`.
+
+See [`model/lake.ttl`](https://github.com/thelakeprotocol/lake/blob/main/model/lake.ttl), [`model/shapes.ttl`](https://github.com/thelakeprotocol/lake/blob/main/model/shapes.ttl) and the packs in [`usecases/`](https://github.com/thelakeprotocol/lake/tree/main/usecases).
 
 ## 11. Blueprints (apps on the Lake)
 

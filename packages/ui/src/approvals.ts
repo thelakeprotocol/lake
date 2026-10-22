@@ -185,12 +185,17 @@ async function keys() {
 }
 
 // ---- Rules ----
-const FIELDS = ['age_band', 'medications', 'conditions', 'readmissions', 'postcode', 'dob', 'name'];
+// The fields rules can name come from the packs this house takes part in (and the identifying ones they warn about).
+let FIELDS: { name: string; label: string; pack: string }[] = [];
 const PURPOSES = ['research', 'care', 'marketing', 'insurance'];
 let draft: Rules | null = null;
 
 async function rules() {
-  if (!draft) draft = structuredClone((await call<{ rules: Rules }>({ kind: 'panel.rules' })).rules);
+  if (!draft) {
+    const r = await call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[] }>({ kind: 'panel.rules' });
+    draft = structuredClone(r.rules);
+    FIELDS = r.fields ?? [];
+  }
   renderRules();
 }
 
@@ -269,7 +274,7 @@ function ruleCard(r: Rule, i: number, all: Rule[]) {
       h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Then'), seg(r.decision, (d) => { r.decision = d; redraw(); })),
     ),
     r.decision === 'join' ? h('div', { class: 'grid2', style: 'margin-top:14px' },
-      h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Fields (tap to cycle)'), h('div', {}, ...FIELDS.map(fieldChip))),
+      h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Fields (tap to cycle)'), h('div', {}, ...FIELDS.map((f) => fieldChip(f.name)))),
       h('div', { class: 'field' },
         h('label', {}, 'At least ($ per study)'), price,
         h('div', { style: 'height:10px' }),
@@ -352,18 +357,20 @@ async function money() {
 
 // ---- Data ----
 async function data() {
-  const d = await call<{ claims: { field: string; value: string; code?: string; observedAt?: string }[]; record: { ok: boolean; why?: string }; provenance: { issuer: string | null; converter: string; certifiedBy: string | null }; folders: Record<string, number> }>({ kind: 'panel.data' });
+  type Source = { pack: string; title: string; folder: string; issuer: string | null; converter: string; certifiedBy: string | null; ok: boolean; why?: string };
+  const d = await call<{ claims: { field: string; label?: string; value: string; code?: string; observedAt?: string }[]; record: { ok: boolean; why?: string }; sources: Source[]; folders: Record<string, number> }>({ kind: 'panel.data' });
   const by = new Map<string, typeof d.claims>();
-  for (const c of d.claims) by.set(c.field, [...(by.get(c.field) ?? []), c]);
+  for (const c of d.claims) by.set(c.label ?? nice(c.field), [...(by.get(c.label ?? nice(c.field)) ?? []), c]);
   view().replaceChildren(
-    h('p', { class: 'lede' }, 'What your house holds. It never leaves: studies run here and send back one noisy answer.'),
-    h('div', { class: `card ${d.record.ok ? 'ok' : 'bad'}`, style: 'max-width:820px' },
-      h('h3', {}, 'Where it came from'),
+    h('p', { class: 'lede' }, 'What your house holds. It never leaves: programs run here, and only what you agreed to comes out.'),
+    h('h2', {}, 'Where it came from'),
+    ...d.sources.map((s) => h('div', { class: `card ${s.ok ? 'ok' : 'bad'}`, style: 'max-width:820px' },
+      h('h3', {}, s.title),
       h('dl', { class: 'facts' },
-        ...([['Signed by', d.provenance.issuer ?? 'unknown'], ['Converted by', d.provenance.converter], ['Certified by', d.provenance.certifiedBy ?? 'not certified'], ['Check', d.record.ok ? 'every signature verifies' : d.record.why ?? 'failed']] as [string, string][])
-          .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v))))),
+        ...([['Signed by', s.issuer ?? 'unknown'], ['Converted by', s.converter], ['Certified by', s.certifiedBy ?? 'not certified'], ['Kept in', `/${s.folder}`], ['Check', s.ok ? 'every signature verifies, and the claims pass their shapes' : s.why ?? 'failed']] as [string, string][])
+          .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))))),
     h('h2', {}, 'Claims'),
-    ...[...by].map(([field, cs]) => h('div', { class: 'card', style: 'max-width:820px' }, h('h3', {}, nice(field)),
+    ...[...by].map(([label, cs]) => h('div', { class: 'card', style: 'max-width:820px' }, h('h3', {}, label),
       h('div', { style: 'margin-top:8px' }, ...cs.map((c) => h('span', { class: 'chip' }, c.value, c.observedAt ? ` · ${new Date(c.observedAt).toLocaleDateString()}` : ''))))),
     h('h2', {}, 'Folders in your pod'),
     h('ul', { class: 'rows' }, ...Object.entries(d.folders).map(([f, n]) => h('li', {}, h('div', { class: 'r-title' }, `/${f}`), h('span', { class: 'count' }, `${n} item${n === 1 ? '' : 's'}`)))),

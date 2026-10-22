@@ -1,7 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { generateIdentity, loadOrCreateIdentity } from '@thelakeprotocol/core';
-import { SANDBOX_STUDIES } from '@thelakeprotocol/visitor';
+import { exampleStudies, generateIdentity, loadOrCreateIdentity, loadPacks } from '@thelakeprotocol/core';
+
+// The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
+await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
+const SANDBOX_STUDIES = exampleStudies();
 import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
 
 export interface McpExtras {

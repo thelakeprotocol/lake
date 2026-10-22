@@ -20,6 +20,7 @@
       }
     },
     "tags": { "type": "array", "items": { "type": "string" } },
+    "packs": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*@\\d+$" }, "description": "Houses: the packs whose claims this house holds and checks, e.g. health@1 (SPEC §10)" },
     "lakeVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
   },
   "additionalProperties": false

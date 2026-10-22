@@ -1,0 +1,25 @@
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+
+# health@1. Its classes keep the v0.1 model namespace, so pods written before packs existed still read.
+# Each maps to FHIR (see src/pack.ts, field.standard).
+
+# ---- Health vocabulary -------------------------------------------------
+
+lake:AgeBand      a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "Age as a band, e.g. '60-69'. Never a birth date." .
+lake:Medication   a owl:Class ; rdfs:subClassOf lake:Claim .
+lake:Condition    a owl:Class ; rdfs:subClassOf lake:Claim .
+lake:Readmission  a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "A hospital readmission within 30 days." .
+
+
+# ---- Field names used in offers ---------------------------------------
+
+lake:age_band     a rdf:Property ; rdfs:range lake:AgeBand .
+lake:medications  a rdf:Property ; rdfs:range lake:Medication .
+lake:conditions   a rdf:Property ; rdfs:range lake:Condition .
+lake:readmissions a rdf:Property ; rdfs:range lake:Readmission .
+lake:postcode     a rdf:Property ; rdfs:comment "Identifying. Most personas deny it." .
+lake:dob          a rdf:Property ; rdfs:comment "Identifying. Most personas deny it." .
+lake:name         a rdf:Property ; rdfs:comment "Identifying. Most personas deny it." .

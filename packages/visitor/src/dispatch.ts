@@ -1,38 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, cardUrlFor, cellLabels, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  buildCard, cardUrlFor, cellLabels, fieldSpec, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
   type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { readFile, writeFile } from 'node:fs/promises';
 import { ask, type Visitor } from './knock.js';
-
-export function readmissionStudy(question = 'Do over-60s on drug X get readmitted less?', epsilon = 2): Study {
-  return {
-    v: 1,
-    question,
-    kind: 'contingency',
-    predicates: [
-      { name: 'over 60', field: 'age_band', op: 'age_at_least', value: 60 },
-      { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
-      { name: 'readmitted', field: 'readmissions', op: 'present' },
-    ],
-    privacy: { mechanism: 'unary-randomized-response', epsilon },
-    minTier: 'issuer-signed',
-  };
-}
-
-/** Questions the sandbox sponsor rotates through: a group, an exposure and an outcome, all certifiable. */
-export const SANDBOX_STUDIES: Study[] = [
-  readmissionStudy(),
-  cohortStudy('Are people with heart failure on drug Y readmitted more?', { name: 'with heart failure', field: 'conditions', op: 'has_code', value: '84114007' }, { name: 'on drug Y', field: 'medications', op: 'has_code', value: 'drug-y' }),
-  cohortStudy('Do over-50s on drug Z end up back in hospital?', { name: 'over 50', field: 'age_band', op: 'age_at_least', value: 50 }, { name: 'on drug Z', field: 'medications', op: 'has_code', value: 'drug-z' }),
-  cohortStudy('Diabetes and drug X: more readmissions?', { name: 'with type 2 diabetes', field: 'conditions', op: 'has_code', value: '44054006' }, { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' }),
-  cohortStudy('Hypertension and drug Y: more readmissions?', { name: 'with hypertension', field: 'conditions', op: 'has_code', value: '38341003' }, { name: 'on drug Y', field: 'medications', op: 'has_code', value: 'drug-y' }),
-];
-
-function cohortStudy(question: string, group: Study['predicates'][number], exposure: Study['predicates'][number], epsilon = 2): Study {
-  return { ...readmissionStudy(question, epsilon), predicates: [group, exposure, { name: 'readmitted', field: 'readmissions', op: 'present' }] };
-}
 
 /** The human at the research organisation who signs the spending mandate. Not the agent: a separate key. */
 export interface Human {
@@ -302,10 +274,13 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
 /** Ask each node in turn; fall back to the houses remembered last time. Nodes are search indexes, not gatekeepers. */
 async function discover(o: DispatchOptions, log: (step: string, detail: string) => void): Promise<House[]> {
   const nodes = (Array.isArray(o.node) ? o.node : o.node.split(',')).map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
+  // Houses advertise one skill per pack they take part in (`health-study`): look for the pack this study reads.
+  const pack = studyFields(o.study).map((f) => fieldSpec(f)?.pack.id).find(Boolean);
+  const skill = pack ? `${pack}-study` : '';
   for (const node of nodes) {
     try {
-      log('discover', `searching ${node} for houses with the health-study skill`);
-      const found = (await (await fetch(`${node}/cards?skill=health-study&role=house`, { signal: AbortSignal.timeout(5000) })).json()) as { id: string; card: AgentCard }[];
+      log('discover', `searching ${node} for houses${skill ? ` with the ${skill} skill` : ''}`);
+      const found = (await (await fetch(`${node}/cards?${skill ? `skill=${skill}&` : ''}role=house`, { signal: AbortSignal.timeout(5000) })).json()) as { id: string; card: AgentCard }[];
       // A relayed house lists one address per node; use the one on the node that answered.
       const houses = found.map((f) => ({ id: f.id, name: f.card.name, url: (f.card.supportedInterfaces.find((i) => i.url.startsWith(node)) ?? f.card.supportedInterfaces[0]!).url }));
       if (o.houseCache) await writeFile(o.houseCache, JSON.stringify(houses)).catch(() => {});

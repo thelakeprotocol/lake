@@ -1,5 +1,5 @@
 import { generateIdentity, type AgentCard } from '@thelakeprotocol/core';
-import { knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
+import { knock, makeVisitor, presets, type Tamper } from './knock.js';
 
 export const ATTACKS: (Tamper | 'injection')[] = ['forge-card', 'unsigned', 'replay', 'impersonate', 'injection'];
 
@@ -30,7 +30,7 @@ export async function attack(o: { houses: string[]; count: number; domain?: stri
     let outcome: string;
     try {
       // Requests rules decline anyway, so a replay's first, genuine copy never lands on an owner's phone.
-      const { reply } = how === 'injection' ? await knock(house, attacker, PRESETS.injection!) : await knock(house, attacker, PRESETS.marketing!, how);
+      const { reply } = how === 'injection' ? await knock(house, attacker, presets().injection!) : await knock(house, attacker, presets().marketing!, how);
       outcome = reply.kind === 'rejected' ? String(reply.code) : `${reply.decision}${reply.decision === 'join' ? ' (NOT BLOCKED)' : ''}`;
     } catch (e) {
       outcome = `error: ${(e as Error).message.slice(0, 60)}`;
@@ -55,7 +55,7 @@ export async function swarm(o: { node: string; traders: number; attackers: numbe
       if (!houses.length) continue;
       const house = houses[Math.floor(Math.random() * houses.length)]!;
       // Only the GP asks for something a rule grants; everyone else is ordinary marketing that rules decline.
-      await knock(house, t, t.domain === 'gp.example' ? PRESETS.gp! : PRESETS.marketing!).catch(() => {});
+      await knock(house, t, t.domain === 'gp.example' ? presets().gp! : presets().marketing!).catch(() => {});
     }
   });
   const attackers = Array.from({ length: o.attackers }, async () => {

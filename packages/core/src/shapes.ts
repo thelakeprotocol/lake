@@ -1,0 +1,23 @@
+/** The shapes every pack's claims must pass (model/shapes.ttl; a unit test keeps the two identical). */
+export const CORE_SHAPES = `@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# The shapes every pack's claims must pass. Each pack adds its own for its fields
+# (usecases/<pack>/shapes.ttl); a house checks both before any program reads a claim.
+
+# Every claim must say what it is about and where it came from.
+lake:ClaimShape a sh:NodeShape ;
+  sh:targetSubjectsOf lake:provenance ;
+  sh:property [ sh:path lake:about ; sh:minCount 1 ; sh:maxCount 1 ] ;
+  sh:property [ sh:path lake:value ; sh:minCount 1 ; sh:maxCount 1 ] ;
+  sh:property [ sh:path lake:provenance ; sh:minCount 1 ; sh:maxCount 1 ; sh:node lake:ProvenanceShape ] .
+
+# A converted claim carries the full trust chain: tier, original hash, converter + certificate, housekeeper signature.
+lake:ProvenanceShape a sh:NodeShape ;
+  sh:property [ sh:path lake:tier ; sh:minCount 1 ; sh:in ( lake:SelfReported lake:DeviceSigned lake:IssuerSigned ) ] ;
+  sh:property [ sh:path lake:originalHash ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+  sh:property [ sh:path lake:converter ; sh:minCount 1 ; sh:datatype xsd:string ; sh:pattern "^@?[a-z0-9-/]+@\\\\d+\\\\.\\\\d+\\\\.\\\\d+$" ] ;
+  sh:property [ sh:path lake:converterCert ; sh:minCount 1 ] ;
+  sh:property [ sh:path lake:signedBy ; sh:minCount 1 ] .
+`;

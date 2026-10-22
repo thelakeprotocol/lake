@@ -5,9 +5,10 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import express from 'express';
-import { describe, parseRules, type LakeEvent } from '@thelakeprotocol/core';
-import { seedFrom } from '@thelakeprotocol/convert-fhir';
+import { describe, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
+
 import { startHouse, type House } from './house.js';
+import { loadPacks } from './packs.js';
 import { externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
 
 const { values: a } = parseArgs({
@@ -19,6 +20,10 @@ const { values: a } = parseArgs({
     'pod-port': { type: 'string', default: process.env.LAKE_POD_PORT ?? '3000' },
     'public-url': { type: 'string', default: process.env.LAKE_PUBLIC_URL },
     'pod-url': { type: 'string', default: process.env.LAKE_POD_URL },
+    // The use cases this house takes part in, by pack id (each one is a package: @thelakeprotocol/usecase-<id>).
+    packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
+    // Each pack's issuer: health=http://…,mortgage=http://… (--issuer-url sets the first pack's, as before).
+    issuers: { type: 'string', default: process.env.LAKE_ISSUERS },
     'issuer-url': { type: 'string', default: process.env.LAKE_ISSUER_URL },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL },
@@ -50,7 +55,6 @@ const { values: a } = parseArgs({
 if (a.join) {
   const lake = a.join.replace(/\/$/, '');
   a.lake ??= lake;
-  a['issuer-url'] ??= `${lake}/s/issuer`;
   a['auditor-url'] ??= `${lake}/s/auditor`;
   a.relay = true;
 }
@@ -68,7 +72,12 @@ if (podHost.protocol === 'http:' && podHost.hostname.split('.').pop() !== 'local
   process.exit(2);
 }
 const sandbox = !a.production;
-const common = { issuerUrl: a['issuer-url'] ?? 'http://issuer:4300', auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
+const packs = await loadPacks(a.packs!.split(','), (n) => import(n));
+// A pack's issuer: named explicitly, or the joined Lake's (/s/<path>), or the demo compose service (<path>:4300).
+const named = Object.fromEntries((a.issuers ?? '').split(',').filter((x) => x.includes('=')).map((x) => x.split('=').map((y) => y.trim()) as [string, string]));
+const issuerUrls = Object.fromEntries(packs.filter((p) => p.source).map((p, i) => [p.id,
+  (named[p.id] ?? (i === 0 ? a['issuer-url'] : undefined) ?? (a.join ? `${a.join.replace(/\/$/, '')}/s/${p.source!.issuer.path}` : `http://${p.source!.issuer.path}:4300`)).replace(/\/$/, '')]));
+const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
 
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();

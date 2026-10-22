@@ -159,7 +159,7 @@ Honest, updated every merge.
 | ✅ | **M6 Wild life**: background traders and attackers (`lake swarm`, `lake attack`); every attack blocked and logged, prompt injection included; quarantine by key after 3 blocks, published as a signed blocklist houses follow; reputation for verified agents, usable in rules; guilds | runs, end-to-end tested |
 | ✅ | **M7 Scale**: hosted houses (`--tenants 250`, each still its own WebID, pod, wallet, card and rules); `docker compose --profile scale up --scale house-multi=4` | runs. Measured on a busy 4-core laptop: 250 houses, full paid mission in **57 s**; 1,000 houses, **737 paid answers in 10.6 min**, 0 records moved. The spec's 60 s at 1,000 needs dedicated cores or faster pod storage ([details](https://lake.doneinfifty.com/docs/architecture#scale-measured)) |
 | ✅ | **M8 Federation**: nodes follow peers (`--follow`), re-verify every card they learn, drop what peers drop, share blocklists; participants use several nodes; agents remember houses; `lake card <url>` finds anyone at their own address. Stop a node mid-study and the study finishes | runs, end-to-end tested and shown in Docker (`docker stop lake-node-a`) |
-| ✅ | **npm**: `@thelakeprotocol/core`, `convert-fhir`, `visitor`, `agent` 0.1.0, published from CI with provenance | live |
+| ✅ | **npm**: `@thelakeprotocol/core`, `visitor`, `agent` and the use-case packs (`usecase-health`), published from CI with provenance | live |
 | ✅ | **M9 Open door**: `@thelakeprotocol/agent` (an outside agent completes a paid study in ten lines); the Lake MCP connector (`lake mcp`: overview, search, knock, dispatch); agent docs, `llms.txt`, signed examples; public sandbox | runs, end-to-end tested. One-click hosted houses for non-developers are next |
 | ✅ | **M10 Polish**: map choreography like the reference (the agent visits each specialist, the $2 → $5 moment, payment threads, snapping keys); `lake demo` runs the on-stage script; `lake reset` in under a second; `--record` / `--replay` for a stage fallback; seeded runs; a [90-second recording](https://lake.doneinfifty.com/demo.mp4) | done. [Acceptance scorecard](https://lake.doneinfifty.com/docs/roadmap#acceptance-tests): 12 of 14 met; startup and 1,000-house timing miss their targets on a 4-core laptop |
 | ✅ | **Relay**: houses at home, behind any router, are reached through the nodes they follow (`--relay`); one signed outgoing connection per node; registration still proves control through the relay | runs, end-to-end tested through two nodes |
@@ -190,8 +190,9 @@ packages/
   specialists/   issuer, ethics, auditor, payments                        ✅
   ui/            the live map ✅ · the control panel ✅                    M4
   agent/         SDK for outside agents + the Lake MCP connector          ✅
-  convert-fhir/  FHIR → canonical Lake model                              ✅
-model/           canonical ontology (RDF) + SHACL shapes
+usecases/        one package per use case ("pack"): fields, shapes, converter, demo data
+  health/        health@1: FHIR → claims, synthetic patients, studies     ✅
+model/           the core ontology (RDF) + SHACL shapes every pack's claims pass
 spec/            JSON Schemas, node OpenAPI, signed examples
 personas/        example rules.yaml files
 site/            lake.doneinfifty.com: landing page + docs

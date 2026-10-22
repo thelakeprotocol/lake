@@ -1,11 +1,10 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { rng, seedFrom } from '@thelakeprotocol/convert-fhir';
 import {
-  agreementDigest, agreementFor, auditStudy, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
-  type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
+  type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
-import { checkRecord, quickCheck, type RecordCheck, type Trust } from './record.js';
+import { checkRecord, quickCheck, type RecordCheck, type RecordPaths, type Trust } from './record.js';
 import type { OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
 
@@ -20,7 +19,8 @@ export interface HousekeeperOptions {
   trust: Trust;
   /** MCP client connected to this house's pod: the housekeeper's only way in. */
   pod: Client;
-  claimsUrl: string;
+  /** One signed record per pack this house takes part in, and where its files are. */
+  records: { pack: LakePack; paths: RecordPaths; claimsUrl: string }[];
   sandbox: boolean;
   /** Seeded demo runs: the same seed gives the same randomised answers. */
   seed?: string;
@@ -54,8 +54,8 @@ const HOUR = 3_600_000;
  */
 export class Housekeeper {
   private replay = new ReplayGuard();
-  private record: RecordCheck = { ok: false, why: 'not checked yet' };
-  private fullCheckAt = 0;
+  /** Per pack: the last check, and when the whole chain was last verified. */
+  private checks = new Map<string, { check: RecordCheck; fullAt: number }>();
   /** Agreements this house signed, so a countersignature doesn't need a pod read. The pod copy is the record. */
   private agreements = new Map<string, SignedAgreement & { grant?: string }>();
   private claimCache: { at: number; claims: PodClaim[] } | null = null;
@@ -77,23 +77,38 @@ export class Housekeeper {
 
   /** Everything this house holds, as canonical claims (for the owner's own panel). */
   async allClaims(): Promise<PodClaim[]> {
-    return this.claims(['age_band', 'medications', 'conditions', 'readmissions']);
+    return this.claims(allFields());
   }
 
   async read(path: string): Promise<string> {
     return this.tool('pod_read', { path });
   }
 
-  /** The whole chain once a minute; in between, the data files against the digests the chain pins. */
-  async verifyOwnRecord(): Promise<RecordCheck> {
+  /**
+   * The whole chain once a minute; in between, the data files against the digests the chain pins. Only the
+   * records of the packs whose fields are in play have to be healthy (all of them when none are named).
+   */
+  async verifyOwnRecord(fields?: string[]): Promise<{ ok: true } | { ok: false; why: string; transient?: boolean }> {
+    const named = new Set((fields ?? []).map((f) => fieldSpec(f)?.pack.id).filter(Boolean));
+    const records = this.o.records.filter((r) => !named.size || named.has(r.pack.id));
+    if (!records.length) return { ok: false, why: 'this house holds no signed record for that' };
+    for (const r of records) {
+      const c = await this.verifyRecord(r);
+      if (!c.ok) return { ok: false, why: this.o.records.length > 1 ? `${r.pack.id}: ${c.why}` : c.why, transient: c.transient };
+    }
+    return { ok: true };
+  }
+
+  private async verifyRecord(r: HousekeeperOptions['records'][number]): Promise<RecordCheck> {
     const read = (p: string) => this.read(p);
-    const r = this.record.ok && Date.now() - this.fullCheckAt < 60_000
-      ? await quickCheck(read, this.record.pins)
-      : await checkRecord(read, { claimsUrl: this.o.claimsUrl, ownJwk: this.o.id.publicJwk as JWK, webId: this.o.webId, trust: this.o.trust, sandbox: this.o.sandbox });
-    if (!r.ok && r.transient) return r; // busy, not broken: keep what we knew
-    if (r.ok && !(this.record.ok && Date.now() - this.fullCheckAt < 60_000)) this.fullCheckAt = Date.now();
-    this.record = r;
-    return r;
+    const last = this.checks.get(r.pack.id);
+    const fresh = last?.check.ok && Date.now() - last.fullAt < 60_000;
+    const c = fresh
+      ? await quickCheck(read, r.paths, (last!.check as Extract<RecordCheck, { ok: true }>).pins)
+      : await checkRecord(read, r.pack, r.paths, { claimsUrl: r.claimsUrl, ownJwk: this.o.id.publicJwk as JWK, webId: this.o.webId, trust: this.o.trust, sandbox: this.o.sandbox });
+    if (!c.ok && c.transient) return c; // busy, not broken: keep what we knew
+    this.checks.set(r.pack.id, { check: c, fullAt: c.ok && !fresh ? Date.now() : last?.fullAt ?? 0 });
+    return c;
   }
 
   async handle(data: LakeData | null): Promise<LakeData> {
@@ -173,7 +188,7 @@ export class Housekeeper {
       });
     }
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
-    const chain = await this.verifyOwnRecord();
+    const chain = await this.verifyOwnRecord(d.fields);
     if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
     if (!chain.ok) return decide('decline', `my own record failed its checks (${chain.why}), so I won't take part`);
 
@@ -229,7 +244,7 @@ export class Housekeeper {
     // No study runs before both parties have signed the same terms.
     const signed = await this.countersign(g.offer, p.countersignature, profile);
     if (!signed.ok) return excluded(signed.why);
-    const chain = await this.verifyOwnRecord();
+    const chain = await this.verifyOwnRecord(studyFields(p.study));
     if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
     if (!chain.ok) return excluded(`my record failed its checks: ${chain.why}`);
 

@@ -31,7 +31,7 @@ Every value carries a tier, and offers state the minimum they accept:
 
 ## Write a converter <span class="status done">first one: FHIR, runs</span>
 
-A converter is a package that maps one external standard into the canonical model: `@thelakeprotocol/convert-fhir` first, then whatever you need.
+A converter maps one external standard into the canonical model. Each use case brings its own in its pack: FHIR R4 for health (`usecases/health`), then whatever you need.
 
 - Runs **inside the house**. Raw source data never leaves.
 - Must be **signed by its author** and **certified by the Auditor** before a house will run it, the same rule as study code.

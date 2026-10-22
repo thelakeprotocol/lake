@@ -16,6 +16,8 @@ export interface LakeProfile {
   publicJwk: jose.JWK;
   /** Interest tags used for discovery and guilds, e.g. "research-volunteers". */
   tags: string[];
+  /** Houses: the packs (use cases) whose claims this house holds and checks against their shapes, e.g. "health@1". */
+  packs?: string[];
   lakeVersion: string;
 }
 

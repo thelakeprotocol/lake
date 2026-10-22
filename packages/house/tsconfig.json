@@ -3,5 +3,5 @@
   "compilerOptions": { "outDir": "dist", "rootDir": "src", "composite": true },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../core" }, { "path": "../convert-fhir" }]
+  "references": [{ "path": "../core" }, { "path": "../../usecases/health" }]
 }

@@ -29,9 +29,9 @@ docker run -d --network lake_default --hostname house-you \
 
 On start, your house:
 
-1. Starts a pod (Community Solid Server) and creates your WebID and folders: `/health/`, `/finance/`, `/agreements/`, `/receipts/`, `/wallet/`. Its signing key goes in `/wallet/`.
-2. Asks the Issuer for a **synthetic** health record, checks the Issuer's signature, and stores the original untouched in `/health/original/`.
-3. Converts it to the canonical Lake model inside the pod (`/health/claims.ttl`) and signs the result.
+1. Starts a pod (Community Solid Server) and creates your WebID and folders: `/agreements/`, `/receipts/`, `/wallet/`, `/audit/`, `/settings/`, and one per use case it takes part in (`/health/` by default; `--packs` picks them). Each one is registered in your pod's Solid Type Index, so any Solid app can find it. Its signing key goes in `/wallet/`.
+2. For each use case, asks that use case's issuer for a **synthetic** record (the demo hospital, for health), checks the signature, and stores the original untouched in `/health/original/`.
+3. Converts it to claims inside the pod (`/health/claims.ttl`), checks them against the use case's shapes, and signs the result.
 4. Re-verifies the whole chain, publishes its signed Agent Card at `/.well-known/agent-card.json`, and starts answering on A2A.
 
 Watch it: `docker logs -f <container>`. Then knock:

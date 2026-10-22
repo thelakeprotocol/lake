@@ -9,14 +9,17 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, generateIdentity, issueCredential, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
-import { dispatch, makeHuman, readmissionStudy } from '../packages/visitor/src/dispatch.js';
+import { buildCard, generateIdentity, issueCredential, registerPack, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
+import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import { attack } from '../packages/visitor/src/attack.js';
 import { ownerSession, startPod } from '../packages/house/src/pod.js';
-import { ask, knock, makeVisitor, PRESETS } from '../packages/visitor/src/knock.js';
+import { ask, knock, makeVisitor, presets } from '../packages/visitor/src/knock.js';
 
 // Boots a whole Lake from source: a node, the issuer, auditor and ethics specialists, and three houses
 // (each a real Community Solid Server + housekeeper), then knocks and runs a mission over A2A.
+// This process plays visitors that read the health pack's fields and example offers.
+registerPack(health);
 const procs: ChildProcess[] = [];
 let dir: string;
 let node: string;
@@ -60,7 +63,7 @@ beforeAll(async () => {
   const sp = await port();
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
-  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node], /quests registered with the Lake node/);
+  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node], /issuer registered with the Lake node/);
   await Promise.all(
     ['stan', 'strict', 'research'].map(async (name) => {
       const [pp, hp] = [await port(), await port()];
@@ -90,22 +93,22 @@ describe('one house', () => {
   });
 
   it('joins what a standing rule covers, and hands over a signed grant', async () => {
-    const { reply } = await knock(houses.stan!, await visitor('gp.example'), PRESETS.gp!);
+    const { reply } = await knock(houses.stan!, await visitor('gp.example'), presets().gp!);
     expect(reply).toMatchObject({ kind: 'decision', decision: 'join', grantHours: 48, holds: ['medications'] });
     expect(String(reply.grant).split('.')).toHaveLength(3);
   });
 
   it('asks the owner when no rule covers it, declines what a rule refuses', async () => {
-    expect((await knock(houses.stan!, await visitor('uni.example'), PRESETS.research!)).reply.decision).toBe('ask');
-    expect((await knock(houses.stan!, await visitor('ads.example'), PRESETS.marketing!)).reply.decision).toBe('decline');
+    expect((await knock(houses.stan!, await visitor('uni.example'), presets().research!)).reply.decision).toBe('ask');
+    expect((await knock(houses.stan!, await visitor('ads.example'), presets().marketing!)).reply.decision).toBe('decline');
   });
 
   it('is not talked round by prompt injection', async () => {
-    expect((await knock(houses.stan!, await visitor('evil.example'), PRESETS.injection!)).reply.decision).toBe('decline');
+    expect((await knock(houses.stan!, await visitor('evil.example'), presets().injection!)).reply.decision).toBe('decline');
   });
 
   it.each(['forge-card', 'unsigned', 'replay', 'impersonate'] as const)('rejects %s', async (tamper) => {
-    const { reply } = await knock(houses.stan!, await visitor('gp.example'), PRESETS.gp!, tamper);
+    const { reply } = await knock(houses.stan!, await visitor('gp.example'), presets().gp!, tamper);
     expect(reply.kind).toBe('rejected');
   });
 });
@@ -122,7 +125,7 @@ describe('the Lake node', () => {
     const kinds: string[] = [];
     await new Promise((ok) => ws.once('message', ok)); // snapshot
     ws.on('message', (m) => kinds.push(JSON.parse(String(m)).event.kind));
-    await knock(houses.stan!, await visitor('gp.example'), PRESETS.gp!);
+    await knock(houses.stan!, await visitor('gp.example'), presets().gp!);
     await new Promise((r) => setTimeout(r, 600));
     ws.close();
     expect(kinds).toEqual(expect.arrayContaining(['knock', 'decision', 'grant.issued']));
@@ -448,7 +451,7 @@ describe('bring your own pod', () => {
       // Everything the house keeps lives in a corner of Alice's pod (/lake/), found from her WebID profile.
       const files = await readdir(join(opts.dataDir, 'pod', 'alice', 'lake'));
       expect(files).toEqual(expect.arrayContaining(['health', 'agreements', 'wallet', 'settings']));
-      const { reply } = await knock(`http://localhost:${hp}/a2a`, await visitor('gp.example'), PRESETS.gp!);
+      const { reply } = await knock(`http://localhost:${hp}/a2a`, await visitor('gp.example'), presets().gp!);
       expect(reply).toMatchObject({ kind: 'decision', decision: 'join', holds: ['medications'] });
     } finally {
       procs.pop()?.kill('SIGTERM'); // the house leaves the Lake, so later tests count three again
@@ -473,12 +476,12 @@ describe('relay: a house behind a home router', () => {
     const found = await (await fetch(`${node}/cards?role=house`)).json() as { card: typeof card & { name: string } }[];
     card = found.find((f) => f.card.name === 'House homebody')!.card;
     expect(card.supportedInterfaces.map((i) => i.url)).toEqual([expect.stringMatching(new RegExp(`^${node}/relay/`)), expect.stringMatching(new RegExp(`^${nodeB}/relay/`))]);
-    const { reply } = await knock(card.supportedInterfaces[0]!.url, await visitor('gp.example'), PRESETS.gp!);
+    const { reply } = await knock(card.supportedInterfaces[0]!.url, await visitor('gp.example'), presets().gp!);
     expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });
   });
 
   it('can be reached through either node', async () => {
-    const { reply } = await knock(card.supportedInterfaces[1]!.url, await visitor('gp.example'), PRESETS.gp!);
+    const { reply } = await knock(card.supportedInterfaces[1]!.url, await visitor('gp.example'), presets().gp!);
     expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });
   });
 

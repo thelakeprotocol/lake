@@ -7,7 +7,7 @@ export interface Offer {
   /** Domain of the agent asking (proven at registration). */
   requester: string;
   purpose: string;
-  /** Canonical Lake field names, e.g. "age_band", "medications". */
+  /** Field names, as the packs in use declare them. */
   fields: string[];
   /** "none" or an ISO 8601 duration such as "P30D". */
   retention: string;

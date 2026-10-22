@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditStudy, buildCard, digestSRI, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  auditStudy, buildCard, digestSRI, identifyingFields, packs, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -11,9 +11,8 @@ type Reply =
   | { kind: 'settled'; receipts: { payee: string; credential: string }[]; total: number; remaining: number }
   | { kind: 'refused'; problems: string[] };
 
-const IDENTIFYING = ['name', 'dob', 'nhs_number', 'email', 'phone', 'address'];
-/** Converters this auditor has reviewed. A real auditor would pin the package digest too. */
-const CERTIFIED_CONVERTERS = ['@thelakeprotocol/convert-fhir@0.1.0'];
+/** Converters this auditor has reviewed: those of the packs it runs with. A real auditor would pin the package digest too. */
+const certifiedConverters = () => packs().map((p) => p.source?.converter).filter(Boolean);
 const DAY = 86_400_000;
 
 export type Refused = { kind: 'refused'; problems: string[] };
@@ -56,7 +55,7 @@ export async function createEthics(o: SpecialistOptions): Promise<{ app: express
     if (!protocol?.study) return { kind: 'refused', problems: ['no study in the protocol'] };
     if (protocol.purpose !== 'research') problems.push('purpose must be research');
     if (protocol.retention !== 'none') problems.push('results only; no retention of anything else');
-    const identifying = (protocol.fields ?? []).filter((f) => IDENTIFYING.includes(f));
+    const identifying = (protocol.fields ?? []).filter((f) => identifyingFields().includes(f));
     if (identifying.length) problems.push(`directly identifying fields: ${identifying.join(', ')}`);
     const missing = studyFields(protocol.study).filter((f) => !protocol.fields.includes(f));
     if (missing.length) problems.push(`the study uses fields the protocol doesn't declare: ${missing.join(', ')}`);
@@ -81,7 +80,7 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
     }
     if (p.kind === 'audit-converter') {
       const pkg = String(p.package ?? '');
-      if (!CERTIFIED_CONVERTERS.includes(pkg)) return { kind: 'refused', problems: [`${pkg} has not been reviewed`] };
+      if (!certifiedConverters().includes(pkg)) return { kind: 'refused', problems: [`${pkg} has not been reviewed`] };
       const credential = await s.vc('LakeConverterCertificate', { id: `urn:lake:converter:${pkg}`, package: pkg }, 365);
       return { kind: 'certified', credential, notes: [] };
     }

@@ -16,8 +16,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@thelakeprotocol/convert-fhir": "workspace:^",
     "@thelakeprotocol/core": "workspace:^",
+    "@thelakeprotocol/usecase-health": "workspace:^",
     "@thelakeprotocol/visitor": "workspace:^",
     "express": "5",
     "ws": "8"

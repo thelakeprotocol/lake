@@ -3,8 +3,8 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  buildCard, describe, exportIdentity, generateIdentity, importIdentity, LakeLinks, makeEvent, parseRules, signCard,
-  type AgentCard, type Identity, type LakeEvent, type Rules,
+  allFields, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, signCard,
+  type AgentCard, type Identity, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
@@ -12,7 +12,9 @@ import { OwnerDesk, type PanelProvider } from './owner.js';
 import { Parser } from 'n3';
 import { createPodMcpServer } from './pod-mcp.js';
 import type { OwnerSession } from './pod.js';
-import { convertRecord, fetchConverterCert, fetchRecord, RECORD, type Trust } from './record.js';
+import { recordPaths } from './packs.js';
+import { convertRecord, fetchConverterCert, fetchRecord, type RecordPaths, type Trust } from './record.js';
+import { packFolders } from './typeindex.js';
 import { connectRelay } from './relay.js';
 import { createHouseServer } from './server.js';
 
@@ -26,7 +28,10 @@ export interface HouseOptions {
   /** Where this house is reached, without /a2a: https://h, or https://h/t/<name> for a hosted house. */
   publicUrl: string;
   ownerUrl?: string;
-  issuerUrl: string;
+  /** The use cases this house takes part in (loaded and registered by the caller). */
+  packs: LakePack[];
+  /** Where each pack's issuer is, by pack id. */
+  issuerUrls: Record<string, string>;
   auditorUrl: string;
   /** One or more Lake nodes, comma-separated. The house registers with and reports to each. */
   lakeUrl?: string;
@@ -59,8 +64,8 @@ export interface House {
   leave: () => Promise<void>;
 }
 
-// Whose signatures count. A sandbox house with no trust section trusts the demo specialists, and says so.
-const DEMO_TRUST: Trust = { issuers: ['issuer.lake.local'], auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
+// Whose signatures count. A sandbox house with no trust section trusts the demo specialists and its packs' demo issuers, and says so.
+const DEMO_TRUST: Omit<Trust, 'issuers'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
 
 let appDir: string | undefined | null = null;
 function approvalsApp() {
@@ -78,10 +83,11 @@ function approvalsApp() {
 export async function startHouse(o: HouseOptions): Promise<House> {
   const { owner, say } = o;
   const actor = `house:${o.name}`;
+  const demoIssuers = o.packs.map((p) => p.source?.issuer.domain).filter((d): d is string => !!d);
   const trustFrom = (rules: Rules): Trust => {
     const t = rules.trust;
     return {
-      issuers: t?.issuers ?? (o.sandbox ? DEMO_TRUST.issuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
+      issuers: t?.issuers ?? (o.sandbox ? demoIssuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
       ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
     };
   };
@@ -96,7 +102,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
 
   // Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
-  for (const f of ['', 'health/', 'health/original/', 'finance/', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/']) await ensureContainer(owner, f);
+  for (const f of ['', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/']) await ensureContainer(owner, f);
+  // Each pack's data lives where the pod's Type Index says (registered there the first time).
+  const folders = await packFolders(owner, o.packs, say);
+  const paths = recordPaths(o.packs, folders);
+  for (const p of o.packs) for (const f of [paths.get(p.id)!.folder, `${paths.get(p.id)!.folder}original/`]) await ensureContainer(owner, f);
 
   // The owner's rules. Edits made in the control panel live in their pod and win over the file the house started with.
   let rulesText = o.rulesText;
@@ -115,7 +125,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const id = await walletIdentity(owner);
   const nodes = (o.lakeUrl ?? '').split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
   const relayed = o.relay && nodes.length ? nodes.map((n) => `${n}/relay/${id.kid.replace(/[^a-zA-Z0-9]/g, '')}/a2a`) : null;
-  if (!rules.trust && o.sandbox) say(`no trust section in rules.yaml; sandbox default: issuer ${DEMO_TRUST.issuers}, auditor ${DEMO_TRUST.auditors}, ethics ${DEMO_TRUST.ethics}`);
+  if (!rules.trust && o.sandbox) say(`no trust section in rules.yaml; sandbox default: issuers ${demoIssuers.join(', ')}, auditor ${DEMO_TRUST.auditors}, ethics ${DEMO_TRUST.ethics}`);
 
   const card = await signCard(
     buildCard(
@@ -124,44 +134,51 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         description: `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
         url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
         alsoAt: relayed?.slice(1),
-        skills: [{ id: 'health-study', name: 'Health study', description: "Considers research offers by its owner's rules", tags: rules.tags ?? [] }],
-        profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: rules.tags ?? [] },
+        // One skill per pack (`health-study`, `mortgage-study`), so agents find the houses that can answer them.
+        skills: o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: rules.tags ?? [] })),
+        profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: rules.tags ?? [], packs: o.packs.map(packId) },
       },
       id,
     ),
     id,
   );
 
-  // The record: signed by the issuer, converted in the pod, signed again by the housekeeper.
-  const claimsUrl = `${owner.podRoot}${RECORD.claims}`;
+  // One record per pack: signed by the pack's issuer, converted in the pod, checked against the pack's shapes, signed again by the housekeeper.
+  const records: { pack: LakePack; paths: RecordPaths; claimsUrl: string }[] = [];
   const missing = async (path: string) => (await owner.fetch(owner.podRoot + path, { method: 'HEAD' })).status === 404;
-  if (await missing(RECORD.converterCert)) {
-    say(`asking the auditor at ${o.auditorUrl} to certify this house's converter`);
-    try {
-      const cert = await fetchConverterCert(o.auditorUrl, { id, card, webId: owner.webId });
-      await put(owner, RECORD.converterCert, JSON.stringify(cert), 'application/json');
-    } catch (e) {
-      say(`WARNING: ${(e as Error).message}. Uncertified converter: this house's data can't be used in studies.`);
+  for (const p of o.packs.filter((x) => x.source)) {
+    const at = paths.get(p.id)!;
+    const claimsUrl = `${owner.podRoot}${at.claims}`;
+    records.push({ pack: p, paths: at, claimsUrl });
+    if (await missing(at.converterCert)) {
+      say(`asking the auditor at ${o.auditorUrl} to certify the ${p.id} converter`);
+      try {
+        await put(owner, at.converterCert, JSON.stringify(await fetchConverterCert(o.auditorUrl, { id, card, webId: owner.webId }, p)), 'application/json');
+      } catch (e) {
+        say(`WARNING: ${(e as Error).message}. Uncertified converter: this house's ${p.id} data can't be used.`);
+      }
     }
-  }
-  if (await missing(RECORD.claims)) {
-    say(`asking the issuer at ${o.issuerUrl} for a signed synthetic record`);
-    try {
-      const r = await fetchRecord(o.issuerUrl, owner.webId);
-      const c = await convertRecord(r, { webId: owner.webId, claimsUrl, id, converterCert: owner.podRoot + RECORD.converterCert });
-      await put(owner, RECORD.bundle, r.bundle, 'application/json');
-      await put(owner, RECORD.credential, r.credential, 'text/plain');
-      await put(owner, RECORD.issuer, JSON.stringify({ recordId: r.recordId, card: r.issuerCard }), 'application/json');
-      await put(owner, RECORD.claims, c.turtle, 'text/turtle');
-      await put(owner, RECORD.claimsCredential, c.credential, 'text/plain');
-      say(`record stored: ${c.claims.length} claims (${[...new Set(c.claims.map((x) => x.field))].join(', ')})`);
-    } catch (e) {
-      say(`WARNING: ${(e as Error).message}. This house holds no signed record and will not join studies.`);
+    if (await missing(at.claims)) {
+      const issuerUrl = o.issuerUrls[p.id];
+      if (!issuerUrl) { say(`WARNING: no issuer for ${p.id}; this house holds no ${p.id} record`); continue; }
+      say(`asking the ${p.id} issuer at ${issuerUrl} for a signed synthetic record`);
+      try {
+        const r = await fetchRecord(issuerUrl, owner.webId, p);
+        const c = await convertRecord(r, p, { webId: owner.webId, claimsUrl, id, converterCert: owner.podRoot + at.converterCert });
+        await put(owner, at.original, r.original, p.source!.mediaType);
+        await put(owner, at.credential, r.credential, 'text/plain');
+        await put(owner, at.issuer, JSON.stringify({ recordId: r.recordId, card: r.issuerCard }), 'application/json');
+        await put(owner, at.claims, c.turtle, 'text/turtle');
+        await put(owner, at.claimsCredential, c.credential, 'text/plain');
+        say(`${p.id} record stored: ${c.claims.length} claims (${[...new Set(c.claims.map((x) => x.field))].join(', ')})`);
+      } catch (e) {
+        say(`WARNING: ${(e as Error).message}. This house holds no signed ${p.id} record and won't take part in ${p.id} offers.`);
+      }
     }
   }
 
   // The housekeeper and its MCP door to the pod: reads anything; writes only agreements, receipts and its audit log.
-  const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/'] });
+  const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/'], claimsDocs: records.map((r) => r.paths.claims) });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await mcp.connect(serverSide);
   const podClient = new Client({ name: `housekeeper-${o.name}`, version: '0.1.0' });
@@ -171,7 +188,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // Signals from the node this house follows: refreshed every 2 s, verified against the node's own card.
   const signals = { blocklist: new Set<string>(), reputation: {} as Record<string, number> };
   let keeperRef: Housekeeper | null = null;
-  const panel = panelFor({ o, owner, actor, activity, card, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed });
+  const panel = panelFor({ o, owner, actor, activity, card, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records });
   const desk = new OwnerDesk({
     panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit,
@@ -201,7 +218,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   }
 
   const keeper = new Housekeeper({
-    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, claimsUrl, sandbox: o.sandbox, seed: o.seed, emit, desk,
+    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, seed: o.seed, emit, desk,
     signals: () => signals,
   });
   keeperRef = keeper;
@@ -281,6 +298,7 @@ const decode = (jws: string) => {
 function panelFor(x: {
   o: HouseOptions; owner: OwnerSession; actor: string; activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
   card: AgentCard; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
+  records: { pack: LakePack; paths: RecordPaths }[];
   trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
 }): PanelProvider {
   const { owner } = x;
@@ -314,7 +332,9 @@ function panelFor(x: {
       };
     },
     async rules() {
-      return { text: x.keeper().rulesText, rules: x.keeper().rules };
+      // The fields the owner can name in rules: every pack's, plus the identifying ones packs warn about.
+      const fields = [...allFields().map((f) => ({ name: f, label: fieldSpec(f)!.label, pack: fieldSpec(f)!.pack.id })), ...identifyingFields().map((f) => ({ name: f, label: f.replace(/_/g, ' '), pack: 'identifying' }))];
+      return { text: x.keeper().rulesText, rules: x.keeper().rules, fields };
     },
     async setRules(text: string) {
       let rules: Rules;
@@ -347,14 +367,21 @@ function panelFor(x: {
     async data() {
       const claims = await x.keeper().allClaims();
       const chain = await x.keeper().verifyOwnRecord();
-      const issuer = await owner.fetch(owner.podRoot + RECORD.issuer).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { card?: AgentCard } | null;
-      const cert = await owner.fetch(owner.podRoot + RECORD.converterCert).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { card?: AgentCard } | null;
+      const json = (path: string) => owner.fetch(owner.podRoot + path).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<{ card?: AgentCard } | null>;
+      // Where each pack's record came from: who signed it, which converter turned it into claims, who certified that.
+      const sources = await Promise.all(x.records.map(async (r) => {
+        const check = await x.keeper().verifyOwnRecord(Object.keys(r.pack.fields));
+        return {
+          pack: r.pack.id, title: r.pack.title, folder: r.paths.folder, issuer: (await json(r.paths.issuer))?.card?.name ?? null,
+          converter: r.pack.source!.converter, certifiedBy: (await json(r.paths.converterCert))?.card?.name ?? null,
+          ok: check.ok, why: check.ok ? undefined : check.why,
+        };
+      }));
       const folders: Record<string, number> = {};
-      for (const f of ['health/', 'agreements/', 'receipts/', 'audit/', 'wallet/', 'settings/']) folders[f] = (await listContainer(owner, f)).length;
+      for (const f of [...x.records.map((r) => r.paths.folder), 'agreements/', 'receipts/', 'audit/', 'wallet/', 'settings/']) folders[f] = (await listContainer(owner, f)).length;
       return {
-        claims, record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
-        provenance: { issuer: issuer?.card?.name ?? null, converter: '@thelakeprotocol/convert-fhir@0.1.0', certifiedBy: cert?.card?.name ?? null },
-        folders,
+        claims: claims.map((c) => ({ ...c, label: fieldSpec(c.field)?.label ?? c.field })), record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
+        sources, folders,
       };
     },
     async exportAll() {

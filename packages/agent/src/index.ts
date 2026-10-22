@@ -2,10 +2,10 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signMessage, verifyLakeData,
+  buildCard, exampleStudies, generateIdentity, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
-import { ask, dispatch, knock, makeHuman, makeVisitor, readmissionStudy, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
+import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
 
 export type { MissionResult, Study };
 
@@ -38,6 +38,8 @@ export interface LakeAgentOptions {
   onMessage?: (m: { from: LakeProfile; card: AgentCard; payload: Record<string, unknown> }) => Promise<Record<string, unknown>>;
   /** A sandbox Lake: skip domain proof when checking who sent a message. Default true. */
   sandbox?: boolean;
+  /** The use cases this agent works with (their studies, fields and houses). Default: health. */
+  packs?: string[];
   /** Specialists to use. Defaults are the demo Lake's (docker compose). */
   ethics?: string;
   auditor?: string;
@@ -83,12 +85,13 @@ export interface LakeAgent {
 export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const port = o.port ?? 4800;
   const base = (o.publicUrl ?? `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
+  await loadPacks(o.packs ?? ['health'], (n) => import(n));
   const id: Identity = o.identity ?? (o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity());
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
   if (o.tags?.length) {
     // Same identity, a card that also lists what this agent is up for.
     const webId = `https://${o.domain}/#agent`;
-    visitor.card = await signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'health-study', name: 'Health study', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId, ownerDomain: o.domain, tags: o.tags } }, id), id);
+    visitor.card = await signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId, ownerDomain: o.domain, tags: o.tags } }, id), id);
   }
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
@@ -146,7 +149,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         visitor, node: nodes, link, log: s.log, houseCache: o.keyFile ? `${o.keyFile}.houses.json` : undefined,
         ethics: o.ethics ?? 'http://ethics:4500',
         auditor: o.auditor ?? 'http://auditor:4400',
-        study: s.study ?? readmissionStudy(question),
+        study: s.study ?? studyFor(question),
         priceUsd: s.priceUsd ?? 2,
         extraFields: s.extraFields,
         waitSeconds: s.waitSeconds,
@@ -161,6 +164,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (server) await new Promise((ok) => server!.close(ok));
     },
   };
+}
+
+/** Studies are certified in advance: a question must be one the loaded packs offer, or pass `study` yourself. */
+function studyFor(question: string): Study {
+  const found = exampleStudies().find((s) => s.question.toLowerCase() === question.trim().toLowerCase());
+  if (!found) throw new Error(`no loaded pack offers "${question}"; pick one of: ${exampleStudies().map((s) => `"${s.question}"`).join(', ')}, or pass a study`);
+  return found;
 }
 
 export { createLakeMcpServer } from './mcp.js';

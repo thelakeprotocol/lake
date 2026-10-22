@@ -4,6 +4,8 @@
  * No real data, ever. A real Synthea export can be used instead; the converter reads both.
  */
 
+import { rng } from '@thelakeprotocol/core';
+
 export const DEMO_DRUGS = 'https://lake.doneinfifty.com/demo/drugs';
 
 const CONDITIONS = [
@@ -18,23 +20,6 @@ const DRUGS = [
   { code: 'drug-y', display: 'Drug Y' },
   { code: 'drug-z', display: 'Drug Z' },
 ];
-
-export function rng(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-export function seedFrom(text: string): number {
-  let h = 2166136261;
-  for (const c of text) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  return h >>> 0;
-}
 
 const day = 86_400_000;
 const iso = (t: number) => new Date(t).toISOString();

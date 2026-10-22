@@ -30,7 +30,7 @@
 | Specialists: issuer, ethics, auditor, payments | `packages/specialists` | <span class="status done">runs</span> |
 | UI: live map · control panel | `packages/ui` | <span class="status done">runs</span> |
 | Agent SDK + Lake MCP connector | `packages/agent` | <span class="status done">runs</span> |
-| FHIR converter | `packages/convert-fhir` | <span class="status done">runs</span> |
+| Use-case packs (health: FHIR converter, shapes, studies) | `usecases/*` | <span class="status done">runs</span> |
 
 ## Scale
 

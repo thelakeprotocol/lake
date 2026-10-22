@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { extractClaims, fhirToLake, syntheticPatient } from './index.js';
 
 const asOf = Date.UTC(2026, 9, 1);
-const shapes = rdf.dataset(new Parser().parse(readFileSync(new URL('../../../model/shapes.ttl', import.meta.url), 'utf8')));
+const read = (u: string) => new Parser().parse(readFileSync(new URL(u, import.meta.url), 'utf8'));
+const shapes = rdf.dataset([...read('../../../model/shapes.ttl'), ...read('../shapes.ttl')]);
 const validate = (ttl: string) => new SHACLValidator(shapes, { factory: rdf }).validate(rdf.dataset(new Parser().parse(ttl)));
 
 const opts = { subject: 'http://localhost:3000/stan/profile/card#me', base: 'http://localhost:3000/stan/health/claims.ttl', issuer: 'http://issuer:4300/', originalHash: 'sha256-abc', asOf };

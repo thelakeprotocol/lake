@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { cardUrlFor, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
-import { dispatch, makeHuman, readmissionStudy, SANDBOX_STUDIES } from './dispatch.js';
-import type { Study } from '@thelakeprotocol/core';
+import { dispatch, makeHuman } from './dispatch.js';
+import { exampleStudies, loadPacks, type Study } from '@thelakeprotocol/core';
 import { attack, houseUrls, swarm } from './attack.js';
-import { ask, knock, makeVisitor, PRESETS, type Tamper } from './knock.js';
+import { ask, knock, makeVisitor, presets, type Tamper } from './knock.js';
 
 const HELP = `lake — talk to the Lake
 
@@ -62,8 +62,11 @@ const { positionals, values: a } = parseArgs({
     attackers: { type: 'string', default: '1' },
     interval: { type: 'string', default: '2000' },
     every: { type: 'string', default: '600' },
+    // The use cases whose example studies this CLI can run.
+    packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
   },
 });
+await loadPacks(a.packs!.split(','), (n) => import(n));
 
 if (cmd === 'knock') await knockCmd();
 else if (cmd === 'dispatch') await dispatchCmd();
@@ -122,7 +125,8 @@ else if (cmd === 'sponsor') {
   a.as ??= 'open-science.example';
   a.wait = a.wait === '0' ? '20' : a.wait;
   for (let i = 0; ; i++) {
-    const study = SANDBOX_STUDIES[i % SANDBOX_STUDIES.length]!;
+    const studies = exampleStudies();
+    const study = studies[i % studies.length]!;
     a.price = String(2 + (i % 4));
     a['extra-fields'] = i % 2 ? 'postcode' : undefined;
     console.log(`\nSPONSOR   run ${i + 1}: "${study.question}"`);
@@ -137,8 +141,8 @@ else {
 
 async function knockCmd() {
   const house = positionals[0] ?? 'http://localhost:4000';
-  const preset = PRESETS[a.offer!];
-  if (!preset) throw new Error(`unknown offer preset ${a.offer}; try ${Object.keys(PRESETS).join(', ')}`);
+  const preset = presets()[a.offer!];
+  if (!preset) throw new Error(`unknown offer preset ${a.offer}; try ${Object.keys(presets()).join(', ')}`);
   const domain = a.as ?? (a.offer === 'gp' ? 'gp.example' : a.offer === 'research' ? 'uni.example' : a.offer === 'injection' ? 'evil.example' : 'ads.example');
   const terms = {
     ...preset,
@@ -173,7 +177,11 @@ async function dispatchCmd(chosen?: Study) {
   await link.register(6);
 
   const say = (step: string, detail: string) => { if (!a.json) console.log(`${step.toUpperCase().padEnd(9)} ${detail}`); };
-  const study = chosen ?? readmissionStudy(a.goal, Number(a.epsilon));
+  // Studies are certified in advance: run one the loaded packs offer (by its question), with the privacy budget asked for.
+  const known = exampleStudies();
+  const base = chosen ?? known.find((s) => s.question.toLowerCase() === a.goal!.toLowerCase()) ?? known[0];
+  if (!base) throw new Error('no pack loaded offers a study; try --packs health');
+  const study = chosen ?? { ...base, privacy: { ...base.privacy, epsilon: Number(a.epsilon) } };
   say('dispatch', `"${study.question}"  (as ${domain}, $${a.price ?? 2} per participant)`);
   try {
     const r = await dispatch({

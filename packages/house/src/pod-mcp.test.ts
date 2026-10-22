@@ -1,7 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
+import { registerPack } from '@thelakeprotocol/core';
+import health from '@thelakeprotocol/usecase-health';
 import { createPodMcpServer } from './pod-mcp.js';
+
+registerPack(health);
 
 const root = 'http://pod.test/stan/';
 const files: Record<string, string> = {
@@ -14,7 +18,7 @@ const fakeFetch = (async (url: string) => new Response(files[url] ?? 'nope', { s
 
 async function connect(deny?: string[]) {
   const seen: string[] = [];
-  const server = createPodMcpServer({ podRoot: root, fetch: fakeFetch, deny, onAccess: (_t, p) => seen.push(p) });
+  const server = createPodMcpServer({ podRoot: root, fetch: fakeFetch, deny, onAccess: (_t, p) => seen.push(p), claimsDocs: ['health/claims.ttl'] });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(b);
   const client = new Client({ name: 't', version: '0' });

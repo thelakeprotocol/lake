@@ -8,8 +8,11 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { packPaths } from '@thelakeprotocol/core';
+import { loadPacks } from './packs.js';
 import { createPodMcpServer } from './pod-mcp.js';
 import { ownerSession } from './pod.js';
+import { packFolders } from './typeindex.js';
 
 const owner = process.env.LAKE_OWNER;
 if (!owner) {
@@ -28,4 +31,7 @@ const s = await ownerSession({
   baseUrl: (process.env.LAKE_POD_URL ?? 'http://localhost:3000/').replace(/\/?$/, '/'),
   owner,
 });
-await createPodMcpServer({ podRoot: s.podRoot, fetch: s.fetch, deny: ['wallet/'] }).connect(new StdioServerTransport());
+const packs = await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
+const folders = await packFolders(s, packs);
+const claimsDocs = packs.map((p) => packPaths(p, folders.get(p.id)).claims);
+await createPodMcpServer({ podRoot: s.podRoot, fetch: s.fetch, deny: ['wallet/'], claimsDocs }).connect(new StdioServerTransport());

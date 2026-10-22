@@ -8,9 +8,10 @@ WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages packages
+COPY usecases usecases
 COPY site/package.json site/package.json
-RUN pnpm install --frozen-lockfile --filter "./packages/**"
-RUN pnpm -r --filter "./packages/**" build
+RUN pnpm install --frozen-lockfile --filter "./packages/**" --filter "./usecases/**"
+RUN pnpm -r --filter "./packages/**" --filter "./usecases/**" build
 RUN pnpm deploy --filter @thelakeprotocol/house --prod /out/house \
  && pnpm deploy --filter @thelakeprotocol/specialists --prod /out/specialists \
  && pnpm deploy --filter @thelakeprotocol/agent --prod /out/cli \
@@ -31,7 +32,7 @@ ENTRYPOINT ["node", "dist/main.js"]
 
 FROM node:22-slim AS specialists
 LABEL org.opencontainers.image.source=https://github.com/thelakeprotocol/lake \
-      org.opencontainers.image.description="Lake specialist agents (issuer now; ethics, auditor, payments next)." \
+      org.opencontainers.image.description="Lake specialist agents: the packs' demo issuers, ethics, auditor, payments, and the sandbox guides." \
       org.opencontainers.image.licenses=Apache-2.0
 WORKDIR /app
 COPY --from=build /out/specialists .

@@ -1,5 +1,5 @@
 import { generateIdentity, verifyLakeCard, cardUrlFor, type AgentCard } from '@thelakeprotocol/core';
-import { knock, makeVisitor, PRESETS, type Tamper } from '@thelakeprotocol/visitor';
+import { knock, makeVisitor, presets, type Tamper } from '@thelakeprotocol/visitor';
 import { checkTarget, fromNode, rateLimit } from './net.js';
 import { specialist, type SpecialistOptions, type Specialist } from './review.js';
 
@@ -57,7 +57,7 @@ export async function createSparring(o: SpecialistOptions & { nodeUrl?: string; 
       let outcome: string;
       let blocked: boolean;
       try {
-        const { reply } = move === 'injection' ? await knock(house, me, PRESETS.injection!) : await knock(house, me, PRESETS.marketing!, move === 'again' ? 'none' : move);
+        const { reply } = move === 'injection' ? await knock(house, me, presets().injection!) : await knock(house, me, presets().marketing!, move === 'again' ? 'none' : move);
         blocked = reply.kind === 'rejected' || (move === 'injection' && reply.decision === 'decline');
         outcome = reply.kind === 'rejected' ? `rejected: ${reply.code}` : `${reply.decision}: ${reply.reason}`;
         // The polite knock after the bout only counts as blocked if the house dropped the key on sight.
