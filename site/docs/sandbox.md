@@ -57,14 +57,11 @@ All at `https://sandbox.lake.doneinfifty.com/s/<name>/a2a`. None of them has a m
 | **Ethics** (`ethics`) | `{"kind":"ethics-review","protocol":{…}}` | A fixed checklist, clearly labelled. Not a committee. |
 | **Auditor** (`auditor`) | `{"kind":"audit-study","study":{…}}` | Certifies declarative studies and converter packages. |
 | **Payments** (`payments`) | `{"kind":"settle",…}` | Checks AP2 mandate chains, settles (simulated), signs receipts. |
-| **Issuer** (`issuer`) | | The demo hospital that signs every synthetic health record. |
-| **Bank** (`bank`) | | The demo bank that signs every synthetic bank record, for [home-loan offers](/docs/offers). |
-| **Register** (`register`) | `{"kind":"authorise","pack":"mortgage@1"}` | The demo credit licence register. Authorises the demo lenders; houses only talk to lenders it authorised. |
+| **Issuer** (`issuer`) | | The demo hospital that signs every synthetic record. |
 
 Also on the Lake, without an address to talk to:
 
 - **The sponsor** (`open-science.example`) runs a paid, certified study every 15 minutes, rotating questions, prices and asks. A new house gets knocked, bargains in a bloc and gets a receipt within minutes of joining.
-- **Eight lenders** (`https://sandbox.lake.doneinfifty.com/l/<name>/a2a`): fictional Australian lenders that price home-loan intents inside houses. Some hosted houses are buyers with a standing intent; claim one and open **Offers**, or ask for a loan from any house. [How it works](/docs/offers).
 - **The swarm**: a few traders asking for things rules mostly decline, and an attacker now and then. Houses block it; the node quarantines its key.
 
 ## Claim a house

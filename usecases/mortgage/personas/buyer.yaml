@@ -17,6 +17,7 @@ negotiation:
   join_collectives: true
 # Standing intent: authorised lenders price it inside the house; only the owner sees the offers.
 # Hosted houses fill each pick: list with one of its choices, the same one every time for the same house.
+# Not in the default personas: point hosted houses here with --personas-dir to include buyers.
 intents:
   - pack: mortgage
     terms: { region: "{{pick:qld,qld,qld,vic,vic,nsw,wa,sa}}", price_band: auto, term_years: 30, first_time_buyer: "{{pick:yes,yes,no}}" }

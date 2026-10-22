@@ -77,7 +77,6 @@ services:
 
   # Mortgage offers (usecases/mortgage): the demo bank that signs statements, the register that
   # authorises lenders, and eight lenders whose rules run inside each buyer's house.
-  #   docker compose --profile scale up -d    (hosted houses include buyers looking for a mortgage)
   bank:
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: bank

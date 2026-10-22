@@ -8,7 +8,7 @@ intent ─▶ authorised lenders hear ─▶ certified program ─▶ runs in yo
 
 <video controls muted playsinline preload="none" poster="/demos/home-loans-inside-homes.jpg" style="width:100%;border:1px solid var(--vp-c-divider);border-radius:6px"><source src="/demos/home-loans-inside-homes.mp4" type="video/mp4"></video>
 
-Everything here runs, on synthetic data, in the [sandbox](/docs/sandbox) and in the end-to-end tests. The video is a real run of [`demos/offers`](https://github.com/thelakeprotocol/lake/tree/main/demos#offers-no-claude-in-this-one): a hundred houses, eight lenders, 72 deals in 148 seconds. The protocol is [SPEC §12](/docs/spec).
+Everything here runs, on synthetic data, in the local demo Lake (`docker compose up`) and in the end-to-end tests. It isn't on the public sandbox. The video is a real run of [`demos/offers`](https://github.com/thelakeprotocol/lake/tree/main/demos#offers-no-claude-in-this-one): a hundred houses, eight lenders, 72 deals in 148 seconds. The protocol is [SPEC §12](/docs/spec).
 
 ## 1. Your data, signed
 
