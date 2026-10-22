@@ -7,7 +7,7 @@ import { syntheticStatements } from './synthetic.js';
 const M = 'https://lake.doneinfifty.com/usecases/mortgage/v1#';
 const CDR = 'https://consumerdatastandardsaustralia.github.io/standards/';
 /** Price bands (Australian dollars), cheapest first. A band's lower bound is the price lenders assume. */
-export const PRICE_BANDS = ['300000-449999', '450000-599999', '600000-749999', '750000-899999', '900000-1099999', '1100000-1399999', '1400000-1799999'];
+export const PRICE_BANDS = ['200000-299999', '300000-449999', '450000-599999', '600000-749999', '750000-899999', '900000-1099999', '1100000-1399999', '1400000-1799999'];
 export const STATES: Record<string, string> = {
   nsw: 'New South Wales', vic: 'Victoria', qld: 'Queensland', wa: 'Western Australia', sa: 'South Australia', tas: 'Tasmania', act: 'Australian Capital Territory', nt: 'Northern Territory',
 };
