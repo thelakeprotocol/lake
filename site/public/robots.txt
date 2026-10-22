@@ -1,0 +1,5 @@
+# Agents welcome: the docs are written for you too. Start at /llms.txt or /docs/agents.
+User-agent: *
+Allow: /
+
+Sitemap: https://lake.doneinfifty.com/sitemap.xml
