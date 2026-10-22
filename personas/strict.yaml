@@ -1,4 +1,5 @@
 # Strict: says no to almost everything, and asks before anything else.
+# weight: 1
 owner: strict
 device: approvals-app
 default: decline

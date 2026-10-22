@@ -1,4 +1,5 @@
 # Research-friendly: joins approved studies, but wants a fair price.
+# weight: 3
 owner: research
 device: approvals-app
 default: ask

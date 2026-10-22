@@ -1,0 +1,22 @@
+# Buying a home: joins approved research for a fair price, and is looking for a mortgage.
+# weight: 3
+owner: buyer
+device: approvals-app
+default: ask
+tags: [home-buyers]
+rules:
+  - match: { purpose: research, ethics_approved: true }
+    allow_fields: [age_band, medications, readmissions]
+    deny_fields: [name, postcode, dob]
+    min_price_usd: 4
+    retention: none
+    decision: join
+  - match: { purpose: marketing }
+    decision: decline
+negotiation:
+  join_collectives: true
+# Standing intent: authorised lenders price it inside the house; only the owner sees the offers.
+# Hosted houses fill each pick: list with one of its choices, the same one every time for the same house.
+intents:
+  - pack: mortgage
+    terms: { region: "{{pick:north-west,north-west,yorkshire,yorkshire,midlands,london}}", price_band: auto, term_years: 30, first_time_buyer: "{{pick:yes,yes,no}}" }

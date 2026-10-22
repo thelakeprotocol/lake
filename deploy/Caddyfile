@@ -8,6 +8,9 @@
 	handle_path /s/* {
 		reverse_proxy 127.0.0.1:4300
 	}
+	handle_path /l/* {
+		reverse_proxy 127.0.0.1:4810
+	}
 	handle /mcp* {
 		reverse_proxy 127.0.0.1:4800 {
 			flush_interval -1

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -147,9 +147,14 @@ async function hosted(n: number) {
   await pool(names, 8, async (name) => {
     // Each hosted house gets its own rules file: a persona, its own owner name, one or two interests.
     const h = seedFrom(name);
-    const persona = personas[h % 10 < 4 ? 'stan' : h % 10 < 8 ? 'research' : 'strict']!;
+    // Personas are picked by their `# weight:`, the same one every time for the same house; `{{pick:a,b}}` picks a choice the same way.
+    const total = personas.reduce((n, p) => n + p.weight, 0);
+    let at = h % total;
+    const persona = personas.find((p) => (at -= p.weight) < 0)!.text;
+    let k = 0;
+    const filled = persona.replace(/\{\{pick:([^}]+)\}\}/g, (_, list: string) => { const xs = list.split(','); return xs[seedFrom(`${name}|${k++}`) % xs.length]!.trim(); });
     const tags = [TAGS[h % TAGS.length]!, ...(h % 3 === 0 ? [TAGS[(h >> 3) % TAGS.length]!] : [])];
-    const rulesText = persona.replace(/^owner: .*$/m, `owner: ${name}`).replace(/^tags: .*$/m, '') + `\ntags: [${[...new Set(tags)].join(', ')}]\n`;
+    const rulesText = filled.replace(/^owner: .*$/m, `owner: ${name}`).replace(/^tags: .*$/m, '') + `\ntags: [${[...new Set(tags)].join(', ')}]\n`;
     const houseDir = join(dataDir, 'houses', name);
     await mkdir(houseDir, { recursive: true });
     await writeFile(join(houseDir, 'rules.yaml'), rulesText);
@@ -188,12 +193,14 @@ async function hosted(n: number) {
   process.on('SIGINT', stop);
 }
 
-async function loadPersonas(dir: string): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  for (const p of ['stan', 'research', 'strict']) {
-    out[p] = await readFile(join(dir, `${p}.yaml`), 'utf8').catch(() => readFile(new URL(`../../../personas/${p}.yaml`, import.meta.url), 'utf8'));
-  }
-  return out;
+/** Every persona in the folder (personas/*.yaml), with its `# weight:` (default 1). */
+async function loadPersonas(dir: string): Promise<{ name: string; text: string; weight: number }[]> {
+  const from = existsSync(dir) ? dir : new URL('../../../personas/', import.meta.url).pathname;
+  const files = (await readdir(from)).filter((f) => f.endsWith('.yaml')).sort();
+  return Promise.all(files.map(async (f) => {
+    const text = await readFile(join(from, f), 'utf8');
+    return { name: f.replace(/\.yaml$/, ''), text, weight: Number(text.match(/^# weight: (\d+)/m)?.[1] ?? 1) };
+  }));
 }
 
 async function pool<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {

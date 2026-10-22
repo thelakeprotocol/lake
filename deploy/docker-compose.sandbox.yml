@@ -9,6 +9,7 @@
 #   /        the node: live map, registry, events, signals, relay
 #   /s/*     the specialists: /s/guide /s/inspector /s/sparring /s/quests /s/ethics /s/auditor /s/payments /s/issuer
 #   /mcp     the Lake MCP connector over HTTP (Claude as a Lake agent)
+#   /l/*     the demo lenders (mortgage offers)
 #   /t/*     the hosted houses (anyone can claim one: the first device to open /t/<name>/owner/ becomes its owner)
 name: lake-sandbox
 
@@ -34,7 +35,7 @@ services:
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: specialists
     command: ["all", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--spar-every", "1800"]
-    environment: { NODE_OPTIONS: "--max-old-space-size=128", LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { NODE_OPTIONS: "--max-old-space-size=128", LAKE_NODE_URL: "http://lake-node:7000", LAKE_PACKS: "health,mortgage" }
     volumes: [specialists:/data]
     ports: ["127.0.0.1:4300:4300"]
     depends_on: [lake-node]
@@ -50,7 +51,8 @@ services:
     environment:
       NODE_OPTIONS: "--max-old-space-size=256"
       LAKE_NODE_URL: "http://lake-node:7000"
-      LAKE_ISSUER_URL: "http://specialists:4300/issuer"
+      LAKE_PACKS: "health,mortgage"
+      LAKE_ISSUERS: "health=http://specialists:4300/issuer,mortgage=http://specialists:4300/bank"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
     volumes: [houses:/data]
     ports: ["127.0.0.1:4000:4000"]
@@ -68,6 +70,19 @@ services:
     environment: { NODE_OPTIONS: "--max-old-space-size=96" }
     volumes: [cli:/root/.lake]
     depends_on: [houses]
+    mem_limit: 140m
+    memswap_limit: 140m
+
+  # Eight demo lenders for mortgage@1: authorised by the register, programs certified by the auditor.
+  lenders:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake:latest
+    hostname: lenders
+    command: ["quoters", "--packs", "mortgage", "--port", "4810", "--public-url", "https://${LAKE_DOMAIN}/l", "--node", "http://lake-node:7000",
+      "--auditor", "http://specialists:4300/auditor", "--authority", "http://specialists:4300/register", "--payments", "http://specialists:4300/payments"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_NODE_URL: "http://lake-node:7000" }
+    ports: ["127.0.0.1:4810:4810"]
+    depends_on: [specialists]
     mem_limit: 140m
     memswap_limit: 140m
 
