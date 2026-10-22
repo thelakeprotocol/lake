@@ -120,9 +120,47 @@
           "items": {
             "type": "string"
           }
+        },
+        "payments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "regulators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
+    },
+    "intents": {
+      "type": "array",
+      "description": "What the owner is looking for, standing (SPEC \u00a712). A term set to \"auto\" is worked out inside the house from the owner's own data.",
+      "items": {
+        "type": "object",
+        "required": [
+          "pack",
+          "terms"
+        ],
+        "properties": {
+          "pack": {
+            "type": "string"
+          },
+          "terms": {
+            "type": "object",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

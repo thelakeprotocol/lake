@@ -26,8 +26,28 @@ export interface LakePack {
   /** SHACL shapes (Turtle) every converted claims document must pass. */
   shapes?: string;
   source?: PackSource;
+  /**
+   * Intents: what an owner may announce they want ("a mortgage, around this price, in this region"), as
+   * coarse public terms. Houses with the same `groupBy` terms form a group that agents can bid for together.
+   */
+  intent?: {
+    terms: Record<string, IntentTerm>;
+    groupBy: string[];
+    /** Terms an owner may leave as `auto`, worked out inside the house from their own claims (e.g. a price band they can afford). */
+    auto?: (claims: Claim[]) => Record<string, string | number>;
+  };
+  /** The authority whose authorisation an agent must carry before a house sends it an intent (a regulator). */
+  authority?: { name: string; description: string; domain: string; path: string; register: string[] };
+  /** What an owner hands over when they accept an offer: the issuer-signed original, so the asker can check it with the issuer. */
+  release?: ('original' | 'credential')[];
   /** Something to try: what guides and examples show for this pack. */
-  examples?: { study?: import('./study.js').Study; studies?: import('./study.js').Study[]; offers?: Record<string, Omit<import('./offer.js').Offer, 'id' | 'requester'>> };
+  examples?: {
+    study?: import('./study.js').Study;
+    studies?: import('./study.js').Study[];
+    offers?: Record<string, Omit<import('./offer.js').Offer, 'id' | 'requester'>>;
+    /** Demo agents that quote for this pack's intents (lenders, insurers…), each with its certified program. */
+    quoters?: QuoterExample[];
+  };
 }
 
 export interface PackField {
@@ -57,6 +77,21 @@ export interface PackSource {
   convert(original: string, asOf?: number): Claim[];
   /** A synthetic original for a subject (seeded by it). Demo issuers only; never real data. */
   synthetic(subject: string, asOf?: number): string;
+}
+
+export interface IntentTerm {
+  kind: 'band' | 'number' | 'code';
+  label: string;
+  /** The coarse choices an owner picks from: public, so they must not identify anyone. */
+  options: (string | number)[];
+}
+
+export interface QuoterExample {
+  name: string;
+  domain: string;
+  program: import('./program.js').QuoteProgram;
+  /** What it pays the owner on acceptance, in whole currency units (e.g. a procuration fee). */
+  feeOnAccept?: number;
 }
 
 export interface Claim {

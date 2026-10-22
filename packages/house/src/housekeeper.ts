@@ -4,6 +4,7 @@ import {
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
+import { Market } from './market.js';
 import { checkRecord, quickCheck, type RecordCheck, type RecordPaths, type Trust } from './record.js';
 import type { OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
@@ -29,6 +30,10 @@ export interface HousekeeperOptions {
   /** Signals from the nodes this house follows: keys to drop on sight, agents' reputation. */
   signals?: () => { blocklist: Set<string>; reputation: Record<string, number> };
   emit: (e: LakeEvent) => void;
+  say?: (msg: string) => void;
+  /** The nodes this house follows, and its links to them (for intents). */
+  nodes?: string[];
+  links?: () => import('@thelakeprotocol/core').LakeLinks | null;
 }
 
 type Decision = 'join' | 'decline' | 'ask' | 'counter';
@@ -38,12 +43,14 @@ export type Reply =
   | { kind: 'filed'; receipt: string }
   | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'fragment'; study: string; fragment: number[] }
-  | { kind: 'excluded'; study: string; why: string };
+  | { kind: 'excluded'; study: string; why: string }
+  | { kind: 'quoted'; ref: string };
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string }
 interface StatusPayload { kind: 'status'; offerId: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
+interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core').QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number }
 
 const HOUR = 3_600_000;
 
@@ -61,8 +68,17 @@ export class Housekeeper {
   private claimCache: { at: number; claims: PodClaim[] } | null = null;
   private actor: string;
 
+  /** What the owner is looking for, and the offers priced for them inside this house. */
+  readonly market: Market;
+
   constructor(private o: HousekeeperOptions) {
     this.actor = `house:${o.name}`;
+    this.market = new Market({
+      actor: this.actor, webId: o.webId, id: o.id, card: o.card, sandbox: o.sandbox, trust: () => this.o.trust, links: o.links ?? (() => null), nodes: o.nodes ?? [],
+      records: o.records, claims: (f) => this.claims(f), read: (p) => this.read(p),
+      write: async (path, content) => { await this.tool('pod_write', { path, content }); },
+      verifyRecord: (f) => this.verifyOwnRecord(f), emit: o.emit, say: o.say ?? (() => {}),
+    });
   }
 
   get rules(): Rules { return this.o.rules; }
@@ -122,7 +138,7 @@ export class Housekeeper {
       blocked('quarantined', false);
       return this.reply({ kind: 'rejected', code: 'quarantined', why: 'this key is quarantined' });
     }
-    const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload | StatusPayload | ReceiptPayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
+    const v = await verifyLakeData(data as LakeData<OfferPayload | ComputePayload | StatusPayload | ReceiptPayload | QuotePayload> | null, { replay: this.replay, sandbox: this.o.sandbox });
     if (!v.ok) {
       blocked(v.rejection.code, false);
       return this.reply({ kind: 'rejected', code: v.rejection.code, why: v.rejection.why });
@@ -139,7 +155,8 @@ export class Housekeeper {
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor);
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
-    return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer or a compute request' });
+    if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
+    return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer, a compute request or a quote' });
   }
 
   private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {

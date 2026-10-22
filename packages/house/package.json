@@ -27,6 +27,7 @@
     "@thelakeprotocol/core": "workspace:^",
     "@thelakeprotocol/ui": "workspace:^",
     "@thelakeprotocol/usecase-health": "workspace:^",
+    "@thelakeprotocol/usecase-mortgage": "workspace:^",
     "@zazuko/env": "^3.0.2",
     "express": "5",
     "n3": "1",

@@ -1,0 +1,13 @@
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix m:    <https://lake.doneinfifty.com/usecases/mortgage/v1#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+
+# mortgage@1. Each field maps to an Open Banking (UK) resource or a schema.org term (see src/pack.ts).
+
+m:FinanceRecord      a owl:Class ; rdfs:comment "Where a pod keeps its finance claims (registered in the Solid Type Index)." .
+m:IncomeAnnual       a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "Gross yearly income, estimated from a year of pay, to the nearest £1,000." .
+m:MonthlyCommitments a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "Average monthly loan, card and car finance payments." .
+m:Savings            a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "Savings balances: the deposit available." .
+m:MissedPayments     a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "Returned direct debits in the last 12 months." .
+m:Employment         a owl:Class ; rdfs:subClassOf lake:Claim ; rdfs:comment "employed or self-employed." .

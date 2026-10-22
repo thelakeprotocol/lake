@@ -22,6 +22,8 @@ export interface NodeOptions {
   quarantineAfter?: number;
   /** Houses sharing an interest tag before they count as a guild. Default 3. */
   guildMin?: number;
+  /** Intent groups smaller than this aren't published, so a lone household can't be singled out. Default 2. */
+  intentMin?: number;
   /** Peer nodes to follow: their cards (re-verified here) and their blocklists. */
   follow?: string[];
   syncMs?: number;
@@ -237,6 +239,48 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
       n++;
     }
     res.json({ accepted: n });
+  });
+
+  // Intents (SPEC §12): a house says what it's looking for. The node keeps who privately and publishes
+  // only how many share each group; agents learn a group's size, never its members. In a sandbox the map
+  // also shows which house asked, so people can watch it happen.
+  const intents = new Map<string, { pack: string; group: string; at: number }[]>();
+  const groupSizes = () => {
+    const counts = new Map<string, { pack: string; group: string; members: number }>();
+    for (const [id, list] of intents) {
+      if (!registry.get(id)) { intents.delete(id); continue; }
+      for (const x of list) {
+        const k = `${x.pack}|${x.group}`;
+        const c = counts.get(k) ?? { pack: x.pack, group: x.group, members: 0 };
+        c.members++;
+        counts.set(k, c);
+      }
+    }
+    return [...counts.values()];
+  };
+  app.post('/intents', async (req, res) => {
+    const env = req.body as Signed<{ kind: 'intents'; intents: { pack: string; group: string }[] }>;
+    const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
+    if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
+    try {
+      await verifyMessage(env, async (kid) => (kid === entry.profile.publicJwk.kid ? entry.profile.publicJwk : null), { replay });
+    } catch (e) {
+      return void res.status(403).json({ code: 'bad-signature', why: (e as Error).message });
+    }
+    const before = new Set((intents.get(entry.id) ?? []).map((x) => `${x.pack}|${x.group}`));
+    const list = (env.payload.intents ?? []).slice(0, 8).map((x) => ({ pack: String(x.pack).slice(0, 40), group: String(x.group).slice(0, 120), at: Date.now() }));
+    intents.set(entry.id, list);
+    const sizes = groupSizes();
+    for (const x of list) {
+      if (before.has(`${x.pack}|${x.group}`)) continue;
+      const members = sizes.find((g) => g.pack === x.pack && g.group === x.group)?.members ?? 1;
+      publish(makeEvent('intent.opened', o.sandbox ? entry.id : 'lake', undefined, { pack: x.pack, group: x.group, members }));
+    }
+    res.json({ groups: sizes.filter((g) => list.some((x) => x.pack === g.pack && x.group === g.group)) });
+  });
+  app.get('/intents', (req, res) => {
+    const pack = str(req.query.pack);
+    res.json(groupSizes().filter((g) => (!pack || g.pack === pack) && g.members >= (o.intentMin ?? 2)));
   });
 
   // Relay (SPEC §9.1): a house behind a home router keeps one outgoing connection here, and knocks for it

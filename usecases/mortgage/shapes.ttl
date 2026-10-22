@@ -1,0 +1,17 @@
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix m:    <https://lake.doneinfifty.com/usecases/mortgage/v1#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+
+# mortgage@1: what its claims must look like, on top of the core shapes (model/shapes.ttl).
+
+m:AmountShape a sh:NodeShape ;
+  sh:targetClass m:IncomeAnnual, m:MonthlyCommitments, m:Savings ;
+  sh:property [ sh:path lake:value ; sh:minCount 1 ; sh:maxCount 1 ; sh:pattern "^\\d{1,9}$" ] .
+
+m:CountShape a sh:NodeShape ;
+  sh:targetClass m:MissedPayments ;
+  sh:property [ sh:path lake:value ; sh:minCount 1 ; sh:maxCount 1 ; sh:pattern "^\\d{1,3}$" ] .
+
+m:EmploymentShape a sh:NodeShape ;
+  sh:targetClass m:Employment ;
+  sh:property [ sh:path lake:code ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( "employed" "self-employed" ) ] .

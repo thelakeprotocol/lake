@@ -43,6 +43,17 @@ export class LakeLink {
   private nodeKey: import('jose').JWK | null = null;
 
   /** The node's blocklist and reputation, verified against the node's own signed card. */
+  /** Tells the node what this house is looking for (replacing what it said before); returns the size of each group. */
+  async intents(list: { pack: string; group: string }[]): Promise<{ pack: string; group: string; members: number }[] | null> {
+    try {
+      const env = await signMessage({ kind: 'intents', intents: list }, this.o.identity, { iss: this.o.webId });
+      const res = await fetch(`${this.o.nodeUrl}/intents`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(5000) });
+      return res.ok ? ((await res.json()) as { groups: { pack: string; group: string; members: number }[] }).groups : null;
+    } catch {
+      return null;
+    }
+  }
+
   async signals(): Promise<Signals | null> {
     try {
       if (!this.nodeKey) this.nodeKey = (await verifyLakeCard(await (await fetch(`${this.o.nodeUrl}/.well-known/agent-card.json`)).json())).publicJwk;
@@ -133,6 +144,12 @@ export class LakeLinks {
   }
 
   /** Union of the blocklists, average of the reputations, across the nodes that answered. */
+  /** Intents go to every node; the biggest count any node reports for a group is its size. */
+  async intents(list: { pack: string; group: string }[]): Promise<{ pack: string; group: string; members: number }[]> {
+    const answers = (await Promise.all(this.links.map((l) => l.intents(list)))).filter((a): a is NonNullable<typeof a> => !!a);
+    return list.map((x) => ({ ...x, members: Math.max(1, ...answers.flat().filter((g) => g.pack === x.pack && g.group === x.group).map((g) => g.members)) }));
+  }
+
   async signals(): Promise<Signals | null> {
     const all = (await Promise.all(this.links.map((l) => l.signals()))).filter((s): s is Signals => !!s);
     if (!all.length) return null;

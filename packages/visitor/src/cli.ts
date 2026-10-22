@@ -4,9 +4,10 @@ import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { cardUrlFor, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
 import { dispatch, makeHuman } from './dispatch.js';
-import { exampleStudies, loadPacks, type Study } from '@thelakeprotocol/core';
+import { exampleStudies, loadPacks, packs, type Study } from '@thelakeprotocol/core';
 import { attack, houseUrls, swarm } from './attack.js';
 import { ask, knock, makeVisitor, presets, type Tamper } from './knock.js';
+import { startQuoter } from './quoter.js';
 
 const HELP = `lake — talk to the Lake
 
@@ -28,6 +29,8 @@ const HELP = `lake — talk to the Lake
   lake attack [--count 10] [--node http://lake-node:7000] [<house-url> …]
   lake sponsor [--every 600] [--as open-science.example]   sandbox life: a paid, certified study every few minutes,
                                    rotating questions, prices and asks, so new houses get knocked, bargain and get paid
+  lake quoters --packs mortgage [--port 4810] [--public-url http://quoters:4810] [--authority http://specialists:4300/register]
+                                   run a pack's demo quoters (its lenders, for mortgage) in one process, each at /<name>
   lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -62,6 +65,8 @@ const { positionals, values: a } = parseArgs({
     attackers: { type: 'string', default: '1' },
     interval: { type: 'string', default: '2000' },
     every: { type: 'string', default: '600' },
+    authority: { type: 'string', default: process.env.LAKE_AUTHORITY_URL },
+    'public-url': { type: 'string' },
     // The use cases whose example studies this CLI can run.
     packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
   },
@@ -119,6 +124,26 @@ else if (cmd === 'reset') {
 } else if (cmd === 'swarm') {
   console.log(`swarm: ${a.traders} traders, ${a.attackers} attacker(s), one move every ~${a.interval} ms. Ctrl-C to stop.`);
   await swarm({ node: a.node!, traders: Number(a.traders), attackers: Number(a.attackers), intervalMs: Number(a.interval), log: (l) => console.log(l) });
+}
+else if (cmd === 'quoters') {
+  // Every quoter the loaded packs bring (for mortgage: its lenders), in one process, each under its own path.
+  const { default: express } = await import('express');
+  const root = express();
+  const port = Number(a.port === '4800' ? '4810' : a.port);
+  const base = (a['public-url'] ?? `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
+  const server = root.listen(port);
+  const examples = packs().flatMap((p) => p.examples?.quoters ?? []);
+  if (!examples.length) throw new Error('no loaded pack brings quoters; try --packs mortgage');
+  for (const ex of examples) {
+    const slug = ex.domain.split('.')[0]!;
+    const authority = a.authority ?? `http://specialists:4300/${packs().find((p) => ex.program.pack.startsWith(`${p.id}@`))?.authority?.path ?? 'register'}`;
+    let mounted: import('express').Express | null = null;
+    root.use(`/${slug}`, (req, res, next) => (mounted ? mounted(req, res, next) : res.status(503).end()));
+    await startQuoter({ example: ex, node: a.node!, auditor: a.auditor!, authority, payments: a.payments, publicUrl: `${base}/${slug}`, mount: (app) => { mounted = app; }, log: (m) => console.log(m) })
+      .catch((e: Error) => console.log(`${ex.name}: ${e.message}`));
+  }
+  console.log(`${examples.length} quoters on :${port}`);
+  process.on('SIGTERM', () => server.close());
 }
 else if (cmd === 'sponsor') {
   // Each run asks something else, at another price; every other one also asks for the postcode, so blocs form and counter.

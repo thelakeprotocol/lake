@@ -3,6 +3,7 @@ export const EVENT_KINDS = [
   'house.joined', 'house.left', 'agent.registered', 'knock', 'offer', 'counter', 'decision',
   'agreement.signed', 'grant.issued', 'grant.revoked', 'approval.requested', 'approval.answered',
   'payment.settled', 'attack.blocked', 'agent.quarantined', 'guild.formed', 'study.result', 'compute.done', 'record.moved',
+  'intent.opened', 'quote.made', 'offer.accepted',
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -49,5 +50,8 @@ export function describe(e: LakeEvent): string {
     case 'study.result': return `${e.actor} got its answer from ${d.participants} houses${d.summary ? `: ${d.summary}` : ''}.`;
     case 'compute.done': return `${e.actor} ran ${e.subject}'s certified study inside its pod. Records out: ${d.recordsOut}.`;
     case 'record.moved': return `ALERT: a record left ${e.actor}.`;
+    case 'intent.opened': return `${e.actor} asked for offers (${d.group ?? d.pack}). ${d.members ? `${d.members} households in this group.` : ''}`.trim();
+    case 'quote.made': return `${e.subject}'s offer was worked out inside ${e.actor}. Only its owner sees it.`;
+    case 'offer.accepted': return `The owner of ${e.actor} accepted ${e.subject}'s offer${d.released ? ` and released ${d.released} file(s) to it` : ''}.`;
   }
 }

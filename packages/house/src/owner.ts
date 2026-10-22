@@ -34,6 +34,11 @@ export interface PanelProvider {
   money(): Promise<unknown>;
   data(): Promise<unknown>;
   exportAll(): Promise<unknown>;
+  /** What the owner is looking for, and the offers priced for them in this house. */
+  market(): Promise<unknown>;
+  openIntent(pack: string, terms: Record<string, string | number>): Promise<unknown>;
+  closeIntent(pack: string): Promise<unknown>;
+  acceptOffer(id: string): Promise<unknown>;
 }
 
 export interface GrantRecord {
@@ -180,7 +185,8 @@ export class OwnerDesk {
       }
       const panel = this.o.panel;
       if (panel && p.kind.startsWith('panel.')) {
-        const q = p as unknown as { text?: string };
+        const q = p as unknown as { text?: string; pack?: string; terms?: Record<string, string | number>; offer?: string };
+        // A panel action that can't be done says why, instead of failing the request.
         const answer = await ({
           'panel.overview': () => panel.overview(),
           'panel.rules': () => panel.rules(),
@@ -190,8 +196,12 @@ export class OwnerDesk {
           'panel.money': () => panel.money(),
           'panel.data': () => panel.data(),
           'panel.export': () => panel.exportAll(),
-        } as Record<string, () => Promise<unknown>>)[p.kind]?.();
-        if (answer !== undefined) return void res.json(answer);
+          'panel.market': () => panel.market(),
+          'panel.intent.open': () => panel.openIntent(String(q.pack ?? ''), q.terms ?? {}),
+          'panel.intent.close': () => panel.closeIntent(String(q.pack ?? '')),
+          'panel.offer.accept': () => panel.acceptOffer(String(q.offer ?? '')),
+        } as Record<string, () => Promise<unknown>>)[p.kind]?.().catch((e: Error) => ({ error: e.message }));
+        if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }
       res.status(400).json({ error: 'unknown request' });
     });

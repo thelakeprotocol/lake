@@ -10,7 +10,8 @@ export interface IntentMandateSubject {
   id: string;
   natural_language_description: string;
   study: string;
-  budget: { currency: 'USD'; amount: number };
+  /** ISO 4217, e.g. USD, GBP. */
+  budget: { currency: string; amount: number };
   intent_expiry: string;
   user_cart_confirmation_required: false;
 }
@@ -22,14 +23,14 @@ export function signIntentMandate(human: Identity, humanWebId: string, s: Intent
   );
 }
 
-export function signPaymentMandate(agent: Identity, agentWebId: string, o: { payee: string; amount: number; intentMandate: string; agreement: string }): Promise<string> {
+export function signPaymentMandate(agent: Identity, agentWebId: string, o: { payee: string; amount: number; intentMandate: string; agreement: string; currency?: string }): Promise<string> {
   return issueCredential(
     {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential', 'PaymentMandate'],
       issuer: agentWebId,
       validFrom: new Date().toISOString(),
-      credentialSubject: { id: o.payee, amount: { currency: 'USD', value: o.amount }, intentMandate: digestSRI(o.intentMandate), agreement: o.agreement },
+      credentialSubject: { id: o.payee, amount: { currency: o.currency ?? 'USD', value: o.amount }, intentMandate: digestSRI(o.intentMandate), agreement: o.agreement },
     } as never,
     agent,
   );

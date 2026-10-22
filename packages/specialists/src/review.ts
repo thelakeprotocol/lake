@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditStudy, buildCard, digestSRI, identifyingFields, packs, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  type AgentCard, type Identity, type LakeData, type LakeProfile, type Study,
+  auditProgram, auditStudy, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  packId, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
@@ -78,13 +78,38 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
       const credential = await s.vc('LakeStudyCertificate', { id: studyId(study), checks: ['declarative study, no code', 'answers randomised before leaving a house', 'aggregates only', `privacy budget ε=${study.privacy.epsilon}`] }, 90);
       return { kind: 'certified', credential, notes: [] };
     }
+    if (p.kind === 'audit-program') {
+      // Quote programs: declarative, bounded, reading only safe fields of a pack here, shown only to the owner.
+      const program = p.program as QuoteProgram;
+      const audit = auditProgram(program);
+      if (!audit.ok) return { kind: 'refused', problems: audit.problems };
+      const credential = await s.vc('LakeProgramCertificate', { id: programId(program), pack: program.pack, checks: ['declarative program, no code', 'reads only safe fields of its pack', 'result shown to the owner only'] }, 90);
+      return { kind: 'certified', credential, notes: [] };
+    }
     if (p.kind === 'audit-converter') {
       const pkg = String(p.package ?? '');
       if (!certifiedConverters().includes(pkg)) return { kind: 'refused', problems: [`${pkg} has not been reviewed`] };
       const credential = await s.vc('LakeConverterCertificate', { id: `urn:lake:converter:${pkg}`, package: pkg }, 365);
       return { kind: 'certified', credential, notes: [] };
     }
-    return { kind: 'refused', problems: ['send { kind: "audit-study", study } or { kind: "audit-converter", package }'] };
+    return { kind: 'refused', problems: ['send { kind: "audit-study", study }, { kind: "audit-program", program } or { kind: "audit-converter", package }'] };
+  });
+  return { app: s.app, card: s.card, webId: s.webId };
+}
+
+/**
+ * A demo authority for a pack (for mortgages: a stand-in for a register of authorised firms, like the FCA's).
+ * It authorises the agents on its register to quote for that pack, as a signed credential houses check.
+ */
+export async function createAuthority(o: SpecialistOptions & { pack: LakePack }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
+  const a = o.pack.authority!;
+  const id = packId(o.pack);
+  const s: Specialist = await specialist<Reply>(o, a.name, a.description, 'authorise', async (p, from, profile) => {
+    if (p.kind !== 'authorise') return { kind: 'refused', problems: ['send { kind: "authorise", pack }'] };
+    if (p.pack !== id) return { kind: 'refused', problems: [`this register covers ${id}`] };
+    if (!a.register.includes(profile.ownerDomain)) return { kind: 'refused', problems: [`${profile.ownerDomain} is not on the register`] };
+    const credential = await s.vc('LakeAuthorisation', { id: from, domain: profile.ownerDomain, pack: id, scope: 'quote' }, 365);
+    return { kind: 'approved', credential, notes: [`authorised to quote for ${id}`] };
   });
   return { app: s.app, card: s.card, webId: s.webId };
 }
@@ -115,7 +140,7 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     } catch {
       return { kind: 'refused', problems: ['the Intent Mandate signature does not verify'] };
     }
-    const m = mandate.credentialSubject as unknown as { id: string; budget: { amount: number }; intent_expiry: string };
+    const m = mandate.credentialSubject as unknown as { id: string; budget: { amount: number; currency?: string }; intent_expiry: string };
     if (!mandate.type.includes('IntentMandate') || m.id !== agentWebId) return { kind: 'refused', problems: ['the Intent Mandate is not for this agent'] };
     if (Date.parse(m.intent_expiry) < Date.now()) return { kind: 'refused', problems: ['the Intent Mandate has expired'] };
     const digest = digestSRI(intent.credential);
@@ -139,7 +164,7 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     const receipts = await Promise.all(
       checked.map(async (c) => ({
         payee: c.payee,
-        credential: await s.vc('LakeReceipt', { id: c.payee, amount: { currency: 'USD', value: c.amount }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated' }, 3650),
+        credential: await s.vc('LakeReceipt', { id: c.payee, amount: { currency: m.budget.currency ?? 'USD', value: c.amount }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated' }, 3650),
       })),
     );
     o.onSettled?.(total, checked.length);

@@ -22,6 +22,7 @@
     "@modelcontextprotocol/sdk": "1.32.1",
     "@thelakeprotocol/core": "workspace:^",
     "@thelakeprotocol/usecase-health": "workspace:^",
+    "@thelakeprotocol/usecase-mortgage": "workspace:^",
     "@thelakeprotocol/visitor": "workspace:^",
     "express": "5",
     "zod": "3"

@@ -65,7 +65,7 @@ export interface House {
 }
 
 // Whose signatures count. A sandbox house with no trust section trusts the demo specialists and its packs' demo issuers, and says so.
-const DEMO_TRUST: Omit<Trust, 'issuers'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
+const DEMO_TRUST: Omit<Trust, 'issuers' | 'regulators'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
 
 let appDir: string | undefined | null = null;
 function approvalsApp() {
@@ -84,11 +84,13 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const { owner, say } = o;
   const actor = `house:${o.name}`;
   const demoIssuers = o.packs.map((p) => p.source?.issuer.domain).filter((d): d is string => !!d);
+  const demoRegulators = o.packs.map((p) => p.authority?.domain).filter((d): d is string => !!d);
   const trustFrom = (rules: Rules): Trust => {
     const t = rules.trust;
     return {
       issuers: t?.issuers ?? (o.sandbox ? demoIssuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
       ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
+      regulators: t?.regulators ?? (o.sandbox ? demoRegulators : []),
     };
   };
   let link: LakeLinks | null = null;
@@ -102,7 +104,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
 
   // Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
-  for (const f of ['', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/']) await ensureContainer(owner, f);
+  for (const f of ['', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/', 'offers/']) await ensureContainer(owner, f);
   // Each pack's data lives where the pod's Type Index says (registered there the first time).
   const folders = await packFolders(owner, o.packs, say);
   const paths = recordPaths(o.packs, folders);
@@ -178,7 +180,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   }
 
   // The housekeeper and its MCP door to the pod: reads anything; writes only agreements, receipts and its audit log.
-  const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/'], claimsDocs: records.map((r) => r.paths.claims) });
+  const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/', 'offers/'], claimsDocs: records.map((r) => r.paths.claims) });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await mcp.connect(serverSide);
   const podClient = new Client({ name: `housekeeper-${o.name}`, version: '0.1.0' });
@@ -218,7 +220,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   }
 
   const keeper = new Housekeeper({
-    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, seed: o.seed, emit, desk,
+    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk,
     signals: () => signals,
   });
   keeperRef = keeper;
@@ -246,6 +248,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         }, 2000).unref();
       }
       emit(makeEvent('house.joined', actor, undefined, { tags: (rules.tags ?? []).join(',') }));
+      // Intents the owner opened before a restart, then the standing ones in their rules.
+      await keeper.market.load();
+      await keeper.market.resume();
+      for (const x of keeper.rules.intents ?? []) await keeper.market.open(x.pack, x.terms).catch((e: Error) => say(`intent for ${x.pack}: ${e.message}`));
     },
     leave: async () => {
       emit(makeEvent('house.left', actor));
@@ -384,6 +390,17 @@ function panelFor(x: {
         sources, folders,
       };
     },
+    async market() {
+      const m = x.keeper().market;
+      return {
+        intents: [...m.intents.values()],
+        offers: [...m.offers.values()].sort((a, b) => Number(b.result.eligible) - Number(a.result.eligible) || (a.result.outputs.rate ?? 99) - (b.result.outputs.rate ?? 99)),
+        packs: x.records.filter((r) => r.pack.intent).map((r) => ({ id: packId(r.pack), title: r.pack.title, terms: r.pack.intent!.terms })),
+      };
+    },
+    openIntent: (pack, terms) => x.keeper().market.open(pack, terms),
+    async closeIntent(pack) { await x.keeper().market.close(pack); return { ok: true }; },
+    acceptOffer: (id) => x.keeper().market.accept(id),
     async exportAll() {
       // Everything in the pod, so the owner can move house. Includes the wallet: it is theirs.
       const files: Record<string, string> = {};

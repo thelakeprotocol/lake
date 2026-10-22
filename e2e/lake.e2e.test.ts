@@ -9,9 +9,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, generateIdentity, issueCredential, registerPack, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, generateIdentity, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
+import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
 import { attack } from '../packages/visitor/src/attack.js';
 import { ownerSession, startPod } from '../packages/house/src/pod.js';
 import { ask, knock, makeVisitor, presets } from '../packages/visitor/src/knock.js';
@@ -32,6 +33,7 @@ let guide: string;
 let inspector: string;
 let sparring: string;
 let quests: string;
+let specialistsUrl: string;
 const houses: Record<string, string> = {};
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
@@ -63,7 +65,8 @@ beforeAll(async () => {
   const sp = await port();
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
-  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node], /issuer registered with the Lake node/);
+  specialistsUrl = `http://localhost:${sp}`;
+  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage'], /register registered with the Lake node/);
   await Promise.all(
     ['stan', 'strict', 'research'].map(async (name) => {
       const [pp, hp] = [await port(), await port()];
@@ -117,7 +120,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(8);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(10);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -459,6 +462,90 @@ describe('bring your own pod', () => {
       pod.stop();
     }
   }, 120_000);
+});
+
+describe('mortgage offers, priced inside the house', () => {
+  // Three first-time buyers in the same region and price band (a group of 3), eight authorised lenders.
+  // People whose synthetic finances some lender accepts at £150–200k, picked the way the demo bank seeds them.
+  const names = Array.from({ length: 40 }, (_, i) => `mm-${i}`);
+  const terms = { region: 'north-west', price_band: '150000-199999', term_years: 30, first_time_buyer: 'yes' };
+  const buyers: { name: string; url: string; call: (payload: Record<string, unknown>) => Promise<any> }[] = [];
+  let firstProc = 0;
+
+  beforeAll(async () => {
+    registerPack(mortgage);
+    firstProc = procs.length;
+    const affordable = names.filter((n) => {
+      const claims = mortgageClaims(syntheticStatements(seedFrom(`/${n}/profile/card#me`)));
+      return LENDERS.some((l) => runProgram(l.program, claims, { ...terms, price_band: 150_000, group_size: 3 }).eligible);
+    }).slice(0, 3);
+    expect(affordable).toHaveLength(3);
+    // The lenders first, so they're listed when the houses announce what they want.
+    const qp = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'quoters', '--packs', 'mortgage', '--port', qp, '--public-url', `http://localhost:${qp}`, '--node', node,
+      '--auditor', auditor, '--authority', `${specialistsUrl}/register`, '--payments', payments], /8 quoters on/);
+    for (const name of affordable) {
+      const rules = join(dir, `${name}.yaml`);
+      await writeFile(rules, `owner: ${name}\ndefault: decline\nrules: []\nintents:\n  - pack: mortgage\n    terms: { region: north-west, price_band: "150000-199999", term_years: 30, first_time_buyer: "yes" }\n`);
+      const [pp, hp] = [await freePort(), await freePort()];
+      await start(['packages/house/dist/main.js', '--name', name, '--rules', rules, '--data', join(dir, 'houses'), '--packs', 'health,mortgage',
+        '--issuers', `health=${issuerUrl},mortgage=${specialistsUrl}/bank`, '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--open-pairing'], /joined the Lake/);
+      const url = `http://localhost:${hp}`;
+      const phone = await generateIdentity('phone');
+      await fetch(`${url}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk }) });
+      const call = async (payload: Record<string, unknown>) => (await fetch(`${url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: 'owner' })) })).json();
+      buyers.push({ name, url, call });
+    }
+  }, 240_000);
+
+  // The buyers and lenders leave, so the tests after this one see the Lake as it was.
+  afterAll(async () => {
+    procs.splice(firstProc).forEach((p) => p.kill('SIGTERM'));
+    await new Promise((r) => setTimeout(r, 1500));
+  });
+
+  it('every authorised lender prices each house inside it; as the group of three forms, offers improve to group rates', async () => {
+    const ready = async (b: (typeof buyers)[number]) => {
+      const m = await b.call({ kind: 'panel.market' });
+      return m.intents[0]?.members === 3 && m.offers.length === 8 && m.offers.every((o: any) => o.groupSize === 3);
+    };
+    for (let i = 0; i < 80 && !(await Promise.all(buyers.map(ready))).every(Boolean); i++) await new Promise((r) => setTimeout(r, 500));
+    for (const b of buyers) {
+      const m = await b.call({ kind: 'panel.market' });
+      expect(m.intents[0]).toMatchObject({ pack: 'mortgage@1', members: 3 });
+      expect(m.offers).toHaveLength(8);
+      const eligible = m.offers.filter((o: any) => o.result.eligible);
+      expect(eligible.length).toBeGreaterThan(0);
+      // Sorted by rate, and the group discount is in the certified program's own output.
+      expect(eligible.map((o: any) => o.result.outputs.rate)).toEqual([...eligible.map((o: any) => o.result.outputs.rate)].sort((x, y) => x - y));
+      expect(m.offers.some((o: any) => o.result.outputs.group_off > 0)).toBe(true);
+    }
+    const intents = await (await fetch(`${node}/intents?pack=mortgage@1`)).json();
+    expect(intents).toEqual([{ pack: 'mortgage@1', group: 'region=north-west;price_band=150000-199999;first_time_buyer=yes', members: 3 }]);
+  });
+
+  it('nothing leaves until the owner accepts; then two files go to one lender, who confirms and pays the fee', async () => {
+    const b = buyers[0]!;
+    const best = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible);
+    const before = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit')).catch(() => []);
+    expect(before.filter((f) => f.includes('accept'))).toEqual([]);
+    const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
+    expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'agreement in principle', outputs: best.result.outputs } });
+    expect(accepted.answer.feePaid).toBeGreaterThan(0);
+    const audit = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit'));
+    const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
+    expect(entry).toMatchObject({ to: best.quoter.webId, released: ['finance/original/statements.json', 'finance/original/statements.vc.jwt'], consent: 'owner, live' });
+    const money = await b.call({ kind: 'panel.money' });
+    expect(money.receipts.some((r: any) => r.amount === accepted.answer.feePaid)).toBe(true);
+    expect((await (await fetch(`${node}/state`)).json()).counters.recordsMoved).toBe(0);
+  });
+
+  it('a lender without an authorisation never hears about an intent, and an uncertified program never runs', async () => {
+    const rogue = await makeVisitor(await generateIdentity(), 'rogue-lender.example');
+    const program = { ...LENDERS[0]!.program, title: 'Rogue: everything' };
+    const { reply } = await ask(`${buyers[1]!.url}/a2a`, rogue, { kind: 'quote', program });
+    expect(reply).toMatchObject({ kind: 'rejected', code: 'unauthorised' });
+  });
 });
 
 describe('relay: a house behind a home router', () => {

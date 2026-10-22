@@ -14,7 +14,13 @@ export interface Rules {
   negotiation?: { join_collectives?: boolean };
   tags?: string[];
   /** Whose signatures count. An approval from anyone not listed counts as no approval. */
-  trust?: { ethics?: string[]; auditors?: string[]; issuers?: string[]; payments?: string[] };
+  trust?: { ethics?: string[]; auditors?: string[]; issuers?: string[]; payments?: string[]; regulators?: string[] };
+  /**
+   * What the owner is looking for, standing: "offers for a mortgage, around this price, in this region".
+   * The house announces each one to authorised agents, who price it inside the house (SPEC §12).
+   * A term set to `auto` is worked out inside the house from the owner's own data.
+   */
+  intents?: { pack: string; terms: Record<string, string | number> }[];
 }
 
 export interface Rule {
@@ -30,6 +36,7 @@ export interface Rule {
 const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least'] as const;
 type MatchKey = (typeof MATCH_KEYS)[number];
 const DECISIONS = ['join', 'decline', 'ask'];
+const TRUST_LISTS = ['ethics', 'auditors', 'issuers', 'payments', 'regulators'];
 
 export class RulesError extends Error {}
 
@@ -48,7 +55,10 @@ export function parseRules(text: string): Rules {
     return { ...r, match: r.match ?? {} };
   });
   for (const k of Object.keys(raw.trust ?? {})) {
-    if (!['ethics', 'auditors', 'issuers', 'payments'].includes(k)) throw new RulesError(`trust: unknown list "${k}" (allowed: ethics, auditors, issuers, payments)`);
+    if (!TRUST_LISTS.includes(k)) throw new RulesError(`trust: unknown list "${k}" (allowed: ${TRUST_LISTS.join(', ')})`);
+  }
+  for (const [i, x] of (raw.intents ?? []).entries()) {
+    if (!x || typeof x.pack !== 'string' || !x.terms || typeof x.terms !== 'object') throw new RulesError(`intents ${i + 1}: needs a pack and its terms`);
   }
   return { ...raw, owner: raw.owner, default: def, rules } as Rules;
 }

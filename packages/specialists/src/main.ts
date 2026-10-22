@@ -3,13 +3,13 @@ import { parseArgs } from 'node:util';
 import express from 'express';
 import { LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type LakePack } from '@thelakeprotocol/core';
 import { createIssuer } from './issuer.js';
-import { createAuditor, createEthics, createPayments } from './review.js';
+import { createAuditor, createAuthority, createEthics, createPayments } from './review.js';
 import { createGuide } from './guide.js';
 import { createInspector } from './inspector.js';
 import { createSparring } from './sparring.js';
 import { createQuests } from './quests.js';
 
-const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack }> = {
+const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
   auditor: { port: '4400', domain: 'audit.lake.local' },
   ethics: { port: '4500', domain: 'ethics.lake.local' },
   payments: { port: '4600', domain: 'payments.lake.local' },
@@ -41,6 +41,7 @@ const { positionals, values } = parseArgs({
 // Each pack brings its own demo authority: the hospital for health (/issuer), the bank for mortgages (/bank)…
 for (const p of await loadPacks(values.packs!.split(','), (n) => import(n))) {
   if (p.source) DEFAULTS[p.source.issuer.path] = { port: '4300', domain: p.source.issuer.domain, pack: p };
+  if (p.authority) DEFAULTS[p.authority.path] = { port: '4800', domain: p.authority.domain, pack: p, authority: true };
 }
 const kind = positionals[0] ?? 'issuer';
 const kinds = kind === 'all' ? Object.keys(DEFAULTS) : kind.split(',');
@@ -61,7 +62,8 @@ async function start(k: string, url: string) {
   let link: LakeLinks | null = null;
   const o = { id, url, domain, sandbox: !values.production, report: (e: import('@thelakeprotocol/core').LakeEvent) => link?.report(e) };
   const s: { app: express.Express; card: AgentCard; webId: string } =
-    DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
+    DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack! })
+    : DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
     : k === 'ethics' ? await createEthics(o)
     : k === 'payments' ? await createPayments({ ...o, onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
     : k === 'guide' ? await createGuide({ ...o, nodeUrl: nodes[0], publicNodeUrl: values['public-node'] })
