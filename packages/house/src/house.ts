@@ -147,12 +147,24 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 
   // One record per pack: signed by the pack's issuer, converted in the pod, checked against the pack's shapes, signed again by the housekeeper.
   const records: { pack: LakePack; paths: RecordPaths; claimsUrl: string }[] = [];
-  const missing = async (path: string) => (await owner.fetch(owner.podRoot + path, { method: 'HEAD' })).status === 404;
+  // What a stored credential is about, read without verifying: enough to notice that the pack's converter changed since it was
+  // made (an upgrade), so the house gets a fresh certificate and record instead of failing its own check forever. The full check runs later.
+  const subjectOf = async (path: string): Promise<Record<string, unknown> | undefined> => {
+    try {
+      const res = await owner.fetch(owner.podRoot + path);
+      if (!res.ok) return undefined;
+      const text = (await res.text()).trim();
+      const jws = text.startsWith('{') ? (JSON.parse(text) as { credential: string }).credential : text;
+      return JSON.parse(Buffer.from(jws.split('.')[1]!, 'base64url').toString()).credentialSubject;
+    } catch {
+      return undefined;
+    }
+  };
   for (const p of o.packs.filter((x) => x.source)) {
     const at = paths.get(p.id)!;
     const claimsUrl = `${owner.podRoot}${at.claims}`;
     records.push({ pack: p, paths: at, claimsUrl });
-    if (await missing(at.converterCert)) {
+    if ((await subjectOf(at.converterCert))?.id !== `urn:lake:converter:${p.source!.converter}`) {
       say(`asking the auditor at ${o.auditorUrl} to certify the ${p.id} converter`);
       try {
         await put(owner, at.converterCert, JSON.stringify(await fetchConverterCert(o.auditorUrl, { id, card, webId: owner.webId }, p)), 'application/json');
@@ -160,7 +172,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         say(`WARNING: ${(e as Error).message}. Uncertified converter: this house's ${p.id} data can't be used.`);
       }
     }
-    if (await missing(at.claims)) {
+    if ((await subjectOf(at.claimsCredential))?.converter !== p.source!.converter) {
       const issuerUrl = o.issuerUrls[p.id];
       if (!issuerUrl) { say(`WARNING: no issuer for ${p.id}; this house holds no ${p.id} record`); continue; }
       say(`asking the ${p.id} issuer at ${issuerUrl} for a signed synthetic record`);

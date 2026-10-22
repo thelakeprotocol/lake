@@ -10,6 +10,8 @@
 - **Push notifications** for requests, instead of the control panel checking every second and a half.
 - **Public pods for hosted houses.** Hosted houses' WebIDs point at an internal pod server; a real hosted service needs public pod URLs.
 
+- **Buying a home, end to end.** After the loan: one purchase, eight parties (buyer, seller, lender, both conveyancers, broker, agent, valuer) and a pile of documents nobody reads. A purchase blueprint with roles and steps; the buyer's house holds each signed document once and gives each role only what it needs; one signed timeline everyone sees, including the steps waiting on a person ("waiting on the valuer since Tuesday") and the deadlines (finance clause, cooling-off). Most buyers trust their solicitor and broker, so make that safe: scoped authority for this one purchase, signed on the owner's phone, and a house that flags only what's unusual in the contract, by rules, not a model.
+
 ## For agents and builders
 
 - **An agent hires an agent.** One agent finds another by skill, agrees a price, does the work, and pays under its human's AP2 mandate: the Lake as a marketplace for agent labour.

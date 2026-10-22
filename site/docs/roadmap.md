@@ -1,6 +1,6 @@
 # Roadmap
 
-<p class="lead">Ten milestones, in build order. Each one ends with something you can run.</p>
+<p class="lead">Eleven milestones, in build order. Each one ends with something you can run.</p>
 
 | # | Milestone | Done when | Status |
 |---|---|---|---|
@@ -15,6 +15,7 @@
 | 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-mission and finish anyway | <span class="status done">done</span> |
 | 9 | **Open door** | Agent SDK, Lake MCP connector, public sandbox Lake | <span class="status done">done</span> (sandbox live) |
 | 10 | **Polish** | Map matches the reference, seeded demo mode, 90-second recording | <span class="status done">done</span> |
+| 11 | **Packs and offers** | Use cases as packs outside the core; intents, certified quote programs run in the house, group rates, accept and release; Australian home loans as the first market | <span class="status done">runs</span> ([how](/docs/offers)); the map doesn't animate offers yet |
 
 ## Acceptance tests
 

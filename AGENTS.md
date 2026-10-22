@@ -30,7 +30,7 @@ Run `pnpm build` before `pnpm test:e2e`: it runs the built `dist/` files.
 | `packages/specialists` | issuer, ethics, auditor, payments, and the sandbox guides: guide, inspector, sparring partner, quests (A2A agents). `all` runs them in one process. |
 | `packages/visitor` | The `lake` CLI: knock, dispatch (research agent), attack, swarm. |
 | `packages/ui` | The live map and the control panel every house serves at /owner/ (Vite). |
-| `usecases/<name>` | One package per use case ("pack"): its fields, vocabulary, SHACL shapes, converter, synthetic data, studies and example offers. `health` today. |
+| `usecases/<name>` | One package per use case ("pack"): its fields, vocabulary, SHACL shapes, converter, synthetic data, studies, intents and example quoters. `health` and `mortgage` (Australian home loans) today. |
 | `spec/`, `model/` | JSON Schemas, OpenAPI for the node, examples; RDF ontology and SHACL shapes. |
 | `site/` | lake.doneinfifty.com. `site/docs/*.md` are the docs. |
 | `e2e/` | End-to-end tests. |
