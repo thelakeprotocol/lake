@@ -4,7 +4,7 @@ import rdf from '@zazuko/env';
 import SHACLValidator from 'rdf-validate-shacl';
 import { describe, expect, it } from 'vitest';
 import { auditProgram, claimsToTurtle, registerPack, runProgram } from '@thelakeprotocol/core';
-import mortgage, { extractClaims, LENDERS, syntheticStatements } from './index.js';
+import mortgage, { extractClaims, grossFromNet, incomeTax, LENDERS, syntheticStatements } from './index.js';
 
 registerPack(mortgage);
 const read = (u: string) => new Parser().parse(readFileSync(new URL(u, import.meta.url), 'utf8'));
@@ -12,7 +12,7 @@ const shapes = rdf.dataset([...read('../../../model/shapes.ttl'), ...read('../sh
 const validate = (ttl: string) => new SHACLValidator(shapes, { factory: rdf }).validate(rdf.dataset(new Parser().parse(ttl)));
 const prov = { subject: 'http://pod.test/sam/profile/card#me', issuer: 'http://bank/#issuer', originalHash: 'sha256-x', converter: mortgage.source!.converter };
 const people = Array.from({ length: 300 }, (_, i) => extractClaims(syntheticStatements(i + 1)));
-const intent = { price_band: 250_000, term_years: 30 };
+const intent = { region: 'vic', price_band: 600_000, term_years: 30, first_time_buyer: 'no' };
 
 describe('mortgage@1', () => {
   it('makes the same statements for the same seed', () => {
@@ -22,10 +22,28 @@ describe('mortgage@1', () => {
   it('turns statements into the five facts a lender needs, in plausible ranges', () => {
     for (const c of people) {
       const n = (f: string) => Number(c.find((x) => x.field === f)!.value);
-      expect(n('income_annual')).toBeGreaterThanOrEqual(10_000);
-      expect(n('income_annual')).toBeLessThanOrEqual(200_000);
+      expect(n('income_annual')).toBeGreaterThanOrEqual(50_000);
+      expect(n('income_annual')).toBeLessThanOrEqual(230_000);
       expect(n('missed_payments_12m')).toBeLessThanOrEqual(4);
     }
+  });
+
+  it('works gross income back out of net pay with the 2026–27 tax scales', () => {
+    // $100k: 15% of $26,800 + 30% of $55,000 + 2% Medicare = $22,520.
+    expect(incomeTax(100_000)).toBeCloseTo(22_520, 0);
+    for (const g of [55_000, 98_000, 150_000, 220_000]) expect(grossFromNet(g - incomeTax(g))).toBeCloseTo(g, 0);
+  });
+
+  it('the First Home Guarantee waives LMI under the state cap, and only there', () => {
+    const p = LENDERS.find((l) => l.name === 'Wattle Mutual')!.program;
+    const buyer = [{ field: 'income_annual', value: '130000' }, { field: 'monthly_commitments', value: '0' }, { field: 'savings', value: '45000' },
+      { field: 'missed_payments_12m', value: '0' }, { field: 'employment', value: 'employed', code: 'employed' }];
+    const at = (region: string, first_time_buyer: string) => runProgram(p, buyer, { region, price_band: 600_000, term_years: 30, first_time_buyer, group_size: 1 }).outputs;
+    expect(at('qld', 'yes')).toMatchObject({ first_home_guarantee: 1, lmi: 0 });
+    expect(at('qld', 'no').lmi).toBeGreaterThan(0);
+    // The Northern Territory's cap is $600k: a $600k home is in, a $750k one is not.
+    expect(at('nt', 'yes').first_home_guarantee).toBe(1);
+    expect(runProgram(p, buyer, { region: 'nt', price_band: 750_000, term_years: 30, first_time_buyer: 'yes', group_size: 1 }).outputs.first_home_guarantee).toBe(0);
   });
 
   it('passes its SHACL shapes, for 50 different people', async () => {
@@ -55,5 +73,8 @@ describe('mortgage@1', () => {
     expect(auditProgram({ ...p, inputs: [...p.inputs, 'account_number'] }).ok).toBe(false);
     expect(auditProgram({ ...p, outputs: { leak: { fetch: [1] } as never } }).ok).toBe(false);
     expect(auditProgram({ ...p, output: 'asker' as never }).ok).toBe(false);
+    // `is` only names a declared code term and one of its choices.
+    expect(auditProgram({ ...p, eligible: { is: ['region', 'texas'] } }).ok).toBe(false);
+    expect(auditProgram({ ...p, eligible: { is: ['price_band', '300000-449999'] } }).ok).toBe(false);
   });
 });

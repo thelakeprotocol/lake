@@ -1,4 +1,4 @@
-# Buying a home: joins approved research for a fair price, and is looking for a mortgage.
+# Buying a home in Australia: joins approved research for a fair price, and is looking for a home loan.
 # weight: 3
 owner: buyer
 device: approvals-app
@@ -19,4 +19,4 @@ negotiation:
 # Hosted houses fill each pick: list with one of its choices, the same one every time for the same house.
 intents:
   - pack: mortgage
-    terms: { region: "{{pick:north-west,north-west,yorkshire,yorkshire,midlands,london}}", price_band: auto, term_years: 30, first_time_buyer: "{{pick:yes,yes,no}}" }
+    terms: { region: "{{pick:qld,qld,qld,vic,vic,nsw,wa,sa}}", price_band: auto, term_years: 30, first_time_buyer: "{{pick:yes,yes,no}}" }

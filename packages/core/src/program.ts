@@ -30,13 +30,13 @@ export interface QuoteProgram {
   output: 'owner';
 }
 
-export type Expr = number | boolean | { var: string } | { has: [string, string] } | { [op: string]: Expr[] | BandArgs | AnnuityArgs };
+export type Expr = number | boolean | { var: string } | { has: [string, string] } | { is: [string, string] } | { [op: string]: Expr[] | BandArgs | AnnuityArgs };
 interface BandArgs { of: Expr; table: [number, number][]; else?: number }
 interface AnnuityArgs { principal: Expr; rate_pct: Expr; years: Expr }
 
 const ARITH = ['+', '-', '*', '/', 'min', 'max', 'round', 'floor', 'ceil'] as const;
 const LOGIC = ['<', '<=', '>', '>=', '==', '!=', 'and', 'or', 'not', 'if'] as const;
-const OPS = new Set<string>([...ARITH, ...LOGIC, 'band', 'annuity', 'has']);
+const OPS = new Set<string>([...ARITH, ...LOGIC, 'band', 'annuity', 'has', 'is']);
 const LIMITS = { nodes: 400, depth: 16, outputs: 12, lets: 24 };
 
 /**
@@ -82,6 +82,13 @@ export function auditProgram(p: QuoteProgram): { ok: boolean; problems: string[]
       if (!(p.inputs ?? []).includes(f) || fieldSpec(f)?.kind !== 'code' || typeof code !== 'string') problems.push(`${where}: has takes a declared code field and a code`);
       return;
     }
+    // { is: [term, choice] }: is a code term of the owner's intent this choice? Only for code terms the program declares.
+    if (op === 'is') {
+      const [t, choice] = (arg as unknown as [string, string]) ?? [];
+      const spec = owner?.intent?.terms[t];
+      if (!(p.terms ?? []).includes(t) || spec?.kind !== 'code' || !spec.options.map(String).includes(choice)) problems.push(`${where}: is takes a declared code term and one of its choices`);
+      return;
+    }
     if (!OPS.has(op)) { problems.push(`${where}: "${op}" is not an operator programs may use`); return; }
     if (op === 'band') {
       const b = arg as BandArgs;
@@ -124,6 +131,7 @@ export function runProgram(p: QuoteProgram, claims: Claim[], terms: Record<strin
     switch (op) {
       case 'var': return env.get(arg as unknown as string) ?? Number.NaN;
       case 'has': { const [f, code] = arg as unknown as [string, string]; return claims.some((c) => c.field === f && (c.code ?? c.value) === code) ? 1 : 0; }
+      case 'is': { const [t, choice] = arg as unknown as [string, string]; return String(terms[t]) === choice ? 1 : 0; }
       case '+': return xs().reduce((a, b) => a + b, 0);
       case '-': { const v = xs(); return v.length === 1 ? -v[0]! : v.slice(1).reduce((a, b) => a - b, v[0]!); }
       case '*': return xs().reduce((a, b) => a * b, 1);

@@ -22,6 +22,7 @@ export interface StoredOffer {
   result: QuoteResult;
   labels: QuoteProgram['labels'];
   fee?: number;
+  currency?: string;
   groupSize: number;
   at: string;
   status: 'open' | 'accepted';
@@ -151,7 +152,7 @@ export class Market {
   }
 
   /** A quote: check who sent it and that the program is certified, run it here, keep the result for the owner. */
-  async quote(q: { program: QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number }, profile: LakeProfile, card: AgentCard): Promise<Record<string, unknown>> {
+  async quote(q: { program: QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number; currency?: string }, profile: LakeProfile, card: AgentCard): Promise<Record<string, unknown>> {
     const p = q.program;
     const intent = p ? this.intents.get(p.pack) : undefined;
     if (!intent) return { kind: 'rejected', code: 'no-intent', why: 'my owner is not looking for that right now' };
@@ -168,7 +169,8 @@ export class Market {
     const result = runProgram(p, await this.c.claims(p.inputs), { ...intent.terms, [GROUP_SIZE]: intent.members });
     const offer: StoredOffer = {
       id: randomUUID(), pack: p.pack, quoter: { name: card.name, domain: profile.ownerDomain, webId: profile.webId, url: card.supportedInterfaces[0]!.url },
-      title: p.title, program: programId(p), result, labels: p.labels, fee: typeof q.fee === 'number' ? q.fee : undefined, groupSize: intent.members, at: new Date().toISOString(), status: 'open',
+      title: p.title, program: programId(p), result, labels: p.labels, fee: typeof q.fee === 'number' ? q.fee : undefined,
+      currency: typeof q.currency === 'string' && /^[A-Z]{3}$/.test(q.currency) ? q.currency : undefined, groupSize: intent.members, at: new Date().toISOString(), status: 'open',
     };
     // A newer quote from the same agent replaces its open one (the group grew, say); accepted ones stay.
     for (const [k, old] of this.offers) if (old.pack === offer.pack && old.quoter.webId === offer.quoter.webId && old.status === 'open') this.offers.delete(k);

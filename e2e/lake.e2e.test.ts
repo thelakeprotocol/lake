@@ -465,10 +465,10 @@ describe('bring your own pod', () => {
 });
 
 describe('mortgage offers, priced inside the house', () => {
-  // Three first-time buyers in the same region and price band (a group of 3), eight authorised lenders.
-  // People whose synthetic finances some lender accepts at £150–200k, picked the way the demo bank seeds them.
+  // Three first home buyers in the same state and price band (a group of 3), eight authorised lenders.
+  // People whose synthetic finances some lender accepts at $450–600k in Queensland, picked the way the demo bank seeds them.
   const names = Array.from({ length: 40 }, (_, i) => `mm-${i}`);
-  const terms = { region: 'north-west', price_band: '150000-199999', term_years: 30, first_time_buyer: 'yes' };
+  const terms = { region: 'qld', price_band: '450000-599999', term_years: 30, first_time_buyer: 'yes' };
   const buyers: { name: string; url: string; call: (payload: Record<string, unknown>) => Promise<any> }[] = [];
   let firstProc = 0;
 
@@ -477,7 +477,7 @@ describe('mortgage offers, priced inside the house', () => {
     firstProc = procs.length;
     const affordable = names.filter((n) => {
       const claims = mortgageClaims(syntheticStatements(seedFrom(`/${n}/profile/card#me`)));
-      return LENDERS.some((l) => runProgram(l.program, claims, { ...terms, price_band: 150_000, group_size: 3 }).eligible);
+      return LENDERS.some((l) => runProgram(l.program, claims, { ...terms, price_band: 450_000, group_size: 3 }).eligible);
     }).slice(0, 3);
     expect(affordable).toHaveLength(3);
     // The lenders first, so they're listed when the houses announce what they want.
@@ -486,7 +486,7 @@ describe('mortgage offers, priced inside the house', () => {
       '--auditor', auditor, '--authority', `${specialistsUrl}/register`, '--payments', payments], /8 quoters on/);
     for (const name of affordable) {
       const rules = join(dir, `${name}.yaml`);
-      await writeFile(rules, `owner: ${name}\ndefault: decline\nrules: []\nintents:\n  - pack: mortgage\n    terms: { region: north-west, price_band: "150000-199999", term_years: 30, first_time_buyer: "yes" }\n`);
+      await writeFile(rules, `owner: ${name}\ndefault: decline\nrules: []\nintents:\n  - pack: mortgage\n    terms: { region: qld, price_band: "450000-599999", term_years: 30, first_time_buyer: "yes" }\n`);
       const [pp, hp] = [await freePort(), await freePort()];
       await start(['packages/house/dist/main.js', '--name', name, '--rules', rules, '--data', join(dir, 'houses'), '--packs', 'health,mortgage',
         '--issuers', `health=${issuerUrl},mortgage=${specialistsUrl}/bank`, '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--open-pairing'], /joined the Lake/);
@@ -521,7 +521,7 @@ describe('mortgage offers, priced inside the house', () => {
       expect(m.offers.some((o: any) => o.result.outputs.group_off > 0)).toBe(true);
     }
     const intents = await (await fetch(`${node}/intents?pack=mortgage@1`)).json();
-    expect(intents).toEqual([{ pack: 'mortgage@1', group: 'region=north-west;price_band=150000-199999;first_time_buyer=yes', members: 3 }]);
+    expect(intents).toEqual([{ pack: 'mortgage@1', group: 'region=qld;price_band=450000-599999;first_time_buyer=yes', members: 3 }]);
   });
 
   it('nothing leaves until the owner accepts; then two files go to one lender, who confirms and pays the fee', async () => {
@@ -530,7 +530,7 @@ describe('mortgage offers, priced inside the house', () => {
     const before = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit')).catch(() => []);
     expect(before.filter((f) => f.includes('accept'))).toEqual([]);
     const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
-    expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'agreement in principle', outputs: best.result.outputs } });
+    expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'conditional approval', outputs: best.result.outputs } });
     expect(accepted.answer.feePaid).toBeGreaterThan(0);
     const audit = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit'));
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));

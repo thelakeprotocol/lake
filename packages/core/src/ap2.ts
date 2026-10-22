@@ -10,7 +10,7 @@ export interface IntentMandateSubject {
   id: string;
   natural_language_description: string;
   study: string;
-  /** ISO 4217, e.g. USD, GBP. */
+  /** ISO 4217, e.g. USD, AUD. */
   budget: { currency: string; amount: number };
   intent_expiry: string;
   user_cart_confirmation_required: false;

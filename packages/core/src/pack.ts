@@ -58,7 +58,7 @@ export interface PackField {
   label: string;
   /** The term in an existing standard this field corresponds to (FHIR, FIBO, schema.org…), when there is one. */
   standard?: string;
-  /** Unit for numbers, e.g. GBP, months. */
+  /** Unit for numbers, e.g. AUD, months. */
   unit?: string;
 }
 
@@ -84,6 +84,10 @@ export interface IntentTerm {
   label: string;
   /** The coarse choices an owner picks from: public, so they must not identify anyone. */
   options: (string | number)[];
+  /** Unit of a band or number term, e.g. AUD: how the owner's panel shows the choices. */
+  unit?: string;
+  /** Plain-English names for code choices, for the owner's panel (e.g. nsw → New South Wales). */
+  names?: Record<string, string>;
 }
 
 export interface QuoterExample {
@@ -92,6 +96,8 @@ export interface QuoterExample {
   program: import('./program.js').QuoteProgram;
   /** What it pays the owner on acceptance, in whole currency units (e.g. a procuration fee). */
   feeOnAccept?: number;
+  /** ISO 4217 currency of the fee (default USD). */
+  currency?: string;
 }
 
 export interface Claim {

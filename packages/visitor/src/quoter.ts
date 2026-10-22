@@ -12,7 +12,7 @@ import { makeHuman } from './dispatch.js';
  * supplier…). It gets authorised by the pack's authority and its program certified by an auditor once;
  * then, for every intent a house sends it, it sends back its program to run inside that house. It never
  * sees the result unless the owner accepts; then it checks the released original with its issuer, confirms,
- * and pays the owner its fee under its own human's spending mandate.
+ * and pays the owner its fee, in its currency, under its own human's spending mandate.
  */
 export interface QuoterOptions {
   example: QuoterExample;
@@ -53,10 +53,11 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
   if (certified.reply.kind !== 'certified') throw new Error(`${ex.name}'s program not certified: ${(certified.reply.problems ?? []).join('; ')}`);
   const certificate: Attachment = { credential: certified.reply.credential, card: await cardOf(o.auditor) };
 
+  const currency = ex.currency ?? 'USD';
   const human = await makeHuman(await generateIdentity(), ex.domain);
   const mandate = await signIntentMandate(human.id, human.webId, {
     id: webId, natural_language_description: `${ex.name}: fees to applicants who accept our offers`, study: `urn:lake:quoter:${ex.domain}`,
-    budget: { currency: 'GBP', amount: 1_000_000 }, intent_expiry: new Date(Date.now() + 365 * 86_400_000).toISOString(), user_cart_confirmation_required: false,
+    budget: { currency, amount: 1_000_000 }, intent_expiry: new Date(Date.now() + 365 * 86_400_000).toISOString(), user_cart_confirmation_required: false,
   });
   let quotes = 0;
 
@@ -79,7 +80,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
 
   async function sendQuote(house: string) {
     try {
-      const envelope = await signMessage({ kind: 'quote', program: ex.program, certificate, authorisation, fee: ex.feeOnAccept }, id, { iss: webId });
+      const envelope = await signMessage({ kind: 'quote', program: ex.program, certificate, authorisation, fee: ex.feeOnAccept, currency }, id, { iss: webId });
       await sendLake(house, { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 20_000 });
       quotes++;
     } catch (e) {
@@ -87,7 +88,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     }
   }
 
-  /** The owner said yes: check the released original with its issuer, confirm in principle, pay the fee. */
+  /** The owner said yes: check the released original with its issuer, confirm conditionally, pay the fee. */
   async function accepted(m: Record<string, unknown>, houseWebId: string, house: string): Promise<Record<string, unknown>> {
     const release = m.release as { original?: string; credential?: string; issuer?: { recordId: string; card: AgentCard } } | undefined;
     if (!release?.original || !release.credential || !release.issuer) return { kind: 'rejected', code: 'malformed', why: 'expected the original record, its credential and its issuer' };
@@ -99,13 +100,13 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     } catch (e) {
       return { kind: 'declined', why: `the record did not check out: ${(e as Error).message}` };
     }
-    // Same rules, now on the verified original: the agreement in principle stands, or it doesn't.
+    // Same rules, now on the verified original: the conditional approval stands, or it doesn't.
     const terms = { ...(m.terms as Record<string, string | number>), [GROUP_SIZE]: Number((m.terms as Record<string, unknown>)?.[GROUP_SIZE] ?? 1) };
     const result = runProgram(ex.program, p!.source!.convert(release.original), terms);
     let paid: number | undefined;
     if (result.eligible && ex.feeOnAccept && o.payments) {
       try {
-        const payment = await signPaymentMandate(id, webId, { payee: houseWebId, amount: ex.feeOnAccept, intentMandate: mandate, agreement: `urn:lake:offer:${String(m.ref)}`, currency: 'GBP' });
+        const payment = await signPaymentMandate(id, webId, { payee: houseWebId, amount: ex.feeOnAccept, intentMandate: mandate, agreement: `urn:lake:offer:${String(m.ref)}`, currency });
         const settled = await ask(`${o.payments}/a2a`, me, { kind: 'settle', intent: { credential: mandate, card: human.card }, payments: [payment] });
         const receipt = settled.reply.receipts?.[0];
         if (receipt) {
@@ -117,7 +118,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       }
     }
     return result.eligible
-      ? { kind: 'agreed', what: 'agreement in principle', outputs: result.outputs, feePaid: paid ?? 0, next: 'a full application, with the documents you choose to send' }
+      ? { kind: 'agreed', what: 'conditional approval', outputs: result.outputs, feePaid: paid ?? 0, next: 'a full application, with the documents you choose to send' }
       : { kind: 'declined', why: 'the verified record does not meet our rules after all' };
   }
 

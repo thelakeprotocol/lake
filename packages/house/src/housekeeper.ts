@@ -50,7 +50,7 @@ interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string }
 interface StatusPayload { kind: 'status'; offerId: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
-interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core').QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number }
+interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core').QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number; currency?: string }
 
 const HOUR = 3_600_000;
 

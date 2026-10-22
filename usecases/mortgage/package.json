@@ -1,7 +1,7 @@
 {
   "name": "@thelakeprotocol/usecase-mortgage",
   "version": "0.1.0",
-  "description": "Mortgage offers on the Lake: the mortgage@1 pack (fields from bank statements, shapes, Open Banking converter, synthetic statements, intents, demo lenders). Lenders' rules run inside the house; only the owner sees the offer.",
+  "description": "Australian home-loan offers on the Lake: the mortgage@1 pack (fields from bank data, shapes, Consumer Data Right converter, synthetic statements, intents, demo lenders). Lenders' rules run inside the house; only the owner sees the offer.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -13,5 +13,5 @@
   "devDependencies": { "@zazuko/env": "^3.0.2", "n3": "1", "@types/n3": "^1.26.4", "rdf-validate-shacl": "0.6.5" },
   "repository": { "type": "git", "url": "git+https://github.com/thelakeprotocol/lake.git", "directory": "usecases/mortgage" },
   "homepage": "https://lake.doneinfifty.com",
-  "keywords": ["lake", "solid", "mortgage", "open-banking"]
+  "keywords": ["lake", "solid", "mortgage", "consumer-data-right", "australia"]
 }
