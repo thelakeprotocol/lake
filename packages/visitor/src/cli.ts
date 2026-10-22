@@ -207,12 +207,14 @@ async function dispatchCmd(chosen?: Study) {
   const base = chosen ?? known.find((s) => s.question.toLowerCase() === a.goal!.toLowerCase()) ?? known[0];
   if (!base) throw new Error('no pack loaded offers a study; try --packs health');
   const study = chosen ?? { ...base, privacy: { ...base.privacy, epsilon: Number(a.epsilon) } };
-  say('dispatch', `"${study.question}"  (as ${domain}, $${a.price ?? 2} per participant)`);
+  // Unpaid means offering nothing: an agent never promises money it can't pay.
+  const price = Number(a.price ?? (a.unpaid ? 0 : 2));
+  say('dispatch', `"${study.question}"  (as ${domain}, $${price} per participant)`);
   try {
     const r = await dispatch({
       visitor, node: a.node!, ethics: a.ethics!, auditor: a.auditor!, link, log: say, houseCache: `${homedir()}/.lake/houses.json`,
       study,
-      priceUsd: Number(a.price ?? 2),
+      priceUsd: price,
       extraFields: a['extra-fields']?.split(',').filter(Boolean),
       waitSeconds: Number(a.wait),
       concurrency: Number(a.concurrency),

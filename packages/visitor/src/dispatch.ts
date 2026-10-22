@@ -86,6 +86,9 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const id = studyId(o.study);
   const beat = () => new Promise((r) => setTimeout(r, o.paceMs ?? 0));
   const fields = [...studyFields(o.study), ...(o.extraFields ?? [])];
+  // Every agreement this agent countersigns is a promise to pay. Without a budget to pay from, it offers $0 and accepts nothing more.
+  const budget = o.money?.budgetUsd ?? 0;
+  if (o.priceUsd > 0 && !o.money) throw new Error(`can't offer $${o.priceUsd} a house with no budget to pay it: set a budget, or offer $0`);
 
   let intent: Attachment | null = null;
   if (o.money) {
@@ -157,7 +160,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     const cost = b.priceUsd * everyone.length;
     const missing = studyFields(o.study).filter((f) => !b.fields.includes(f));
     if (missing.length) log('bargain', `declined: the bloc refuses ${missing.join(', ')}, which the study needs`);
-    else if (o.money && cost > o.money.budgetUsd) log('bargain', `declined: $${cost} is over the $${o.money.budgetUsd} mandate; a human must approve`);
+    else if (cost > budget) log('bargain', o.money ? `declined: $${cost} is over the $${budget} mandate; a human must approve` : `declined: the bloc asks $${b.priceUsd} a house, and this study has no budget to pay it`);
     else {
       log('bargain', `accepted: everyone who joined or countered gets the bloc's terms`);
       joined.clear();
@@ -189,11 +192,19 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     }
   }
 
-  log('compute', `countersigning ${joined.size} agreement(s) and running the certified study inside each house`);
+  // Countersign only what the budget can pay: a house beyond it never gets a signed promise, so no deal is left unpaid.
+  const excluded: MissionResult['excluded'] = [];
+  let committed = 0;
+  const affordable = [...joined.values()].filter((j) => {
+    if (committed + j.priceUsd > budget) { excluded.push({ house: j.house.name, why: `over budget: $${budget} pays for no more houses at $${j.priceUsd}` }); return false; }
+    committed += j.priceUsd;
+    return true;
+  });
+  if (affordable.length < joined.size) log('compute', `${joined.size - affordable.length} house(s) agreed, but the $${budget} budget can't pay them; not countersigning those`);
+  log('compute', `countersigning ${affordable.length} agreement(s) and running the certified study inside each house`);
   const fragments: number[][] = [];
   const answered: Joined[] = [];
-  const excluded: MissionResult['excluded'] = [];
-  await pool([...joined.values()], o.concurrency ?? 32, async (j) => {
+  await pool(affordable, o.concurrency ?? 32, async (j) => {
     try {
       const countersignature = j.agreement ? await signAgreement(j.agreement.agreement, o.visitor.id) : undefined;
       const { reply } = await askPatiently(j.house.url, o.visitor, { kind: 'compute', grant: j.grant, study: o.study, countersignature });

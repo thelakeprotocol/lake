@@ -28,6 +28,8 @@ let nodeB: string;
 let ethics: string;
 let auditor: string;
 let payments: string;
+/** Every priced study needs a human's budget behind it (an agent never promises what it can't pay). */
+const funded = async (budgetUsd = 500) => ({ money: { human: await makeHuman(await generateIdentity(), 'uni.example'), budgetUsd, payments } });
 let issuerUrl: string;
 let guide: string;
 let inspector: string;
@@ -201,7 +203,7 @@ describe('the owner', () => {
 
   it("waits for the owner's tap, and the study includes the house once the owner allows it", async () => {
     const v = await visitor('uni.example');
-    const mission = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20 });
+    const mission = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20, ...(await funded()) });
     let req: { id: string; offerId: string; visitor: { webId: string }; fields: string[]; purpose: string; study: string } | undefined;
     for (let i = 0; i < 40 && !req; i++) {
       await new Promise((r) => setTimeout(r, 250));
@@ -276,10 +278,20 @@ describe('money', () => {
     expect(r.paid).toBeNull();
   });
 
-  it('cannot spend past what the human signed for', async () => {
+  it('never promises more than the human signed for: a $5 budget countersigns one $5 agreement, not two', async () => {
     const r = await paidRun(5, 5);
-    expect(r.participants).toBe(2);
-    expect(r.paid?.refused).toMatch(/a human must approve/);
+    expect(r.participants).toBe(1);
+    expect(r.paid).toMatchObject({ total: 5, houses: 1 });
+    expect(r.excluded.some((x) => /over budget/.test(x.why))).toBe(true);
+  });
+
+  it('an unpaid study accepts no price: it declines the bloc instead of promising money it has none of', async () => {
+    const v = await visitor('uni.example');
+    const r = await dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 0 });
+    expect(r.bloc?.priceUsd).toBeGreaterThan(0);
+    expect(r.participants).toBe(0);
+    expect(r.paid).toBeNull();
+    await expect(dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5 })).rejects.toThrow(/no budget to pay it/);
   });
 });
 
@@ -356,9 +368,9 @@ describe('the open door', () => {
   }, 60_000);
 });
 
-describe('a mission, no money', () => {
+describe('a mission', () => {
   const run = async (o: Partial<Parameters<typeof dispatch>[0]> = {}) =>
-    dispatch({ visitor: await visitor('uni.example'), node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...o });
+    dispatch({ visitor: await visitor('uni.example'), node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()), ...o });
 
   it('goes ethics → audit → knock → decide → grant → compute in place → answer, and moves no records', async () => {
     const r = await run();
@@ -598,7 +610,7 @@ describe('federation (runs last: it stops the nodes)', () => {
   });
 
   it('a mission finishes when a node dies in the middle of it', async () => {
-    const mission = dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5 });
+    const mission = dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()) });
     await new Promise((r) => setTimeout(r, 300));
     procs[0]!.kill('SIGTERM'); // the first node, gone
     const r = await mission;
@@ -610,7 +622,7 @@ describe('federation (runs last: it stops the nodes)', () => {
     await new Promise((r) => setTimeout(r, 300));
     const card = await (await fetch(`${houses.stan}/.well-known/agent-card.json`)).json();
     expect((await verifyLakeCard(card)).role).toBe('house');
-    const r = await dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5 });
+    const r = await dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()) });
     expect(r.houses).toBe(3);
     expect(r.participants).toBeGreaterThan(0);
   });

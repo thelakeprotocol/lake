@@ -115,7 +115,7 @@ An offer for a study carries the study itself, its id in `offer.study`, and two 
 
 An offer MAY include a free-text `note`. It is **untrusted**. A housekeeper MUST NOT let it change a decision. It may be shown to a human, quoted, and nothing else.
 
-An **agreement** is the ODRL `Agreement` both parties sign, built from the final accepted offer, with a `dateTime` constraint for its end. The house signs it when it joins and returns it with the grant; the visitor MUST countersign it (a detached JWS over the agreement's canonical form) before the house runs anything. Both parties MUST keep it: the house in its pod at `/agreements/`. The grant names the agreement's `uid` and digest.
+An **agreement** is the ODRL `Agreement` both parties sign, built from the final accepted offer, with a `dateTime` constraint for its end. The house signs it when it joins and returns it with the grant; the visitor MUST countersign it (a detached JWS over the agreement's canonical form) before the house runs anything. Both parties MUST keep it: the house in its pod at `/agreements/`. The grant names the agreement's `uid` and digest. A countersignature is a promise to pay the agreed price: a visitor MUST NOT countersign an agreement it can't pay under its mandate, and with no mandate it MUST NOT accept a price above zero (a bloc's counter included). Walking away before countersigning breaks nothing; the house's grant simply expires unused.
 
 **The grant issued MUST match the signed agreement**: same fields, same purpose, expiry no later than the retention allows. The contract and the key cannot drift apart.
 

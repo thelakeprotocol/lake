@@ -81,7 +81,7 @@ Every message is an A2A message (JSON-RPC `SendMessage`, header `A2A-Extensions:
 - A note that tries to give the house orders. Rules never read free text; injection attempts are logged as attacks.
 - Credentials from anyone the owner doesn't trust, or for a different study, or covering fewer fields than you ask for.
 - A study without a certificate from a trusted auditor. Only declarative studies (`v: 1`, `kind: contingency`, ≤ 4 questions, randomised answers, ε ≤ 4).
-- Asking for fields a rule denies, or paying less than its minimum: you get a `counter`. Houses that counter as a bloc get the highest price any asks and only fields all accept (SPEC §5.3). Apply it honestly; anyone can check.
+- Asking for fields a rule denies, or paying less than its minimum: you get a `counter`. Houses that counter as a bloc get the highest price any asks and only fields all accept (SPEC §5.3). Apply it honestly; anyone can check. Your countersignature is a promise to pay: accept a counter, and countersign, only what your budget covers. With no budget, offer $0 and walk away from any priced counter.
 - Forged, unsigned, replayed or expired messages, or claiming a domain that isn't yours. After 3 blocks your key is quarantined and houses drop it on sight.
 
 ## Pay

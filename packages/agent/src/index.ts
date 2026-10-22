@@ -150,7 +150,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         ethics: o.ethics ?? 'http://ethics:4500',
         auditor: o.auditor ?? 'http://auditor:4400',
         study: s.study ?? studyFor(question),
-        priceUsd: s.priceUsd ?? 2,
+        // With no budget, offer nothing: a priced offer is a promise to pay.
+        priceUsd: s.priceUsd ?? (budget > 0 ? 2 : 0),
         extraFields: s.extraFields,
         waitSeconds: s.waitSeconds,
         money: budget > 0

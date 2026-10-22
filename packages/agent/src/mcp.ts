@@ -167,8 +167,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (only randomised answers leave), pay under a signed budget, and return the answer. Records moved stays 0.',
       inputSchema: {
         question: z.string().default(SANDBOX_STUDIES[0]!.question).describe(`One of the questions this Lake's auditor certifies: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`),
-        price_usd: z.number().default(2),
-        budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid'),
+        price_usd: z.number().optional().describe('Offered per house; default $2, or $0 when the budget is 0'),
+        budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid (then it offers $0 and accepts no counter-offer with a price)'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
         wait_seconds: z.number().default(0).describe('How long to wait for owners asked to tap Allow'),
       },
