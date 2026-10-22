@@ -57,7 +57,7 @@ async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
 // ---- navigation ----
 const TABS = [
   ['home', 'Home'], ['requests', 'Requests'], ['keys', 'Keys'], ['rules', 'Rules'],
-  ['agents', 'Agents'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'],
+  ['offers', 'Offers'], ['agents', 'Agents'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 let tab: Tab = TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home';
@@ -82,7 +82,7 @@ const nice = (f: string) => f.replace(/_/g, ' ');
 
 async function show() {
   try {
-    const render = { home, requests, keys, rules, agents, money, data, move }[tab];
+    const render = { home, requests, keys, rules, offers, agents, money, data, move }[tab];
     await render();
     $('status').className = 'dot live';
   } catch (e) {
@@ -326,6 +326,71 @@ function renderRules(message?: { ok: boolean; text: string }) {
   );
 }
 
+// ---- Offers ----
+type Term = { kind: string; label: string; options: (string | number)[] };
+type Offer = {
+  id: string; pack: string; quoter: { name: string; domain: string }; title: string; status: string; groupSize: number; fee?: number;
+  result: { eligible: boolean; outputs: Record<string, number> }; labels?: Record<string, { label: string; unit?: string }>; answer?: Record<string, unknown>;
+};
+const money0 = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+const fmt = (v: number, unit?: string) => (unit === 'GBP' ? money0(v) : unit === '%' ? `${v}%` : String(v));
+
+async function offers() {
+  const m = await call<{ intents: { pack: string; terms: Record<string, string | number>; members: number; group: string }[]; offers: Offer[]; packs: { id: string; title: string; terms: Record<string, Term> }[] }>({ kind: 'panel.market' });
+  if (!m.packs.length) return void view().replaceChildren(h('p', { class: 'muted' }, 'This house takes part in no use case that has offers yet.'));
+  const blocks: Child[] = [h('p', { class: 'lede' }, 'Say what you’re looking for. Authorised agents price it inside your house, on your own data, and only you see the result. Nothing leaves until you accept.')];
+  for (const p of m.packs) {
+    const intent = m.intents.find((i) => i.pack === p.id);
+    if (!intent) {
+      // The form: the pack's coarse terms, each a choice, plus "work it out for me" where the pack can.
+      const selects = Object.entries(p.terms).map(([k, t]) => {
+        const sel = h('select', { name: k }, ...(k === 'price_band' ? [h('option', { value: 'auto' }, 'What I can afford (worked out in my house)')] : []), ...t.options.map((o) => h('option', { value: String(o) }, k === 'price_band' ? String(o).split('-').map((x) => money0(Number(x))).join('–') : String(o))));
+        return h('div', { class: 'field' }, h('label', {}, t.label), sel);
+      });
+      const go = h('button', { class: 'btn primary', type: 'button' }, `Ask for ${p.title.toLowerCase()}`);
+      go.onclick = async () => {
+        go.disabled = true;
+        const terms = Object.fromEntries(selects.map((d) => { const s = d.querySelector('select')!; return [s.name, /^\d+$/.test(s.value) ? Number(s.value) : s.value]; }));
+        const r = await call<{ error?: string }>({ kind: 'panel.intent.open', pack: p.id, terms }).catch((e) => ({ error: (e as Error).message }));
+        if (r.error) { alert(r.error); go.disabled = false; } else void show();
+      };
+      blocks.push(h('div', { class: 'card', style: 'max-width:820px' }, h('h3', {}, p.title), h('div', { class: 'grid2', style: 'margin-top:12px' }, ...selects), h('div', { style: 'margin-top:14px' }, go)));
+      continue;
+    }
+    const mine = m.offers.filter((o) => o.pack === p.id);
+    const eligible = mine.filter((o) => o.result.eligible);
+    const stop = h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.intent.close', pack: p.id }); void show(); } }, 'Stop looking');
+    blocks.push(h('div', { class: 'card ok', style: 'max-width:820px' },
+      h('h3', {}, `Looking for ${p.title.toLowerCase()}`),
+      h('p', { class: 'muted', style: 'margin:6px 0 10px' }, `${Object.entries(intent.terms).map(([k, x]) => `${p.terms[k]?.label ?? k}: ${k === 'price_band' ? String(x).split('-').map((y) => money0(Number(y))).join('–') : x}`).join(' · ')}`),
+      h('div', { class: 'r-meta' }, `${intent.members} household${intent.members === 1 ? '' : 's'} in your group · ${mine.length} lender${mine.length === 1 ? '' : 's'} priced it · ${eligible.length} offer${eligible.length === 1 ? '' : 's'} for you`),
+      h('div', { style: 'margin-top:12px' }, stop)));
+    if (!mine.length) blocks.push(h('p', { class: 'muted' }, 'Waiting for authorised lenders to price it…'));
+    for (const o of mine) {
+      const out = o.result.outputs;
+      const lab = (k: string) => o.labels?.[k] ?? { label: k };
+      const head = o.result.eligible ? h('div', { class: 'r-title', style: 'font-size:22px;font-family:var(--f-display)' }, `${out.rate}%`, h('span', { class: 'muted', style: 'font-size:14px;margin-left:10px;font-family:var(--f-body)' }, `${money0(out.monthly ?? 0)} a month`)) : h('div', { class: 'r-title muted' }, 'Not for you this time');
+      const accept = h('button', { class: 'btn allow', type: 'button' }, o.status === 'accepted' ? 'Accepted' : 'Accept');
+      if (o.status === 'accepted' || !o.result.eligible || eligible.some((x) => x.status === 'accepted')) accept.disabled = true;
+      accept.onclick = async () => {
+        if (!confirm(`Accept ${o.quoter.name}'s offer? Your bank statements go to them, and only them, so they can confirm it.`)) return;
+        accept.disabled = true;
+        const r = await call<Offer & { error?: string }>({ kind: 'panel.offer.accept', offer: o.id }).catch((e) => ({ error: (e as Error).message }) as never);
+        if (r.error) alert(r.error);
+        void show();
+      };
+      blocks.push(h('article', { class: 'req', style: `border-color:${o.result.eligible ? 'var(--mint)' : 'var(--line)'};background:none` },
+        h('div', { class: 'who', style: 'font-size:16px' }, o.quoter.name, (out.group_off ?? 0) > 0 ? h('span', { class: 'chip share', style: 'margin-left:8px' }, `group rate −${out.group_off}%`) : ''),
+        head,
+        o.result.eligible ? h('dl', { class: 'facts' }, ...['loan', 'ltv_pct', 'max_loan'].filter((k) => out[k] !== undefined).map((k) => h('div', {}, h('dt', {}, lab(k).label), h('dd', {}, fmt(out[k]!, lab(k).unit)))),
+          o.fee ? h('div', {}, h('dt', {}, 'Pays you'), h('dd', {}, `${money0(o.fee)} if you accept`)) : '') : '',
+        o.answer ? h('p', { class: 'advice' }, h('b', {}, o.quoter.name), String(o.answer.kind === 'agreed' ? `Agreed in principle. ${o.answer.feePaid ? `${money0(Number(o.answer.feePaid))} paid to you.` : ''} Next: ${o.answer.next ?? ''}` : o.answer.why ?? o.answer.kind)) : '',
+        o.result.eligible ? h('div', { class: 'actions', style: 'grid-template-columns:1fr' }, accept) : ''));
+    }
+  }
+  view().replaceChildren(...blocks.filter((b): b is Node | string => !!b));
+}
+
 // ---- Agents ----
 async function agents() {
   const list = await call<{ agent: string; knocks: number; last: string; lastDecision?: string; blocked: number; reputation: number | null }[]>({ kind: 'panel.agents' });
@@ -423,7 +488,7 @@ function start() {
   void refreshBadge();
   setInterval(refreshBadge, 1500);
   // Live tabs refresh themselves; the rules editor never overwrites what you're typing.
-  setInterval(() => { if (['home', 'requests', 'keys', 'agents'].includes(tab) && !document.hidden) void show(); }, 3000);
+  setInterval(() => { if (['home', 'requests', 'keys', 'offers', 'agents'].includes(tab) && !document.hidden && !document.querySelector('select:focus')) void show(); }, 3000);
 }
 
 // Already paired? A signed "list" answers. Otherwise offer to pair (automatically when the link carries a token).

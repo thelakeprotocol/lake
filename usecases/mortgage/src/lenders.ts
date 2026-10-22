@@ -80,20 +80,20 @@ const lender = (name: string, slug: string, r: LenderRules, extra: Omit<QuoterEx
 
 /** Fictional lenders with different appetites, so offers genuinely differ. Most also bid for groups: a discount when enough households ask together. */
 export const LENDERS: QuoterExample[] = [
-  lender('Northern Mutual', 'northern-mutual', { rates: [[0.6, 4.09], [0.75, 4.24], [0.85, 4.49], [0.9, 4.79], [0.95, 5.19]], maxLti: 4.5, maxMissed: 0, stress: 3, affordShare: 0.4, selfEmployed: true },
+  lender('Northern Mutual', 'northern-mutual', { rates: [[0.6, 4.09], [0.75, 4.24], [0.85, 4.49], [0.9, 4.79], [0.95, 5.19]], maxLti: 4.5, maxMissed: 0, stress: 2, affordShare: 0.45, selfEmployed: true },
     { feeOnAccept: 400 }, { off: 0.2, minMembers: 3 }),
-  lender('Harbourside Bank', 'harbourside', { rates: [[0.6, 3.99], [0.75, 4.19], [0.85, 4.59], [0.9, 4.99]], maxLti: 4.75, maxMissed: 0, stress: 3, affordShare: 0.38, selfEmployed: false },
+  lender('Harbourside Bank', 'harbourside', { rates: [[0.6, 3.99], [0.75, 4.19], [0.85, 4.59], [0.9, 4.99]], maxLti: 4.75, maxMissed: 0, stress: 2, affordShare: 0.43, selfEmployed: false },
     { feeOnAccept: 350 }, { off: 0.25, minMembers: 3 }),
-  lender('Peak Building Society', 'peak-bs', { rates: [[0.75, 4.59], [0.9, 4.89], [0.95, 5.09]], maxLti: 4.5, higherLti: { from: 50_000, lti: 5 }, maxMissed: 1, missedLoading: 0.35, stress: 3, affordShare: 0.42, selfEmployed: true },
+  lender('Peak Building Society', 'peak-bs', { rates: [[0.75, 4.59], [0.9, 4.89], [0.95, 5.09]], maxLti: 4.5, higherLti: { from: 50_000, lti: 5 }, maxMissed: 1, missedLoading: 0.35, stress: 2, affordShare: 0.47, selfEmployed: true },
     { feeOnAccept: 300 }, { off: 0.15, minMembers: 3 }),
-  lender('Greenway Bank', 'greenway', { rates: [[0.6, 3.89], [0.75, 4.09], [0.85, 4.39]], maxLti: 4.5, maxMissed: 0, stress: 3, affordShare: 0.35, selfEmployed: false },
+  lender('Greenway Bank', 'greenway', { rates: [[0.6, 3.89], [0.75, 4.09], [0.85, 4.39]], maxLti: 4.5, maxMissed: 0, stress: 2, affordShare: 0.4, selfEmployed: false },
     { feeOnAccept: 500 }, { off: 0.3, minMembers: 3 }),
-  lender('Old Quay Mutual', 'old-quay', { rates: [[0.6, 4.19], [0.75, 4.29], [0.85, 4.49], [0.9, 4.69], [0.95, 4.99]], maxLti: 4.25, maxMissed: 2, missedLoading: 0.25, stress: 3, affordShare: 0.42, selfEmployed: true },
+  lender('Old Quay Mutual', 'old-quay', { rates: [[0.6, 4.19], [0.75, 4.29], [0.85, 4.49], [0.9, 4.69], [0.95, 4.99]], maxLti: 4.25, maxMissed: 2, missedLoading: 0.25, stress: 2, affordShare: 0.47, selfEmployed: true },
     { feeOnAccept: 250 }),
-  lender('Brightstone Bank', 'brightstone', { rates: [[0.75, 4.14], [0.85, 4.34], [0.9, 4.64]], maxLti: 4.5, higherLti: { from: 75_000, lti: 5.5 }, maxMissed: 0, stress: 3, affordShare: 0.4, selfEmployed: false },
+  lender('Brightstone Bank', 'brightstone', { rates: [[0.75, 4.14], [0.85, 4.34], [0.9, 4.64]], maxLti: 4.5, higherLti: { from: 75_000, lti: 5.5 }, maxMissed: 0, stress: 2, affordShare: 0.45, selfEmployed: false },
     { feeOnAccept: 450 }, { off: 0.2, minMembers: 3 }),
-  lender('Riverside Building Society', 'riverside-bs', { rates: [[0.6, 4.29], [0.75, 4.39], [0.85, 4.59], [0.9, 4.79], [0.95, 5.29]], maxLti: 4.5, maxMissed: 3, missedLoading: 0.5, stress: 3, affordShare: 0.42, selfEmployed: true },
+  lender('Riverside Building Society', 'riverside-bs', { rates: [[0.6, 4.29], [0.75, 4.39], [0.85, 4.59], [0.9, 4.79], [0.95, 5.29]], maxLti: 4.5, maxMissed: 3, missedLoading: 0.5, stress: 2, affordShare: 0.47, selfEmployed: true },
     { feeOnAccept: 300 }, { off: 0.1, minMembers: 3 }),
-  lender('Capital Home Loans', 'capital-home', { rates: [[0.6, 3.95], [0.75, 4.15]], maxLti: 4.5, maxMissed: 0, stress: 3, affordShare: 0.38, selfEmployed: false },
+  lender('Capital Home Loans', 'capital-home', { rates: [[0.6, 3.95], [0.75, 4.15]], maxLti: 4.5, maxMissed: 0, stress: 2, affordShare: 0.43, selfEmployed: false },
     { feeOnAccept: 600 }, { off: 0.2, minMembers: 3 }),
 ];

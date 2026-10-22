@@ -37,7 +37,7 @@ export const mortgage: LakePack = {
   intent: {
     terms: {
       region: { kind: 'code', label: 'Region', options: ['north-west', 'north-east', 'yorkshire', 'midlands', 'east', 'london', 'south-east', 'south-west', 'wales', 'scotland'] },
-      price_band: { kind: 'band', label: 'Price', options: ['150000-199999', '200000-249999', '250000-299999', '300000-399999', '400000-499999'] },
+      price_band: { kind: 'band', label: 'Price', options: ['100000-149999', '150000-199999', '200000-249999', '250000-299999', '300000-399999', '400000-499999'] },
       term_years: { kind: 'number', label: 'Term (years)', options: [25, 30, 35] },
       first_time_buyer: { kind: 'code', label: 'First-time buyer', options: ['yes', 'no'] },
     },
@@ -46,7 +46,7 @@ export const mortgage: LakePack = {
     auto: (claims) => {
       const n = (f: string) => Number(claims.find((c) => c.field === f)?.value ?? 0);
       const reach = n('income_annual') * 4.5 + n('savings') * 0.9;
-      const bands = ['150000-199999', '200000-249999', '250000-299999', '300000-399999', '400000-499999'];
+      const bands = ['100000-149999', '150000-199999', '200000-249999', '250000-299999', '300000-399999', '400000-499999'];
       return { price_band: [...bands].reverse().find((b) => Number.parseInt(b, 10) <= reach) ?? bands[0]! };
     },
   },
