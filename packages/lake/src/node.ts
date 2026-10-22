@@ -49,7 +49,7 @@ type Wire =
   | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: Line[]; guilds: { tag: string; members: number }[] }
   | { type: 'event'; event: LakeEvent; text: string; counters: Counters; participant?: Participant }
   | { type: 'reset' };
-interface Participant { id: string; role: string; label: string; tags: string[]; domain: string }
+interface Participant { id: string; role: string; label: string; tags: string[]; domain: string; skills: string[] }
 interface Line { event: LakeEvent; text: string }
 
 /**
@@ -92,7 +92,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     o.id,
   );
 
-  const participant = (e: Entry): Participant => ({ id: e.id, role: e.profile.role, label: e.label, tags: e.profile.tags, domain: e.profile.ownerDomain });
+  // Skill ids let the map tell what an agent does (a quoter docks at the edge); the card is public anyway.
+  const participant = (e: Entry): Participant => ({ id: e.id, role: e.profile.role, label: e.label, tags: e.profile.tags, domain: e.profile.ownerDomain, skills: (e.card.skills ?? []).map((s) => s.id).slice(0, 12) });
   const recount = () => {
     const all = registry.all();
     counters.houses = all.filter((e) => e.profile.role === 'house').length;

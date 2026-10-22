@@ -1,0 +1,6 @@
+# A first home buyer in the offers demo. The demo opens each one's intent through its owner's own control
+# panel, in waves, so the map shows groups forming; nothing here asks for anything.
+owner: buyer
+device: approvals-app
+default: decline
+rules: []

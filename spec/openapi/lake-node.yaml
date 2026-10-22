@@ -67,7 +67,7 @@ paths:
                 type: object
                 properties:
                   counters: { $ref: '#/components/schemas/Counters' }
-                  participants: { type: array, items: { type: object, properties: { id: { type: string }, role: { type: string }, label: { type: string }, tags: { type: array, items: { type: string } }, domain: { type: string } } } }
+                  participants: { type: array, items: { type: object, properties: { id: { type: string }, role: { type: string }, label: { type: string }, tags: { type: array, items: { type: string } }, domain: { type: string }, skills: { type: array, items: { type: string }, description: "skill ids from its card" } } } }
                   guilds: { type: array, items: { type: object, properties: { tag: { type: string }, members: { type: integer } } } }
   /events (WebSocket):
     get:

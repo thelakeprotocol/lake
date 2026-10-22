@@ -133,6 +133,8 @@ async function hosted(n: number) {
   const names = Array.from({ length: n }, (_, i) => `${prefix}${i}`);
   const dataDir = join(a.data!, 'hosted');
   const log = (msg: string) => console.log(`[hosted ${prefix}*] ${msg}`);
+  // One process holds every hosted house: a slip in one (a pod write that timed out) must not take down the rest.
+  process.on('unhandledRejection', (e) => log(`unhandled: ${(e as Error)?.message ?? e}`));
 
   log(`starting one pod server for ${n} houses`);
   const pods = await startProvider({ dataDir, port: podPort, baseUrl: podUrl, names });

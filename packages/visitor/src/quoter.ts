@@ -71,20 +71,34 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     if (m.kind === 'authorisation') return reply({ kind: 'authorisation', authorisation });
     if (m.kind === 'intent' && m.pack === ex.program.pack && house) {
       // Answer at once; quote right after, as a request of our own to the house.
-      setTimeout(() => void sendQuote(house), 10);
+      setTimeout(() => enqueue(house), 10);
       return reply({ kind: 'received' });
     }
     if (m.kind === 'accept' && house) return reply(await accepted(m, v.profile.webId, house));
     return reply({ kind: 'rejected', code: 'malformed', why: 'send an intent, an authorisation request, or an acceptance' });
   });
 
+  // A few quotes at a time, and another try for a house that was busy: a hundred homes asking at once is normal.
+  const queue: string[] = [];
+  let active = 0;
+  function enqueue(house: string) {
+    if (house && !queue.includes(house)) queue.push(house);
+    while (active < 4 && queue.length) {
+      active++;
+      void sendQuote(queue.shift()!).finally(() => { active--; enqueue(''); });
+    }
+  }
   async function sendQuote(house: string) {
-    try {
-      const envelope = await signMessage({ kind: 'quote', program: ex.program, certificate, authorisation, fee: ex.feeOnAccept, currency }, id, { iss: webId });
-      await sendLake(house, { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 20_000 });
-      quotes++;
-    } catch (e) {
-      log(`${ex.name}: could not quote ${house}: ${(e as Error).message}`);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const envelope = await signMessage({ kind: 'quote', program: ex.program, certificate, authorisation, fee: ex.feeOnAccept, currency }, id, { iss: webId });
+        await sendLake(house, { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 20_000 });
+        quotes++;
+        return;
+      } catch (e) {
+        if (attempt >= 3) return log(`${ex.name}: could not quote ${house}: ${(e as Error).message}`);
+        await new Promise((ok) => setTimeout(ok, 2000 * attempt));
+      }
     }
   }
 

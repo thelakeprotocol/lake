@@ -51,14 +51,19 @@ export class Market {
   readonly intents = new Map<string, Intent>();
   readonly offers = new Map<string, StoredOffer>();
   private authorised = new Map<string, Promise<boolean>>();
+  /** The certified programs behind open offers, so a growing group can be re-priced here without asking anyone. */
+  private programs = new Map<string, QuoteProgram>();
   private refreshedAt = 0;
 
   constructor(private c: Ctx) {
-    // Groups grow. Every so often, check: if more households now share an intent, the lenders hear again and re-quote.
-    setInterval(() => void this.refresh(), 10_000).unref();
+    // Groups grow. Every so often, check; a busy pod or an unreachable node just means next time.
+    setInterval(() => void this.refresh().catch((e) => this.c.say(`market refresh: ${(e as Error).message}`)), 10_000).unref();
   }
 
-  /** Learn the current group sizes; when a group has grown, tell its quoters again so their offers reflect it. */
+  /**
+   * Learn the current group sizes. When a group has changed, run the programs this house already holds again
+   * with the new size: the group discount is part of each certified program, so nobody needs to be asked again.
+   */
   async refresh() {
     this.refreshedAt = Date.now();
     const before = new Map([...this.intents.values()].map((i) => [i.pack, i.members]));
@@ -66,8 +71,18 @@ export class Market {
     for (const i of this.intents.values()) {
       if (i.members === before.get(i.pack)) continue;
       await this.save();
-      const p = packOf(i.pack);
-      if (p) void this.announce(p, i);
+      await this.reprice(i);
+    }
+  }
+
+  private async reprice(intent: Intent) {
+    for (const offer of this.offers.values()) {
+      const p = this.programs.get(offer.id);
+      if (!p || offer.pack !== intent.pack || offer.status !== 'open' || offer.groupSize === intent.members) continue;
+      offer.result = runProgram(p, await this.c.claims(p.inputs), { ...intent.terms, [GROUP_SIZE]: intent.members });
+      offer.groupSize = intent.members;
+      offer.at = new Date().toISOString();
+      await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
     }
   }
 
@@ -172,9 +187,10 @@ export class Market {
       title: p.title, program: programId(p), result, labels: p.labels, fee: typeof q.fee === 'number' ? q.fee : undefined,
       currency: typeof q.currency === 'string' && /^[A-Z]{3}$/.test(q.currency) ? q.currency : undefined, groupSize: intent.members, at: new Date().toISOString(), status: 'open',
     };
-    // A newer quote from the same agent replaces its open one (the group grew, say); accepted ones stay.
-    for (const [k, old] of this.offers) if (old.pack === offer.pack && old.quoter.webId === offer.quoter.webId && old.status === 'open') this.offers.delete(k);
+    // A newer quote from the same agent replaces its open one; accepted ones stay.
+    for (const [k, old] of this.offers) if (old.pack === offer.pack && old.quoter.webId === offer.quoter.webId && old.status === 'open') { this.offers.delete(k); this.programs.delete(k); }
     this.offers.set(offer.id, offer);
+    this.programs.set(offer.id, p);
     await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
     this.c.emit(makeEvent('quote.made', this.c.actor, `agent:${profile.ownerDomain}`, { pack: p.pack }));
     // The same answer whatever the result: the agent learns nothing until the owner accepts.

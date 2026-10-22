@@ -6,7 +6,9 @@
 intent ─▶ authorised lenders hear ─▶ certified program ─▶ runs in your house ─▶ offers only you see ─▶ group rate ─▶ accept ─▶ two files, one lender
 ```
 
-Everything here runs, on synthetic data, in the [sandbox](/docs/sandbox) and in the end-to-end tests. The protocol is [SPEC §12](/docs/spec).
+<video controls muted playsinline preload="none" poster="/demos/home-loans-inside-homes.jpg" style="width:100%;border:1px solid var(--vp-c-divider);border-radius:6px"><source src="/demos/home-loans-inside-homes.mp4" type="video/mp4"></video>
+
+Everything here runs, on synthetic data, in the [sandbox](/docs/sandbox) and in the end-to-end tests. The video is a real run of [`demos/offers`](https://github.com/thelakeprotocol/lake/tree/main/demos#offers-no-claude-in-this-one): a hundred houses, eight lenders, 72 deals in 148 seconds. The protocol is [SPEC §12](/docs/spec).
 
 ## 1. Your data, signed
 
@@ -42,7 +44,7 @@ Your panel fills up, cheapest first: *Wattle Mutual, 6.04%, $2,254 a month, Firs
 
 ## 6. Ask together, pay less
 
-As more households join your group, your house learns the new size and tells the lenders again. They re-quote: most lenders' programs take a little off when three or more of you ask together. The discount is written into the certified program, the same for everyone in the group.
+As more households join your group, your house learns the new size and runs the lenders' programs again itself: most of them take a little off when three or more of you ask together. The discount is written into each certified program, the same for everyone in the group, so nobody has to be asked again and nothing leaves your house.
 
 ## 7. Accept, and only then share
 

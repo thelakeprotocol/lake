@@ -1,6 +1,6 @@
 :root {
   --ink: #070B12; --deep: #0D1420; --line: #1D2838; --fg: #E6EDF2; --muted: #8B9BAE;
-  --mint: #3DDC97; --orange: #FF6A2B; --violet: #9D8FFF; --threat: #FF4D6A; --amber: #F5C451;
+  --mint: #3DDC97; --orange: #FF6A2B; --violet: #9D8FFF; --threat: #FF4D6A; --amber: #F5C451; --sky: #59C3FF; --gold: #FFE08A;
   --f-display: 'Oswald', 'Arial Narrow', Arial, sans-serif;
   --f-body: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --f-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
@@ -35,7 +35,22 @@ h1 { margin: 6px 0 0; font: 700 clamp(34px, 6vw, 56px)/0.95 var(--f-display); te
 .log li { text-shadow: 0 1px 6px var(--ink), 0 0 2px var(--ink); overflow-wrap: anywhere; }
 .log li:nth-child(n+2) { opacity: 0.65; } .log li:nth-child(n+4) { opacity: 0.4; }
 .log time { color: var(--muted); margin-right: 8px; }
-.k-threat { color: var(--threat); } .k-mint { color: var(--mint); } .k-violet { color: var(--violet); } .k-amber { color: var(--amber); } .k-orange { color: var(--orange); }
+.k-threat { color: var(--threat); } .k-mint { color: var(--mint); } .k-violet { color: var(--violet); } .k-amber { color: var(--amber); } .k-orange { color: var(--orange); } .k-sky { color: var(--sky); } .k-gold { color: var(--gold); }
+/* Capture mode's captions, insets and scoreboard, for recorded videos. */
+.captions { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.filming .log { display: none; }
+.cap-text { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); width: min(980px, 66%); text-align: center; }
+.cap-text p { margin: 0; font: 700 clamp(20px, 2vw, 30px)/1.15 var(--f-display); text-transform: uppercase; text-shadow: 0 2px 18px var(--ink), 0 0 4px var(--ink); }
+.cap-text .sub { margin-top: 6px; font: 400 clamp(12px, 1.05vw, 15px)/1.4 var(--f-body); text-transform: none; color: var(--muted); }
+.cap-image { position: absolute; right: 9%; top: 50%; transform: translateY(-50%); height: 78%; border-radius: 22px; border: 6px solid #1c2430; box-shadow: 0 18px 60px rgba(0,0,0,0.7); }
+.cap-board { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: rgba(7, 11, 18, 0.86); }
+.cap-board h2 { margin: 0; font: 700 clamp(26px, 3vw, 44px)/1 var(--f-display); text-transform: uppercase; }
+.cap-board dl { display: flex; flex-wrap: wrap; justify-content: center; gap: 26px 64px; margin: 0; }
+.cap-board dl > div { width: min(340px, 40vw); }
+.cap-board dd { margin: 0; font: 700 clamp(34px, 3.9vw, 56px)/1 var(--f-display); white-space: nowrap; color: var(--mint); font-variant-numeric: tabular-nums; }
+.cap-board dl > div { display: flex; flex-direction: column; gap: 8px; }
+.cap-board .today { margin: 6px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font: 400 14px/1.4 var(--f-body); color: var(--muted); }
+.cap-board dt { font: 400 13px/1.4 var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 footer { padding-block: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
 .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }
 .stat { min-width: 0; display: flex; flex-direction: column-reverse; gap: 2px; }

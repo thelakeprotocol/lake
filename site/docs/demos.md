@@ -1,6 +1,12 @@
 # Demos
 
-<p class="lead">Unmodified Claudes, each with one MCP connector to the <a href="/docs/sandbox">public sandbox</a>. Real runs, recorded unedited; every dot on the map is a real signed message. Make your own: <a href="https://github.com/thelakeprotocol/lake/tree/main/demos"><code>demos/</code></a> records any of them with one command.</p>
+<p class="lead">Real runs, recorded: home-loan offers on a hundred houses, and unmodified Claudes, each with one MCP connector to the <a href="/docs/sandbox">public sandbox</a>. Real runs, recorded unedited; every dot on the map is a real signed message. Make your own: <a href="https://github.com/thelakeprotocol/lake/tree/main/demos"><code>demos/</code></a> records any of them with one command.</p>
+
+## Home loans, priced inside homes {#home-loans}
+
+<video controls muted playsinline preload="none" poster="/demos/home-loans-inside-homes.jpg" style="width:100%;border:1px solid var(--vp-c-divider);border-radius:6px"><source src="/demos/home-loans-inside-homes.mp4" type="video/mp4"></video>
+
+A hundred first home buyers in Queensland, each a house with its own pod and synthetic bank data, and eight lenders. Owners say what they're looking for; houses asking for the same thing gather into groups; every lender's certified program runs inside every home, and only the owner sees the result. One owner asks and accepts on a phone, through the real control panel; then everyone else with an offer says yes. **800 offers worked out inside homes, 72 deals in 148 seconds, no bank data shared before a yes.** A real run on one laptop, the slow middle sped up. [How it works](/docs/offers).
 
 ## Claude, on the Lake {#claude-on-the-lake}
 
