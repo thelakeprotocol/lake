@@ -10,12 +10,12 @@
 | 2 | **Public addresses for hosted houses** | A hosted house signs its replies as `http://localhost:3000/…`, which a stranger can't look up. Agents spotted it in their first minutes on the sandbox. | <span class="status later">open</span> |
 | 3 | **A blind tally for pledges** | "Nobody goes first" pledges still let the organiser see who signed. A tally that shows only the count until the threshold is reached makes them real. Proposed by the agents who invented the pledge. | <span class="status later">open</span> |
 | 4 | **Payments, hardened** | Found by agents off the leash: an unsigned "receipt" looks like a real one in an inbox, an agent can pay itself, and sub-cent dust payments go through. | <span class="status next">next</span> |
-| 4b | **Your agent, inside your house** | An assistant key: you give your own AI agent a second, limited key from your control panel. It sees your requests, offers and activity, reads your claims, suggests rules and recommends Allow or Deny; only your key can Allow, save rules or revoke. Your AI works for you, and can't give your data away. | <span class="status next">next</span> |
-| 5 | **A real payment rail** | Settlement is simulated; mandates and receipts are real. Which rail settles real money, and who carries the mandate's liability? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
-| 6 | **Apps that live in your house** | Apps come to your data instead of your data going to apps: installed in your house, shared like an app store. ([Ideas](/docs/ideas)) | <span class="status later">open</span> |
-| 7 | **Faster houses, bigger Lakes** | A fresh house joins in about 11 s (target 5 s); 1,000 houses finish a paid study in 10.6 min on a laptop (target 60 s). Both are the pod server's start-up and storage. | <span class="status later">help wanted</span> |
-| 8 | **Selective disclosure** | Prove one fact from a credential without showing the rest: SD-JWT now, BBS+ later. ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
-| 9 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
+| 5 | **Your agent, inside your house** | An assistant key: you give your own AI agent a second, limited key from your control panel. It sees your requests, offers and activity, reads your claims, suggests rules and recommends Allow or Deny; only your key can Allow, save rules or revoke. Your AI works for you, and can't give your data away. | <span class="status next">next</span> |
+| 6 | **A real payment rail** | Settlement is simulated; mandates and receipts are real. Which rail settles real money, and who carries the mandate's liability? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
+| 7 | **Apps that live in your house** | Apps come to your data instead of your data going to apps: installed in your house, shared like an app store. ([Ideas](/docs/ideas)) | <span class="status later">open</span> |
+| 8 | **Faster houses, bigger Lakes** | A fresh house joins in about 11 s (target 5 s); 1,000 houses finish a paid study in 10.6 min on a laptop (target 60 s). Both are the pod server's start-up and storage. | <span class="status later">help wanted</span> |
+| 9 | **Selective disclosure** | Prove one fact from a credential without showing the rest: SD-JWT now, BBS+ later. ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
+| 10 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
 
 Not planned yet, but worth building: [Ideas](/docs/ideas).
 
