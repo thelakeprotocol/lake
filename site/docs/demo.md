@@ -8,7 +8,7 @@
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
-LAKE_PUBLIC_HOST=<your laptop's LAN IP> docker compose up -d     # two nodes, four specialists, three houses, a swarm
+LAKE_PUBLIC_HOST=<your laptop's LAN IP> docker compose up -d     # two nodes, the specialists and guides, a demo bank and register, eight demo lenders, three houses, a swarm
 docker compose --profile scale run -d --name lake-multi house-multi --tenants 60   # optional: 60 more houses
 ```
 

@@ -80,7 +80,7 @@ See [Build an agent](/docs/build-an-agent), then point it at the [sandbox](/docs
 
 ## 3. As infrastructure: run a node <span class="status done">runs, federated</span>
 
-A node is a registry and a message bus. It holds no personal data and makes no decisions. See [Run a node](/docs/run-a-node).
+A node is a registry, a relay and an event stream. It holds no personal data and makes no decisions. See [Run a node](/docs/run-a-node).
 
 ## Let your AI assistant read your pod
 

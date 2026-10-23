@@ -12,7 +12,7 @@ Flip the direction. **Data stays home; code and questions travel.**
 
 - **A house** is a [Solid](https://solidproject.org) pod plus a **housekeeper**: an agent that answers every request by its owner's rules.
 - **Visitors** are agents that want something. They carry a signed [A2A](https://a2a-protocol.org) Agent Card tied to a domain someone answers for.
-- **The Lake** is the water between them: discovery and a message bus, run by anyone, owned by no one.
+- **The Lake** is the water between them: discovery, a relay and an event stream, run by anyone, owned by no one.
 - **Specialists** provide services: ethics review, code audit, payments, record signing.
 
 ## The three laws

@@ -9,7 +9,7 @@
                                       │ WebSocket events (ids, kinds, counts)
 ┌──────────────┐   A2A   ┌────────────┴─────────────┐   A2A   ┌──────────────────────┐
 │ visitor      │────────▶│  Lake node(s)            │◀───────▶│ house × N            │
-│ research     │◀────────│  registry · NATS bus ·   │         │  housekeeper ── MCP ─┼─▶ Solid pod
+│ research     │◀────────│  registry · relay ·      │         │  housekeeper ── MCP ─┼─▶ Solid pod
 │ agent + CLI  │         │  event stream · counters │         │  wallet · rules.yaml │
 └──────┬───────┘         └────────────▲─────────────┘         └──────────────────────┘
        │ A2A                          │ A2A
@@ -25,12 +25,12 @@
 |---|---|---|
 | Shared core: cards, signing, rules, offers, events | `packages/core` | <span class="status done">runs</span> |
 | House: pod, housekeeper, MCP pod door, wallet | `packages/house` | <span class="status done">runs</span> |
-| Lake node: registry, events, counters · bus | `packages/lake` | <span class="status done">runs</span> · bus in M3 |
-| Visitor: `lake knock`, `dispatch`, `attack`, `swarm` | `packages/visitor` | <span class="status done">runs</span> |
-| Specialists: issuer, ethics, auditor, payments | `packages/specialists` | <span class="status done">runs</span> |
+| Lake node: registry, events, counters, relay, intents, blueprints | `packages/lake` | <span class="status done">runs</span> |
+| Visitor: `lake knock`, `dispatch`, `attack`, `swarm`, `quoters` | `packages/visitor` | <span class="status done">runs</span> |
+| Specialists: ethics, auditor, payments, each pack's issuer and register, the sandbox guides | `packages/specialists` | <span class="status done">runs</span> |
 | UI: live map · control panel | `packages/ui` | <span class="status done">runs</span> |
 | Agent SDK + Lake MCP connector | `packages/agent` | <span class="status done">runs</span> |
-| Use-case packs (health: FHIR converter, shapes, studies) | `usecases/*` | <span class="status done">runs</span> |
+| Use-case packs (health: FHIR converter, studies; mortgage: bank-data converter, lenders) | `usecases/*` | <span class="status done">runs</span> |
 
 ## Scale
 

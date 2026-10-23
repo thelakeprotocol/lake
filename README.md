@@ -152,7 +152,7 @@ Honest, updated every merge.
 | ✅ | **Spec**: `SPEC.md` + JSON Schemas + canonical model | v0.1 draft |
 | ✅ | **Website + docs** | [lake.doneinfifty.com](https://lake.doneinfifty.com) |
 | ✅ | **M1 House**: real Solid pod + WebID, issuer-signed synthetic record, FHIR → canonical model (SHACL-valid), housekeeper answering A2A through MCP, `lake knock` | runs, end-to-end tested. Fresh house joins in ~11 s on a busy 4-core box; target is 5 s ([help wanted](https://github.com/thelakeprotocol/lake/issues)) |
-| ✅ | **M2 Lake node**: registry that verifies every card and checks the registrant serves it, signed event intake (the node stamps who said it), counters, WebSocket stream, live map | runs, end-to-end tested. The NATS bus arrives with broadcast knocks in M3 |
+| ✅ | **M2 Lake node**: registry that verifies every card and checks the registrant serves it, signed event intake (the node stamps who said it), counters, WebSocket stream, live map | runs, end-to-end tested. No message bus: agents message each other directly ([why](https://lake.doneinfifty.com/docs/decisions)) |
 | ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and returns one randomised answer; de-biased result; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
 | ✅ | **M4 Approvals app**: phone-first; the owner's key is made on the phone and signs every live Allow; the house checks the grant matches what the owner saw; Your keys with Revoke; revocation refuses the next request at once (tested under 1 s); QR code on the map; the research agent waits for taps | runs, end-to-end tested. No push notifications yet; over-asking is stopped by the housekeeper, not yet below it |
 | ✅ | **M5 Money**: ODRL agreements signed by both sides before any study runs; houses counter as one bloc ($2 → $5, drop the postcode); a human's AP2 Intent Mandate caps spending; the Payments agent checks the chain, refuses over budget, settles (simulated) and signs receipts filed in each pod | runs, end-to-end tested |
@@ -186,10 +186,10 @@ Node 20+, pnpm 9, Docker.
 packages/
   core/          signing, Lake cards, rules engine, ODRL, VCs, events     ✅
   house/         Solid pod + housekeeper + MCP pod door                   ✅
-  lake/          registry, event stream, counters (bus: M3)               ✅
-  visitor/       `lake` CLI: knock, dispatch, attack, swarm               ✅
-  specialists/   issuer, ethics, auditor, payments                        ✅
-  ui/            the live map ✅ · the control panel ✅                    M4
+  lake/          registry, event stream, counters, relay, blueprints       ✅
+  visitor/       `lake` CLI: knock, dispatch, attack, swarm, quoters      ✅
+  specialists/   ethics, auditor, payments, the packs' issuers and registers, sandbox guides ✅
+  ui/            the live map · the control panel                         ✅
   agent/         SDK for outside agents + the Lake MCP connector          ✅
 usecases/        one package per use case ("pack"): fields, shapes, converter, demo data
   health/        health@1: FHIR → claims, synthetic patients, studies     ✅

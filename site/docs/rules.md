@@ -61,6 +61,7 @@ A `default: join` with no matching rule becomes **ask**, because without a rule 
 | `rules[].grant_hours` | integer | Key lifetime. Default 48. |
 | `rules[].decision` | `join` \| `decline` \| `ask` | |
 | `negotiation.join_collectives` | boolean | Allow your housekeeper to bargain with neighbours as one bloc |
+| `intents[]` | list of `{ pack, terms }` | Standing intents: what you're looking for, so authorised agents price it inside your house. A term set to `auto` is worked out from your own data. ([How an offer works](/docs/offers)) |
 
 ### Trust
 
@@ -70,6 +71,7 @@ trust:
   auditors: [audit.lake.local]     # who may certify studies and converters
   ethics: [ethics.lake.local]      # whose ethics approvals count
   payments: [payments.lake.local]  # whose receipts you file
+  regulators: [register.lake.local] # whose authorisation an agent needs before it hears your intents
 ```
 
 `ethics_approved: true` in a rule means *approved by an ethics body you list here*. An approval from anyone else counts as none. Nobody appoints these for the Lake; you choose. A sandbox house with no `trust` section trusts the demo specialists and says so in its log; outside the sandbox, an empty list trusts nobody.

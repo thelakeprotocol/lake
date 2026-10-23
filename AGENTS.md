@@ -12,7 +12,7 @@ The Lake: an open protocol and reference implementation where each person's data
 corepack enable && pnpm install
 pnpm build            # tsc -b for packages, vite for the map/approvals UI
 pnpm test             # unit tests (fast)
-pnpm test:e2e         # boots a whole Lake from source: node, 8 specialists (one process), 3 houses with real Solid pods (~70 s)
+pnpm test:e2e         # boots a whole Lake from source: two nodes, every specialist (one process), houses with real Solid pods (~2.5 min)
 pnpm examples         # regenerate spec/examples (then commit; the unit tests verify them)
 pnpm site:dev         # website + docs (VitePress)
 docker compose up -d  # the demo Lake; map at http://localhost:7000
@@ -49,6 +49,6 @@ Run `pnpm build` before `pnpm test:e2e`: it runs the built `dist/` files.
 
 - TypeScript ESM, Node 20+, strict. Match the code around you; comments say why, not what.
 - Spec and code move together: change SPEC.md (and schemas/examples) in the same commit as behaviour.
-- Docs are honest: statuses in README and `site/docs/roadmap.md` say what actually runs.
+- Docs are honest: statuses in README and `site/docs/roadmap.md` (What's next) say what actually runs and what doesn't yet.
 - Ports 3000 and 3100 may be taken on dev machines; tests pick free ports.
 - The pod server must run with `NODE_ENV=production` (its OIDC fails under `test`).
