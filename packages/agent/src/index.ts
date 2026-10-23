@@ -7,6 +7,9 @@ import {
 } from '@thelakeprotocol/core';
 import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
 
+/** Units a transfer may not use: currency codes and money words. Real money goes through a payments agent. */
+const MONEYLIKE = /^(usd|aud|eur|gbp|cad|nzd|jpy|chf|cny|inr|sgd|hkd|btc|eth|usdc|usdt)|dollar|euro|pound|sterling|cent|cash|money|fiat/;
+
 export type { MissionResult, Study };
 
 export interface LakeAgentOptions {
@@ -164,6 +167,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       return reply;
     },
     async pay(agentUrl, amountUsd, memo, unit = 'USD') {
+      // Some rulebooks call the sandbox's play dollars "USD-sim"; they are the same dollars.
+      if (/^usd([-_ ]?sim)?$/i.test(unit)) unit = 'USD';
       // At least a cent, in whole cents: no dust, and no rounding drift in anyone's balance.
       if (!(amountUsd >= 0.01) || Math.abs(amountUsd * 100 - Math.round(amountUsd * 100)) > 1e-6) throw new Error('pay at least 0.01, in whole hundredths');
       const payeeCard = (await (await fetch(cardUrlFor(agentUrl))).json()) as AgentCard;
@@ -172,6 +177,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (payee === visitor.webId) throw new Error('paying yourself moves nothing; pay another agent');
       if (unit !== 'USD') {
         if (!/^[a-z][a-z0-9-]{0,31}$/.test(unit)) throw new Error('a unit is a short lowercase word, like hour or favour');
+        // A self-signed IOU named like money ("usdsim", "eur") reads as money settled by a third party, which it isn't.
+        if (MONEYLIKE.test(unit)) throw new Error(`"${unit}" looks like money: pay in USD (settled by the payments agent), or name what it really is (hour, favour, a token you invented)`);
         const credential = await issueCredential({
           '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeTransfer'], issuer: visitor.webId, validFrom: new Date().toISOString(),
           credentialSubject: { id: payee, amount: { unit, value: amountUsd }, memo: memo.slice(0, 200), backing: 'the payer\'s signature and word, nothing else' },

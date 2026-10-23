@@ -127,6 +127,23 @@ async function pool<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => { while (i < items.length) await fn(items[i++]!); }));
 }
 
+/**
+ * The pod server makes a new pod's top folder readable by anyone, and a listing of it says what the owner keeps
+ * (health/, wallet/, receipts/…) and, by its timestamps, when they last did a deal. A house closes it on pods it
+ * hosts; the profile keeps its own public rule, so the WebID still works. A pod you bring is left as you set it.
+ */
+export async function closePodRoot(owner: OwnerSession): Promise<boolean> {
+  const url = `${owner.podRoot}.acl`;
+  const res = await owner.fetch(url, { headers: { accept: 'text/turtle' } });
+  if (!res.ok) return false;
+  const text = await res.text();
+  // The public rule is one statement, ending at the first full stop that ends a line (not the one inside <./>).
+  const open = /<#public>[\s\S]*?\.[ \t]*(\n|$)/;
+  if (!open.test(text) || !/acl:agentClass\s+foaf:Agent/.test(text.match(open)![0])) return false;
+  const put = await owner.fetch(url, { method: 'PUT', headers: { 'content-type': 'text/turtle' }, body: text.replace(open, '').replace(/# The homepage is readable by the public\n?/, '') });
+  return put.ok;
+}
+
 const SOLID_OIDC_ISSUER = 'http://www.w3.org/ns/solid/terms#oidcIssuer';
 const PIM_STORAGE = 'http://www.w3.org/ns/pim/space#storage';
 

@@ -216,6 +216,12 @@ describe('the owner', () => {
     expect((await pairWith(await generateIdentity(), token)).status).toBe(403);
   });
 
+  it("doesn't show strangers what's in the pod: the top folder is closed, the WebID profile is public", async () => {
+    const root = webId.replace(/profile\/card#me$/, '');
+    expect((await fetch(root)).status).toBe(401);
+    expect((await fetch(webId.split('#')[0]!)).status).toBe(200);
+  });
+
   it("waits for the owner's tap, and the study includes the house once the owner allows it", async () => {
     const v = await visitor('uni.example');
     const mission = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20, ...(await funded()) });
@@ -407,7 +413,10 @@ describe('the open door', () => {
     expect(inbox.messages.map((m: { message: { kind: string } }) => m.message.kind)).toEqual(['receipt', 'transfer']);
     // Both checked by the connector: signed by the payments agent, and by the payer, and made out to this agent.
     expect(inbox.messages.map((m: { checked: { verified: boolean } }) => m.checked.verified)).toEqual([true, true]);
-    expect(inbox.messages[0].checked).toMatchObject({ amount: 3, unit: 'USD' });
+    expect(inbox.messages[0].checked).toMatchObject({ amount: 3, unit: 'USD', settled: true });
+    // A transfer is the sender's word, never money, whatever its unit is called; units named like money are refused.
+    expect(inbox.messages[1].checked).toMatchObject({ unit: 'favour', settled: false });
+    expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 4, unit: 'eur', memo: 'the auction' } })).isError).toBe(true);
     // A message that only says "paid" is flagged; paying yourself and paying dust are refused.
     await other.callTool({ name: 'lake_ask', arguments: { agent_url: o.you.url, message: { kind: 'receipt', amount: 100 } } });
     const myInbox = await text('lake_inbox', { wait_seconds: 5 });
@@ -416,6 +425,8 @@ describe('the open door', () => {
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 0.001, memo: 'dust' } })).isError).toBe(true);
     const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
     expect(again.messages).toHaveLength(2);
+    // "USD-sim" (some rulebooks' name for the sandbox's dollars) is paid as USD, settled.
+    expect(await text('lake_pay', { agent_url: theirs.you.url, amount: 1, unit: 'USD-sim', memo: 'lot2' })).toMatchObject({ paid: 1, unit: 'USD' });
     // A blind tally: nobody, not even the opener, learns who signed until the threshold; then every signer is told at once.
     const tally = `${specialistsUrl}/tally/a2a`;
     const t = (who: Client, message: Record<string, unknown>) => who.callTool({ name: 'lake_ask', arguments: { agent_url: tally, message } }).then((r) => JSON.parse((r.content as { text: string }[])[0]!.text));

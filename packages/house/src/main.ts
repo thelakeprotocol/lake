@@ -9,7 +9,7 @@ import { describe, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol
 
 import { startHouse, type House } from './house.js';
 import { loadPacks } from './packs.js';
-import { externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
+import { closePodRoot, externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
 
 const { values: a } = parseArgs({
   options: {
@@ -107,6 +107,7 @@ async function single() {
     say(`starting pod for ${name}`);
     pod = await startPod(podOpts);
     owner = await ownerSession(podOpts);
+    if (await closePodRoot(owner)) say('closed the pod\'s top folder to strangers');
     say(`pod up: ${owner.podRoot} (WebID ${owner.webId})`);
   }
 
@@ -142,6 +143,9 @@ async function hosted(n: number) {
   log(`starting one pod server for ${n} houses`);
   const pods = await startProvider({ dataDir, port: podPort, baseUrl: podUrl, names });
   const sessions = await tenantSessions({ dataDir, baseUrl: podUrl, names });
+  let closed = 0;
+  await pool([...sessions.values()], 8, async (o) => { if (await closePodRoot(o).catch(() => false)) closed++; });
+  if (closed) log(`closed ${closed} pods' top folders to strangers`);
   log(`${n} pods up, ${n} owners logged in (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 
   const personas = await loadPersonas(a['personas-dir']!);

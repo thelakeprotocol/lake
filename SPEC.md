@@ -218,7 +218,7 @@ A payments agent MUST check the whole chain, MUST settle only whole cents of at 
 
 Agents also pay each other: for an auction lost, a trade, a bet, a service. In money, the same chain applies: the paying agent signs a `PaymentMandate` under an `IntentMandate` its human signed (an allowance rather than a study budget), a payments agent settles it, and the payer sends the payee `{ kind: "receipt", receipt: { credential, card }, amount, memo }`. On a sandbox, the operator MAY sign a small play-money allowance in the human's place, and MUST say so.
 
-Value is whatever two parties agree on, so an agent MAY pay in any other unit (an hour, a favour, a naming right): a `LakeTransfer` credential the payer signs, `credentialSubject`: payee (`id`), `amount: { unit, value }`, `memo`, sent as `{ kind: "transfer", transfer: { credential, card }, amount, unit, memo }`. Nothing backs a transfer but the payer's signature and word; receivers MUST NOT treat one as money settled by a third party. A message that only claims a payment proves nothing: a receiver MUST verify the receipt's credential (signed by the payments agent, made out to it) or the transfer's (signed by the sender, made out to it) before treating it as paid. Agents MAY report `agent.message` events (who to whom, the message kind, a payment's amount and unit; never content), so a map can show agents dealing with each other.
+Value is whatever two parties agree on, so an agent MAY pay in any other unit (an hour, a favour, a naming right): a `LakeTransfer` credential the payer signs, `credentialSubject`: payee (`id`), `amount: { unit, value }`, `memo`, sent as `{ kind: "transfer", transfer: { credential, card }, amount, unit, memo }`. Nothing backs a transfer but the payer's signature and word; receivers MUST NOT treat one as money settled by a third party, and its unit MUST NOT be named like money (a currency code, "dollar", "cash"…), so it can't pass for a settled payment. A connector that checks payments SHOULD say `settled: true` only for a payments agent's receipt. A message that only claims a payment proves nothing: a receiver MUST verify the receipt's credential (signed by the payments agent, made out to it) or the transfer's (signed by the sender, made out to it) before treating it as paid. Agents MAY report `agent.message` events (who to whom, the message kind, a payment's amount and unit; never content), so a map can show agents dealing with each other.
 
 ### 6.4 One person, one house
 
@@ -232,6 +232,8 @@ In v0 a **study is a declaration, not code**: up to four yes/no questions about 
 - The house answers with **one randomised fragment**: the one-hot cell its owner falls in, perturbed by unary randomised response with the study's privacy budget ε (at most 4). Any single fragment is deniable; the visitor de-biases the sum across houses.
 - Every computation is written to the house's `/audit/` log (`fieldsRead`, `claimsRead`, `recordsOut`) and reported as a `compute.done` event. A node's **Records moved** counter is the sum of `recordsOut` and MUST be published, even when it is not zero.
 - Arbitrary study code needs attested execution; it is a stretch goal, not v0.
+
+- Only the owner may list the pod's folders. A listing says what the owner keeps (health, wallet, receipts) and, by its timestamps, when they last did a deal; a house hosting a pod MUST NOT leave it readable by anyone else. The WebID profile stays public.
 
 ## 8. Events
 
