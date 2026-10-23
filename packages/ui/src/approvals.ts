@@ -64,13 +64,16 @@ type Tab = (typeof TABS)[number][0];
 let tab: Tab = TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home';
 let pending = 0;
 
+const unused = new Set<Tab>(); // tabs this house has nothing for (no use case with offers, say)
+
 function renderNav() {
-  $('nav').replaceChildren(...TABS.map(([id, label]) =>
+  $('nav').replaceChildren(...TABS.filter(([id]) => !unused.has(id) || id === tab).map(([id, label]) =>
     h('button', { type: 'button', 'aria-current': id === tab ? 'page' : undefined, onclick: () => go(id) }, label, id === 'requests' && pending ? h('span', { class: 'badge' }, String(pending)) : null)));
 }
 
 function go(t: Tab) {
   tab = t;
+  document.body.classList.add('fetching');
   if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`);
   renderNav();
   // On a phone the tabs scroll sideways; keep the one you picked in sight.
@@ -78,48 +81,72 @@ function go(t: Tab) {
   void show();
 }
 
-const view = () => $('view');
+// Each tab draws into its own box. A click shows that box at once (what you saw last time) and refreshes it
+// behind; an answer for a tab you've left lands in its own box, never over the one you're looking at.
+const boxes = new Map<Tab, HTMLElement>();
+const boxFor = (t: Tab) => {
+  let b = boxes.get(t);
+  if (!b) boxes.set(t, (b = h('div', {}, h('p', { class: 'muted' }, 'Opening…'))));
+  return b;
+};
+const view = () => boxFor(tab);
+const drawing = new Map<Tab, boolean>(); // tab → asked again while drawing
 const hoursLeft = (iso: string) => { const hr = (Date.parse(iso) - Date.now()) / 3_600_000; return hr < 1 ? `${Math.max(1, Math.round(hr * 60))} min` : `${Math.round(hr)} h`; };
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const nice = (f: string) => f.replace(/_/g, ' ');
+/** A WebID or agent id, said the way a person would: its domain. */
+const who = (id: string) => { try { return new URL(id).hostname; } catch { return id.replace(/^agent:/, '') || 'someone'; } };
 
 async function show() {
+  const t = tab, box = boxFor(t);
+  if ($('view').firstChild !== box) { $('view').replaceChildren(box); scrollTo(0, 0); }
+  if (drawing.has(t)) return void drawing.set(t, true);
+  drawing.set(t, false);
   try {
-    const render = { home, requests, keys, rules, offers, myagent, agents, money, data, move }[tab];
-    await render();
+    do {
+      drawing.set(t, false);
+      await { home, requests, keys, rules, offers, myagent, agents, money, data, move }[t](box);
+    } while (drawing.get(t));
     $('status').className = 'dot live';
   } catch (e) {
     $('status').className = 'dot down';
-    view().replaceChildren(h('p', { class: 'muted' }, `Couldn't reach your house: ${(e as Error).message}`));
+    box.replaceChildren(h('p', { class: 'muted' }, `Couldn't reach your house: ${(e as Error).message}`));
+  } finally {
+    drawing.delete(t);
+    if (t === tab) document.body.classList.remove('fetching');
   }
 }
 
 // ---- Home ----
-async function home() {
-  const o = await call({ kind: 'panel.overview' });
-  const feed = await call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
-  const { suggestions, assistants } = await call<{ suggestions: { id: string; from: string; text: string; at: string }[]; assistants: { label: string }[] }>({ kind: 'list' });
+async function home(box: HTMLElement) {
+  const [o, feed, { suggestions, assistants }] = await Promise.all([
+    call({ kind: 'panel.overview' }),
+    call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
+    call<{ suggestions: { id: string; from: string; text: string; at: string }[]; assistants: { label: string }[] }>({ kind: 'list' }),
+  ]);
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
-  const tile = (label: string, value: string | number, cls = '') => h('div', { class: `tile ${cls}` }, h('dt', {}, label), h('dd', {}, String(value)));
-  view().replaceChildren(
-    suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
-    h('div', { class: 'card' },
+  const tile = (label: string, value: string | number, to: Tab, cls = '') =>
+    h('div', { class: `tile link ${cls}`, role: 'button', tabindex: 0, onclick: () => go(to), onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') go(to); } }, h('dt', {}, label), h('dd', {}, String(value)));
+  const agentCard = h('div', { class: 'card' },
       h('h3', {}, 'Your AI agent'),
       h('p', { class: 'muted' }, assistants.length ? `${assistants.map((a) => a.label.replace(/\s*\(.*\)$/, '')).join(', ')} ${assistants.length === 1 ? 'is' : 'are'} looking after your house: it sees every knock and suggests; you decide.` : 'Let your own AI agent look after your house: it sees every knock and suggests what to do; only you decide.'),
-      h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, assistants.length ? 'My agent →' : 'Give it a key →')),
+      h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, assistants.length ? 'My agent →' : 'Give it a key →'));
+  box.replaceChildren(
+    suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
     h('dl', { class: 'tiles' },
-      tile('Knocks today', o.knocksToday),
-      tile('Waiting for you', o.pending, o.pending ? 'amber' : ''),
-      tile('Live keys', o.keys),
-      tile('Earned', `$${o.earned}`, 'mint'),
-      tile('Attacks blocked today', o.blockedToday, o.blockedToday ? 'threat' : ''),
+      tile('Waiting for you', o.pending, 'requests', o.pending ? 'amber' : ''),
+      tile('Knocks today', o.knocksToday, 'agents'),
+      tile('Live keys', o.keys, 'keys'),
+      tile('Earned', `$${o.earned}`, 'money', 'mint'),
+      tile('Attacks blocked today', o.blockedToday, 'agents', o.blockedToday ? 'threat' : ''),
     ),
     h('div', { class: `card ${o.record.ok ? 'ok' : 'bad'}` },
       h('h3', {}, o.record.ok ? 'Your record checks out' : 'Your record failed its check'),
       h('p', { class: 'muted' }, o.record.ok
         ? `Signed by a trusted issuer, unchanged since, converted by a certified converter. Your house holds ${o.claims} claims: ${o.holds.map(nice).join(', ') || 'none'}.`
         : `${o.record.why}. Your house won't join studies until this is fixed.`)),
+    agentCard,
     leaseUntil ? leaseCard() : '',
     personCard(o.person),
     h('div', { class: 'card' },
@@ -180,31 +207,48 @@ function leaseCard() {
 }
 
 // ---- Requests ----
-async function requests() {
+async function requests(box: HTMLElement) {
   const v = await call<{ requests: Request[] }>({ kind: 'list' });
-  view().replaceChildren(
+  box.replaceChildren(
     h('p', { class: 'lede' }, 'Your rules answer the easy ones. These are the ones they left to you.'),
-    v.requests.length ? h('div', {}, ...v.requests.map(requestCard)) : h('p', { class: 'muted' }, 'Nothing to decide. Your rules are handling it.'),
+    v.requests.length ? h('div', {}, ...sameAsks(v.requests).map(requestCard)) : h('p', { class: 'muted' }, 'Nothing to decide. Your rules are handling it.'),
   );
 }
 
-function requestCard(r: Request) {
-  const allow = h('button', { class: 'btn allow', type: 'button' }, 'Allow');
-  const deny = h('button', { class: 'btn deny', type: 'button' }, 'Deny');
+/** An agent that knocks seven times with the same ask gets one card, answered once for all seven. */
+function sameAsks(list: Request[]): Request[][] {
+  const groups = new Map<string, Request[]>();
+  for (const r of list) {
+    const k = JSON.stringify([r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.recommendation]);
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+  }
+  return [...groups.values()];
+}
+
+function requestCard(all: Request[]) {
+  const r = all[0]!, n = all.length;
+  const allow = h('button', { class: 'btn allow', type: 'button' }, n > 1 ? `Allow all ${n}` : 'Allow');
+  const deny = h('button', { class: 'btn deny', type: 'button' }, n > 1 ? `Deny all ${n}` : 'Deny');
   allow.onclick = async () => {
     allow.disabled = deny.disabled = true;
-    // The key is cut here, on this device, with your key. The house only checks it.
-    const grant = signCredential({
-      '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeAccessGrant'], issuer: webId,
-      validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString(),
-      credentialSubject: { id: r.visitor.webId, offer: r.offerId, study: r.study, fields: r.fields, purpose: r.purpose, authorizedBy: 'owner, live' },
-    }, key);
-    await call({ kind: 'answer', request: r.id, answer: 'allow', grant }).catch((e) => alert(e.message));
+    for (const q of all) {
+      // The key is cut here, on this device, with your key. The house only checks it.
+      const grant = signCredential({
+        '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeAccessGrant'], issuer: webId,
+        validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString(),
+        credentialSubject: { id: q.visitor.webId, offer: q.offerId, study: q.study, fields: q.fields, purpose: q.purpose, authorizedBy: 'owner, live' },
+      }, key);
+      await call({ kind: 'answer', request: q.id, answer: 'allow', grant }).catch((e) => alert(e.message));
+    }
     void refreshBadge(); void show();
   };
-  deny.onclick = async () => { allow.disabled = deny.disabled = true; await call({ kind: 'answer', request: r.id, answer: 'deny' }); void refreshBadge(); void show(); };
+  deny.onclick = async () => {
+    allow.disabled = deny.disabled = true;
+    for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {});
+    void refreshBadge(); void show();
+  };
   return h('article', { class: 'req' },
-    h('div', { class: 'who' }, r.visitor.domain),
+    h('div', { class: 'who' }, r.visitor.domain, n > 1 ? h('span', { class: 'count' }, `asked ${n} times`) : null),
     r.question ? h('p', { class: 'q' }, `“${r.question}”`) : null,
     h('dl', { class: 'facts' },
       ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : r.retention], ['Pays', `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
@@ -214,9 +258,9 @@ function requestCard(r: Request) {
 }
 
 // ---- Keys ----
-async function keys() {
+async function keys(box: HTMLElement) {
   const v = await call<{ keys: Key[] }>({ kind: 'list' });
-  view().replaceChildren(
+  box.replaceChildren(
     h('p', { class: 'lede' }, 'Everyone who can use something in your house right now. Revoking cuts them off on their next request.'),
     v.keys.length ? h('ul', { class: 'rows' }, ...v.keys.map((k) => h('li', {},
       h('div', {}, h('div', { class: 'r-title' }, `${k.visitor} · ${k.purpose}`), h('div', { class: 'r-meta' }, `${k.fields.map(nice).join(', ')} · ${hoursLeft(k.until)} left · ${k.authorizedBy}`)),
@@ -232,7 +276,7 @@ let FIELDS: { name: string; label: string; pack: string }[] = [];
 const PURPOSES = ['research', 'care', 'marketing', 'insurance'];
 let draft: Rules | null = null;
 
-async function rules() {
+async function rules(box: HTMLElement) {
   if (!draft) {
     const r = await call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[] }>({ kind: 'panel.rules' });
     draft = structuredClone(r.rules);
@@ -344,7 +388,7 @@ function renderRules(message?: { ok: boolean; text: string }) {
     const res = await call<{ ok: boolean; error?: string }>({ kind: 'panel.rules.set', text: stringify(clean) });
     renderRules(res.ok ? { ok: true, text: 'Saved in your pod. Your housekeeper uses these rules from now on.' } : { ok: false, text: res.error ?? 'not saved' });
   };
-  view().replaceChildren(
+  boxFor('rules').replaceChildren(
     h('p', { class: 'lede' }, 'Your housekeeper follows these, top to bottom; the first rule that fits decides. They run as code, and nothing an agent writes can change them.'),
     ...r.rules.map((rule, i) => ruleCard(rule, i, r.rules)),
     h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn', type: 'button', onclick: () => { r.rules.push({ match: { purpose: 'research' }, decision: 'ask' }); renderRules(); } }, '+ Add a rule')),
@@ -363,7 +407,7 @@ function renderRules(message?: { ok: boolean; text: string }) {
           chipsEditor(trust[k] ?? [], 'domain, then Enter', (v) => { trust[k] = v; renderRules(); }))))),
     h('details', { style: 'margin-top:16px;max-width:820px' }, h('summary', { class: 'muted' }, 'See it as rules.yaml'), h('pre', {}, stringify(r))),
     h('div', { class: 'savebar' }, save,
-      h('button', { class: 'btn', type: 'button', onclick: async () => { draft = null; await rules(); } }, 'Undo changes'),
+      h('button', { class: 'btn', type: 'button', onclick: async () => { draft = null; await rules(boxFor('rules')); } }, 'Undo changes'),
       message ? h('span', { class: `msg ${message.ok ? 'ok' : 'bad'}` }, message.text) : null),
   );
 }
@@ -382,9 +426,9 @@ const fmt = (v: number, unit?: string) => (isCurrency(unit) ? money0(v, unit) : 
 const choice = (t: Term | undefined, x: string | number) =>
   t?.kind === 'band' && isCurrency(t.unit) ? String(x).split('-').map((y) => money0(Number(y), t.unit)).join('–') : t?.names?.[String(x)] ?? String(x);
 
-async function offers() {
+async function offers(box: HTMLElement) {
   const m = await call<{ intents: { pack: string; terms: Record<string, string | number>; members: number; group: string }[]; offers: Offer[]; packs: { id: string; title: string; terms: Record<string, Term> }[] }>({ kind: 'panel.market' });
-  if (!m.packs.length) return void view().replaceChildren(h('p', { class: 'muted' }, 'This house takes part in no use case that has offers yet.'));
+  if (!m.packs.length) return void box.replaceChildren(h('p', { class: 'muted' }, 'This house takes part in no use case that has offers yet.'));
   const blocks: Child[] = [h('p', { class: 'lede' }, 'Say what you’re looking for. Authorised agents price it inside your house, on your own data, and only you see the result. Nothing leaves until you accept.')];
   for (const p of m.packs) {
     const intent = m.intents.find((i) => i.pack === p.id);
@@ -436,19 +480,23 @@ async function offers() {
         o.result.eligible ? h('div', { class: 'actions', style: 'grid-template-columns:1fr' }, accept) : ''));
     }
   }
-  view().replaceChildren(...blocks.filter((b): b is Node | string => !!b));
+  box.replaceChildren(...blocks.filter((b): b is Node | string => !!b));
 }
 
 // ---- Agents ----
-async function agents() {
+async function agents(box: HTMLElement) {
   const list = await call<{ agent: string; knocks: number; last: string; lastDecision?: string; blocked: number; reputation: number | null }[]>({ kind: 'panel.agents' });
-  view().replaceChildren(
-    h('p', { class: 'lede' }, 'Every agent that has come to your door lately, what your house told it, and how it behaves across the Lake.'),
-    list.length ? h('ul', { class: 'rows' }, ...list.map((a) => h('li', {},
+  // Keys that never proved who they are and only got blocked are noise next to real visitors: fold them away.
+  const junk = list.filter((a) => a.agent.startsWith('key:') && a.blocked && !a.knocks);
+  const row = (a: (typeof list)[number]) => h('li', {},
       h('div', {}, h('div', { class: 'r-title' }, a.agent.replace(/^agent:/, '').replace(/^key:/, 'unverified key ')),
         h('div', { class: 'r-meta' }, `${a.knocks} knock${a.knocks === 1 ? '' : 's'} · last ${time(a.last)}${a.lastDecision ? ` · you said ${a.lastDecision}` : ''}${a.blocked ? ` · ${a.blocked} blocked` : ''}`)),
-      h('div', { class: 'r-meta' }, a.reputation === null ? (a.blocked ? 'blocked' : '') : h('span', {}, `reputation ${a.reputation}`, h('span', { class: 'rep' }, h('i', { style: `width:${Math.round(a.reputation * 100)}%` })))))))
-      : h('p', { class: 'muted' }, 'No visitors yet.'),
+      h('div', { class: 'r-meta' }, a.reputation === null ? (a.blocked ? 'blocked' : '') : h('span', {}, `reputation ${a.reputation}`, h('span', { class: 'rep' }, h('i', { style: `width:${Math.round(a.reputation * 100)}%` })))));
+  const real = list.filter((a) => !junk.includes(a));
+  box.replaceChildren(
+    h('p', { class: 'lede' }, 'Every agent that has come to your door lately, what your house told it, and how it behaves across the Lake.'),
+    real.length ? h('ul', { class: 'rows' }, ...real.map(row)) : h('p', { class: 'muted' }, 'No visitors yet.'),
+    junk.length ? h('details', { class: 'fold' }, h('summary', { class: 'muted' }, `${junk.length} unproven key${junk.length === 1 ? '' : 's'} tried something and ${junk.length === 1 ? 'was' : 'were'} blocked`), h('ul', { class: 'rows' }, ...junk.map(row))) : '',
   );
 }
 
@@ -457,7 +505,7 @@ async function agents() {
 let invite: { msg: string; until: number } | null = null;
 
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
-async function myagent() {
+async function myagent(box: HTMLElement) {
   const v = await call<{ assistants: { kid: string; label: string; addedAt: string }[]; suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
   const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
   if (invite && invite.until < Date.now()) invite = null;
@@ -468,7 +516,7 @@ async function myagent() {
     invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until) };
     void show();
   };
-  const box = invite ? (() => {
+  const code = invite ? (() => {
     const text = h('textarea', { readonly: true, rows: 5, class: 'copybox' }) as HTMLTextAreaElement;
     text.value = invite.msg;
     text.onfocus = () => text.select();
@@ -480,9 +528,9 @@ async function myagent() {
     return h('div', { class: 'card' }, h('h3', {}, 'Paste this to your AI agent'),
       h('p', { class: 'muted' }, `It needs the Lake connector. The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`), text, copy);
   })() : '';
-  view().replaceChildren(
+  box.replaceChildren(
     h('p', { class: 'lede' }, 'Give your own AI agent a key to your house. It can look at everything (requests, offers, visitors, your data) and suggest what to do. It can never decide: only your key can Allow, change your rules, accept an offer or revoke a key.'),
-    box || give,
+    code || give,
     v.assistants.length
       ? h('div', {}, h('h2', {}, 'Connected'), h('ul', { class: 'rows' }, ...v.assistants.map((a) => h('li', {},
           h('div', {}, h('div', { class: 'r-title' }, a.label.replace(/\s*\(.*\)$/, '')), h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest`)),
@@ -500,25 +548,25 @@ function suggestionList(list: { id: string; from: string; text: string; at: stri
 }
 
 // ---- Money ----
-async function money() {
-  const m = await call<{ total: number; receipts: { amount: number; currency: string; agreement: string; from: string; at: string; settlement: string }[] }>({ kind: 'panel.money' });
-  view().replaceChildren(
+async function money(box: HTMLElement) {
+  const m = await call<{ total: number; receipts: { amount: number; currency: string; agreement: string; from: string; payer?: string; at: string; settlement: string }[] }>({ kind: 'panel.money' });
+  box.replaceChildren(
     h('dl', { class: 'tiles' }, h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.total}`)), h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.receipts.length)))),
     h('p', { class: 'lede' }, 'Every payment comes with a receipt signed by a payments agent you trust, filed in your pod. In the sandbox, settlement is simulated.'),
     m.receipts.length ? h('ul', { class: 'rows', style: 'margin-top:14px' }, ...m.receipts.map((r) => h('li', {},
-      h('div', {}, h('div', { class: 'r-title' }, `$${r.amount} · ${new Date(r.at).toLocaleDateString()}`), h('div', { class: 'r-meta' }, `${r.agreement.split(':').slice(0, 4).join(':')} · ${r.settlement}`)),
+      h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `$${r.amount} from ${who(r.payer)}` : `$${r.amount}`), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · signed by ${who(r.from)} · ${r.settlement}`)),
       h('span', { class: 'chip share' }, 'signed'))))
       : h('p', { class: 'muted' }, 'No payments yet.'),
   );
 }
 
 // ---- Data ----
-async function data() {
+async function data(box: HTMLElement) {
   type Source = { pack: string; title: string; folder: string; issuer: string | null; converter: string; certifiedBy: string | null; ok: boolean; why?: string };
   const d = await call<{ claims: { field: string; label?: string; value: string; code?: string; observedAt?: string }[]; record: { ok: boolean; why?: string }; sources: Source[]; folders: Record<string, number> }>({ kind: 'panel.data' });
   const by = new Map<string, typeof d.claims>();
   for (const c of d.claims) by.set(c.label ?? nice(c.field), [...(by.get(c.label ?? nice(c.field)) ?? []), c]);
-  view().replaceChildren(
+  box.replaceChildren(
     h('p', { class: 'lede' }, 'What your house holds. It never leaves: programs run here, and only what you agreed to comes out.'),
     h('h2', {}, 'Where it came from'),
     ...d.sources.map((s) => h('div', { class: `card ${s.ok ? 'ok' : 'bad'}`, style: 'max-width:820px' },
@@ -535,7 +583,7 @@ async function data() {
 }
 
 // ---- Move house ----
-async function move() {
+async function move(box: HTMLElement) {
   const btn = h('button', { class: 'btn primary', type: 'button' }, 'Download everything');
   const note = h('p', { class: 'muted' });
   btn.onclick = async () => {
@@ -548,7 +596,7 @@ async function move() {
     note.textContent = `${Object.keys(x.files).length} files downloaded, including your agreements, receipts, audit log and wallet. Keep it safe: your wallet is in there.`;
     btn.disabled = false;
   };
-  view().replaceChildren(
+  box.replaceChildren(
     h('p', { class: 'lede' }, 'Your house is yours. Take everything with you, to another host or to your own machine, whenever you like. No one can stop you.'),
     h('div', { class: 'savebar', style: 'position:static' }, btn), note,
   );
@@ -578,6 +626,7 @@ function start() {
   renderNav();
   void show();
   void refreshBadge();
+  void call<{ packs: unknown[] }>({ kind: 'panel.market' }).then((m) => { if (!m.packs?.length) { unused.add('offers'); renderNav(); } }).catch(() => {});
   setInterval(refreshBadge, 1500);
   // Live tabs refresh themselves; the rules editor never overwrites what you're typing.
   // Never while you're typing, choosing or selecting something: a refresh would wipe it.

@@ -344,7 +344,7 @@ function panelFor(x: {
       const r = await owner.fetch(owner.podRoot + f);
       const vc = r.ok ? decode(await r.text()) : null;
       const s = vc?.credentialSubject;
-      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
     }))).filter(Boolean) as { amount: number; at: string }[];
     receipts.sort((a, b) => (a.at < b.at ? 1 : -1));
     return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts };
