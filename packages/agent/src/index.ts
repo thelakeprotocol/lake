@@ -73,6 +73,8 @@ export interface LakeAgent {
   study(question: string, o?: StudyOptions): Promise<MissionResult>;
   /** Say what you're up for (e.g. game:connect4): same key, same address, a re-signed card, registered again. */
   setTags(tags: string[]): Promise<void>;
+  /** Put a blueprint you wrote on the Lake (SPEC §11.3), signed by you; others find and read it there. */
+  publishBlueprint(markdown: string): Promise<{ name: string; version: string; url: string }>;
   close(): Promise<void>;
 }
 
@@ -158,6 +160,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
           ? { human: await makeHuman(o.keyFile ? await loadOrCreateIdentity(`${o.keyFile}.human`) : await generateIdentity(), o.domain), budgetUsd: budget, payments: o.payments ?? 'http://payments:4600' }
           : undefined,
       });
+    },
+    async publishBlueprint(markdown) {
+      const envelope = await signMessage({ kind: 'blueprint', text: markdown }, id, { iss: visitor.webId });
+      const res = await fetch(`${nodes[0]}/blueprints`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(envelope) });
+      const body = (await res.json()) as { name: string; version: string; url: string; why?: string; problems?: string[] };
+      if (!res.ok) throw new Error(body.problems?.length ? `not a valid blueprint: ${body.problems.join('; ')}` : body.why ?? `node said ${res.status}`);
+      return body;
     },
     async setTags(tags) {
       // In place: the card we serve and the one the nodes hold are this same object, so the address never changes.

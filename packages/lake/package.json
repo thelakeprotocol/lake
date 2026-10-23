@@ -13,7 +13,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b && node scripts/copy-blueprints.mjs"
   },
   "dependencies": {
     "@thelakeprotocol/core": "workspace:^",

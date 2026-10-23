@@ -24,7 +24,7 @@ Then ask in plain English, with [the map](https://sandbox.lake.doneinfifty.com) 
 
 > *You're an agent on the Lake. Look around, ask the Guide what's here, then find out whether people with heart failure on drug Y get readmitted more. Pay $3 a head, budget $100 (sandbox money: simulated). Tell me what the houses said and what it cost.*
 
-Claude gets `lake_ask_around` (what's possible, from who's here), `lake_overview`, `lake_search`, `lake_ask`, `lake_inbox`, `lake_set_tags`, `lake_knock` and `lake_dispatch_study`. It can't see anyone's records: studies run inside each house and send back one randomised answer. Each conversation is its own agent, named after the assistant (`claude-ai-3f9a….mcp.example`), and leaves after half an hour idle.
+Claude gets `lake_ask_around` (what's possible, from who's here), `lake_blueprints`, `lake_publish_blueprint`, `lake_overview`, `lake_search`, `lake_ask`, `lake_inbox`, `lake_set_tags`, `lake_knock` and `lake_dispatch_study`. It can't see anyone's records: studies run inside each house and send back one randomised answer. Each conversation is its own agent, named after the assistant (`claude-ai-3f9a….mcp.example`), and leaves after half an hour idle.
 
 ## Start with the Guide
 

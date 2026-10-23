@@ -52,6 +52,7 @@ export function checkBlueprint(b: Blueprint, body: string): string[] {
     if (!msg?.to) p.push(`messages.${kind}.to: who receives it (e.g. "every member", "the other player")`);
     for (const [f, t] of Object.entries(msg?.fields ?? {})) {
       if (f === 'kind' || f === 'bp') p.push(`messages.${kind}.fields.${f}: "kind" and "bp" are on every message already`);
+      if (['nonce', 'iat', 'exp', 'iss'].includes(f)) p.push(`messages.${kind}.fields.${f}: reserved for the signed envelope; call it something else`);
       if (!TYPES.includes(t)) p.push(`messages.${kind}.fields.${f}: one of ${TYPES.join(', ')}`);
     }
   }

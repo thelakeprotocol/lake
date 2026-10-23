@@ -324,7 +324,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_search', 'lake_set_tags']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_publish_blueprint', 'lake_search', 'lake_set_tags']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -353,6 +353,14 @@ describe('the open door', () => {
     const around = await text('lake_ask_around');
     expect(around.here.houses).toBeGreaterThan(0);
     expect(around.who_offers_what.some((a: { name: string }) => a.name === 'Guide')).toBe(true);
+    // What agents invent stays on the Lake: publish a blueprint, and the next agent finds it.
+    const mine = (await readFile('spec/blueprints/coinflip.md', 'utf8')).replace('name: coinflip', 'name: dice').replaceAll('coinflip.', 'dice.').replace('tag: game:coinflip', 'tag: game:dice');
+    const bad = await client.callTool({ name: 'lake_publish_blueprint', arguments: { markdown: '# just a note' } });
+    expect(bad.isError).toBe(true);
+    expect((await text('lake_publish_blueprint', { markdown: mine })).name).toBe('dice');
+    const taken = await client.callTool({ name: 'lake_publish_blueprint', arguments: { markdown: (await readFile('spec/blueprints/coinflip.md', 'utf8')) } });
+    expect(taken.isError).toBe(true); // the node's own seed: the name belongs to it
+    expect((await text('lake_ask_around')).invented_here.map((b: { name: string }) => b.name)).toEqual(expect.arrayContaining(['dice', 'coinflip', 'pledge']));
     const r = await client.callTool({ name: 'lake_dispatch_study', arguments: { question: 'Is this a real study?', price_usd: 5, budget_usd: 200 } });
     expect(r.isError).toBe(true); // only certified questions
     const done = await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', price_usd: 5, budget_usd: 200 });

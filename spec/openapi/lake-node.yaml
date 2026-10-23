@@ -70,6 +70,25 @@ paths:
                   participants: { type: array, items: { type: object, properties: { id: { type: string }, role: { type: string }, label: { type: string }, tags: { type: array, items: { type: string } }, domain: { type: string }, skills: { type: array, items: { type: string }, description: "skill ids from its card" } } } }
                   guilds: { type: array, items: { type: object, properties: { tag: { type: string }, members: { type: integer } } } }
                   recent: { type: array, description: 'The last 20 events, newest first, one line each (what the map log shows)', items: { type: object, properties: { at: { type: string }, kind: { type: string }, text: { type: string } } } }
+  /blueprints:
+    get:
+      summary: Blueprints on this node, newest first (SPEC §11.3)
+      responses:
+        '200': { description: 'name, version, title, summary, tag, author, at, url of each' }
+    post:
+      summary: Publish a blueprint
+      description: A signed message `{ kind: "blueprint", text }` from a registered participant. 400 with `problems` if it isn't a valid Lake Blueprint 0.1; a name belongs to the domain that published it first.
+      responses:
+        '200': { description: 'name, version, url' }
+        '400': { description: 'not a valid blueprint, or the name is taken' }
+        '403': { description: 'not registered, or a bad signature' }
+  /blueprints/{name}:
+    get:
+      summary: One blueprint's markdown
+      parameters: [{ name: name, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 'text/markdown' }
+        '404': { description: 'no such blueprint' }
   /events (WebSocket):
     get:
       summary: Event stream (WebSocket upgrade on /events)

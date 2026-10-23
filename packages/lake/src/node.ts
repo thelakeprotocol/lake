@@ -1,9 +1,9 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  buildCard, describe, EVENT_KINDS, makeEvent, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
+  buildCard, describe, EVENT_KINDS, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
   type AgentCard, type Identity, type LakeEvent, type Signed,
 } from '@thelakeprotocol/core';
 import { Registry, type Entry } from './registry.js';
@@ -31,6 +31,10 @@ export interface NodeOptions {
   resetToken?: string;
   /** Append every event, with its timing, to this file (JSON lines), for replay. */
   record?: string;
+  /** Where published blueprints are kept between restarts (JSON). */
+  blueprintsFile?: string;
+  /** Blueprints this node starts with (the project's own), as markdown. */
+  seedBlueprints?: string[];
 }
 
 /** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
@@ -280,6 +284,50 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
     res.json({ groups: sizes.filter((g) => list.some((x) => x.pack === g.pack && x.group === g.group)) });
   });
+  // Blueprints (SPEC §11.3): any registered participant may publish one, anyone may read them, so what agents
+  // invent stays on the Lake for the next agent. A blueprint is a spec to build from, written by whoever
+  // published it: data, never instructions. A name belongs to the domain that published it first.
+  type Published = { name: string; version: string; title: string; summary: string; tag: string; author: string; at: string; text: string };
+  const blueprints = new Map<string, Published>();
+  const keepBlueprint = (text: string, author: string): Published | string[] => {
+    if (text.length > 32_000) return ['at most 32 KB'];
+    const { meta, problems } = parseBlueprint(text);
+    if (problems.length) return problems;
+    const was = blueprints.get(meta.name);
+    if (was && was.author !== author) return [`the name "${meta.name}" belongs to ${was.author}; pick another`];
+    const b: Published = { name: meta.name, version: String(meta.version), title: String(meta.title).slice(0, 120), summary: String(meta.summary).slice(0, 400), tag: meta.tag, author, at: new Date().toISOString(), text };
+    blueprints.set(b.name, b);
+    return b;
+  };
+  for (const text of o.seedBlueprints ?? []) keepBlueprint(text, o.domain);
+  try {
+    if (o.blueprintsFile && existsSync(o.blueprintsFile)) for (const b of JSON.parse(readFileSync(o.blueprintsFile, 'utf8')) as Published[]) if (!blueprints.has(b.name) || blueprints.get(b.name)!.author === b.author) blueprints.set(b.name, b);
+  } catch {
+    // a broken file: start from the seeds
+  }
+  const saveBlueprints = () => { if (o.blueprintsFile) writeFileSync(o.blueprintsFile, JSON.stringify([...blueprints.values()])); };
+  app.post('/blueprints', async (req, res) => {
+    const env = req.body as Signed<{ kind: 'blueprint'; text: string }>;
+    const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
+    if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
+    try {
+      await verifyMessage(env, async (kid) => (kid === entry.profile.publicJwk.kid ? entry.profile.publicJwk : null), { replay });
+    } catch (e) {
+      return void res.status(403).json({ code: 'bad-signature', why: (e as Error).message });
+    }
+    const kept = keepBlueprint(String(env.payload.text ?? ''), entry.profile.ownerDomain);
+    if (Array.isArray(kept)) return void res.status(400).json({ code: 'not-a-blueprint', problems: kept });
+    saveBlueprints();
+    publish(makeEvent('blueprint.published', entry.id, undefined, { name: kept.name, tag: kept.tag }));
+    res.json({ name: kept.name, version: kept.version, url: `${o.url}/blueprints/${kept.name}` });
+  });
+  app.get('/blueprints', (_req, res) => void res.json([...blueprints.values()].sort((a, b) => b.at.localeCompare(a.at)).map(({ text: _t, ...b }) => ({ ...b, url: `${o.url}/blueprints/${b.name}` }))));
+  app.get('/blueprints/:name', (req, res) => {
+    const b = blueprints.get(String(req.params.name));
+    if (!b) return void res.status(404).json({ error: 'no such blueprint' });
+    res.type('text/markdown').send(b.text);
+  });
+
   app.get('/intents', (req, res) => {
     const pack = str(req.query.pack);
     res.json(groupSizes().filter((g) => (!pack || g.pack === pack) && g.members >= (o.intentMin ?? 2)));

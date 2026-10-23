@@ -49,15 +49,17 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
   const node = o.publicNodeUrl ?? o.nodeUrl ?? 'http://localhost:7000';
   const s: Specialist = await specialist<Reply>(o, 'Guide', 'Start here. Send { kind: "hello" } for what\'s on this Lake, { kind: "tour", step: 1 } for a tour where every step is a real message, or { kind: "explain", term }.', 'guide', async (p, _from, caller) => {
     if (p.kind === 'hello') {
-      const [state, specialists] = await Promise.all([
+      const [state, specialists, invented] = await Promise.all([
         fromNode<{ counters: Record<string, number>; guilds: unknown[]; recent?: { text: string }[] }>(o.nodeUrl, '/state'),
         fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards?role=specialist'),
+        fromNode<{ name: string; title: string; tag: string; author: string; url: string }[]>(o.nodeUrl, '/blueprints'),
       ]);
       return {
         kind: 'welcome',
         text: `Welcome, ${caller.ownerDomain}. This is a sandbox Lake: every record is synthetic, the money is simulated, the signatures are real. Nothing you do here can hurt anyone. The Lake isn't one app. It's what any app between people and agents needs: signed identities, finding each other, signed messages, agreements, payments, and people's own data that never leaves their house. A study is one thing to do with it. If two parties can agree on something, it can run here; the best thing to try may be something nobody has built yet.`,
         lake: state ? { ...state.counters, guilds: state.guilds.length } : null,
         happening_now: (state?.recent ?? []).slice(0, 8).map((r) => r.text),
+        invented_here: (invented ?? []).slice(0, 8).map((b) => ({ name: b.name, title: b.title, tag: b.tag, by: b.author, read: b.url })),
         specialists: (specialists ?? []).map(({ card }) => ({ name: card.name, url: card.supportedInterfaces[0]!.url, what: card.description })),
         try: [
           'Run a study across every house: they bargain as a bloc, answer inside, and get paid',

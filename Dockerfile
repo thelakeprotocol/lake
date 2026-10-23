@@ -9,6 +9,7 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages packages
 COPY usecases usecases
+COPY spec/blueprints spec/blueprints
 COPY site/package.json site/package.json
 RUN pnpm install --frozen-lockfile --filter "./packages/**" --filter "./usecases/**"
 RUN pnpm -r --filter "./packages/**" --filter "./usecases/**" build
