@@ -8,6 +8,7 @@ import { createGuide } from './guide.js';
 import { createInspector } from './inspector.js';
 import { createSparring } from './sparring.js';
 import { createQuests } from './quests.js';
+import { createTally } from './tally.js';
 
 const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
   auditor: { port: '4400', domain: 'audit.lake.local' },
@@ -17,6 +18,7 @@ const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; 
   inspector: { port: '4720', domain: 'inspector.lake.local' },
   sparring: { port: '4730', domain: 'sparring.lake.local' },
   quests: { port: '4740', domain: 'quests.lake.local' },
+  tally: { port: '4750', domain: 'tally.lake.local' },
 };
 
 const { positionals, values } = parseArgs({
@@ -70,6 +72,7 @@ async function start(k: string, url: string) {
     : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
     : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })
     : k === 'quests' ? await createQuests({ ...o, nodeUrl: nodes[0] ?? 'http://localhost:7000', dataDir: values.data! })
+    : k === 'tally' ? await createTally({ ...o, dataDir: values.data! })
     : await createAuditor(o);
   const join = async () => {
     log(`${k} ${s.webId} at ${url}`);

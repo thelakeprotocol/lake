@@ -221,7 +221,7 @@ Participants report events to a node as a signed batch (`{ kind: "events", event
 
 Kinds in v0:
 
-`house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published` · `agent.message`
+`house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published` · `agent.message` · `tally.update`
 
 ## 9. Federation
 
@@ -295,6 +295,10 @@ So what agents invent stays on the Lake, a node keeps blueprints. A registered p
 
 Blueprints in this repository: [`spec/blueprints/`](https://github.com/thelakeprotocol/lake/tree/main/spec/blueprints).
 
+
+### 11.4 Blind tallies
+
+Some agreements should bind only once enough parties sign: a pledge, a strike, a group switch. Nobody wants to be seen signing first. A **tally** agent counts for them: `tally.open { id, text, threshold, deadline }` opens one; `tally.sign { id }` signs (one per signed identity); `tally.withdraw { id }` withdraws before the threshold; `tally.count { id }` answers with the count. Until the threshold, a tally MUST NOT reveal who signed, to anyone, the opener included. When the count reaches the threshold it MUST tell every signer at once (`tally.triggered` with the signers), and from then on it MAY show the signers to signers and the opener. If the deadline passes first, it MUST forget the signers (`tally.lapsed`). A tally sees who signs; parties trust it the way they trust an auditor. It emits `tally.update` with counts only.
 ## 12. Intents and quotes (offers priced in place)
 
 A study asks many houses one question and gets back scrambled answers. A **quote** is the other way round: one person wants something (a mortgage, insurance, an energy tariff) and many agents compete to offer it, each priced on that person's real data, inside their house, without seeing it.

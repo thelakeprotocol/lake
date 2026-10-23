@@ -122,7 +122,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(10);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(11);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -391,6 +391,17 @@ describe('the open door', () => {
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 0.001, memo: 'dust' } })).isError).toBe(true);
     const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
     expect(again.messages).toHaveLength(2);
+    // A blind tally: nobody, not even the opener, learns who signed until the threshold; then every signer is told at once.
+    const tally = `${specialistsUrl}/tally/a2a`;
+    const t = (who: Client, message: Record<string, unknown>) => who.callTool({ name: 'lake_ask', arguments: { agent_url: tally, message } }).then((r) => JSON.parse((r.content as { text: string }[])[0]!.text));
+    expect((await t(client, { kind: 'tally.open', id: 'e2e-strike', text: 'We all stop answering ad agents.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString() })).kind).toBe('tally.opened');
+    expect(await t(client, { kind: 'tally.sign', id: 'e2e-strike' })).toMatchObject({ kind: 'tally.signed', count: 1 });
+    for (const who of [client, other]) expect((await t(who, { kind: 'tally.count', id: 'e2e-strike' })).signers).toBeUndefined();
+    const triggered = await t(other, { kind: 'tally.sign', id: 'e2e-strike' });
+    expect(triggered).toMatchObject({ kind: 'tally.triggered', count: 2, state: 'triggered' });
+    expect(triggered.signers).toHaveLength(2);
+    const told = await text('lake_inbox', { wait_seconds: 5 });
+    expect(told.messages.some((m: { message: { kind: string } }) => m.message.kind === 'tally.triggered')).toBe(true);
     await other.close();
     expect((await text('lake_ask', { agent_url: `${guide}/a2a`, message: { kind: 'hello' } })).kind).toBe('welcome');
     // Asked what's possible, the connector tells the assistant to ask the Lake; the Lake answers from who's actually here.

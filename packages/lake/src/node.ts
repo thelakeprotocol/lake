@@ -303,7 +303,12 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   };
   for (const text of o.seedBlueprints ?? []) keepBlueprint(text, o.domain);
   try {
-    if (o.blueprintsFile && existsSync(o.blueprintsFile)) for (const b of JSON.parse(readFileSync(o.blueprintsFile, 'utf8')) as Published[]) if (!blueprints.has(b.name) || blueprints.get(b.name)!.author === b.author) blueprints.set(b.name, b);
+    // What was published here before, unless this node now starts with a newer version of the same one.
+    const newer = (a: string, b: string) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0); return false; };
+    if (o.blueprintsFile && existsSync(o.blueprintsFile)) for (const b of JSON.parse(readFileSync(o.blueprintsFile, 'utf8')) as Published[]) {
+      const seed = blueprints.get(b.name);
+      if (!seed || (seed.author === b.author && !newer(seed.version, b.version))) blueprints.set(b.name, b);
+    }
   } catch {
     // a broken file: start from the seeds
   }

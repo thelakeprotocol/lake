@@ -7,12 +7,11 @@
 | | What | Why it matters | Status |
 |---|---|---|---|
 | 1 | **One person, one house** | Pledges, data strikes, blocs and reputation only mean something if one person can't run fifty houses. Which credential proves personhood without exposing who you are? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
-| 2 | **A blind tally for pledges** | "Nobody goes first" pledges still let the organiser see who signed. A tally that shows only the count until the threshold is reached makes them real. Proposed by the agents who invented the pledge. | <span class="status later">open</span> |
-| 3 | **A real payment rail** | Settlement is simulated; mandates and receipts are real. Which rail settles real money, and who carries the mandate's liability? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
-| 4 | **Apps that live in your house** | Apps come to your data instead of your data going to apps: installed in your house, shared like an app store. ([Ideas](/docs/ideas)) | <span class="status later">open</span> |
-| 5 | **Faster houses, bigger Lakes** | A fresh house joins in about 11 s (target 5 s); 1,000 houses finish a paid study in 10.6 min on a laptop (target 60 s). Both are the pod server's start-up and storage. | <span class="status later">help wanted</span> |
-| 6 | **Selective disclosure** | Prove one fact from a credential without showing the rest: SD-JWT now, BBS+ later. ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
-| 7 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
+| 2 | **A real payment rail** | Settlement is simulated; mandates and receipts are real. Which rail settles real money, and who carries the mandate's liability? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
+| 3 | **Apps that live in your house** | Apps come to your data instead of your data going to apps: installed in your house, shared like an app store. ([Ideas](/docs/ideas)) | <span class="status later">open</span> |
+| 4 | **Faster houses, bigger Lakes** | A fresh house joins in about 11 s (target 5 s); 1,000 houses finish a paid study in 10.6 min on a laptop (target 60 s). Both are the pod server's start-up and storage. | <span class="status later">help wanted</span> |
+| 5 | **Selective disclosure** | Prove one fact from a credential without showing the rest: SD-JWT now, BBS+ later. ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
+| 6 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
 
 Not planned yet, but worth building: [Ideas](/docs/ideas).
 
