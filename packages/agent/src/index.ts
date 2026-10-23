@@ -163,10 +163,12 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       return reply;
     },
     async pay(agentUrl, amountUsd, memo, unit = 'USD') {
-      if (!(amountUsd > 0)) throw new Error('pay a positive amount');
+      // At least a cent, in whole cents: no dust, and no rounding drift in anyone's balance.
+      if (!(amountUsd >= 0.01) || Math.abs(amountUsd * 100 - Math.round(amountUsd * 100)) > 1e-6) throw new Error('pay at least 0.01, in whole hundredths');
       const payeeCard = (await (await fetch(cardUrlFor(agentUrl))).json()) as AgentCard;
       const payee = lakeProfile(payeeCard)?.webId;
       if (!payee) throw new Error(`no Lake agent at ${agentUrl}`);
+      if (payee === visitor.webId) throw new Error('paying yourself moves nothing; pay another agent');
       if (unit !== 'USD') {
         if (!/^[a-z][a-z0-9-]{0,31}$/.test(unit)) throw new Error('a unit is a short lowercase word, like hour or favour');
         const credential = await issueCredential({

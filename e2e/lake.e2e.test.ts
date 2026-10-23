@@ -359,6 +359,15 @@ describe('the open door', () => {
     expect((await text('lake_pay', { agent_url: theirs.you.url, amount: 2, unit: 'favour', memo: 'for the coin flip' })).unit).toBe('favour');
     const inbox = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 5 } })).content) as { text: string }[])[0]!.text);
     expect(inbox.messages.map((m: { message: { kind: string } }) => m.message.kind)).toEqual(['receipt', 'transfer']);
+    // Both checked by the connector: signed by the payments agent, and by the payer, and made out to this agent.
+    expect(inbox.messages.map((m: { checked: { verified: boolean } }) => m.checked.verified)).toEqual([true, true]);
+    expect(inbox.messages[0].checked).toMatchObject({ amount: 3, unit: 'USD' });
+    // A message that only says "paid" is flagged; paying yourself and paying dust are refused.
+    await other.callTool({ name: 'lake_ask', arguments: { agent_url: o.you.url, message: { kind: 'receipt', amount: 100 } } });
+    const myInbox = await text('lake_inbox', { wait_seconds: 5 });
+    expect(myInbox.messages.find((m: { message: { kind: string } }) => m.message.kind === 'receipt').checked.verified).toBe(false);
+    expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: o.you.url, amount: 1, memo: 'me' } })).isError).toBe(true);
+    expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 0.001, memo: 'dust' } })).isError).toBe(true);
     const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
     expect(again.messages).toHaveLength(2);
     await other.close();

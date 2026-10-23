@@ -188,15 +188,15 @@ Payments follow the Agent Payments Protocol's mandate chain, as W3C VCs:
 |---|---|---|
 | `IntentMandate` | a human at the visitor's organisation (same `ownerDomain`, a separate key) | this agent, this study, `budget`, `intent_expiry` |
 | `PaymentMandate` | the visitor agent | payee (the house's WebID), amount, the digest of the Intent Mandate, the agreement `uid` |
-| `LakeReceipt` | the payments agent | payee, amount, agreement, the Intent Mandate digest, `settlement` |
+| `LakeReceipt` | the payments agent | payee, payer, amount, agreement, the Intent Mandate digest, `settlement` |
 
-A payments agent MUST check the whole chain and MUST refuse once the total under one Intent Mandate would exceed its budget: past that, a human must approve. Only houses that answered are paid. A house files receipts from payments agents on its owner's `trust.payments` list in `/receipts/`. In the reference implementation settlement is simulated; the mandates and receipts are real signed objects.
+A payments agent MUST check the whole chain, MUST settle only whole cents of at least one cent, MUST refuse a payment whose payee is the paying agent itself, and MUST refuse once the total under one Intent Mandate would exceed its budget: past that, a human must approve. Only houses that answered are paid. A house files receipts from payments agents on its owner's `trust.payments` list in `/receipts/`. In the reference implementation settlement is simulated; the mandates and receipts are real signed objects.
 
 ### 6.3 Agents paying agents
 
 Agents also pay each other: for an auction lost, a trade, a bet, a service. In money, the same chain applies: the paying agent signs a `PaymentMandate` under an `IntentMandate` its human signed (an allowance rather than a study budget), a payments agent settles it, and the payer sends the payee `{ kind: "receipt", receipt: { credential, card }, amount, memo }`. On a sandbox, the operator MAY sign a small play-money allowance in the human's place, and MUST say so.
 
-Value is whatever two parties agree on, so an agent MAY pay in any other unit (an hour, a favour, a naming right): a `LakeTransfer` credential the payer signs, `credentialSubject`: payee (`id`), `amount: { unit, value }`, `memo`, sent as `{ kind: "transfer", transfer: { credential, card }, amount, unit, memo }`. Nothing backs a transfer but the payer's signature and word; receivers MUST NOT treat one as money settled by a third party. Agents MAY report `agent.message` events (who to whom, the message kind, a payment's amount and unit; never content), so a map can show agents dealing with each other.
+Value is whatever two parties agree on, so an agent MAY pay in any other unit (an hour, a favour, a naming right): a `LakeTransfer` credential the payer signs, `credentialSubject`: payee (`id`), `amount: { unit, value }`, `memo`, sent as `{ kind: "transfer", transfer: { credential, card }, amount, unit, memo }`. Nothing backs a transfer but the payer's signature and word; receivers MUST NOT treat one as money settled by a third party. A message that only claims a payment proves nothing: a receiver MUST verify the receipt's credential (signed by the payments agent, made out to it) or the transfer's (signed by the sender, made out to it) before treating it as paid. Agents MAY report `agent.message` events (who to whom, the message kind, a payment's amount and unit; never content), so a map can show agents dealing with each other.
 
 ## 7. Data never moves
 
