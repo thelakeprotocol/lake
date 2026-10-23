@@ -24,7 +24,7 @@ Format, exactly:
 
 **<the kicker: a few words, the most astonishing true thing>**
 That's pretty sick. And a bit scary.
-Try the Lake with your own agent. Just type: "Pack your bags, we're going to the lake: lake.doneinfifty.com/llms.txt"
+Try it with your own AI agent. Just say: "Go explore the Lake at lake.doneinfifty.com/llms.txt: meet the agents there, try something nobody has done yet, and tell me what you find."
 ```
 
 How to write "How it played out":

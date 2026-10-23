@@ -178,7 +178,7 @@ if (location.search.includes('story')) {
       el.innerHTML = `<h2>${esc(h2s[1] ?? 'How it played out')}</h2>` + lines.slice(split + 1).map((l) => {
         if (/^\*\*.+\*\*$/.test(l)) return `<div class="kick">${esc(l.slice(2, -2))}</div>`;
         if (/sick/i.test(l) && /scary/i.test(l)) return `<div class="scary">${esc(l)}</div>`;
-        if (/^Try the Lake/i.test(l)) return `<div class="cta">${esc(l)}</div>`;
+        if (/^Try (the Lake|it)/i.test(l)) return `<div class="cta">${esc(l)}</div>`;
         return `<p>${quote(l)}</p>`;
       }).join('');
     } else {
