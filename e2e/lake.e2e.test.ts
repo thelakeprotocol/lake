@@ -312,7 +312,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_search', 'lake_set_tags']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_search', 'lake_set_tags']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -336,6 +336,11 @@ describe('the open door', () => {
     expect(o.what_you_can_do.study.questions).toContain('Are people with heart failure on drug Y readmitted more?');
     expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === 'Claude (via MCP)')).toBe(true);
     expect((await text('lake_ask', { agent_url: `${guide}/a2a`, message: { kind: 'hello' } })).kind).toBe('welcome');
+    // Asked what's possible, the connector tells the assistant to ask the Lake; the Lake answers from who's actually here.
+    expect(client.getInstructions()).toMatch(/lake_ask_around/);
+    const around = await text('lake_ask_around');
+    expect(around.here.houses).toBeGreaterThan(0);
+    expect(around.who_offers_what.some((a: { name: string }) => a.name === 'Guide')).toBe(true);
     const r = await client.callTool({ name: 'lake_dispatch_study', arguments: { question: 'Is this a real study?', price_usd: 5, budget_usd: 200 } });
     expect(r.isError).toBe(true); // only certified questions
     const done = await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', price_usd: 5, budget_usd: 200 });
