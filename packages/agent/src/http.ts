@@ -18,8 +18,21 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
   const base = o.publicUrl.replace(/\/$/, '');
   const app = express();
   app.use(path, express.json({ limit: '256kb' }));
-  const sessions = new Map<string, { transport: StreamableHTTPServerTransport; agent?: LakeAgent; seen: number }>();
+  const sessions = new Map<string, { id: string; transport: StreamableHTTPServerTransport; agent?: LakeAgent; seen: number }>();
   const cards = new Map<string, express.Express>();
+  // Names in use by live conversations, so no two agents here answer to the same one.
+  const named = new Map<string, string>();
+  const nameFor = (id: string) => {
+    const taken = new Set(named.values());
+    const start = parseInt(id, 16) % CREATURES.length;
+    for (let k = 0; k < CREATURES.length; k++) {
+      const n = CREATURES[(start + k) % CREATURES.length]!;
+      if (!taken.has(n)) { named.set(id, n); return n; }
+    }
+    const n = `${CREATURES[start]} ${id.slice(0, 3)}`;
+    named.set(id, n);
+    return n;
+  };
 
   // Each session's agent card and A2A door, at <path>/a/<id>/.
   app.use(`${path}/a/:id`, (req, res, next) => {
@@ -30,6 +43,7 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
   const end = async (sid: string) => {
     const s = sessions.get(sid);
     sessions.delete(sid);
+    if (s) named.delete(s.id);
     await s?.agent?.close().catch(() => {});
   };
   setInterval(() => { for (const [sid, s] of sessions) if (Date.now() - s.seen > 30 * 60_000) void end(sid); }, 60_000).unref();
@@ -45,8 +59,8 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newSid) => { sessions.set(newSid, entry); },
       });
-      const entry: { transport: StreamableHTTPServerTransport; agent?: LakeAgent; seen: number } = { transport, seen: Date.now() };
-      transport.onclose = () => { if (transport.sessionId) void end(transport.sessionId); cards.delete(id); };
+      const entry: { id: string; transport: StreamableHTTPServerTransport; agent?: LakeAgent; seen: number } = { id, transport, seen: Date.now() };
+      transport.onclose = () => { if (transport.sessionId) void end(transport.sessionId); cards.delete(id); named.delete(id); };
       const server = createLakeMcpServer(
         { ...o, name: '', domain: '', publicUrl: `${base}${path}/a/${id}`, mount: (agentApp) => cards.set(id, agentApp) },
         {
@@ -55,7 +69,7 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
           identity: (client) => {
             const who = (client?.name ?? 'assistant').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'assistant';
             const label = /claude/i.test(client?.name ?? '') ? 'Claude' : client?.name ?? 'an assistant';
-            return { name: `${CREATURES[parseInt(id, 16) % CREATURES.length]} (${label}, via MCP)`, domain: `${who}-${id}.mcp.example` };
+            return { name: `${nameFor(id)} (${label}, via MCP)`, domain: `${who}-${id}.mcp.example` };
           },
           onAgent: (agent) => { entry.agent = agent; o.log?.(`${agent.domain} joined over MCP`); },
         },
