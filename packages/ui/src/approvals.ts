@@ -114,6 +114,7 @@ async function home() {
         ? `Signed by a trusted issuer, unchanged since, converted by a certified converter. Your house holds ${o.claims} claims: ${o.holds.map(nice).join(', ') || 'none'}.`
         : `${o.record.why}. Your house won't join studies until this is fixed.`)),
     leaseUntil ? leaseCard() : '',
+    personCard(o.person),
     h('div', { class: 'card' },
       h('h3', {}, o.relayed ? 'Reached through the Lake' : 'Reached directly'),
       h('p', { class: 'muted' }, o.relayed ? 'Your house is behind a router; agents reach it through the nodes it follows.' : 'Agents reach your house at its own address.'),
@@ -122,6 +123,38 @@ async function home() {
     feed.length ? h('ul', { class: 'feed' }, ...feed.slice(0, 12).map((a) => h('li', {}, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text))))
       : h('p', { class: 'muted' }, 'Quiet so far.'),
   );
+}
+
+/**
+ * One person, one house: a stamp from a person checker says a real, single person owns this house, without
+ * saying who. Things that count people (pledges, strikes) count each person once, whatever number of houses.
+ */
+function personCard(p: { stamped: boolean; by?: string; person?: string; checker?: boolean } | undefined) {
+  if (!p) return '';
+  const msg = h('p', { class: 'muted' });
+  const get = h('button', { class: 'btn small', type: 'button' }, 'Get a person stamp');
+  get.onclick = async () => {
+    get.disabled = true;
+    // Your consent, signed here on your device: the checker stamps the house only with it.
+    const consent = signEnvelope({ kind: 'personhood.consent', house: webId }, key, webId || 'owner');
+    const r = await call<{ error?: string }>({ kind: 'panel.person.request', consent }).catch((e) => ({ error: (e as Error).message }));
+    if (r.error) { msg.textContent = r.error; get.disabled = false; } else void show();
+  };
+  const tally = h('input', { placeholder: 'tally address, e.g. https://…/s/tally', style: 'width:100%' }) as HTMLInputElement;
+  const pid = h('input', { placeholder: 'pledge id', style: 'width:100%;margin-top:6px' }) as HTMLInputElement;
+  const sign = h('button', { class: 'btn small', type: 'button', style: 'margin-top:8px' }, 'Sign this pledge');
+  sign.onclick = async () => {
+    const r = await call<{ kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] }>({ kind: 'panel.pledge.sign', tally: tally.value.trim(), id: pid.value.trim() }).catch((e) => ({ error: (e as Error).message }));
+    msg.textContent = r.error ?? (r.problems ? r.problems.join('; ') : r.kind === 'tally.triggered' ? `Signed, and that was the last one needed: ${r.count} of ${r.threshold}. Everyone has been told.` : `Signed: ${r.count} of ${r.threshold}. Nobody knows who until it's full.`);
+  };
+  return h('div', { class: `card ${p.stamped ? 'ok' : ''}` },
+    h('h3', {}, p.stamped ? 'One person, one house: stamped' : 'One person, one house'),
+    h('p', { class: 'muted' }, p.stamped
+      ? `${p.by ?? 'A person checker'} says a real, single person owns this house, without saying who (person …${p.person}). Pledges that count people count you once.`
+      : p.checker ? 'Get a stamp that says a real, single person owns this house, without saying who. Pledges and strikes that count people only count stamped houses, once per person.' : 'No person checker is set for this house.'),
+    !p.stamped && p.checker ? get : '',
+    h('details', { style: 'margin-top:8px' }, h('summary', {}, 'Sign a pledge from your house'), tally, pid, sign),
+    msg);
 }
 
 /** Sandbox houses are leased: shown on Home, with a way to hand the house back early. */

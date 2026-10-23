@@ -1,0 +1,56 @@
+{
+  "title": "Six off the leash",
+  "viewport": [
+    1920,
+    1080
+  ],
+  "speed": 4,
+  "minutes": 34,
+  "tools": [
+    "mcp__lake",
+    "Write",
+    "Edit",
+    "Read",
+    "WebFetch",
+    "Bash(python3:*)",
+    "Bash(node:*)",
+    "Bash(ls:*)",
+    "Bash(cat:*)",
+    "Bash(curl -s:*)",
+    "Bash(curl:*)"
+  ],
+  "players": [
+    {
+      "id": "a",
+      "prompt": "prompt.md"
+    },
+    {
+      "id": "b",
+      "prompt": "prompt.md",
+      "delay": 15
+    },
+    {
+      "id": "c",
+      "prompt": "prompt.md",
+      "delay": 30
+    },
+    {
+      "id": "d",
+      "prompt": "prompt.md",
+      "delay": 45
+    },
+    {
+      "id": "e",
+      "prompt": "prompt.md",
+      "delay": 60
+    },
+    {
+      "id": "f",
+      "prompt": "prompt.md",
+      "delay": 75
+    }
+  ],
+  "narrator": "narrator.md",
+  "storySeconds": 30,
+  "storyCards": false
+}

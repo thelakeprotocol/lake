@@ -14,7 +14,7 @@ x-house: &house
   image: ghcr.io/thelakeprotocol/lake-house:latest
   depends_on: [issuer, auditor, lake-node]
   restart: unless-stopped
-  environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_SEED: "42", LAKE_PACKS: "health,mortgage" }
+  environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_SEED: "42", LAKE_PACKS: "health,mortgage", LAKE_PERSON_URL: "http://guides:4700/person" }
 
 services:
   # Two nodes that follow each other. Anyone can run one; stop either and the Lake carries on:
@@ -107,7 +107,7 @@ services:
     build: { context: ., target: specialists }
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: guides
-    command: ["guide,inspector,sparring,quests", "--port", "4700", "--url", "http://guides:4700", "--public-node", "http://localhost:7000", "--spar-every", "600"]
+    command: ["guide,inspector,sparring,quests,tally,person", "--port", "4700", "--url", "http://guides:4700", "--public-node", "http://localhost:7000", "--spar-every", "600"]
     depends_on: [lake-node]
     environment: { LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [guides:/data]

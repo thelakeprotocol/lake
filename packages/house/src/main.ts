@@ -27,6 +27,8 @@ const { values: a } = parseArgs({
     'issuer-url': { type: 'string', default: process.env.LAKE_ISSUER_URL },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL },
+    // The person checker this house asks for its stamp (one person, one house); none by default.
+    'person-url': { type: 'string', default: process.env.LAKE_PERSON_URL },
     join: { type: 'string', default: process.env.LAKE_JOIN },
     // Bring your own pod (any Solid server): your WebID and client credentials registered with its identity provider.
     webid: { type: 'string', default: process.env.LAKE_WEBID },
@@ -56,6 +58,7 @@ if (a.join) {
   const lake = a.join.replace(/\/$/, '');
   a.lake ??= lake;
   a['auditor-url'] ??= `${lake}/s/auditor`;
+  a['person-url'] ??= `${lake}/s/person`;
   a.relay = true;
 }
 const port = Number(a.port);
@@ -77,7 +80,7 @@ const packs = await loadPacks(a.packs!.split(','), (n) => import(n));
 const named = Object.fromEntries((a.issuers ?? '').split(',').filter((x) => x.includes('=')).map((x) => x.split('=').map((y) => y.trim()) as [string, string]));
 const issuerUrls = Object.fromEntries(packs.filter((p) => p.source).map((p, i) => [p.id,
   (named[p.id] ?? (i === 0 ? a['issuer-url'] : undefined) ?? (a.join ? `${a.join.replace(/\/$/, '')}/s/${p.source!.issuer.path}` : `http://${p.source!.issuer.path}:4300`)).replace(/\/$/, '')]));
-const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
+const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
 
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();

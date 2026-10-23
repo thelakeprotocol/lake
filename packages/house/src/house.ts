@@ -3,8 +3,8 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, signCard,
-  type AgentCard, type Identity, type LakeEvent, type LakePack, type Rules,
+  allFields, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
@@ -33,6 +33,8 @@ export interface HouseOptions {
   /** Where each pack's issuer is, by pack id. */
   issuerUrls: Record<string, string>;
   auditorUrl: string;
+  /** The person checker this house asks for its stamp (SPEC §6.4), if any. */
+  personUrl?: string;
   /** One or more Lake nodes, comma-separated. The house registers with and reports to each. */
   lakeUrl?: string;
   seed?: string;
@@ -202,7 +204,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // Signals from the node this house follows: refreshed every 2 s, verified against the node's own card.
   const signals = { blocklist: new Set<string>(), reputation: {} as Record<string, number> };
   let keeperRef: Housekeeper | null = null;
-  const panel = panelFor({ o, owner, actor, activity, card, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records });
+  const panel = panelFor({ o, owner, id, actor, activity, card, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records });
   const desk = new OwnerDesk({
     panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit,
@@ -316,12 +318,24 @@ const decode = (jws: string) => {
 
 /** Everything the owner's control panel shows and changes. Every call arrives signed by the owner's key. */
 function panelFor(x: {
-  o: HouseOptions; owner: OwnerSession; actor: string; activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
+  o: HouseOptions; owner: OwnerSession; id: Identity; actor: string; activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
   card: AgentCard; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
   trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
 }): PanelProvider {
   const { owner } = x;
+  // A signed request from this house to another agent, and its verified reply.
+  const send = async (url: string, payload: Record<string, unknown>) => {
+    const envelope = await signMessage(payload, x.id, { iss: owner.webId });
+    const reply = await sendLake(url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: x.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 15_000 });
+    const v = await verifyLakeData<Record<string, unknown>>(reply as LakeData<Record<string, unknown>>, { sandbox: x.o.sandbox });
+    if (!v.ok) throw new Error(v.rejection.why);
+    return { payload: v.payload, card: (reply as LakeData).card };
+  };
+  const stamp = async (): Promise<{ credential: string; card: AgentCard; person: string } | null> => {
+    const r = await owner.fetch(`${owner.podRoot}wallet/personhood.json`).catch(() => null);
+    return r?.ok ? r.json() : null;
+  };
   const money = async () => {
     const files = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
     const receipts = (await Promise.all(files.map(async (f) => {
@@ -349,6 +363,7 @@ function panelFor(x: {
         pending: view.requests.length, keys: view.keys.length,
         earned: (await money()).total,
         rulesOwner: x.keeper().rules.owner,
+        person: await stamp().then((s) => (s ? { stamped: true, by: s.card?.name, person: s.person.slice(-8) } : { stamped: false, checker: !!x.o.personUrl })),
       };
     },
     async rules() {
@@ -413,6 +428,18 @@ function panelFor(x: {
       };
     },
     openIntent: (pack, terms) => x.keeper().market.open(pack, terms),
+    async requestPersonhood(consent, ownerJwk) {
+      if (!x.o.personUrl) throw new Error('no person checker is set for this house');
+      const { payload, card } = await send(x.o.personUrl, { kind: 'personhood.request', owner: ownerJwk, consent });
+      if (payload.kind !== 'stamped') throw new Error(((payload.problems as string[]) ?? ['refused']).join('; '));
+      await put(owner, 'wallet/personhood.json', JSON.stringify({ credential: payload.credential, card, person: payload.person }), 'application/json');
+      return { stamped: true, by: card.name };
+    },
+    async signPledge(tally, id) {
+      const s = await stamp();
+      const { payload } = await send(tally, { kind: 'tally.sign', id, ...(s ? { person: { credential: s.credential, card: s.card } } : {}) });
+      return payload;
+    },
     async closeIntent(pack) { await x.keeper().market.close(pack); return { ok: true }; },
     acceptOffer: (id) => x.keeper().market.accept(id),
     async exportAll() {

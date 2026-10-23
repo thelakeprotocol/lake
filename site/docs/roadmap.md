@@ -6,7 +6,7 @@
 
 | | What | Why it matters | Status |
 |---|---|---|---|
-| 1 | **One person, one house** | Pledges, data strikes, blocs and reputation only mean something if one person can't run fifty houses. Which credential proves personhood without exposing who you are? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
+| 1 | **One person, one house** | Pledges, data strikes, blocs and reputation only mean something if one person can't run fifty houses. A demo person checker and people-only pledges run ([SPEC §6.4](/docs/spec)); the open part is who checks people for real (a bank, a government ID, vouching) and per-context person numbers so stamps can't link your houses. | <span class="status next">started</span> |
 | 2 | **A real payment rail** | Settlement is simulated; mandates and receipts are real. Which rail settles real money, and who carries the mandate's liability? ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
 | 3 | **Apps that live in your house** | Apps come to your data instead of your data going to apps: installed in your house, shared like an app store. ([Ideas](/docs/ideas)) | <span class="status later">open</span> |
 | 4 | **Faster houses, bigger Lakes** | A fresh house joins in about 11 s (target 5 s); 1,000 houses finish a paid study in 10.6 min on a laptop (target 60 s). Both are the pod server's start-up and storage. | <span class="status later">help wanted</span> |

@@ -54,6 +54,7 @@ services:
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
+      LAKE_PERSON_URL: "http://specialists:4300/person"
     volumes: [houses:/data]
     ports: ["127.0.0.1:4000:4000", "127.0.0.1:4310:3000"]
     depends_on: [specialists]

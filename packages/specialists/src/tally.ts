@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { makeEvent, sendLake, signMessage, type AgentCard, type LakeData } from '@thelakeprotocol/core';
+import { checkAttachment, makeEvent, sendLake, signMessage, type AgentCard, type Attachment, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -16,17 +16,20 @@ interface Tally {
   deadline: number;
   opener: string;
   state: 'open' | 'triggered' | 'lapsed';
-  signers: { webId: string; domain: string; url: string; at: string }[];
+  /** Count people, not identities: each signature needs a person stamp, and one person counts once (SPEC §6.4). */
+  peopleOnly?: boolean;
+  signers: { webId: string; domain: string; url: string; at: string; person?: string }[];
 }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const MAX_DAYS = 30;
 
-export async function createTally(o: SpecialistOptions & { dataDir: string }) {
+export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[] }) {
+  const checkers = o.personCheckers ?? ['person.lake.local'];
   const file = `${o.dataDir}/tallies.json`;
   const tallies = new Map<string, Tally>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Tally[]).map((t) => [t.id, t]));
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
-  const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: t.signers.length, deadline: new Date(t.deadline).toISOString(), state: t.state });
+  const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: t.signers.length, deadline: new Date(t.deadline).toISOString(), state: t.state, ...(t.peopleOnly ? { people_only: true } : {}) });
   const report = (t: Tally) => o.report?.(makeEvent('tally.update', 'self', undefined, { count: t.signers.length, threshold: t.threshold, state: t.state }));
 
   // Messages the tally sends on its own: the trigger, and a lapse.
@@ -49,7 +52,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string }) {
   };
   setInterval(() => { for (const t of tallies.values()) lapse(t); }, 30_000).unref();
 
-  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. Send { kind: "tally.open", id, text, threshold, deadline }, { kind: "tally.sign", id }, { kind: "tally.withdraw", id } or { kind: "tally.count", id }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people (each signature needs a person stamp) instead of identities. Send { kind: "tally.open", id, text, threshold, deadline, people_only? }, { kind: "tally.sign", id }, { kind: "tally.withdraw", id } or { kind: "tally.count", id }.', 'tally', async (p, from, profile, card: AgentCard) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -61,7 +64,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string }) {
         ...(deadline > Date.now() && deadline < Date.now() + MAX_DAYS * 86_400_000 ? [] : [`deadline: a time in the next ${MAX_DAYS} days`]),
       ];
       if (problems.length) return { kind: 'refused', problems };
-      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [] };
+      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}) };
       tallies.set(id, t);
       void save();
       report(t);
@@ -85,8 +88,15 @@ export async function createTally(o: SpecialistOptions & { dataDir: string }) {
     }
     if (p.kind === 'tally.sign') {
       if (t.state !== 'open') return { kind: 'refused', problems: [`it has ${t.state}`] };
-      // One signature per signed identity. Counting people, not keys, needs personhood (on What's next).
-      if (!signed) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString() });
+      // One signature per signed identity; in a people-only tally, also one per person, whatever number of houses they have.
+      let person: string | undefined;
+      if (t.peopleOnly) {
+        const stamp = await checkAttachment(p.person as Attachment | undefined, { trusted: checkers, type: 'LakePersonhood', subject: from, sandbox: o.sandbox });
+        if (!stamp.ok) return { kind: 'refused', problems: [`this tally counts people: attach a person stamp from ${checkers.join(' or ')} (${stamp.why})`] };
+        person = String(stamp.vc.credentialSubject.person ?? '');
+      }
+      const counted = signed || (person !== undefined && t.signers.some((x) => x.person === person));
+      if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}) });
       if (t.signers.length >= t.threshold) {
         t.state = 'triggered';
         const signers = t.signers.map(({ domain, url }) => ({ domain, url }));

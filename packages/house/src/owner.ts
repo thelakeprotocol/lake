@@ -39,6 +39,10 @@ export interface PanelProvider {
   openIntent(pack: string, terms: Record<string, string | number>): Promise<unknown>;
   closeIntent(pack: string): Promise<unknown>;
   acceptOffer(id: string): Promise<unknown>;
+  /** One person, one house (SPEC §6.4): ask the person checker for a stamp, with the owner's signed consent. */
+  requestPersonhood(consent: unknown, ownerJwk: JWK): Promise<unknown>;
+  /** Sign a pledge on a blind tally, from this house, with its person stamp. */
+  signPledge(tally: string, id: string): Promise<unknown>;
 }
 
 export interface GrantRecord {
@@ -265,6 +269,8 @@ export class OwnerDesk {
           'panel.intent.open': () => panel.openIntent(String(q.pack ?? ''), q.terms ?? {}),
           'panel.intent.close': () => panel.closeIntent(String(q.pack ?? '')),
           'panel.offer.accept': () => panel.acceptOffer(String(q.offer ?? '')),
+          'panel.person.request': () => panel.requestPersonhood((q as { consent?: unknown }).consent, this.ownerJwk!),
+          'panel.pledge.sign': () => panel.signPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
         } as Record<string, () => Promise<unknown>>)[p.kind]?.().catch((e: Error) => ({ error: e.message }));
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }

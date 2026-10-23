@@ -25,6 +25,7 @@ LAKE_PUBLIC_HOST=192.168.1.20 docker compose up -d
 | Tab | What you do there |
 |---|---|
 | **Home** | Knocks today, requests waiting, live keys, money earned, attacks blocked. Whether your record checks out (signed by a trusted issuer, unchanged, converted by a certified converter). How agents reach you: directly, or through the Lake's relay. What just happened at your door. |
+| **Home: one person, one house** | Get a stamp from a person checker saying a real, single person owns your house, without saying who (your consent is signed on your device). Sign a pledge from your house; pledges that count people count you once, whatever number of houses you have. |
 | **Requests** | One card per request your rules left to you: who is asking, the question, the purpose, the exact fields, whether they keep anything, the price, how long the key lasts, and what your housekeeper recommends. **Allow** or **Deny**. |
 | **Keys** | Every live key to your house: who holds it, for what, how long is left, and whether a rule or you issued it. **Revoke** one, or **Revoke every key**. |
 | **Rules** | Your `rules.yaml`, without the YAML. Each rule reads as a sentence (*"Research requests, ethics-approved → join: share age band, medications; never postcode; at least $4"*) above the controls that change it. Tap a field to cycle it: not mentioned → share → never. Reorder rules, set what happens when no rule fits, turn bargaining in blocs on or off, pick your interests (for guilds), and choose whose word counts: which ethics bodies, auditors, record issuers and payment agents you trust. **Save** checks the rules the same way the housekeeper does, files them in your pod at `/settings/rules.yaml`, and the housekeeper uses them from the next knock. |
@@ -46,7 +47,7 @@ docker compose exec house-stan node dist/admin.js revoke-all
 
 ## The API under it
 
-The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.data`, `panel.export`, `panel.market`, `panel.intent.open`, `panel.intent.close`, `panel.offer.accept`, `panel.assistant.invite`, `panel.assistant.revoke`, `panel.assistant.dismiss`. Your assistant's key may only read and send `assistant.suggest`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
+The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.data`, `panel.export`, `panel.market`, `panel.intent.open`, `panel.intent.close`, `panel.offer.accept`, `panel.assistant.invite`, `panel.assistant.revoke`, `panel.assistant.dismiss`, `panel.person.request`, `panel.pledge.sign`. Your assistant's key may only read and send `assistant.suggest`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
 
 ## What it can't do yet
 

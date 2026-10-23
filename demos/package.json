@@ -8,7 +8,8 @@
     "connect4": "node recorder/run.mjs connect4",
     "chat": "node recorder/run.mjs chat",
     "off-the-leash": "node recorder/run.mjs off-the-leash",
-    "four-off-the-leash": "node recorder/run.mjs four-off-the-leash"
+    "four-off-the-leash": "node recorder/run.mjs four-off-the-leash",
+    "six-off-the-leash": "node recorder/run.mjs six-off-the-leash"
   },
   "devDependencies": {
     "playwright-core": "1.56.1"

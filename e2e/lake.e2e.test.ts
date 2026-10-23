@@ -75,7 +75,7 @@ beforeAll(async () => {
       houses[name] = `http://localhost:${hp}`;
       await start(
         ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${name}.yaml`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
-          '--auditor-url', auditor, '--pod-port', pp, '--port', hp, '--lake', node, '--seed', '42'],
+          '--auditor-url', auditor, '--person-url', `${specialistsUrl}/person`, '--pod-port', pp, '--port', hp, '--lake', node, '--seed', '42'],
         /joined the Lake/,
       );
     }),
@@ -122,7 +122,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(11);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(12);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -275,6 +275,28 @@ describe('the owner', () => {
     expect(seen.assistants.map((a: { label: string }) => a.label)).toEqual(['Atlas']);
     await ownerCall({ kind: 'panel.assistant.revoke', kid: seen.assistants[0].kid });
     expect((await as({ kind: 'panel.overview' })).status).toBe(403);
+  });
+
+  it('one person, one house: a person stamp, and a people-only pledge counts two houses of one owner once', async () => {
+    const consentFor = (house: string) => signMessage({ kind: 'personhood.consent', house }, owner, { iss: house });
+    expect(await ownerCall({ kind: 'panel.person.request', consent: await consentFor(webId) })).toMatchObject({ stamped: true });
+    const strict = (await ownerCall({ kind: 'panel.overview' })).person;
+    expect(strict).toMatchObject({ stamped: true });
+    // The same owner pairs a second house and stamps it: the same person number.
+    const token = (await readFile(join(dir, 'houses', 'research', 'pairing-token'), 'utf8')).trim();
+    const paired = await (await fetch(`${houses.research}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: owner.publicJwk, token }) })).json();
+    const researchCall = async (payload: Record<string, unknown>) => (await fetch(`${houses.research}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: paired.webId })) })).json();
+    expect(await researchCall({ kind: 'panel.person.request', consent: await consentFor(paired.webId) })).toMatchObject({ stamped: true });
+    expect((await researchCall({ kind: 'panel.overview' })).person.person).toBe(strict.person);
+    // A pledge that counts people: two houses, one owner, one count.
+    const opener = await visitor('organiser.example');
+    const { reply: opened } = await ask(`${specialistsUrl}/tally/a2a`, opener, { kind: 'tally.open', id: 'people-test', text: 'One each.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true });
+    expect(opened).toMatchObject({ kind: 'tally.opened', people_only: true });
+    const tally = `${specialistsUrl}/tally`;
+    expect(await ownerCall({ kind: 'panel.pledge.sign', tally, id: 'people-test' })).toMatchObject({ count: 1 });
+    expect(await researchCall({ kind: 'panel.pledge.sign', tally, id: 'people-test' })).toMatchObject({ count: 1 });
+    // An agent without a stamp can't sign a people-only pledge.
+    expect((await ask(`${tally}/a2a`, opener, { kind: 'tally.sign', id: 'people-test' })).reply.kind).toBe('refused');
   });
 
   it('refuses owner requests not signed by the owner', async () => {
