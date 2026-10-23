@@ -1,0 +1,12 @@
+{
+  "title": "Inside and outside",
+  "viewport": [1920, 1080],
+  "speed": 4,
+  "minutes": 29,
+  "setup": "setup.mjs",
+  "teardown": "teardown.mjs",
+  "narrator": "narrator.md",
+  "storyCards": false,
+  "tools": ["mcp__lake", "Write", "Edit", "Read", "WebFetch", "Bash(python3:*)", "Bash(node:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(date:*)", "Bash(curl -s:*)", "Bash(curl:*)"],
+  "players": [{ "id": "a", "prompt": "inside.md" }, { "id": "b", "prompt": "outside.md", "delay": 20 }]
+}

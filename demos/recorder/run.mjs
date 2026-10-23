@@ -1,7 +1,7 @@
 // Records a demo: local, unmodified Claude Code sessions (headless) with one MCP connector to the sandbox
 // Lake, a page showing the live map beside their transcripts, and an mp4 at the end.
 //   npm run connect4        (needs: claude, Google Chrome, ffmpeg)
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,10 @@ for (const p of config.players) {
   writeFileSync(join(run, `${p.id}.jsonl`), '');
 }
 
+// An optional setup step (e.g. claim a house) whose JSON output fills {{name}} in the prompts; teardown undoes it.
+const vars = config.setup ? JSON.parse(execFileSync(process.execPath, [join(root, demo, config.setup), run], { encoding: 'utf8' })) : {};
+const fillVars = (text) => Object.entries(vars).reduce((t, [k, v]) => t.replaceAll(`{{${k}}}`, String(v)), text);
+
 const port = 4990;
 const server = serve({ page: join(root, demo, 'page.html'), run, port });
 const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
@@ -35,7 +39,7 @@ await page.waitForTimeout(4000);
 
 const t0 = Date.now();
 const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() => {
-  const prompt = fill(readFileSync(join(root, demo, p.prompt), 'utf8')).replaceAll('{{start}}', new Date().toTimeString().slice(0, 8));
+  const prompt = fillVars(fill(readFileSync(join(root, demo, p.prompt), 'utf8'))).replaceAll('{{start}}', new Date().toTimeString().slice(0, 8));
   writeFileSync(join(run, p.id, 'PROMPT.md'), prompt);
   const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', '--allowedTools', ...(config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
     { cwd: join(run, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
@@ -50,6 +54,7 @@ const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() =
   c.on('exit', (code) => { clearTimeout(limit); done(code); });
 }, (p.delay ?? i * 2) * 1000)));
 const codes = await Promise.all(procs);
+if (config.teardown) try { execFileSync(process.execPath, [join(root, demo, config.teardown), run], { stdio: 'inherit' }); } catch (e) { console.log(`teardown: ${e.message}`); }
 await page.waitForTimeout(12000);
 await ctx.close();
 
