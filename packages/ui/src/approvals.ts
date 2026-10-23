@@ -55,9 +55,10 @@ async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
 }
 
 // ---- navigation ----
+// Your agent and the agents that knock are different things: "My agent" is yours, "Visitors" are strangers.
 const TABS = [
-  ['home', 'Home'], ['requests', 'Requests'], ['keys', 'Keys'], ['rules', 'Rules'],
-  ['offers', 'Offers'], ['agents', 'Agents'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'],
+  ['home', 'Home'], ['requests', 'Requests'], ['offers', 'Offers'], ['myagent', 'My agent'], ['keys', 'Keys'], ['rules', 'Rules'],
+  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 let tab: Tab = TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home';
@@ -72,6 +73,8 @@ function go(t: Tab) {
   tab = t;
   if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`);
   renderNav();
+  // On a phone the tabs scroll sideways; keep the one you picked in sight.
+  $('nav').querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   void show();
 }
 
@@ -82,7 +85,7 @@ const nice = (f: string) => f.replace(/_/g, ' ');
 
 async function show() {
   try {
-    const render = { home, requests, keys, rules, offers, agents, money, data, move }[tab];
+    const render = { home, requests, keys, rules, offers, myagent, agents, money, data, move }[tab];
     await render();
     $('status').className = 'dot live';
   } catch (e) {
@@ -95,12 +98,16 @@ async function show() {
 async function home() {
   const o = await call({ kind: 'panel.overview' });
   const feed = await call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
-  const { suggestions } = await call<{ suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
+  const { suggestions, assistants } = await call<{ suggestions: { id: string; from: string; text: string; at: string }[]; assistants: { label: string }[] }>({ kind: 'list' });
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
   const tile = (label: string, value: string | number, cls = '') => h('div', { class: `tile ${cls}` }, h('dt', {}, label), h('dd', {}, String(value)));
   view().replaceChildren(
     suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
+    h('div', { class: 'card' },
+      h('h3', {}, 'Your AI agent'),
+      h('p', { class: 'muted' }, assistants.length ? `${assistants.map((a) => a.label.replace(/\s*\(.*\)$/, '')).join(', ')} ${assistants.length === 1 ? 'is' : 'are'} looking after your house: it sees every knock and suggests; you decide.` : 'Let your own AI agent look after your house: it sees every knock and suggests what to do; only you decide.'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, assistants.length ? 'My agent →' : 'Give it a key →')),
     h('dl', { class: 'tiles' },
       tile('Knocks today', o.knocksToday),
       tile('Waiting for you', o.pending, o.pending ? 'amber' : ''),
@@ -144,7 +151,7 @@ function personCard(p: { stamped: boolean; by?: string; person?: string; checker
   const pid = h('input', { placeholder: 'pledge id', style: 'width:100%;margin-top:6px' }) as HTMLInputElement;
   const sign = h('button', { class: 'btn small', type: 'button', style: 'margin-top:8px' }, 'Sign this pledge');
   sign.onclick = async () => {
-    const r = await call<{ kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] }>({ kind: 'panel.pledge.sign', tally: tally.value.trim(), id: pid.value.trim() }).catch((e) => ({ error: (e as Error).message }));
+    const r = await call<{ kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] }>({ kind: 'panel.pledge.sign', tally: tally.value.trim(), id: pid.value.trim() }).catch((e): { error: string; problems?: string[]; kind?: string; count?: number; threshold?: number } => ({ error: (e as Error).message }));
     msg.textContent = r.error ?? (r.problems ? r.problems.join('; ') : r.kind === 'tally.triggered' ? `Signed, and that was the last one needed: ${r.count} of ${r.threshold}. Everyone has been told.` : `Signed: ${r.count} of ${r.threshold}. Nobody knows who until it's full.`);
   };
   return h('div', { class: `card ${p.stamped ? 'ok' : ''}` },
@@ -442,30 +449,47 @@ async function agents() {
         h('div', { class: 'r-meta' }, `${a.knocks} knock${a.knocks === 1 ? '' : 's'} · last ${time(a.last)}${a.lastDecision ? ` · you said ${a.lastDecision}` : ''}${a.blocked ? ` · ${a.blocked} blocked` : ''}`)),
       h('div', { class: 'r-meta' }, a.reputation === null ? (a.blocked ? 'blocked' : '') : h('span', {}, `reputation ${a.reputation}`, h('span', { class: 'rep' }, h('i', { style: `width:${Math.round(a.reputation * 100)}%` })))))))
       : h('p', { class: 'muted' }, 'No visitors yet.'),
-    await assistantSection(),
   );
 }
 
+// ---- My agent ----
+/** The code you hand your agent, kept here so a refresh doesn't wipe it while you copy it. */
+let invite: { msg: string; until: number } | null = null;
+
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
-async function assistantSection(): Promise<Node> {
+async function myagent() {
   const v = await call<{ assistants: { kid: string; label: string; addedAt: string }[]; suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
   const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
-  const out = h('div', {});
-  const give = h('button', { class: 'btn primary', type: 'button' }, 'Give my AI agent a key');
+  if (invite && invite.until < Date.now()) invite = null;
+  const give = h('button', { class: 'btn primary', type: 'button' }, v.assistants.length ? 'Give another agent a key' : 'Give my AI agent a key');
   give.onclick = async () => {
+    give.disabled = true;
     const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant' });
-    const msg = `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`;
-    const copy = h('button', { class: 'btn small', type: 'button', onclick: () => navigator.clipboard?.writeText(msg) }, 'Copy');
-    out.replaceChildren(h('p', { class: 'muted' }, `Paste this to your AI agent (it needs the Lake connector). The code works once, for 15 minutes:`), h('pre', { style: 'white-space:pre-wrap' }, msg), copy);
+    invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until) };
+    void show();
   };
-  return h('section', {},
-    h('h2', {}, 'Your AI agent, inside your house'),
-    h('p', { class: 'lede' }, 'Give your own AI agent a key that can look but never decide: it sees your requests, offers, visitors and data, and suggests what to do. Only your key can Allow, change your rules, accept an offer or revoke a key.'),
-    give, out,
-    v.assistants.length ? h('ul', { class: 'rows', style: 'margin-top:14px' }, ...v.assistants.map((a) => h('li', {},
-      h('div', {}, h('div', { class: 'r-title' }, a.label), h('div', { class: 'r-meta' }, `added ${time(a.addedAt)} · can look and suggest`)),
-      h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } }, 'Revoke')))) : '',
-    v.suggestions.length ? h('div', {}, h('h3', { style: 'margin-top:18px' }, 'Suggestions from your agent'), suggestionList(v.suggestions)) : '',
+  const box = invite ? (() => {
+    const text = h('textarea', { readonly: true, rows: 5, class: 'copybox' }) as HTMLTextAreaElement;
+    text.value = invite.msg;
+    text.onfocus = () => text.select();
+    const copy = h('button', { class: 'btn small', type: 'button' }, 'Copy');
+    copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(invite!.msg); copy.textContent = 'Copied ✓'; } catch { text.focus(); text.select(); copy.textContent = 'Selected: copy it'; }
+    };
+    const mins = Math.max(1, Math.round((invite.until - Date.now()) / 60_000));
+    return h('div', { class: 'card' }, h('h3', {}, 'Paste this to your AI agent'),
+      h('p', { class: 'muted' }, `It needs the Lake connector. The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`), text, copy);
+  })() : '';
+  view().replaceChildren(
+    h('p', { class: 'lede' }, 'Give your own AI agent a key to your house. It can look at everything (requests, offers, visitors, your data) and suggest what to do. It can never decide: only your key can Allow, change your rules, accept an offer or revoke a key.'),
+    box || give,
+    v.assistants.length
+      ? h('div', {}, h('h2', {}, 'Connected'), h('ul', { class: 'rows' }, ...v.assistants.map((a) => h('li', {},
+          h('div', {}, h('div', { class: 'r-title' }, a.label.replace(/\s*\(.*\)$/, '')), h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest`)),
+          h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } }, 'Revoke')))))
+      : h('p', { class: 'muted', style: 'margin-top:14px' }, 'No agent connected yet.'),
+    h('h2', {}, 'What it suggests'),
+    v.suggestions.length ? suggestionList(v.suggestions) : h('p', { class: 'muted' }, 'Nothing yet. Its suggestions show up here and on Home.'),
   );
 }
 
@@ -556,7 +580,9 @@ function start() {
   void refreshBadge();
   setInterval(refreshBadge, 1500);
   // Live tabs refresh themselves; the rules editor never overwrites what you're typing.
-  setInterval(() => { if (['home', 'requests', 'keys', 'offers', 'agents'].includes(tab) && !document.hidden && !document.querySelector('select:focus')) void show(); }, 3000);
+  // Never while you're typing, choosing or selecting something: a refresh would wipe it.
+  const busy = () => !!document.querySelector('select:focus, input:focus, textarea:focus') || !!window.getSelection()?.toString();
+  setInterval(() => { if (['home', 'requests', 'keys', 'offers', 'myagent', 'agents'].includes(tab) && !document.hidden && !busy()) void show(); }, 3000);
 }
 
 // Already paired? A signed "list" answers. Otherwise offer to pair (automatically when the link carries a token).

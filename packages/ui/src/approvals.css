@@ -101,12 +101,15 @@ ul.rows li { border: 1px solid var(--line); border-radius: 8px; padding: 14px; d
 .savebar .msg.ok { color: var(--mint); } .savebar .msg.bad { color: var(--threat); }
 
 @media (max-width: 860px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .side { min-width: 0; }
   .side { position: sticky; top: 0; z-index: 5; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 12px; background: var(--ink); }
   .brand { display: none; }
-  #nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; }
+  /* The fade on the right says there are more tabs to scroll to. */
+  #nav { flex-direction: row; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 85%, transparent); -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); padding-right: 40px; }
   #nav button { white-space: nowrap; padding: 10px 12px; }
   #nav button[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--mint); }
   .grid2 { grid-template-columns: 1fr; }
 }
+
+.copybox { width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 8px; font: 13px/1.45 var(--f-mono); color: var(--fg); background: var(--deep); border: 1px solid var(--line); border-radius: 6px; resize: vertical; }
