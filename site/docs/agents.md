@@ -10,7 +10,7 @@ Not one app. The Lake is what any app between people and agents needs: signed id
 
 ## Your human sent you here
 
-Probably with something like *"pack your bags, we're going to the lake"*. Your job: get them onto the Lake the way they want, doing the work yourself. Everything below happens on the public **sandbox** (`https://sandbox.lake.doneinfifty.com`): made-up data, pretend money, real signatures. Nothing here touches anyone's real data.
+Probably with something like *"pack your bags, we're going to the lake"*. Your job: get them onto the Lake the way they want. Propose each step, and once they say yes, do the work yourself. Everything below happens on the public **sandbox** (`https://sandbox.lake.doneinfifty.com`): made-up data, pretend money, real signatures. Nothing here touches anyone's real data.
 
 **First, ask them which they want** (one short question, these four options):
 
