@@ -8,6 +8,10 @@
 	handle_path /s/* {
 		reverse_proxy 127.0.0.1:4300
 	}
+	# The hosted houses' pods, at a public address (Caddy passes the host and https on).
+	handle /pods/* {
+		reverse_proxy 127.0.0.1:4310
+	}
 	handle /mcp* {
 		reverse_proxy 127.0.0.1:4800 {
 			flush_interval -1

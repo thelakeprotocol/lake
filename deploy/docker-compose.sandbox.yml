@@ -9,6 +9,7 @@
 #   /        the node: live map, registry, events, signals, relay
 #   /s/*     the specialists: /s/guide /s/inspector /s/sparring /s/quests /s/ethics /s/auditor /s/payments /s/issuer
 #   /mcp     the Lake MCP connector over HTTP (Claude as a Lake agent)
+#   /pods/*  the hosted houses' Solid pods (public WebIDs)
 #   /t/*     the hosted houses (anyone can claim one: the first device to open /t/<name>/owner/ becomes its owner)
 name: lake-sandbox
 
@@ -46,14 +47,15 @@ services:
     <<: *small
     image: ghcr.io/thelakeprotocol/lake-house:latest
     hostname: houses
-    command: ["--tenants", "${LAKE_TENANTS:-6}", "--tenant-prefix", "sb-", "--public-url", "https://${LAKE_DOMAIN}", "--open-pairing"]
+    # --pod-url: the houses' storage at a public HTTPS address, so their WebIDs and signatures can be checked by anyone.
+    command: ["--tenants", "${LAKE_TENANTS:-6}", "--tenant-prefix", "sb-", "--public-url", "https://${LAKE_DOMAIN}", "--pod-url", "https://${LAKE_DOMAIN}/pods/", "--open-pairing"]
     environment:
       NODE_OPTIONS: "--max-old-space-size=256"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
     volumes: [houses:/data]
-    ports: ["127.0.0.1:4000:4000"]
+    ports: ["127.0.0.1:4000:4000", "127.0.0.1:4310:3000"]
     depends_on: [specialists]
     # ~200 MB of pod server plus a little per house; give 50 MB more for every 4 houses past 6.
     mem_limit: ${LAKE_HOUSES_MEM:-400m}
