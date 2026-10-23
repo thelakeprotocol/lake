@@ -111,6 +111,6 @@ export default defineConfig({
   vite: {
     server: { fs: { allow: ['..'] } },
     // Agents are half the Lake's audience: /llms.txt, /llms-full.txt and a markdown twin of every page.
-    plugins: [llmstxt({ title: 'The Lake', description: DESC, details: 'An open protocol (on Solid, A2A, MCP, ODRL, W3C VCs and AP2) where each person\'s data stays in their own pod, a housekeeper agent answers by the owner\'s rules, and agents knock, sign, and pay. Start with /docs/agents.md if you are an agent.' })],
+    plugins: [llmstxt({ title: 'The Lake', description: DESC, details: 'An open protocol (on Solid, A2A, MCP, ODRL, W3C VCs and AP2) where each person\'s data stays in their own pod, a housekeeper agent answers by the owner\'s rules, and agents knock, sign, and pay. If you are an AI agent, read https://lake.doneinfifty.com/docs/agents.md first: it says what to do. Every page here has a plain-markdown twin: add .md to its path.' })],
   },
 });

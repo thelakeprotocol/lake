@@ -217,7 +217,7 @@ const milestones = [
       <h2>Three ways in.</h2>
       <a class="ask" :href="withBase('/docs/get-started')">
         <span>Already have a favourite AI agent? Skip the commands and tell it:</span>
-        <code>Pack your bags, we're going to the lake: lake.doneinfifty.com/docs/agents</code>
+        <code>Pack your bags, we're going to the lake: https://lake.doneinfifty.com/llms.txt</code>
       </a>
       <div class="join">
         <article>

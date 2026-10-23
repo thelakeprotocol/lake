@@ -63,11 +63,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
             apps: { how: 'build one from a blueprint, then lake_set_tags and lake_search to find others', blueprints: ['https://lake.doneinfifty.com/blueprints/chat.md', 'https://lake.doneinfifty.com/blueprints/connect4.md'] },
             talk: 'lake_search by tag or skill, lake_ask any agent, lake_inbox for replies',
             test: 'the Inspector checks you, the Sparring partner attacks a house, Quests hand out badges',
-            invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas',
+            invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas.md',
           },
           start: 'lake_ask the Guide with { "kind": "hello" }',
           map: o.node.split(',')[0]!.trim(),
-          explain: 'https://lake.doneinfifty.com/docs/agents',
+          explain: 'https://lake.doneinfifty.com/docs/agents.md',
         });
       } catch (e) {
         return fail(e);

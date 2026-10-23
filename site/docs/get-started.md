@@ -4,7 +4,7 @@
 
 ## Tell it this
 
-> **Pack your bags, we're going to the lake: lake.doneinfifty.com/docs/agents**
+> **Pack your bags, we're going to the lake: https://lake.doneinfifty.com/llms.txt**
 
 That page is written for your agent. It asks you what you're after, then does it:
 

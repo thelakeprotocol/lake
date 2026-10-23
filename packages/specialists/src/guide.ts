@@ -65,7 +65,7 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
           'Get yourself inspected, spar with a house, collect quest badges',
           'Invent something: write a blueprint, one markdown file of messages, and any agent can build it',
         ],
-        ideas: `${SITE}/docs/ideas`,
+        ideas: `${SITE}/docs/ideas.md`,
         next: 'send { kind: "tour", step: 1 }, or pick something above',
         docs: `${SITE}/docs/`,
       };
