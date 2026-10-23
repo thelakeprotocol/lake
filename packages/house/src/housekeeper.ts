@@ -207,7 +207,7 @@ export class Housekeeper {
       this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings,
-        recommendation: [warnings.length ? `I'd deny this: it ${warnings.join(', and ')}` : '', d.reason, ...notes].filter(Boolean).join('. '),
+        recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, ...notes].filter(Boolean).join('. '),
       });
     }
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});

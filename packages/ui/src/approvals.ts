@@ -94,6 +94,12 @@ const drawing = new Map<Tab, boolean>(); // tab → asked again while drawing
 const hoursLeft = (iso: string) => { const hr = (Date.parse(iso) - Date.now()) / 3_600_000; return hr < 1 ? `${Math.max(1, Math.round(hr * 60))} min` : `${Math.round(hr)} h`; };
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const nice = (f: string) => f.replace(/_/g, ' ');
+/** "P99Y" → "99 years", "P30D" → "30 days". */
+const duration = (iso: string) => {
+  const units: [RegExp, string][] = [[/(\d+)Y/, 'year'], [/P[^T]*?(\d+)M/, 'month'], [/(\d+)W/, 'week'], [/(\d+)D/, 'day'], [/T.*?(\d+)H/, 'hour']];
+  const parts = units.flatMap(([re, u]) => { const n = Number(re.exec(iso)?.[1] ?? 0); return n ? [`${n} ${u}${n === 1 ? '' : 's'}`] : []; });
+  return parts.join(' ') || iso;
+};
 /** A WebID or agent id, said the way a person would: its domain. */
 const who = (id: string) => { try { return new URL(id).hostname; } catch { return id.replace(/^agent:/, '') || 'someone'; } };
 
@@ -227,8 +233,10 @@ function sameAsks(list: Request[]): Request[][] {
 
 function requestCard(all: Request[]) {
   const r = all[0]!, n = all.length;
-  const allow = h('button', { class: 'btn allow', type: 'button' }, n > 1 ? `Allow all ${n}` : 'Allow');
-  const deny = h('button', { class: 'btn deny', type: 'button' }, n > 1 ? `Deny all ${n}` : 'Deny');
+  // On a risky ask the safe answer is the easy one to hit.
+  const risky = !!r.warnings?.length;
+  const allow = h('button', { class: risky ? 'btn deny' : 'btn allow', type: 'button' }, n > 1 ? `Allow all ${n}` : 'Allow');
+  const deny = h('button', { class: risky ? 'btn danger-fill' : 'btn deny', type: 'button' }, n > 1 ? `Deny all ${n}` : 'Deny');
   allow.onclick = async () => {
     allow.disabled = deny.disabled = true;
     for (const q of all) {
@@ -252,7 +260,7 @@ function requestCard(all: Request[]) {
     r.question ? h('p', { class: 'q' }, `“${r.question}”`) : null,
     r.warnings?.length ? h('ul', { class: 'warn' }, ...r.warnings.map((w) => h('li', {}, `It ${w}`))) : null,
     h('dl', { class: 'facts' },
-      ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : r.retention], ['Pays', `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
+      ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : `yes, for ${duration(r.retention)}`], ['Pays', `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
         .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))),
     h('p', { class: 'advice' }, h('b', {}, 'Your housekeeper says'), r.recommendation),
     h('div', { class: 'actions' }, allow, deny));

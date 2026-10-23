@@ -40,6 +40,7 @@ pre { background: var(--deep); border: 1px solid var(--line); border-radius: 6px
 .btn.allow { background: var(--mint); border-color: var(--mint); color: var(--ink); }
 .btn.deny { border-color: var(--muted); }
 .btn.danger { border-color: var(--threat); color: var(--threat); }
+.btn.danger-fill { background: var(--threat); border-color: var(--threat); color: var(--ink); }
 .btn.small { padding: 9px 11px; font-size: 11px; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn:focus-visible, #nav button:focus-visible, .seg button:focus-visible, .chip:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
