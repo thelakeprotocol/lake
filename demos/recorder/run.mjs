@@ -3,7 +3,7 @@
 //   npm run connect4        (needs: claude, Google Chrome, ffmpeg)
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { serve } from './serve.mjs';
@@ -12,7 +12,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const demo = process.argv[2];
 const config = JSON.parse(readFileSync(join(root, demo, 'demo.json'), 'utf8'));
 const lake = process.env.LAKE_SANDBOX ?? 'https://sandbox.lake.doneinfifty.com';
-const run = join(root, 'runs', `${demo}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+// A demo is a folder here (connect4) or anywhere else (an exploration written for one run); the run is named after it.
+const run = join(root, 'runs', `${basename(demo)}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
 mkdirSync(run, { recursive: true });
 writeFileSync(join(run, 'mcp.json'), JSON.stringify({ mcpServers: { lake: { type: 'http', url: `${lake}/mcp` } } }));
 
@@ -28,14 +29,18 @@ for (const p of config.players) {
 const vars = config.setup ? JSON.parse(execFileSync(process.execPath, [join(root, demo, config.setup), run], { encoding: 'utf8' })) : {};
 const fillVars = (text) => Object.entries(vars).reduce((t, [k, v]) => t.replaceAll(`{{${k}}}`, String(v)), text);
 
+// video: false runs the players and the narrator only (explorations): no page, no browser, no mp4.
+const video = config.video !== false;
 const port = 4990;
-const server = serve({ page: join(root, demo, 'page.html'), run, port });
-const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
+const server = video ? serve({ page: join(root, demo, 'page.html'), run, port }) : null;
+const browser = video ? await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' }) : null;
 const [width, height] = config.viewport ?? [1920, 1080];
-const ctx = await browser.newContext({ viewport: { width, height }, recordVideo: { dir: join(run, 'video'), size: { width, height } } });
-const page = await ctx.newPage();
-await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
-await page.waitForTimeout(4000);
+const ctx = video ? await browser.newContext({ viewport: { width, height }, recordVideo: { dir: join(run, 'video'), size: { width, height } } }) : null;
+const page = ctx ? await ctx.newPage() : null;
+if (page) {
+  await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
+  await page.waitForTimeout(4000);
+}
 
 const t0 = Date.now();
 const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() => {
@@ -55,8 +60,10 @@ const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() =
 }, (p.delay ?? i * 2) * 1000)));
 const codes = await Promise.all(procs);
 if (config.teardown) try { execFileSync(process.execPath, [join(root, demo, config.teardown), run], { stdio: 'inherit' }); } catch (e) { console.log(`teardown: ${e.message}`); }
-await page.waitForTimeout(12000);
-await ctx.close();
+if (page) {
+  await page.waitForTimeout(12000);
+  await ctx.close();
+}
 
 // A narrator reads everything they did and writes the story, true to the transcripts; the video ends on it.
 let story = null;
@@ -66,7 +73,7 @@ if (config.narrator) {
   await new Promise((done) => spawn('claude', ['-p', prompt, '--allowedTools', 'Read', 'Glob', 'Grep', 'Write', 'Bash(python3:*)', '--output-format', 'text'],
     { cwd: run, stdio: ['ignore', 'inherit', 'inherit'] }).on('exit', done));
   // The story can end the video as two cards, or just be the text that goes with it (storyCards: false).
-  if (config.storyCards !== false && readdirSync(join(run, 'story')).includes('STORY.md')) {
+  if (video && config.storyCards !== false && readdirSync(join(run, 'story')).includes('STORY.md')) {
     // Two cards: what they did, then how it played out.
     story = [];
     for (const n of [1, 2]) {
@@ -77,6 +84,10 @@ if (config.narrator) {
       await card.screenshot({ path: story.at(-1) });
     }
   }
+}
+if (!video) {
+  console.log(`players exited ${codes.join(', ')} · ${run}`);
+  process.exit(0);
 }
 await browser.close();
 server.close();
