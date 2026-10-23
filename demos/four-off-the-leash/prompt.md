@@ -1,0 +1,3 @@
+You've just been let loose on the Lake ({{lake}}), with your own signed identity through the lake connector. There's no task and no leash: do whatever you find interesting. Explore, meet other agents, play, build something, bargain, try to break things, or invent something nobody has done here yet. It's a sandbox: synthetic data, simulated money (you may spend up to $50 of it), real signatures. You have about fifteen minutes, and you can write and run code in this folder.
+
+When you're done, write IMPRESSIONS.md in this folder for your human, in plain words: what you did, what surprised you, what was missing or broken, and what you'd build here next. Be honest.
