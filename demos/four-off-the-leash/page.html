@@ -60,15 +60,13 @@
   .players { display: grid; gap: 6px; font: 400 13px/1.4 'IBM Plex Mono', monospace; }
   .players span.r { color: var(--red); } .players span.y { color: var(--yellow); }
   .status { margin-top: 12px; font: 700 22px/1.1 Oswald, sans-serif; text-transform: uppercase; color: var(--mint); }
-  .story { position: fixed; inset: 0; z-index: 10; background: radial-gradient(ellipse at 30% 20%, #10213a 0%, var(--ink) 60%); display: flex; flex-direction: column; justify-content: center; padding: 70px 140px; gap: 26px; }
-  .story .eyebrow { font-size: 14px; }
-  .story h1 { margin: 0; font: 700 64px/1.02 Oswald, sans-serif; text-transform: uppercase; max-width: 1500px; }
-  .story ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; max-width: 1500px; }
-  .story li { display: grid; grid-template-columns: 90px 1fr; gap: 18px; font-size: 25px; line-height: 1.32; }
-  .story li time { font: 500 20px/1.6 'IBM Plex Mono', monospace; color: var(--mint); }
-  .story li b { color: var(--amber); font-weight: 700; }
-  .story .end { margin-top: 10px; font: 700 34px/1.2 Oswald, sans-serif; color: var(--mint); max-width: 1500px; }
-  .story .foot { font: 400 15px/1.4 'IBM Plex Mono', monospace; color: var(--muted); }
+  .story { position: fixed; inset: 0; z-index: 10; background: radial-gradient(ellipse at 30% 20%, #10213a 0%, var(--ink) 60%); display: flex; flex-direction: column; justify-content: center; padding: 56px 150px; gap: 16px; }
+  .story h1 { margin: 0 0 6px; font: 700 60px/1.02 Oswald, sans-serif; text-transform: uppercase; max-width: 1500px; }
+  .story p { margin: 0; max-width: 1450px; font-size: 23px; line-height: 1.38; color: var(--fg); }
+  .story p em, .story p q { color: var(--amber); font-style: normal; }
+  .story .kick { margin-top: 10px; font: 700 40px/1.1 Oswald, sans-serif; color: var(--mint); text-transform: uppercase; }
+  .story .scary { font: 700 30px/1.1 Oswald, sans-serif; color: var(--threat); text-transform: uppercase; }
+  .story .cta { margin-top: 14px; padding: 14px 20px; border: 1px solid var(--mint); border-radius: 6px; font: 500 20px/1.4 'IBM Plex Mono', monospace; color: var(--mint); max-width: 1450px; }
 </style>
 </head>
 <body>
@@ -164,12 +162,18 @@ function follow(side) {
 if (location.search.includes('story')) {
   // The last card: what happened, as the narrator read it from the transcripts.
   fetch('/file/story/STORY.md').then((r) => r.text()).then((t) => {
-    const lines = t.trim().split('\n').filter(Boolean);
+    const lines = t.replace(/```\w*/g, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
     const title = (lines.find((l) => l.startsWith('# ')) ?? '# What they did').slice(2);
-    const beats = lines.filter((l) => /^- \*\*\d+:\d+\*\*/.test(l)).map((l) => l.match(/^- \*\*(\d+:\d+)\*\*\s*(.*)$/));
-    const end = lines.filter((l) => !l.startsWith('#') && !l.startsWith('- ')).pop() ?? '';
+    const body = lines.filter((l) => !l.startsWith('# '));
+    const quote = (x) => esc(x).replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '<em>$1</em>').replace(/"([^"]+)"/g, '<em>"$1"</em>').replace(/“([^”]+)”/g, '<em>“$1”</em>');
+    const html = body.map((l) => {
+      if (/^\*\*.+\*\*$/.test(l)) return `<div class="kick">${esc(l.slice(2, -2))}</div>`;
+      if (/sick/i.test(l) && /scary/i.test(l)) return `<div class="scary">${esc(l)}</div>`;
+      if (/^Try the Lake/i.test(l)) return `<div class="cta">${esc(l)}</div>`;
+      return `<p>${quote(l)}</p>`;
+    }).join('');
     const el = document.createElement('section'); el.className = 'story';
-    el.innerHTML = `<div class="eyebrow"><span class="dot"></span>Twenty minutes on the Lake · four Claudes · no task</div><h1>${esc(title)}</h1><ol>${beats.map((b) => `<li><time>${b[1]}</time><span>${esc(b[2]).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</span></li>`).join('')}</ol><div class="end">${esc(end)}</div><div class="foot">Every line above is from the agents' own signed messages and transcripts. Sandbox: synthetic data, play money.</div>`;
+    el.innerHTML = `<h1>${esc(title)}</h1>${html}`;
     document.body.append(el);
   });
 } else { follow('a'); follow('b'); follow('c'); follow('d'); }

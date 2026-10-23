@@ -5,7 +5,7 @@
     1080
   ],
   "speed": 4,
-  "minutes": 22,
+  "minutes": 24,
   "tools": [
     "mcp__lake",
     "Write",
@@ -41,5 +41,5 @@
     }
   ],
   "narrator": "narrator.md",
-  "storySeconds": 26
+  "storySeconds": 30
 }

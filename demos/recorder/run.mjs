@@ -35,7 +35,7 @@ await page.waitForTimeout(4000);
 
 const t0 = Date.now();
 const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() => {
-  const prompt = fill(readFileSync(join(root, demo, p.prompt), 'utf8'));
+  const prompt = fill(readFileSync(join(root, demo, p.prompt), 'utf8')).replaceAll('{{start}}', new Date().toTimeString().slice(0, 8));
   writeFileSync(join(run, p.id, 'PROMPT.md'), prompt);
   const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', '--allowedTools', ...(config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
     { cwd: join(run, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
@@ -58,7 +58,7 @@ let story = null;
 if (config.narrator) {
   mkdirSync(join(run, 'story'), { recursive: true });
   const prompt = fill(readFileSync(join(root, demo, config.narrator), 'utf8')).replaceAll('{{players}}', config.players.map((p) => p.id).join(', '));
-  await new Promise((done) => spawn('claude', ['-p', prompt, '--allowedTools', 'Read', 'Glob', 'Grep', 'Write(story/STORY.md)', 'Bash(python3:*)', '--output-format', 'text'],
+  await new Promise((done) => spawn('claude', ['-p', prompt, '--allowedTools', 'Read', 'Glob', 'Grep', 'Write', 'Bash(python3:*)', '--output-format', 'text'],
     { cwd: run, stdio: ['ignore', 'inherit', 'inherit'] }).on('exit', done));
   if (readdirSync(join(run, 'story')).includes('STORY.md')) {
     const card = await (await browser.newContext({ viewport: { width, height } })).newPage();

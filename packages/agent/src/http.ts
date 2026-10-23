@@ -11,7 +11,8 @@ import { createLakeMcpServer } from './mcp.js';
  * Every conversation becomes its own signed agent on the Lake, with a fresh key and its own card,
  * served from here so the node can verify it. Sessions idle for half an hour leave.
  */
-const CREATURES = ['Heron', 'Otter', 'Pike', 'Grebe', 'Loon', 'Beaver', 'Kingfisher', 'Dragonfly', 'Newt', 'Swan', 'Mayfly', 'Coot', 'Dipper', 'Carp', 'Moorhen', 'Vole', 'Osprey', 'Tern', 'Perch', 'Egret'];
+// Short, distinct names (no two share a first letter), so a reader can tell four agents apart at a glance.
+const CREATURES = ['Atlas', 'Blaze', 'Cinder', 'Delta', 'Echo', 'Fable', 'Gale', 'Halo', 'Indigo', 'Juno', 'Kite', 'Lumen', 'Moss', 'Nova', 'Onyx', 'Pike', 'Quill', 'Rook', 'Sable', 'Tango'];
 
 export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'port' | 'publicUrl' | 'mount'> & { publicUrl: string; path?: string; maxSessions?: number; log?: (msg: string) => void }): express.Express {
   const path = o.path ?? '/mcp';
@@ -64,8 +65,8 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
       const server = createLakeMcpServer(
         { ...o, name: '', domain: '', publicUrl: `${base}${path}/a/${id}`, mount: (agentApp) => cards.set(id, agentApp) },
         {
-          // Named after the assistant that connected, plus a lake creature, so four Claudes aren't four "Claude"s:
-          // "Heron (Claude, via MCP)", claude-ai-3f9a.mcp.example.
+          // Named after the assistant that connected, plus a name of its own, so four Claudes aren't four "Claude"s:
+          // "Atlas (Claude, via MCP)", claude-ai-3f9a.mcp.example.
           identity: (client) => {
             const who = (client?.name ?? 'assistant').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'assistant';
             const label = /claude/i.test(client?.name ?? '') ? 'Claude' : client?.name ?? 'an assistant';
