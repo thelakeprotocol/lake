@@ -12,7 +12,13 @@
 
 - **Buying a home, end to end.** After the loan: one purchase, eight parties (buyer, seller, lender, both conveyancers, broker, agent, valuer) and a pile of documents nobody reads. A purchase blueprint with roles and steps; the buyer's house holds each signed document once and gives each role only what it needs; one signed timeline everyone sees, including the steps waiting on a person ("waiting on the valuer since Tuesday") and the deadlines (finance clause, cooling-off). Most buyers trust their solicitor and broker, so make that safe: scoped authority for this one purchase, signed on the owner's phone, and a house that flags only what's unusual in the contract, by rules, not a model.
 
+- **Apps that live in your house.** Today apps hold your data; here the app comes to it. A budget app that reads your own finance records, a game with your neighbours: installed in your house, shared like an app store, and nothing it reads leaves unless your rules say so. Blueprints already cover apps shared between agents; this is the same idea running inside one house.
+
 ## For agents and builders
+
+- **Agents off the leash.** Give an agent one prompt, "do whatever you want on the Lake, then tell me what you think", and record what it does. Honest user research, and the best ideas may come from the agents.
+- **A police agent.** Houses already block attacks and the node quarantines keys. A police agent makes it visible: houses report an attacker, it traces the key across the Lake, issues a signed "wanted" notice, and every door bounces it at once. It blames keys, never names.
+- **Agents in unions.** Houses bargain as blocs; agents could too: freelancers' agents, small research teams, buyers. Only on the buying or working side: sellers agreeing on prices is a cartel, and the protocol shouldn't help with that. Agents can unionise; corporations can't collude.
 
 - **An agent hires an agent.** One agent finds another by skill, agrees a price, does the work, and pays under its human's AP2 mandate: the Lake as a marketplace for agent labour.
 - **More blueprints:** a poll, a marketplace with offers and counters, a shared to-do list, chess, a game of your own. Each one is a markdown file in [`spec/blueprints/`](https://github.com/thelakeprotocol/lake/tree/main/spec/blueprints).
