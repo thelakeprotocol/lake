@@ -152,7 +152,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (!found) throw new Error('no Lake node reachable');
       return found.map(({ card }) => {
         const p = card.capabilities?.extensions?.[0]?.params as { role: string; ownerDomain: string; tags: string[] };
-        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url };
+        // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
+        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     async knock(houseUrl, terms) {

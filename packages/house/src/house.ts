@@ -131,21 +131,29 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const relayed = o.relay && nodes.length ? nodes.map((n) => `${n}/relay/${id.kid.replace(/[^a-zA-Z0-9]/g, '')}/a2a`) : null;
   if (!rules.trust && o.sandbox) say(`no trust section in rules.yaml; sandbox default: issuers ${demoIssuers.join(', ')}, auditor ${DEMO_TRUST.auditors}, ethics ${DEMO_TRUST.ethics}`);
 
-  const card = await signCard(
-    buildCard(
-      {
-        name: `House ${o.name}`,
-        description: `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
-        url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
-        alsoAt: relayed?.slice(1),
-        // One skill per pack (`health-study`, `mortgage-study`), so agents find the houses that can answer them.
-        skills: o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: rules.tags ?? [] })),
-        profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: rules.tags ?? [], packs: o.packs.map(packId) },
-      },
+  // The card is the house's public face, so the owner's rules decide what it says: its interest tags, and whether it names
+  // the kinds of data it holds (privacy.show_packs). Hidden, agents searching by kind of data won't find it; that is the trade.
+  const cardFor = async (r: Rules) => {
+    const show = r.privacy?.show_packs !== false;
+    return signCard(
+      buildCard(
+        {
+          name: `House ${o.name}`,
+          description: `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
+          url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
+          alsoAt: relayed?.slice(1),
+          // One skill per pack (`health-study`, `mortgage-study`), so agents find the houses that can answer them.
+          skills: show
+            ? o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: r.tags ?? [] }))
+            : [{ id: 'offers', name: 'Offers', description: 'Considers offers by its owner\'s rules', tags: r.tags ?? [] }],
+          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [] },
+        },
+        id,
+      ),
       id,
-    ),
-    id,
-  );
+    );
+  };
+  const card = await cardFor(rules);
 
   // One record per pack: signed by the pack's issuer, converted in the pod, checked against the pack's shapes, signed again by the housekeeper.
   const records: { pack: LakePack; paths: RecordPaths; claimsUrl: string }[] = [];
@@ -204,7 +212,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // Signals from the node this house follows: refreshed every 2 s, verified against the node's own card.
   const signals = { blocklist: new Set<string>(), reputation: {} as Record<string, number> };
   let keeperRef: Housekeeper | null = null;
-  const panel = panelFor({ o, owner, id, actor, activity, card, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records });
+  // Everyone holds this one card object, so a re-signed card is changed in place; then the nodes hear of it.
+  const recard = async (r: Rules) => { Object.assign(card, await cardFor(r)); await link?.register(3); };
+  const panel = panelFor({ o, owner, id, actor, activity, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records });
   const desk = new OwnerDesk({
     panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit,
@@ -321,7 +331,7 @@ const decode = (jws: string) => {
 /** Everything the owner's control panel shows and changes. Every call arrives signed by the owner's key. */
 function panelFor(x: {
   o: HouseOptions; owner: OwnerSession; id: Identity; actor: string; activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
-  card: AgentCard; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
+  card: AgentCard; recard: (r: Rules) => Promise<void>; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
   trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
 }): PanelProvider {
@@ -381,7 +391,9 @@ function panelFor(x: {
         return { ok: false as const, error: (e as Error).message };
       }
       await put(owner, 'settings/rules.yaml', text, 'text/yaml');
+      const before = x.keeper().rules;
       x.keeper().setRules(rules, text, x.trustFrom(rules));
+      if (JSON.stringify([before.tags, before.privacy]) !== JSON.stringify([rules.tags, rules.privacy])) await x.recard(rules).catch((e: Error) => x.o.say(`card: ${e.message}`));
       x.o.say('the owner changed their rules in the control panel');
       return { ok: true as const };
     },

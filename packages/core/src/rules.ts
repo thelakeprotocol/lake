@@ -22,6 +22,8 @@ export interface Rules {
    * A term set to `auto` is worked out inside the house from the owner's own data.
    */
   intents?: { pack: string; terms: Record<string, string | number> }[];
+  /** What the house's public card says. show_packs: false keeps it from naming the kinds of data it holds (health…). */
+  privacy?: { show_packs?: boolean };
 }
 
 export interface Rule {
@@ -34,7 +36,7 @@ export interface Rule {
   decision: 'join' | 'decline' | 'ask';
 }
 
-const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least'] as const;
+const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least', 'price_below'] as const;
 type MatchKey = (typeof MATCH_KEYS)[number];
 const DECISIONS = ['join', 'decline', 'ask'];
 const TRUST_LISTS = ['ethics', 'auditors', 'issuers', 'payments', 'regulators'];
@@ -54,6 +56,9 @@ export function parseRules(text: string): Rules {
       if (!(MATCH_KEYS as readonly string[]).includes(k)) throw new RulesError(`rule ${i + 1}: unknown match key "${k}" (allowed: ${MATCH_KEYS.join(', ')})`);
     }
     // A misspelt purpose would match nothing, and a "decline" rule that matches nothing quietly lets things through.
+    // "Decline research paying under $5" needs a price test before the decision, not min_price_usd (a join rule's counter).
+    const below = r.match?.price_below;
+    if (below !== undefined && !(typeof below === 'number' && below > 0)) throw new RulesError(`rule ${i + 1}: price_below must be a positive number of dollars`);
     const purpose = r.match?.purpose;
     if (purpose !== undefined && !isPurpose(String(purpose))) throw new RulesError(`rule ${i + 1}: unknown purpose "${purpose}" (known: ${Object.keys(PURPOSES).join(', ')})`);
     return { ...r, match: r.match ?? {} };
@@ -61,6 +66,10 @@ export function parseRules(text: string): Rules {
   for (const k of Object.keys(raw.trust ?? {})) {
     if (!TRUST_LISTS.includes(k)) throw new RulesError(`trust: unknown list "${k}" (allowed: ${TRUST_LISTS.join(', ')})`);
   }
+  for (const k of Object.keys(raw.privacy ?? {})) {
+    if (k !== 'show_packs') throw new RulesError(`privacy: unknown setting "${k}" (allowed: show_packs)`);
+  }
+  if (raw.privacy?.show_packs !== undefined && typeof raw.privacy.show_packs !== 'boolean') throw new RulesError('privacy.show_packs must be true or false');
   for (const [i, x] of (raw.intents ?? []).entries()) {
     if (!x || typeof x.pack !== 'string' || !x.terms || typeof x.terms !== 'object') throw new RulesError(`intents ${i + 1}: needs a pack and its terms`);
   }
@@ -77,7 +86,7 @@ export type Decision =
 export interface Context { reputation?: number }
 
 function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
-  const facts: Record<Exclude<MatchKey, 'reputation_at_least'>, string | boolean> = {
+  const facts: Record<Exclude<MatchKey, 'reputation_at_least' | 'price_below'>, string | boolean> = {
     purpose: o.purpose,
     requester: o.requester,
     sponsor_verified: o.credentials.sponsorVerified,
@@ -86,7 +95,30 @@ function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
   };
   // A rule about a broad purpose covers the narrower ones inside it: "marketing" catches "advertising".
   return Object.entries(m).every(([k, v]) =>
-    k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
+    k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'price_below' ? o.priceUsd < Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
+}
+
+/**
+ * When the owner is asked, what their own join rule for this kind of request is missing: "your rule 1 would join if
+ * it had an ethics approval you trust and paid at least $5". Tells them how the ask compares with what they already
+ * said yes to, so a $2 ask doesn't look as harmless as a $5 one. Null when no join rule is close.
+ */
+export function nearMiss(rules: Rules, offer: Offer, ctx: Context = {}): string | null {
+  for (const [i, r] of rules.rules.entries()) {
+    if (r.decision !== 'join') continue;
+    if (r.match.purpose !== undefined && !purposeWithin(offer.purpose, String(r.match.purpose))) continue;
+    if (r.match.requester !== undefined && r.match.requester !== offer.requester) continue;
+    const missing = [
+      r.match.ethics_approved && !offer.credentials.ethicsApproved ? 'had an ethics approval you trust' : '',
+      r.match.audit_certified && !offer.credentials.auditCertified ? 'had a certified study' : '',
+      r.match.sponsor_verified && !offer.credentials.sponsorVerified ? 'came from a verified sponsor' : '',
+      r.match.reputation_at_least !== undefined && (ctx.reputation ?? 0.5) < Number(r.match.reputation_at_least) ? `had a reputation of at least ${r.match.reputation_at_least}` : '',
+      r.min_price_usd !== undefined && offer.priceUsd < r.min_price_usd ? `paid at least $${r.min_price_usd}` : '',
+      r.retention === 'none' && offer.retention !== 'none' ? 'kept nothing' : '',
+    ].filter(Boolean);
+    if (missing.length) return `your rule ${i + 1} would join if it ${missing.join(' and ')}`;
+  }
+  return null;
 }
 
 /**

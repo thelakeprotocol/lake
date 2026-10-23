@@ -249,6 +249,9 @@ describe('the owner', () => {
     const { reply } = await ask(strict.url, v, { kind: 'compute', grant: strict.grant, study: readmissionStudy() });
     expect(reply).toMatchObject({ kind: 'excluded', why: 'the owner revoked this key' });
     expect(Date.now() - t0).toBeLessThan(1000);
+    // A key a standing rule cut for a study works once: the study has run, so asking again is refused.
+    const other = r.grants.find((g) => !g.url.startsWith(houses.strict!))!;
+    expect((await ask(other.url, v, { kind: 'compute', grant: other.grant, study: readmissionStudy() })).reply).toMatchObject({ kind: 'excluded', why: 'this key was for one use, and it has been used' });
   });
 
   it('runs the control panel: overview, rules edited and saved in the pod, everything exported', async () => {
@@ -262,7 +265,13 @@ describe('the owner', () => {
     const x = await ownerCall({ kind: 'panel.export' });
     expect(x.files['settings/rules.yaml']).toContain('panel-test');
     expect(Object.keys(x.files)).toEqual(expect.arrayContaining(['wallet/identity.json']));
+    // The owner decides what the house's public card says: with show_packs off it no longer names the data it holds.
+    const packsOnCard = async () => (await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).capabilities.extensions[0].params.packs;
+    expect(await packsOnCard()).toEqual(['health@1']);
+    expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\nprivacy: { show_packs: false }\n` })).toEqual({ ok: true });
+    expect(await packsOnCard()).toEqual([]);
     expect(await ownerCall({ kind: 'panel.rules.set', text })).toEqual({ ok: true });
+    expect(await packsOnCard()).toEqual(['health@1']);
   });
 
   it("gives the owner's own AI agent a key that can look and suggest, never decide", async () => {
@@ -278,9 +287,12 @@ describe('the owner', () => {
     expect((await as({ kind: 'panel.overview' })).status).toBe(200);
     expect((await as({ kind: 'list' })).status).toBe(200);
     for (const kind of ['answer', 'revoke', 'panel.rules.set', 'panel.export', 'panel.offer.accept', 'panel.assistant.invite']) expect((await as({ kind })).status).toBe(403);
-    expect((await as({ kind: 'assistant.suggest', text: 'Decline ads.example: it keeps asking for your postcode.' })).body.ok).toBe(true);
+    const first = (await as({ kind: 'assistant.suggest', text: 'Decline ads.example: it keeps asking for your date of birth.' })).body;
+    // Got it wrong: the assistant replaces its own note, and the owner sees only the corrected one.
+    expect((await as({ kind: 'assistant.suggest', text: 'Decline ads.example: it keeps asking for your postcode.', replaces: first.id })).body).toMatchObject({ ok: true, replaced: first.id });
     const seen = await ownerCall({ kind: 'list' });
     expect(seen.suggestions[0]).toMatchObject({ from: 'Atlas', text: expect.stringContaining('postcode') });
+    expect(seen.suggestions.some((x: { id: string }) => x.id === first.id)).toBe(false);
     expect(seen.assistants.map((a: { label: string }) => a.label)).toEqual(['Atlas']);
     await ownerCall({ kind: 'panel.assistant.revoke', kid: seen.assistants[0].kid });
     expect((await as({ kind: 'panel.overview' })).status).toBe(403);

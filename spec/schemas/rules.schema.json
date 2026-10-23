@@ -39,7 +39,21 @@
             "type": "object",
             "properties": {
               "purpose": {
-                "enum": ["research", "academic-research", "commercial-research", "care", "service", "insurance", "credit", "marketing", "advertising", "personalised-advertising", "direct-marketing", "security", "legal"],
+                "enum": [
+                  "research",
+                  "academic-research",
+                  "commercial-research",
+                  "care",
+                  "service",
+                  "insurance",
+                  "credit",
+                  "marketing",
+                  "advertising",
+                  "personalised-advertising",
+                  "direct-marketing",
+                  "security",
+                  "legal"
+                ],
                 "description": "Covers the narrower purposes inside it (marketing covers advertising)"
               },
               "requester": {
@@ -53,6 +67,16 @@
               },
               "audit_certified": {
                 "type": "boolean"
+              },
+              "reputation_at_least": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "price_below": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Matches offers paying less than this many dollars: decline research under $5"
               }
             },
             "additionalProperties": false
@@ -162,6 +186,16 @@
         },
         "additionalProperties": false
       }
+    },
+    "privacy": {
+      "type": "object",
+      "properties": {
+        "show_packs": {
+          "type": "boolean",
+          "description": "false: the house's public card doesn't name the kinds of data it holds; agents searching by kind won't find it"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

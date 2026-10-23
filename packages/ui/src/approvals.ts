@@ -9,7 +9,7 @@ interface Request { id: string; offerId: string; visitor: { webId: string; domai
 interface Key { id: string; visitor: string; fields: string[]; purpose: string; until: string; authorizedBy: string }
 type Decision = 'join' | 'ask' | 'decline';
 interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
-interface Rules { owner: string; device?: string; default: Decision; tags?: string[]; rules: Rule[]; negotiation?: { join_collectives?: boolean }; trust?: Record<string, string[]> }
+interface Rules { owner: string; device?: string; default: Decision; tags?: string[]; rules: Rule[]; negotiation?: { join_collectives?: boolean }; trust?: Record<string, string[]>; privacy?: { show_packs?: boolean } }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const key = loadKey();
@@ -244,7 +244,7 @@ function requestCard(all: Request[]) {
       const grant = signCredential({
         '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeAccessGrant'], issuer: webId,
         validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString(),
-        credentialSubject: { id: q.visitor.webId, offer: q.offerId, study: q.study, fields: q.fields, purpose: q.purpose, authorizedBy: 'owner, live' },
+        credentialSubject: { id: q.visitor.webId, offer: q.offerId, study: q.study, fields: q.fields, purpose: q.purpose, authorizedBy: 'owner, live', ...(q.study ? { uses: 1 } : {}) },
       }, key);
       await call({ kind: 'answer', request: q.id, answer: 'allow', grant }).catch((e) => alert(e.message));
     }
@@ -304,6 +304,7 @@ function summary(r: Rule): Child[] {
   if (r.match.audit_certified) when.push('with certified study code');
   if (r.match.sponsor_verified) when.push('from a verified sponsor');
   if (r.match.reputation_at_least !== undefined) when.push(`reputation at least ${r.match.reputation_at_least}`);
+  if (r.match.price_below !== undefined) when.push(`paying under $${r.match.price_below}`);
   const head = when.length ? when.join(', ') : 'Any request';
   const verb = { join: 'join', ask: 'ask me first', decline: 'decline' }[r.decision];
   const out: Child[] = [h('b', {}, head[0]!.toUpperCase() + head.slice(1)), ' → ', h('b', {}, verb)];
@@ -351,6 +352,7 @@ function ruleCard(r: Rule, i: number, all: Rule[]) {
       redraw();
     } }, state === 'share' ? '✓ ' : state === 'never' ? '✕ ' : '', nice(f));
   };
+  const below = h('input', { type: 'number', min: '0.5', step: '0.5', value: r.match.price_below ?? '', placeholder: 'any price', onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; set('price_below', v === '' ? undefined : Number(v)); } });
   const price = h('input', { type: 'number', min: '0', step: '0.5', value: r.min_price_usd ?? '', placeholder: 'any', onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; if (v === '') delete r.min_price_usd; else r.min_price_usd = Number(v); redraw(); } });
   const hours = h('input', { type: 'number', min: '1', max: '720', value: r.grant_hours ?? '', placeholder: '48', onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; if (v === '') delete r.grant_hours; else r.grant_hours = Number(v); redraw(); } });
   const move = (d: number) => { const j = i + d; if (j < 0 || j >= all.length) return; [all[i], all[j]] = [all[j]!, all[i]!]; redraw(); };
@@ -364,6 +366,7 @@ function ruleCard(r: Rule, i: number, all: Rule[]) {
     h('div', { class: 'grid2' },
       h('div', { class: 'field' }, h('label', {}, 'When the purpose is'), purpose),
       h('div', { class: 'field' }, h('label', {}, 'From'), requester),
+      h('div', { class: 'field' }, h('label', {}, 'Paying less than ($)'), below),
       h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Only if'),
         toggle('an ethics body I trust approved it', !!r.match.ethics_approved, (v) => set('ethics_approved', v || undefined)),
         toggle('an auditor I trust certified the study', !!r.match.audit_certified, (v) => set('audit_certified', v || undefined)),
@@ -408,6 +411,7 @@ function renderRules(message?: { ok: boolean; text: string }) {
       h('div', { class: 'grid2' },
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'When no rule fits'), seg(r.default, (d) => { r.default = d; renderRules(); })),
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Bargaining'), toggle('bargain together with neighbours (a bloc gets better terms)', !!r.negotiation?.join_collectives, (v) => { r.negotiation = { ...(r.negotiation ?? {}), join_collectives: v }; renderRules(); })),
+        h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Your house in public'), toggle('say what kinds of data my house holds (so agents with matching offers can find it)', r.privacy?.show_packs !== false, (v) => { if (v) delete r.privacy; else r.privacy = { show_packs: false }; renderRules(); })),
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'My interests (for guilds)'), chipsEditor(r.tags ?? [], 'add, then Enter', (v) => { r.tags = v; renderRules(); })),
       )),
     h('h2', {}, 'Whose word counts'),

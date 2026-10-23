@@ -229,6 +229,7 @@ Anything that counts people (a pledge, a strike, a group) breaks if one person c
 In v0 a **study is a declaration, not code**: up to four yes/no questions about canonical fields (`age_at_least`, `has_code`, `present`). Its id is `urn:lake:study:` + the digest of its canonical JSON.
 
 - The visitor sends `{ kind: "compute", grant, study }`. The house checks the grant is its own, unexpired, for this visitor and this study, re-verifies its record chain, and reads only the granted fields.
+- A grant MAY limit how often it can be used (`credentialSubject.uses`). A grant for a study SHOULD say `uses: 1`: the house spends it after the one computation, and a spent grant is refused like a revoked one, however long it had left.
 - The house answers with **one randomised fragment**: the one-hot cell its owner falls in, perturbed by unary randomised response with the study's privacy budget ε (at most 4). Any single fragment is deniable; the visitor de-biases the sum across houses.
 - Every computation is written to the house's `/audit/` log (`fieldsRead`, `claimsRead`, `recordsOut`) and reported as a `compute.done` event. A node's **Records moved** counter is the sum of `recordsOut` and MUST be published, even when it is not zero.
 - Arbitrary study code needs attested execution; it is a stretch goal, not v0.

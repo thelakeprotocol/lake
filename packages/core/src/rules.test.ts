@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { collectiveCounter, evaluate, parseRules, PURPOSES, RulesError, type Offer } from './index.js';
+import { collectiveCounter, evaluate, nearMiss, parseRules, PURPOSES, RulesError, type Offer } from './index.js';
 
 const persona = (n: string) => parseRules(readFileSync(new URL(`../../../personas/${n}.yaml`, import.meta.url), 'utf8'));
 
@@ -67,6 +67,19 @@ describe('rules engine', () => {
   it('keeps the schemas\' purpose list the same as the code\'s', () => {
     const schema = JSON.parse(readFileSync(new URL('../../../spec/schemas/offer.schema.json', import.meta.url), 'utf8'));
     expect(schema.properties.purpose.enum).toEqual(Object.keys(PURPOSES));
+  });
+
+  it('declines what pays too little, before any join rule sees it', () => {
+    const r = parseRules('owner: x\nrules:\n  - match: { purpose: research, price_below: 5 }\n    decision: decline\n  - match: { purpose: research }\n    decision: join\n    allow_fields: [age_band]');
+    expect(evaluate(r, { ...study, fields: ['age_band'], priceUsd: 2 })).toMatchObject({ decision: 'decline', rule: 1 });
+    expect(evaluate(r, { ...study, fields: ['age_band'], priceUsd: 5 })).toMatchObject({ decision: 'join', rule: 2 });
+    expect(() => parseRules('owner: x\nrules:\n  - match: { price_below: cheap }\n    decision: decline')).toThrow(RulesError);
+  });
+
+  it('tells the owner what their own join rule is missing', () => {
+    const cheap = { ...study, priceUsd: 2, credentials: { ...study.credentials, ethicsApproved: false } };
+    expect(nearMiss(persona('stan'), cheap)).toMatch(/^your rule 1 would join if it had an ethics approval you trust and paid at least \$\d/);
+    expect(nearMiss(persona('stan'), { ...study, purpose: 'marketing' })).toBeNull();
   });
 
   it('rejects a rule about a purpose nobody uses, so a misspelt "decline" never lets things through', () => {

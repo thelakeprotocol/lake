@@ -100,15 +100,18 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     log('mandate', `${o.money.human.card.name} signed an Intent Mandate: this study only, budget $${o.money.budgetUsd}`);
   }
 
-  log('ethics', `asking ${o.ethics} to review the protocol`);
+  log('ethics', 'asking the ethics agent to review the protocol');
   const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study: o.study, purpose: 'research', fields, retention: 'none' } });
   if (ethics.reply.kind !== 'approved') throw new Error(`ethics refused: ${(ethics.reply.problems ?? []).join('; ')}`);
+  // Named by its signed domain, not the address it was reached at (inside a hosting setup, an internal hostname).
+  log('ethics', `approved by ${ethics.from.ownerDomain}`);
   const ethicsAtt: Attachment = { credential: ethics.reply.credential, card: await cardOf(o.ethics) };
   await beat();
 
-  log('audit', `asking ${o.auditor} to certify the study`);
+  log('audit', 'asking the auditor to certify the study');
   const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study: o.study });
   if (audit.reply.kind !== 'certified') throw new Error(`auditor refused: ${(audit.reply.problems ?? []).join('; ')}`);
+  log('audit', `certified by ${audit.from.ownerDomain}`);
   const auditAtt: Attachment = { credential: audit.reply.credential, card: await cardOf(o.auditor) };
   await beat();
 
@@ -291,7 +294,7 @@ async function discover(o: DispatchOptions, log: (step: string, detail: string) 
   const skill = pack ? `${pack}-study` : '';
   for (const node of nodes) {
     try {
-      log('discover', `searching ${node} for houses${skill ? ` with the ${skill} skill` : ''}`);
+      log('discover', `searching the Lake's node for houses${skill ? ` with the ${skill} skill` : ''}`);
       const found = (await (await fetch(`${node}/cards?${skill ? `skill=${skill}&` : ''}role=house`, { signal: AbortSignal.timeout(5000) })).json()) as { id: string; card: AgentCard }[];
       // A relayed house lists one address per node; use the one on the node that answered.
       const houses = found.map((f) => ({ id: f.id, name: f.card.name, url: (f.card.supportedInterfaces.find((i) => i.url.startsWith(node)) ?? f.card.supportedInterfaces[0]!).url }));

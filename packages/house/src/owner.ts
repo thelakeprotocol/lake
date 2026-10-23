@@ -56,6 +56,8 @@ export interface GrantRecord {
   until: string;
   authorizedBy: string;
   revoked: boolean;
+  /** Used up: a single-use key whose one use has happened. */
+  spent?: boolean;
 }
 
 const MAX_GRANT_MS = 48 * 3_600_000;
@@ -160,6 +162,14 @@ export class OwnerDesk {
     return req;
   }
 
+  /** A single-use key has been used: it stops working like a revoked one, but nobody took it back. */
+  async spend(id: string) {
+    const g = this.grants.get(id);
+    if (g) { g.revoked = true; g.spent = true; }
+    this.revokedIds.add(id);
+    await this.o.saveRevoked([...this.revokedIds]);
+  }
+
   async revoke(which: 'all' | string): Promise<number> {
     const ids = which === 'all' ? [...this.grants.values()].filter((g) => !g.revoked).map((g) => g.id) : [which];
     let n = 0;
@@ -221,12 +231,16 @@ export class OwnerDesk {
       if (assistant) {
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         if (p.kind === 'assistant.suggest') {
-          const q = p as unknown as { text?: string; request?: string };
-          const text = String(q.text ?? '').trim().slice(0, 600);
-          if (!text) return void res.status(400).json({ error: 'suggest something: text' });
+          const q = p as unknown as { text?: string; request?: string; replaces?: string };
+          const text = String(q.text ?? '').trim().slice(0, 1500);
+          // An assistant that got something wrong takes its own note back; an empty text with replaces just withdraws it.
+          const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
+          if (q.replaces && !old) return void res.status(404).json({ error: 'no note of yours with that id' });
+          if (old) this.suggestions = this.suggestions.filter((x) => x !== old);
+          if (!text) return void (old ? res.json({ ok: true, withdrawn: old.id }) : res.status(400).json({ error: 'suggest something: text' }));
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(q.request ? { request: String(q.request) } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
-          return void res.json({ ok: true, id: sug.id, note: 'your human sees it in their control panel' });
+          return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
       }
       if (p.kind === 'panel.assistant.invite') {

@@ -15,7 +15,7 @@ export async function createPersonhood(o: SpecialistOptions & { dataDir: string 
   const secret = await readFile(file, 'utf8').catch(async () => { const s = randomBytes(32).toString('hex'); await writeFile(file, s, { mode: 0o600 }); return s; });
   const replay = new ReplayGuard();
   const s: Specialist = await specialist(o, 'Person checker (demo)', 'Stamps a house as belonging to one person, without saying who. A demo: it checks nothing real (a real one is a bank or a government ID). One person number per owner key, the same for every house that owner has, so whatever counts people counts them once. Houses ask with their owner\'s signed consent: { kind: "personhood.request", owner, consent }.', 'personhood', async (p, from, profile) => {
-    if (p.kind !== 'personhood.request') return { kind: 'refused', problems: ['send { kind: "personhood.request", owner: <the owner\'s public key>, consent: <the owner\'s signed { kind: "personhood.consent", house }> }'] };
+    if (p.kind !== 'personhood.request') return { kind: 'refused', problems: ['a house asks with { kind: "personhood.request", owner: <the owner\'s public key>, consent: <the owner\'s signed { kind: "personhood.consent", house }> }. Owners don\'t write this by hand: the control panel does it (Home → One person, one house → Get a person stamp). An assistant can\'t; tell your human where to tap.'] };
     if (profile.role !== 'house') return { kind: 'refused', problems: ['only a house is stamped, on its owner\'s say-so'] };
     const owner = p.owner as JWK | undefined;
     if (!owner?.x || owner.crv !== 'Ed25519' || !owner.kid) return { kind: 'refused', problems: ['owner: the owner\'s Ed25519 public key, with its kid'] };
@@ -29,6 +29,7 @@ export async function createPersonhood(o: SpecialistOptions & { dataDir: string 
     const person = `urn:lake:person:${createHash('sha256').update(`${secret}|${owner.x}`).digest('hex').slice(0, 24)}`;
     const credential: string = await s.vc('LakePersonhood', { id: from, person, checked: 'nothing real: a sandbox stand-in for a bank or a government ID' }, 365);
     return { kind: 'stamped', credential, person };
-  });
+    // Quiet, like the tally: who asks for a stamp, just before a people-only pledge fills, says who signed it.
+  }, [], true);
   return s;
 }

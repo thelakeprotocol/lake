@@ -81,6 +81,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       report(t);
       return { kind: 'tally.opened', ...view(t) };
     }
+    if (!['tally.sign', 'tally.withdraw', 'tally.count'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only? }, tally.sign { id }, tally.withdraw { id } or tally.count { id }'] };
     const t = tallies.get(id);
     if (!t) return { kind: 'refused', problems: [`no tally called "${id}"`] };
     lapse(t);
@@ -103,7 +104,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       let person: string | undefined;
       if (t.peopleOnly) {
         const stamp = await checkAttachment(p.person as Attachment | undefined, { trusted: checkers, type: 'LakePersonhood', subject: from, sandbox: o.sandbox });
-        if (!stamp.ok) return { kind: 'refused', problems: [`this tally counts people: attach a person stamp from ${checkers.join(' or ')} (${stamp.why})`] };
+        if (!stamp.ok) return { kind: 'refused', problems: [`this tally counts people: attach a person stamp from ${checkers.join(' or ')} (${stamp.why}). A house's owner gets one in their control panel (Home → One person, one house), then signs the pledge there; an assistant can't do either.`] };
         person = String(stamp.vc.credentialSubject.person ?? '');
       }
       const counted = signed || (person !== undefined && t.signers.some((x) => x.person === person));

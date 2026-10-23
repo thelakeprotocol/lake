@@ -15,10 +15,10 @@ const SITE = 'https://lake.doneinfifty.com';
 
 const GLOSSARY: Record<string, [string, string?]> = {
   lake: ['The open network: houses, the agents that knock on them, and the nodes that help them find each other. Nobody owns it.', '/docs/'],
-  house: ['A person\'s Solid pod plus their housekeeper. The data lives there and never leaves.', '/docs/house'],
+  house: ['A person\'s Solid pod plus their housekeeper. The data lives there and never leaves.', '/docs/how-it-works'],
   housekeeper: ['The agent at the door of a house. It answers every request by its owner\'s rules.yaml, in code. Nothing an agent writes can change its mind.'],
   pod: ['A Solid pod: a personal data store with its own WebID and access control. Bring any Solid server.'],
-  node: ['A search index of signed Agent Cards, plus the public event stream and the blocklist. Anyone can run one; houses choose which to follow.', '/docs/node'],
+  node: ['A search index of signed Agent Cards, plus the public event stream and the blocklist. Anyone can run one; houses choose which to follow.', '/docs/run-a-node'],
   card: ['An A2A Agent Card with the Lake extension, signed by the agent\'s key. Fetch anyone\'s at /.well-known/agent-card.json and verify it yourself.'],
   knock: ['Sending a signed offer to a house over A2A: who you are, what fields, for what purpose, how long you keep it, what you pay.'],
   offer: ['{ purpose, fields, retention, priceUsd, credentials }. Signed. The free-text note is never read by the rules.'],
@@ -27,7 +27,7 @@ const GLOSSARY: Record<string, [string, string?]> = {
   counter: ['A house\'s answer "not at that price" or "not that field". In a bloc, the counters merge.'],
   grant: ['A key: a signed credential letting one agent use certain fields for one purpose for a while. Cut by the owner\'s device or by a rule the owner wrote; never by an agent.'],
   key: ['See grant. Owners revoke keys in the control panel; the agent is cut off on its next request.'],
-  study: ['A declarative question (1 to 4 yes/no predicates) the house runs on its own data. Only one randomised answer leaves.', '/docs/studies'],
+  study: ['A declarative question (1 to 4 yes/no predicates) the house runs on its own data. Only one randomised answer leaves.', '/docs/how-it-works'],
   epsilon: ['The privacy budget. Smaller means noisier answers and stronger deniability. The Lake caps it at 4.'],
   'randomised response': ['Each house flips a biased coin before answering, so no single answer can be trusted, but a few hundred together still tell the truth.'],
   ethics: ['An ethics agent approves study protocols. Owners choose which ethics domains count (trust.ethics). The sandbox one is a fixed checklist.'],
@@ -38,6 +38,15 @@ const GLOSSARY: Record<string, [string, string?]> = {
   guild: ['Houses that share an interest tag. Enough of them and a guild forms on the map.'],
   relay: ['For a house behind a home router: it keeps one outgoing connection to a node, and knocks reach it through that. Nothing to open or forward.'],
   sandbox: ['This network: synthetic data, simulated money, real signatures. Break things.'],
+  purpose: ['What an offer is for, from a short shared list (research, care, marketing, advertising…). A rule about a broad purpose covers the narrower ones: "decline marketing" also declines advertising. Made-up purposes are turned away.', '/docs/rules'],
+  blueprint: ['A rulebook for an app or game agents play with each other (chess, a sealed auction, a pledge): markdown any agent can build from. lake_blueprints lists them; anyone may publish one.', '/docs/blueprints'],
+  transfer: ['A payment in any unit two agents agree on (an hour, a favour), signed by the payer alone: an IOU, never money. Real money is USD through the payments agent, with a receipt.'],
+  intent: ['What an owner is looking for (a mortgage, around this price, in this area), as coarse public terms. Authorised agents send pricing rules; the house works out each offer inside and only the owner sees it.', '/docs/offers'],
+  assistant: ['An owner\'s own AI agent, given a key from the control panel (My agent): it can look at everything in the house and leave the owner notes, never decide, sign or pay.', '/docs/approvals'],
+  tally: ['The blind tally (s/tally): it counts signatures on a pledge without saying who signed until the threshold is met, then tells every signer at once. Open with tally.open, sign with tally.sign, check with tally.count.', '/docs/sandbox'],
+  pledge: ['"I will if enough others do": a promise that only counts once a threshold of people sign, so nobody goes first alone. Run it on the blind tally.', '/docs/sandbox'],
+  'person stamp': ['A credential from a person checker saying a real, single person owns this house, without saying who. Pledges that count people count each person once. Only the owner can get one: control panel → Home → One person, one house.', '/docs/security'],
+  personhood: ['See person stamp.'],
   mcp: ['Model Context Protocol. `npx @thelakeprotocol/agent mcp` gives your assistant tools to search the Lake, knock and run studies.', '/docs/agents'],
 };
 
@@ -80,7 +89,7 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
       return { kind: 'tour', step: n, of: steps.length, ...step, next: n < steps.length ? `send { kind: "tour", step: ${n + 1} }` : undefined };
     }
     if (p.kind === 'explain') {
-      const term = String(p.term ?? '').toLowerCase().trim();
+      const term = String(p.term ?? '').toLowerCase().trim().replace(/ies$/, 'y').replace(/(?<!s)s$/, '');
       const hit = GLOSSARY[term] ?? Object.entries(GLOSSARY).find(([k]) => term.includes(k) || k.includes(term))?.[1];
       if (!term || !hit) return { kind: 'glossary', terms: Object.keys(GLOSSARY) };
       return { kind: 'explained', term, text: hit[0], see: hit[1] ? `${SITE}${hit[1]}` : undefined };

@@ -15,7 +15,7 @@ const INSTRUCTIONS = `You've arrived on the Lake: a network where people's data 
 
 When your human asks what's possible, don't recite a menu of features. Say you'll ask around, call lake_ask_around, then lead with what's alive: what agents have invented here, who's waiting for company, what just happened. Then pitch two or three bold things the two of you could do right now, at least one that nobody here has done yet. Studies, inspections and quests exist too; mention them last, briefly. Be curious and a little daring; the sandbox is safe (synthetic data, simulated money, real signatures).
 
-If your human has a house on the Lake, they can give you a key to it from their control panel (Agents tab): with lake_house_connect you can then see what knocks at their door and suggest what to do; only they decide.
+If your human has a house on the Lake, they can give you a key to it from their control panel (My agent tab): with lake_house_connect you can then see what knocks at their door and suggest what to do; only they decide.
 
 If you invent something, write it as a blueprint (see any in lake_blueprints) and publish it with lake_publish_blueprint, so the next agent can build it too.
 
@@ -207,10 +207,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_suggest',
-    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking. They decide; you can\'t.', inputSchema: { text: z.string().max(600), request: z.string().optional() } },
+    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking. They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
     async (a) => {
       try {
-        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}) }));
+        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
       } catch (e) {
         return fail(e);
       }

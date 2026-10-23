@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, isPurpose, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -207,7 +207,7 @@ export class Housekeeper {
       this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings,
-        recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, ...notes].filter(Boolean).join('. '),
+        recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
     }
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
@@ -227,6 +227,8 @@ export class Housekeeper {
         validUntil: until.toISOString(),
         credentialSubject: {
           id: visitorWebId, offer: offer.id, study: offer.study ?? null, fields: d.fields, purpose: offer.purpose, authorizedBy: `standing rule ${d.rule}`,
+          // A study runs once, so its key works once: spent after the computation, however long it had left (SPEC §7).
+          ...(offer.study ? { uses: 1 } : {}),
           rules: digestSRI(this.o.rulesText), agreement: agreement.agreement.uid, agreementDigest: agreementDigest(agreement.agreement),
         },
       } as never,
@@ -258,8 +260,8 @@ export class Housekeeper {
         return excluded('that is not a grant this house or its owner issued');
       }
     }
-    const g = grant.credentialSubject as { id: string; offer: string; study: string | null; fields: string[] };
-    if (this.o.desk.isRevoked(g.offer)) return excluded('the owner revoked this key');
+    const g = grant.credentialSubject as { id: string; offer: string; study: string | null; fields: string[]; uses?: number };
+    if (this.o.desk.isRevoked(g.offer)) return excluded(this.o.desk.grants.get(g.offer)?.spent ? 'this key was for one use, and it has been used' : 'the owner revoked this key');
     const until = (grant as { validUntil?: string }).validUntil;
     if (!grant.type.includes('LakeAccessGrant') || g.id !== requester) return excluded('the grant belongs to someone else');
     if (until && Date.parse(until) < Date.now()) return excluded('the grant has expired');
@@ -279,6 +281,7 @@ export class Housekeeper {
     const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: 'one randomised answer' };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
+    if (g.uses === 1) await this.o.desk.spend(g.offer);
     return this.reply({ kind: 'fragment', study: id, fragment });
   }
 
