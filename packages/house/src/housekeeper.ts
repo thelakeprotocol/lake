@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, isPurpose, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -202,9 +202,12 @@ export class Housekeeper {
 
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
     if (d.decision === 'ask') {
+      // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
+      const warnings = offerWarnings(offer);
       this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
-        priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, recommendation: [d.reason, ...notes].join('. '),
+        priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings,
+        recommendation: [warnings.length ? `I'd deny this: it ${warnings.join(', and ')}` : '', d.reason, ...notes].filter(Boolean).join('. '),
       });
     }
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
@@ -366,6 +369,8 @@ function offerProblem(o: unknown): string | null {
   const x = o as Offer;
   if (!x || typeof x.id !== 'string' || typeof x.requester !== 'string') return 'expected a Lake offer';
   if (typeof x.purpose !== 'string' || !CODE.test(x.purpose)) return 'purpose must be a short code like "research" (lowercase letters, digits, dashes)';
+  // A made-up purpose ("totally-not-marketing") would slip past every rule about a real one.
+  if (!isPurpose(x.purpose)) return `purpose must be one of the Lake's purposes: ${Object.keys(PURPOSES).join(', ')}`;
   if (!Array.isArray(x.fields) || !x.fields.length || x.fields.length > 32 || !x.fields.every((f) => typeof f === 'string' && FIELD.test(f))) return 'fields must be 1 to 32 field names (lowercase letters, digits, underscores)';
   if (typeof x.retention !== 'string' || !RETENTION.test(x.retention)) return 'retention must be "none" or an ISO 8601 duration like "P30D"';
   if (typeof x.priceUsd !== 'number' || !Number.isFinite(x.priceUsd) || x.priceUsd < 0) return 'price must be zero or more';

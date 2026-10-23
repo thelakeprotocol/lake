@@ -112,7 +112,25 @@ An offer is an ODRL 2.2 `Offer`. Its targets are canonical Lake fields. It MUST 
 
 Offers carry the visitor's credentials (ethics approval, audit certificate) as Verifiable Credentials.
 
-A house MUST reject a malformed offer (`rejected`, code `malformed`) before reading it further: the purpose is a short code (`^[a-z][a-z0-9-]{0,39}$`), never prose; fields are 1 to 32 field names (`^[a-z][a-z0-9_]{0,39}$`); retention is `none` or an ISO 8601 duration; the price is zero or more. Its reasons MUST NOT repeat what the sender wrote, and a decision MAY say which of the asked fields the house holds only when it joins or counters, never when it declines or asks.
+A house MUST reject a malformed offer (`rejected`, code `malformed`) before reading it further: the purpose is one of the Lake's purposes below, never prose or a made-up code; fields are 1 to 32 field names (`^[a-z][a-z0-9_]{0,39}$`); retention is `none` or an ISO 8601 duration; the price is zero or more. Its reasons MUST NOT repeat what the sender wrote, and a decision MAY say which of the asked fields the house holds only when it joins or counters, never when it declines or asks.
+
+**Purposes** are a short shared list, following the W3C Data Privacy Vocabulary (DPV) where it has a term, so that a rule about one can't be dodged with a new word. A narrower purpose sits inside a broader one, and a rule about the broader one covers it: a rule that declines `marketing` also declines `advertising` and `personalised-advertising`.
+
+| Purpose | Inside | DPV |
+|---|---|---|
+| `research` | | ResearchAndDevelopment |
+| `academic-research`, `commercial-research` | `research` | AcademicResearch, CommercialResearch |
+| `care` | | ServiceProvision |
+| `service` | | ServiceProvision |
+| `insurance` | | |
+| `credit` | | CreditChecking |
+| `marketing` | | Marketing |
+| `advertising`, `direct-marketing` | `marketing` | Advertising, DirectMarketing |
+| `personalised-advertising` | `advertising` | PersonalisedAdvertising |
+| `security` | | EnforceSecurity |
+| `legal` | | LegalCompliance |
+
+Rules naming a purpose not on this list are invalid (a misspelt "decline" would otherwise decline nothing).
 
 An offer for a study carries the study itself, its id in `offer.study`, and two attachments: an ethics approval and an audit certificate, each a Verifiable Credential together with the signed card of whoever issued it (§5.2).
 
@@ -132,6 +150,8 @@ A housekeeper answers every offer with exactly one of:
 | `decline` | No. |
 | `ask` | The owner decides. A request goes to their approvals device. |
 | `counter` | The owner would join on different terms (fewer fields, higher price). |
+
+A request sent to the owner (`ask`) SHOULD say what to look at twice, worked out from codes, never from the sender's prose: fields that identify the owner (a pack's `identifying` fields), fields no loaded pack defines, and retention of a year or more. When there is any, the housekeeper's recommendation leans to No.
 
 Decisions MUST be computed in code from the owner's rules (see [`rules.yaml`](https://lake.doneinfifty.com/docs/rules)). A model MAY write the plain-English reason shown to the owner. A model MUST NOT decide, and MUST NOT hold the power to issue a grant.
 

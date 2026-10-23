@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { collectiveCounter, evaluate, parseRules, RulesError, type Offer } from './index.js';
+import { collectiveCounter, evaluate, parseRules, PURPOSES, RulesError, type Offer } from './index.js';
 
 const persona = (n: string) => parseRules(readFileSync(new URL(`../../../personas/${n}.yaml`, import.meta.url), 'utf8'));
 
@@ -56,6 +56,21 @@ describe('rules engine', () => {
 
   it('rejects typos in rules.yaml instead of widening access', () => {
     expect(() => parseRules('owner: x\nrules:\n  - match: { purpse: research }\n    decision: join')).toThrow(RulesError);
+  });
+
+  it('catches narrower purposes with a rule about the broad one', () => {
+    expect(evaluate(persona('stan'), { ...study, purpose: 'advertising' }).decision).toBe('decline');
+    expect(evaluate(persona('stan'), { ...study, purpose: 'personalised-advertising' }).decision).toBe('decline');
+    expect(evaluate(persona('stan'), { ...study, purpose: 'academic-research', fields: ['age_band'], priceUsd: 5 }).decision).toBe('join');
+  });
+
+  it('keeps the schemas\' purpose list the same as the code\'s', () => {
+    const schema = JSON.parse(readFileSync(new URL('../../../spec/schemas/offer.schema.json', import.meta.url), 'utf8'));
+    expect(schema.properties.purpose.enum).toEqual(Object.keys(PURPOSES));
+  });
+
+  it('rejects a rule about a purpose nobody uses, so a misspelt "decline" never lets things through', () => {
+    expect(() => parseRules('owner: x\nrules:\n  - match: { purpose: marketting }\n    decision: decline')).toThrow(/unknown purpose/);
   });
 });
 

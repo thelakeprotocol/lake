@@ -22,13 +22,8 @@
     },
     "purpose": {
       "type": "string",
-      "examples": [
-        "research",
-        "marketing",
-        "care"
-      ],
-      "pattern": "^[a-z][a-z0-9-]{0,39}$",
-      "description": "A short code, never prose"
+      "enum": ["research", "academic-research", "commercial-research", "care", "service", "insurance", "credit", "marketing", "advertising", "personalised-advertising", "direct-marketing", "security", "legal"],
+      "description": "One of the Lake's purposes (SPEC §4), never prose"
     },
     "fields": {
       "type": "array",

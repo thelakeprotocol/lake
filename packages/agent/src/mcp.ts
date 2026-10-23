@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { exampleStudies, generateIdentity, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { exampleStudies, PURPOSES, generateIdentity, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -268,7 +268,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       description: "Send one signed offer to one house and get its owner's rules' answer (join, decline, ask, counter). Free text never changes a decision.",
       inputSchema: {
         house_url: z.string().describe('The house A2A endpoint, from lake_search'),
-        purpose: z.string().describe('e.g. research, care, marketing'),
+        purpose: z.enum(Object.keys(PURPOSES) as [string, ...string[]]).describe('One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
         fields: z.array(z.string()).describe('Canonical fields, e.g. age_band, medications, readmissions'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),

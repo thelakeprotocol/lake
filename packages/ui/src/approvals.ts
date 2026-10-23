@@ -5,7 +5,7 @@ import { loadKey, signCredential, signEnvelope } from './owner-crypto';
 // The control panel that comes with every house (open source). Served by the house at /owner/; every
 // call is signed on this device with the owner's key, which never leaves it.
 
-interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; recommendation: string }
+interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; warnings?: string[]; recommendation: string }
 interface Key { id: string; visitor: string; fields: string[]; purpose: string; until: string; authorizedBy: string }
 type Decision = 'join' | 'ask' | 'decline';
 interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
@@ -219,7 +219,7 @@ async function requests(box: HTMLElement) {
 function sameAsks(list: Request[]): Request[][] {
   const groups = new Map<string, Request[]>();
   for (const r of list) {
-    const k = JSON.stringify([r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.recommendation]);
+    const k = JSON.stringify([r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.warnings ?? [], r.recommendation]);
     groups.set(k, [...(groups.get(k) ?? []), r]);
   }
   return [...groups.values()];
@@ -247,9 +247,10 @@ function requestCard(all: Request[]) {
     for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {});
     void refreshBadge(); void show();
   };
-  return h('article', { class: 'req' },
+  return h('article', { class: r.warnings?.length ? 'req risky' : 'req' },
     h('div', { class: 'who' }, r.visitor.domain, n > 1 ? h('span', { class: 'count' }, `asked ${n} times`) : null),
     r.question ? h('p', { class: 'q' }, `“${r.question}”`) : null,
+    r.warnings?.length ? h('ul', { class: 'warn' }, ...r.warnings.map((w) => h('li', {}, `It ${w}`))) : null,
     h('dl', { class: 'facts' },
       ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : r.retention], ['Pays', `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
         .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))),
@@ -273,14 +274,16 @@ async function keys(box: HTMLElement) {
 // ---- Rules ----
 // The fields rules can name come from the packs this house takes part in (and the identifying ones they warn about).
 let FIELDS: { name: string; label: string; pack: string }[] = [];
-const PURPOSES = ['research', 'care', 'marketing', 'insurance'];
+// The Lake's purposes come from the house; a rule about a broad one (marketing) covers those inside it (advertising).
+let PURPOSES: { name: string; label: string; within?: string }[] = ['research', 'care', 'marketing', 'insurance'].map((name) => ({ name, label: name }));
 let draft: Rules | null = null;
 
 async function rules(box: HTMLElement) {
   if (!draft) {
-    const r = await call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[] }>({ kind: 'panel.rules' });
+    const r = await call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[]; purposes?: typeof PURPOSES }>({ kind: 'panel.rules' });
     draft = structuredClone(r.rules);
     FIELDS = r.fields ?? [];
+    if (r.purposes?.length) PURPOSES = r.purposes;
   }
   renderRules();
 }
@@ -325,7 +328,7 @@ function ruleCard(r: Rule, i: number, all: Rule[]) {
   const redraw = () => renderRules();
   const set = (k: string, v: string | boolean | number | undefined) => { if (v === undefined || v === '' || v === false) delete r.match[k]; else r.match[k] = v; redraw(); };
   const purpose = h('select', { onchange: (e: Event) => set('purpose', (e.target as HTMLSelectElement).value) },
-    h('option', { value: '' }, 'any purpose'), ...PURPOSES.map((p) => h('option', { value: p, selected: r.match.purpose === p }, p)));
+    h('option', { value: '' }, 'any purpose'), ...PURPOSES.map((p) => h('option', { value: p.name, selected: r.match.purpose === p.name }, p.within ? `  ${p.label} (part of ${p.within})` : p.label)));
   const requester = h('input', { type: 'text', value: String(r.match.requester ?? ''), placeholder: 'any agent, or e.g. gp.example', onchange: (e: Event) => set('requester', (e.target as HTMLInputElement).value.trim()) });
   // Each field cycles: not mentioned → share → never.
   const fieldChip = (f: string) => {

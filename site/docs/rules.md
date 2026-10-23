@@ -53,7 +53,7 @@ A `default: join` with no matching rule becomes **ask**, because without a rule 
 | `device` | string | Where `ask` requests go |
 | `default` | `join` \| `decline` \| `ask` | When no rule matches. Default `ask`. |
 | `tags` | list | Interests, used for discovery and guilds |
-| `rules[].match` | map | All keys must equal the offer's. Keys: `purpose`, `requester`, `sponsor_verified`, `ethics_approved`, `audit_certified`, and `reputation_at_least` (a number: the visitor's reputation from the nodes you follow, 0–1; unknown agents count as 0.5) |
+| `rules[].match` | map | All keys must equal the offer's. Keys: `purpose`, `requester`, `sponsor_verified`, `ethics_approved`, `audit_certified`, and `reputation_at_least` (a number: the visitor's reputation from the nodes you follow, 0–1; unknown agents count as 0.5). `purpose` is one of the Lake's purposes (`research`, `academic-research`, `commercial-research`, `care`, `service`, `insurance`, `credit`, `marketing`, `advertising`, `personalised-advertising`, `direct-marketing`, `security`, `legal`; [SPEC §4](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md#4-offers-and-agreements-odrl)) and covers the narrower ones inside it: `marketing` also matches `advertising`. Any other purpose is an error, and houses turn away offers with a purpose that isn't on the list. |
 | `rules[].allow_fields` | list | Fields this rule may share |
 | `rules[].deny_fields` | list | Fields never shared under this rule |
 | `rules[].min_price_usd` | number | Lowest acceptable price per participant |

@@ -18,6 +18,8 @@ export interface PendingRequest {
   priceUsd: number;
   study: string | null;
   question?: string;
+  /** What to look at twice: identifying or unknown fields, keeping data for years (SPEC §5). */
+  warnings?: string[];
   recommendation: string;
   requestedAt: string;
   status: 'pending' | 'allowed' | 'denied';

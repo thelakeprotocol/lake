@@ -1,3 +1,4 @@
+import { allFields, identifyingFields } from './pack.js';
 /**
  * An offer is what a visitor puts on the table: purpose, fields, retention, price.
  * On the wire it is a W3C ODRL Offer (see toOdrl); housekeepers evaluate this flat view.
@@ -50,4 +51,29 @@ export function toOdrl(o: Offer, assigner: string) {
       },
     ],
   };
+}
+
+/**
+ * What an owner should look at twice before allowing an offer, in plain words: fields that identify them, fields no
+ * use case here defines, and keeping the data for a year or more. Codes only; nothing the sender wrote as prose.
+ */
+export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'>): string[] {
+  const identifying = new Set(identifyingFields());
+  const known = new Set(allFields());
+  const ids = o.fields.filter((f) => identifying.has(f));
+  const unknown = o.fields.filter((f) => !identifying.has(f) && !known.has(f));
+  const years = retentionYears(o.retention);
+  return [
+    ids.length ? `asks for fields that identify you: ${ids.join(', ').replace(/_/g, ' ')}` : '',
+    unknown.length ? `asks for fields no use case here defines: ${unknown.join(', ').replace(/_/g, ' ')}` : '',
+    years >= 1 ? `wants to keep your data for ${years >= 2 ? `${Math.round(years)} years` : 'a year or more'}` : '',
+  ].filter(Boolean);
+}
+
+/** An ISO 8601 retention ("P99Y", "P400D") in years; 0 for "none". */
+export function retentionYears(retention: string): number {
+  const m = /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?/.exec(retention);
+  if (!m) return 0;
+  const [, y = 0, mo = 0, w = 0, d = 0] = m.map((x) => Number(x ?? 0));
+  return Number(y) + Number(mo) / 12 + (Number(w) * 7 + Number(d)) / 365;
 }

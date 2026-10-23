@@ -1,6 +1,7 @@
 import { parse } from 'yaml';
 import { DEFAULT_GRANT_HOURS } from './lake.js';
 import type { Offer } from './offer.js';
+import { isPurpose, PURPOSES, purposeWithin } from './purpose.js';
 
 /**
  * rules.yaml — the owner's standing rules, the note on the fridge.
@@ -52,6 +53,9 @@ export function parseRules(text: string): Rules {
     for (const k of Object.keys(r.match ?? {})) {
       if (!(MATCH_KEYS as readonly string[]).includes(k)) throw new RulesError(`rule ${i + 1}: unknown match key "${k}" (allowed: ${MATCH_KEYS.join(', ')})`);
     }
+    // A misspelt purpose would match nothing, and a "decline" rule that matches nothing quietly lets things through.
+    const purpose = r.match?.purpose;
+    if (purpose !== undefined && !isPurpose(String(purpose))) throw new RulesError(`rule ${i + 1}: unknown purpose "${purpose}" (known: ${Object.keys(PURPOSES).join(', ')})`);
     return { ...r, match: r.match ?? {} };
   });
   for (const k of Object.keys(raw.trust ?? {})) {
@@ -80,7 +84,9 @@ function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
     ethics_approved: o.credentials.ethicsApproved,
     audit_certified: o.credentials.auditCertified,
   };
-  return Object.entries(m).every(([k, v]) => (k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : facts[k as keyof typeof facts] === v));
+  // A rule about a broad purpose covers the narrower ones inside it: "marketing" catches "advertising".
+  return Object.entries(m).every(([k, v]) =>
+    k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
 }
 
 /**

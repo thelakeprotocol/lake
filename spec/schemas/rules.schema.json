@@ -39,7 +39,8 @@
             "type": "object",
             "properties": {
               "purpose": {
-                "type": "string"
+                "enum": ["research", "academic-research", "commercial-research", "care", "service", "insurance", "credit", "marketing", "advertising", "personalised-advertising", "direct-marketing", "security", "legal"],
+                "description": "Covers the narrower purposes inside it (marketing covers advertising)"
               },
               "requester": {
                 "type": "string"

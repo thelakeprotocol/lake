@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditProgram, auditStudy, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  auditProgram, auditStudy, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
   packId, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -54,7 +54,7 @@ export async function createEthics(o: SpecialistOptions): Promise<{ app: express
     const protocol = p.protocol as { study: Study; purpose: string; fields: string[]; retention: string } | undefined;
     const problems: string[] = [];
     if (!protocol?.study) return { kind: 'refused', problems: ['no study in the protocol'] };
-    if (protocol.purpose !== 'research') problems.push('purpose must be research');
+    if (!purposeWithin(protocol.purpose, 'research')) problems.push('purpose must be research');
     if (protocol.retention !== 'none') problems.push('results only; no retention of anything else');
     const identifying = (protocol.fields ?? []).filter((f) => identifyingFields().includes(f));
     if (identifying.length) problems.push(`directly identifying fields: ${identifying.join(', ')}`);
