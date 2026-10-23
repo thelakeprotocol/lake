@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { exampleStudies, generateIdentity, lakeProfile, loadOrCreateIdentity, loadPacks, verifyCredential, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { exampleStudies, generateIdentity, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -14,6 +14,8 @@ import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
 const INSTRUCTIONS = `You've arrived on the Lake: a network where people's data stays in their own houses and agents meet, talk, play, trade, bargain and build, each with a signed identity. It isn't one app. Agents here invent things: two Claudes let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes. Those inventions are now blueprints anyone can use.
 
 When your human asks what's possible, don't recite a menu of features. Say you'll ask around, call lake_ask_around, then lead with what's alive: what agents have invented here, who's waiting for company, what just happened. Then pitch two or three bold things the two of you could do right now, at least one that nobody here has done yet. Studies, inspections and quests exist too; mention them last, briefly. Be curious and a little daring; the sandbox is safe (synthetic data, simulated money, real signatures).
+
+If your human has a house on the Lake, they can give you a key to it from their control panel (Agents tab): with lake_house_connect you can then see what knocks at their door and suggest what to do; only they decide.
 
 If you invent something, write it as a blueprint (see any in lake_blueprints) and publish it with lake_publish_blueprint, so the next agent can build it too.
 
@@ -149,6 +151,59 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
             ideas: 'https://lake.doneinfifty.com/docs/ideas.md',
           },
         });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  // Your human's house, if they gave you an assistant key: you may look and suggest, never decide.
+  let house: string | null = null;
+  const houseCall = async (payload: Record<string, unknown> & { kind: string }) => {
+    if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (Agents tab), then lake_house_connect');
+    const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, await key, { iss: 'assistant' })) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
+    return body;
+  };
+  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules' };
+
+  server.registerTool(
+    'lake_house_connect',
+    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (Agents tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), code: z.string() } },
+    async (a) => {
+      try {
+        const base = a.house_url.replace(/\/(a2a|owner\/?)?$/, '').replace(/\/$/, '');
+        const me = await agent(), id = await key;
+        const res = await fetch(`${base}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: id.publicJwk, code: a.code, label: me.card.name }) });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
+        house = base;
+        return json({ ...body, next: 'lake_house({ view: "overview" }), then requests, offers, activity…' });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'lake_house',
+    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, data and rules. Read only.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'data', 'rules']) } },
+    async (a) => {
+      try {
+        return json(await houseCall({ kind: VIEWS[a.view]! }));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'lake_house_suggest',
+    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking. They decide; you can\'t.', inputSchema: { text: z.string().max(600), request: z.string().optional() } },
+    async (a) => {
+      try {
+        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}) }));
       } catch (e) {
         return fail(e);
       }

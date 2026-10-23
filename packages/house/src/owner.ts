@@ -55,6 +55,15 @@ export interface GrantRecord {
 const MAX_GRANT_MS = 48 * 3_600_000;
 
 /**
+ * Your own AI agent, inside your house: a second key the owner hands out from the panel. It may look (requests,
+ * offers, activity, data, rules) and suggest; it may never Allow, change rules, accept, revoke or export. Only
+ * the owner's key cuts keys.
+ */
+export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: string }
+export interface Suggestion { id: string; from: string; text: string; request?: string; at: string }
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.data', 'panel.market', 'assistant.suggest']);
+
+/**
  * The owner's side of the house. The owner's key is made on their own device and never leaves it;
  * the house only ever holds its public half. Live Allow is the one path that mints a grant outside a
  * standing rule, and the grant it mints is signed by the owner, not the housekeeper.
@@ -66,6 +75,9 @@ export class OwnerDesk {
   private replay = new ReplayGuard();
   private token = '';
   private operatorToken = '';
+  readonly assistants = new Map<string, AssistantKey>();
+  private invites = new Map<string, { label: string; until: number }>();
+  suggestions: Suggestion[] = [];
 
   constructor(
     private o: {
@@ -88,6 +100,9 @@ export class OwnerDesk {
       leaseHours?: number;
       clearOwnerKey?: () => Promise<void>;
       onRelease?: () => Promise<void>;
+      /** Where the owner's assistant keys are kept (the pod's wallet). */
+      saveAssistants?: (keys: AssistantKey[]) => Promise<void>;
+      loadAssistants?: () => Promise<AssistantKey[]>;
     },
   ) {}
 
@@ -101,6 +116,9 @@ export class OwnerDesk {
   async release() {
     await this.revoke('all');
     this.pending.clear();
+    this.assistants.clear();
+    this.suggestions = [];
+    await this.o.saveAssistants?.([]);
     this.ownerJwk = null;
     await this.o.clearOwnerKey?.();
     this.token = await secret(join(this.o.dataDir, 'pairing-token'), true);
@@ -117,6 +135,7 @@ export class OwnerDesk {
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
+    for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a);
     return { paired: !!this.ownerJwk, token: this.token };
   }
 
@@ -165,16 +184,62 @@ export class OwnerDesk {
       res.json({ paired: true, webId: this.o.webId, until: this.leaseUntil()?.toISOString() });
     });
 
+    // The owner's assistant pairs with a one-time code the owner made in the panel; its key can look and suggest only.
+    r.post('/assistant', async (req, res) => {
+      const { publicJwk, code, label } = req.body ?? {};
+      if (!publicJwk?.x || publicJwk.crv !== 'Ed25519' || !publicJwk.kid) return void res.status(400).json({ error: 'send an Ed25519 public key with a kid' });
+      const invite = this.invites.get(String(code ?? ''));
+      if (!invite || invite.until < Date.now()) return void res.status(403).json({ error: 'wrong or expired code: ask your human for a new one' });
+      this.invites.delete(String(code));
+      const kid = String(publicJwk.kid);
+      if (kid === this.ownerJwk?.kid) return void res.status(400).json({ error: 'that is the owner\'s own key' });
+      const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString() };
+      this.assistants.set(kid, a);
+      await this.o.saveAssistants?.([...this.assistants.values()]);
+      res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY] });
+    });
+
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
     r.get('/status', (_req, res) => void res.json({ claimed: !!this.ownerJwk, until: this.leaseUntil()?.toISOString() ?? null, leaseHours: this.o.leaseHours ?? null }));
 
     r.post('/api', async (req, res) => {
       if (!this.ownerJwk) return void res.status(409).json({ error: 'pair first' });
       let p: Signed<{ kind: string; request?: string; answer?: string; grant?: string; revoke?: string }>['payload'];
+      let signer = '';
       try {
-        p = await verifyMessage(req.body, async (kid) => (kid === this.ownerJwk!.kid ? this.ownerJwk : null), { replay: this.replay });
+        p = await verifyMessage(req.body, async (kid) => { signer = kid; return kid === this.ownerJwk!.kid ? this.ownerJwk : this.assistants.get(kid)?.jwk ?? null; }, { replay: this.replay });
       } catch (e) {
         return void res.status(403).json({ error: (e as Error).message });
+      }
+      const assistant = signer !== this.ownerJwk.kid ? this.assistants.get(signer) : undefined;
+      if (assistant) {
+        if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
+        if (p.kind === 'assistant.suggest') {
+          const q = p as unknown as { text?: string; request?: string };
+          const text = String(q.text ?? '').trim().slice(0, 600);
+          if (!text) return void res.status(400).json({ error: 'suggest something: text' });
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(q.request ? { request: String(q.request) } : {}), at: new Date().toISOString() };
+          this.suggestions = [sug, ...this.suggestions].slice(0, 50);
+          return void res.json({ ok: true, id: sug.id, note: 'your human sees it in their control panel' });
+        }
+      }
+      if (p.kind === 'panel.assistant.invite') {
+        // Fifteen minutes, one use: long enough to paste into a chat with your agent.
+        const code = randomBytes(9).toString('base64url');
+        this.invites.set(code, { label: String((p as unknown as { label?: string }).label ?? 'my assistant').slice(0, 60), until: Date.now() + 15 * 60_000 });
+        return void res.json({ code, until: new Date(Date.now() + 15 * 60_000).toISOString() });
+      }
+      if (p.kind === 'panel.assistant.revoke') {
+        const kid = String((p as unknown as { kid?: string }).kid ?? '');
+        const gone = kid === 'all' ? this.assistants.size : Number(this.assistants.delete(kid));
+        if (kid === 'all') this.assistants.clear();
+        await this.o.saveAssistants?.([...this.assistants.values()]);
+        return void res.json({ revoked: gone });
+      }
+      if (p.kind === 'panel.assistant.dismiss') {
+        const id = String((p as unknown as { id?: string }).id ?? '');
+        this.suggestions = this.suggestions.filter((x) => x.id !== id);
+        return void res.json({ ok: true });
       }
       if (p.kind === 'list') return void res.json(this.view());
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
@@ -221,6 +286,8 @@ export class OwnerDesk {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt }) => ({ kid, label, addedAt })),
+      suggestions: this.suggestions,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };
   }

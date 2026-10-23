@@ -213,6 +213,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     loadRevoked: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/revoked.json`); return r.ok ? r.json() : []; },
     leaseHours: o.leaseHours,
     clearOwnerKey: async () => { await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`, { method: 'DELETE' }); },
+    saveAssistants: (keys) => put(owner, 'wallet/assistants.json', JSON.stringify(keys), 'application/json'),
+    loadAssistants: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/assistants.json`); return r.ok ? r.json() : []; },
     // The next person gets the house as it started: its original rules.
     onRelease: async () => {
       await put(owner, 'settings/rules.yaml', o.rulesText, 'text/yaml');

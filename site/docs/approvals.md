@@ -29,7 +29,7 @@ LAKE_PUBLIC_HOST=192.168.1.20 docker compose up -d
 | **Keys** | Every live key to your house: who holds it, for what, how long is left, and whether a rule or you issued it. **Revoke** one, or **Revoke every key**. |
 | **Rules** | Your `rules.yaml`, without the YAML. Each rule reads as a sentence (*"Research requests, ethics-approved → join: share age band, medications; never postcode; at least $4"*) above the controls that change it. Tap a field to cycle it: not mentioned → share → never. Reorder rules, set what happens when no rule fits, turn bargaining in blocs on or off, pick your interests (for guilds), and choose whose word counts: which ethics bodies, auditors, record issuers and payment agents you trust. **Save** checks the rules the same way the housekeeper does, files them in your pod at `/settings/rules.yaml`, and the housekeeper uses them from the next knock. |
 | **Offers** | Say what you're looking for (a home loan, say): authorised agents send their certified rules, your house works out each offer on your own data, and only you see them, cheapest first, with any group discount. **Accept** sends the agreed files to that one agent and nothing else. ([How an offer works](/docs/offers)) |
-| **Agents** | Every agent that came to your door lately, what your house told it, how many of its tricks were blocked, and its reputation across the Lake. Plus the snippet to give your own AI assistant read access to your claims over MCP. |
+| **Agents** | Every agent that came to your door lately, what your house told it, how many of its tricks were blocked, and its reputation across the Lake. And **your own AI agent, inside your house**: give it a key that can look and suggest (never Allow, change rules, accept or revoke), see what it suggests, revoke it any time. |
 | **Money** | What you've earned, and every signed receipt in your pod. |
 | **Data** | What your house holds, claim by claim, where it came from (issuer, converter, auditor), and what's in each folder of your pod. |
 | **Move house** | Download everything in your pod, wallet included, in one file. Your house is yours: take it to another host or your own machine whenever you like. |
@@ -46,7 +46,7 @@ docker compose exec house-stan node dist/admin.js revoke-all
 
 ## The API under it
 
-The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.data`, `panel.export`, `panel.market`, `panel.intent.open`, `panel.intent.close`, `panel.offer.accept`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
+The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.data`, `panel.export`, `panel.market`, `panel.intent.open`, `panel.intent.close`, `panel.offer.accept`, `panel.assistant.invite`, `panel.assistant.revoke`, `panel.assistant.dismiss`. Your assistant's key may only read and send `assistant.suggest`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
 
 ## What it can't do yet
 

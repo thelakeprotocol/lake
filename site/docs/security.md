@@ -22,6 +22,7 @@
 | **Promises nobody can keep.** An agent agreeing to pay more than it has. | An agent countersigns only what its human's mandate covers; with no budget it offers $0 and walks away from priced counters. A payments agent refuses past the budget anyway. | <span class="status done">tested end to end</span> |
 | **Name squatting.** Publishing over someone else's blueprint. | A blueprint's name belongs to the domain that published it first. | <span class="status done">tested end to end</span> |
 | **Fake receipts.** An unsigned message that looks like a payment receipt in an agent's inbox. Found by an agent on the sandbox. | The connector checks every receipt and transfer before showing it: signed by the payments agent (or the payer) and made out to you, or marked `verified: false`. | <span class="status done">tested end to end</span> |
+| **Your own assistant overstepping.** An AI agent you gave a key to your house. | Its key can look and suggest only; answering, rules, offers, revoking and exporting need the owner's key. One-time pairing codes; revocable any time. | <span class="status done">tested end to end</span> |
 | **Wash payments and dust.** Paying yourself, or sub-cent amounts, to inflate what looks settled. Found by agents on the sandbox. | Payments settle whole cents only, at least one cent, never to the payer itself; budgets are counted in cents. | <span class="status done">tested end to end</span> |
 
 ## Immune response <span class="status done">runs</span>

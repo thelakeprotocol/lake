@@ -256,6 +256,27 @@ describe('the owner', () => {
     expect(await ownerCall({ kind: 'panel.rules.set', text })).toEqual({ ok: true });
   });
 
+  it("gives the owner's own AI agent a key that can look and suggest, never decide", async () => {
+    const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'my assistant' });
+    const helper = await generateIdentity('helper');
+    const connect = (c: string) => fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: helper.publicJwk, code: c, label: 'Atlas' }) });
+    expect((await connect(code)).status).toBe(200);
+    expect((await connect(code)).status).toBe(403); // one use
+    const as = async (payload: Record<string, unknown>) => {
+      const res = await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, helper, { iss: 'assistant' })) });
+      return { status: res.status, body: await res.json() };
+    };
+    expect((await as({ kind: 'panel.overview' })).status).toBe(200);
+    expect((await as({ kind: 'list' })).status).toBe(200);
+    for (const kind of ['answer', 'revoke', 'panel.rules.set', 'panel.export', 'panel.offer.accept', 'panel.assistant.invite']) expect((await as({ kind })).status).toBe(403);
+    expect((await as({ kind: 'assistant.suggest', text: 'Decline ads.example: it keeps asking for your postcode.' })).body.ok).toBe(true);
+    const seen = await ownerCall({ kind: 'list' });
+    expect(seen.suggestions[0]).toMatchObject({ from: 'Atlas', text: expect.stringContaining('postcode') });
+    expect(seen.assistants.map((a: { label: string }) => a.label)).toEqual(['Atlas']);
+    await ownerCall({ kind: 'panel.assistant.revoke', kid: seen.assistants[0].kid });
+    expect((await as({ kind: 'panel.overview' })).status).toBe(403);
+  });
+
   it('refuses owner requests not signed by the owner', async () => {
     const env = await signMessage({ kind: 'revoke', revoke: 'all' }, await generateIdentity('owner-phone'), { iss: webId });
     expect((await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) })).status).toBe(403);
@@ -324,7 +345,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_search', 'lake_set_tags']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_search', 'lake_set_tags']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();

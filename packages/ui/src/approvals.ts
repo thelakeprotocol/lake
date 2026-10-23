@@ -95,10 +95,12 @@ async function show() {
 async function home() {
   const o = await call({ kind: 'panel.overview' });
   const feed = await call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
+  const { suggestions } = await call<{ suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
   const tile = (label: string, value: string | number, cls = '') => h('div', { class: `tile ${cls}` }, h('dt', {}, label), h('dd', {}, String(value)));
   view().replaceChildren(
+    suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
     h('dl', { class: 'tiles' },
       tile('Knocks today', o.knocksToday),
       tile('Waiting for you', o.pending, o.pending ? 'amber' : ''),
@@ -407,10 +409,37 @@ async function agents() {
         h('div', { class: 'r-meta' }, `${a.knocks} knock${a.knocks === 1 ? '' : 's'} · last ${time(a.last)}${a.lastDecision ? ` · you said ${a.lastDecision}` : ''}${a.blocked ? ` · ${a.blocked} blocked` : ''}`)),
       h('div', { class: 'r-meta' }, a.reputation === null ? (a.blocked ? 'blocked' : '') : h('span', {}, `reputation ${a.reputation}`, h('span', { class: 'rep' }, h('i', { style: `width:${Math.round(a.reputation * 100)}%` })))))))
       : h('p', { class: 'muted' }, 'No visitors yet.'),
-    h('h2', {}, 'Your own assistant'),
-    h('p', { class: 'lede' }, 'Give your AI assistant (Claude, or any MCP client) read access to your claims. Your wallet stays shut. Add this to its MCP settings, on the machine your house runs on:'),
-    h('pre', {}, JSON.stringify({ mcpServers: { 'my-house': { command: 'docker', args: ['exec', '-i', '-e', `LAKE_OWNER=${houseName}`, '<your house container>', 'node', 'dist/pod-mcp-stdio.js'] } } }, null, 2)),
+    await assistantSection(),
   );
+}
+
+/** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
+async function assistantSection(): Promise<Node> {
+  const v = await call<{ assistants: { kid: string; label: string; addedAt: string }[]; suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
+  const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
+  const out = h('div', {});
+  const give = h('button', { class: 'btn primary', type: 'button' }, 'Give my AI agent a key');
+  give.onclick = async () => {
+    const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant' });
+    const msg = `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`;
+    const copy = h('button', { class: 'btn small', type: 'button', onclick: () => navigator.clipboard?.writeText(msg) }, 'Copy');
+    out.replaceChildren(h('p', { class: 'muted' }, `Paste this to your AI agent (it needs the Lake connector). The code works once, for 15 minutes:`), h('pre', { style: 'white-space:pre-wrap' }, msg), copy);
+  };
+  return h('section', {},
+    h('h2', {}, 'Your AI agent, inside your house'),
+    h('p', { class: 'lede' }, 'Give your own AI agent a key that can look but never decide: it sees your requests, offers, visitors and data, and suggests what to do. Only your key can Allow, change your rules, accept an offer or revoke a key.'),
+    give, out,
+    v.assistants.length ? h('ul', { class: 'rows', style: 'margin-top:14px' }, ...v.assistants.map((a) => h('li', {},
+      h('div', {}, h('div', { class: 'r-title' }, a.label), h('div', { class: 'r-meta' }, `added ${time(a.addedAt)} · can look and suggest`)),
+      h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } }, 'Revoke')))) : '',
+    v.suggestions.length ? h('div', {}, h('h3', { style: 'margin-top:18px' }, 'Suggestions from your agent'), suggestionList(v.suggestions)) : '',
+  );
+}
+
+function suggestionList(list: { id: string; from: string; text: string; at: string }[]): Node {
+  return h('ul', { class: 'rows' }, ...list.map((x) => h('li', {},
+    h('div', {}, h('div', { class: 'r-title' }, x.text), h('div', { class: 'r-meta' }, `${x.from} · ${time(x.at)}`)),
+    h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.dismiss', id: x.id }); void show(); } }, 'Dismiss'))));
 }
 
 // ---- Money ----

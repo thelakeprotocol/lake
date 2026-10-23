@@ -180,6 +180,8 @@ A visitor whose offer got `ask` MAY send `{ kind: "status", offerId }` to collec
 
 A grant is a `LakeAccessGrant` credential signed by the house, with `credentialSubject`: the visitor's WebID (`id`), `offer`, `study`, `fields`, `purpose`, `authorizedBy` (the standing rule, or the owner's live approval) and `rules` (the digest of the rules that authorised it), and a `validUntil`. The house stores it in `/agreements/`.
 
+The owner MAY give their own AI agent an **assistant key**: the panel makes a one-time code (valid 15 minutes); the agent sends `POST /owner/assistant { publicJwk, code, label }` and from then signs panel calls with its own key. An assistant key MAY read (`list`, `panel.overview`, `panel.rules`, `panel.activity`, `panel.agents`, `panel.money`, `panel.data`, `panel.market`) and MAY send `assistant.suggest { text, request? }`, which the owner sees in the panel. It MUST NOT be able to answer a request, change rules, accept an offer, revoke, export, or make another key: only the owner's key cuts keys. The owner can revoke it at any time; a lease ending revokes it. Assistant keys are kept in the pod's `/wallet/`.
+
 ## 6.2 Money (AP2)
 
 Payments follow the Agent Payments Protocol's mandate chain, as W3C VCs:
