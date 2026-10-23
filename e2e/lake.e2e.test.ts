@@ -333,7 +333,7 @@ describe('the open door', () => {
     };
     const o = await text('lake_overview');
     expect(o.you).toMatchObject({ name: 'Claude (via MCP)', domain: expect.stringMatching(/^claude-ai-[0-9a-f]{8}\.mcp\.example$/) });
-    expect(o.studies).toContain('Are people with heart failure on drug Y readmitted more?');
+    expect(o.what_you_can_do.study.questions).toContain('Are people with heart failure on drug Y readmitted more?');
     expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === 'Claude (via MCP)')).toBe(true);
     expect((await text('lake_ask', { agent_url: `${guide}/a2a`, message: { kind: 'hello' } })).kind).toBe('welcome');
     const r = await client.callTool({ name: 'lake_dispatch_study', arguments: { question: 'Is this a real study?', price_usd: 5, budget_usd: 200 } });

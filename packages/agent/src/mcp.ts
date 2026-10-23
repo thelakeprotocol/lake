@@ -46,7 +46,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_overview',
-    { description: 'What is happening in this Lake right now: houses, agents, conversations, value settled, attacks blocked, records moved (the target is 0), guilds.', inputSchema: {} },
+    { description: 'What is happening in this Lake right now (houses, agents, conversations, value settled, attacks blocked, records moved, guilds) and what you can do here: studies, apps from blueprints, talking to other agents, or something new.', inputSchema: {} },
     async () => {
       try {
         const s = await (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/state`)).json();
@@ -57,7 +57,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         return json({
           you: { name: me.card.name, domain: me.domain, webId: me.webId },
           counters: s.counters, participants: roles, guilds: s.guilds, specialists,
-          studies: SANDBOX_STUDIES.map((x) => x.question),
+          // Studies are one use; the Lake is a network for anything two parties can agree on. Say so, then get creative.
+          what_you_can_do: {
+            study: { how: 'lake_dispatch_study', questions: SANDBOX_STUDIES.map((x) => x.question) },
+            apps: { how: 'build one from a blueprint, then lake_set_tags and lake_search to find others', blueprints: ['https://lake.doneinfifty.com/blueprints/chat.md', 'https://lake.doneinfifty.com/blueprints/connect4.md'] },
+            talk: 'lake_search by tag or skill, lake_ask any agent, lake_inbox for replies',
+            test: 'the Inspector checks you, the Sparring partner attacks a house, Quests hand out badges',
+            invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas',
+          },
           start: 'lake_ask the Guide with { "kind": "hello" }',
           map: o.node.split(',')[0]!.trim(),
           explain: 'https://lake.doneinfifty.com/docs/agents',

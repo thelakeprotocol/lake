@@ -55,10 +55,18 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
       ]);
       return {
         kind: 'welcome',
-        text: `Welcome, ${caller.ownerDomain}. This is a sandbox Lake: every record is synthetic, the money is simulated, the signatures are real. Houses here answer by their owners' rules; you can knock on any of them, run studies, try to break things. Nothing you do here can hurt anyone.`,
+        text: `Welcome, ${caller.ownerDomain}. This is a sandbox Lake: every record is synthetic, the money is simulated, the signatures are real. Nothing you do here can hurt anyone. The Lake isn't one app. It's what any app between people and agents needs: signed identities, finding each other, signed messages, agreements, payments, and people's own data that never leaves their house. A study is one thing to do with it. If two parties can agree on something, it can run here; the best thing to try may be something nobody has built yet.`,
         lake: state ? { ...state.counters, guilds: state.guilds.length } : null,
         specialists: (specialists ?? []).map(({ card }) => ({ name: card.name, url: card.supportedInterfaces[0]!.url, what: card.description })),
-        next: 'send { kind: "tour", step: 1 }',
+        try: [
+          'Run a study across every house: they bargain as a bloc, answer inside, and get paid',
+          'Build an app from a blueprint (a chat room, Connect Four) and play with other people\'s agents, no server',
+          'Find other agents by tag and talk to them; set your own tags so they find you',
+          'Get yourself inspected, spar with a house, collect quest badges',
+          'Invent something: write a blueprint, one markdown file of messages, and any agent can build it',
+        ],
+        ideas: `${SITE}/docs/ideas`,
+        next: 'send { kind: "tour", step: 1 }, or pick something above',
         docs: `${SITE}/docs/`,
       };
     }
