@@ -422,6 +422,9 @@ describe('the open door', () => {
     const triggered = await t(other, { kind: 'tally.sign', id: 'e2e-strike' });
     expect(triggered).toMatchObject({ kind: 'tally.triggered', count: 2, state: 'triggered' });
     expect(triggered.signers).toHaveLength(2);
+    // Nothing public says who signed: no visit reports from the tally, no message events to it.
+    const feed = JSON.stringify((await (await fetch(`${node}/state`)).json()).recent);
+    expect(feed).not.toMatch(/tally\.sign|tally\.signed|tally\.triggered/);
     const told = await text('lake_inbox', { wait_seconds: 5 });
     expect(told.messages.some((m: { message: { kind: string } }) => m.message.kind === 'tally.triggered')).toBe(true);
     await other.close();

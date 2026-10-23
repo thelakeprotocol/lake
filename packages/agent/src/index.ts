@@ -157,8 +157,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     },
     async ask(agentUrl, payload) {
       const { reply: r, from } = await ask(agentUrl, visitor, payload);
-      // The map may show who talked to whom, and in which kind of message; never what was said.
-      link.report(makeEvent('agent.message', 'self', `agent:${from.ownerDomain}`, { kind: String(payload.kind).slice(0, 40) }));
+      // The map may show who talked to whom, and in which kind of message; never what was said. Not for a quiet agent
+      // (a blind tally, say): that someone talked to it at all is the secret.
+      if (!from.tags?.includes('quiet')) link.report(makeEvent('agent.message', 'self', `agent:${from.ownerDomain}`, { kind: String(payload.kind).slice(0, 40) }));
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },

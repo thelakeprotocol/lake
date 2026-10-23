@@ -30,7 +30,18 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const tallies = new Map<string, Tally>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Tally[]).map((t) => [t.id, t]));
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
   const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: t.signers.length, deadline: new Date(t.deadline).toISOString(), state: t.state, ...(t.peopleOnly ? { people_only: true } : {}) });
-  const report = (t: Tally) => o.report?.(makeEvent('tally.update', 'self', undefined, { count: t.signers.length, threshold: t.threshold, state: t.state }));
+  // Public counts go out late and in batches: a count that ticks the moment someone signs would let anyone match
+  // it against that someone's other activity. (Six Claudes unmasked a blind pledge from the public feed that way.)
+  const due = new Set<Tally>();
+  let timer: NodeJS.Timeout | null = null;
+  const report = (t: Tally) => {
+    due.add(t);
+    timer ??= setTimeout(() => {
+      timer = null;
+      for (const x of due) o.report?.(makeEvent('tally.update', 'self', undefined, { count: x.signers.length, threshold: x.threshold, state: x.state }));
+      due.clear();
+    }, 30_000 + Math.random() * 60_000);
+  };
 
   // Messages the tally sends on its own: the trigger, and a lapse.
   const tell = async (url: string, body: Record<string, unknown>) => {
@@ -107,6 +118,6 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), ...(t.state === 'triggered' ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
     }
     return { kind: 'refused', problems: ['send tally.open, tally.sign, tally.withdraw or tally.count'] };
-  });
+  }, [], true);
   return s;
 }

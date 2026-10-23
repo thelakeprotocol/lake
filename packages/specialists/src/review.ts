@@ -19,10 +19,11 @@ export type Refused = { kind: 'refused'; problems: string[] };
 export interface Specialist { app: express.Express; card: AgentCard; webId: string; vc: (type: string, subject: Record<string, unknown> & { id: string }, days: number) => Promise<string> }
 
 /** A signed Lake agent with one skill: verifies every message before `decide` sees it, signs every reply. */
-export async function specialist<R extends { kind: string } = Reply>(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: LakeProfile, card: AgentCard) => Promise<R | Refused>, extraSkills: { id: string; name: string; description: string }[] = []): Promise<Specialist> {
+export async function specialist<R extends { kind: string } = Reply>(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: LakeProfile, card: AgentCard) => Promise<R | Refused>, extraSkills: { id: string; name: string; description: string }[] = [], quiet = false): Promise<Specialist> {
   const webId = `${o.url}/#${skill}`;
   const card = await signCard(
-    buildCard({ name, description, url: `${o.url}/a2a`, skills: [{ id: skill, name, description }, ...extraSkills], profile: { role: 'specialist', webId, ownerDomain: o.domain, tags: [skill] } }, o.id),
+    // A quiet agent's visitors are nobody's business: it says so on its card, and reports no visits.
+    buildCard({ name, description, url: `${o.url}/a2a`, skills: [{ id: skill, name, description }, ...extraSkills], profile: { role: 'specialist', webId, ownerDomain: o.domain, tags: quiet ? [skill, 'quiet'] : [skill] } }, o.id),
     o.id,
   );
   const replay = new ReplayGuard();
@@ -32,7 +33,7 @@ export async function specialist<R extends { kind: string } = Reply>(o: Speciali
     if (!v.ok) return reply({ kind: 'refused', problems: [`${v.rejection.code}: ${v.rejection.why}`] });
     const out = await decide(v.payload, v.profile.webId, v.profile, (data as LakeData).card);
     // Tell the map who just came by, so it can show the visit. Ids and kinds only.
-    if (out.kind !== 'refused') o.report?.(makeEvent('decision', 'self', `agent:${v.profile.ownerDomain}`, { decision: out.kind }));
+    if (out.kind !== 'refused' && !quiet) o.report?.(makeEvent('decision', 'self', `agent:${v.profile.ownerDomain}`, { decision: out.kind }));
     return reply(out);
   });
   const vc = (type: string, subject: Record<string, unknown> & { id: string }, days: number) =>
