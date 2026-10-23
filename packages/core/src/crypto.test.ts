@@ -18,6 +18,11 @@ describe('signed messages', () => {
     await expect(verifyMessage(old, resolverFor(id.publicJwk))).rejects.toBeInstanceOf(SignatureError);
   });
 
+  it('refuses to sign a payload that uses an envelope field, instead of losing it silently', async () => {
+    const id = await generateIdentity();
+    await expect(signMessage({ kind: 'flip.salt', nonce: 'abc' }, id, { iss: 'x' })).rejects.toThrow(/reserved/);
+  });
+
   it('rejects a message signed by someone else', async () => {
     const [a, b] = await Promise.all([generateIdentity(), generateIdentity()]);
     const msg = await signMessage({ hi: 1 }, a, { iss: 'a' });

@@ -6,7 +6,8 @@
   "scripts": {
     "mission": "node recorder/run.mjs mission",
     "connect4": "node recorder/run.mjs connect4",
-    "chat": "node recorder/run.mjs chat"
+    "chat": "node recorder/run.mjs chat",
+    "off-the-leash": "node recorder/run.mjs off-the-leash"
   },
   "devDependencies": {
     "playwright-core": "1.56.1"

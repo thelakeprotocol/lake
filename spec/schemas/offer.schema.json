@@ -26,19 +26,23 @@
         "research",
         "marketing",
         "care"
-      ]
+      ],
+      "pattern": "^[a-z][a-z0-9-]{0,39}$",
+      "description": "A short code, never prose"
     },
     "fields": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,39}$"
       },
-      "minItems": 1
+      "minItems": 1,
+      "maxItems": 32
     },
     "retention": {
       "type": "string",
       "description": "\"none\" or an ISO 8601 duration",
-      "pattern": "^(none|P.+)$"
+      "pattern": "^(none|P(?=\\d|T\\d)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?)$"
     },
     "priceUsd": {
       "type": "number",

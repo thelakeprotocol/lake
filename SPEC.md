@@ -91,6 +91,7 @@ Every Lake message is an A2A message that declares the Lake extension (the `A2A-
 - The signature is an Ed25519 JWS over the JCS canonical form of `payload`, with header `{ "alg": "EdDSA", "kid": "…", "typ": "lake+jws" }`.
 - `iss` MUST resolve to a verified Lake card whose `publicJwk.kid` matches the JWS `kid`.
 - `exp` MUST be in the future. Receivers MUST keep seen nonces until `exp` and reject repeats.
+- `nonce`, `iat`, `exp` and `iss` belong to the envelope. A payload MUST NOT use them for anything else; a sender MUST refuse to sign one that does (the value would be silently lost).
 - Agents MAY message each other directly at their A2A endpoint. A node's bus is an optimisation for broadcast, never a required hop.
 
 Message kinds in v0: `offer`, `decision`, `counter`, `agreement`, `grant`, `result`, `receipt`, `revocation`.
@@ -110,6 +111,8 @@ An offer is an ODRL 2.2 `Offer`. Its targets are canonical Lake fields. It MUST 
 | Minimum provenance tier | optional constraint `lake:provenanceTier` |
 
 Offers carry the visitor's credentials (ethics approval, audit certificate) as Verifiable Credentials.
+
+A house MUST reject a malformed offer (`rejected`, code `malformed`) before reading it further: the purpose is a short code (`^[a-z][a-z0-9-]{0,39}$`), never prose; fields are 1 to 32 field names (`^[a-z][a-z0-9_]{0,39}$`); retention is `none` or an ISO 8601 duration; the price is zero or more. Its reasons MUST NOT repeat what the sender wrote, and a decision MAY say which of the asked fields the house holds only when it joins or counters, never when it declines or asks.
 
 An offer for a study carries the study itself, its id in `offer.study`, and two attachments: an ethics approval and an audit certificate, each a Verifiable Credential together with the signed card of whoever issued it (§5.2).
 

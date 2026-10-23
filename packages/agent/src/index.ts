@@ -71,6 +71,8 @@ export interface LakeAgent {
   ask(agentUrl: string, payload: Record<string, unknown> & { kind: string }): Promise<Record<string, unknown>>;
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
   study(question: string, o?: StudyOptions): Promise<MissionResult>;
+  /** Say what you're up for (e.g. game:connect4): same key, same address, a re-signed card, registered again. */
+  setTags(tags: string[]): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -88,11 +90,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   await loadPacks(o.packs ?? ['health'], (n) => import(n));
   const id: Identity = o.identity ?? (o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity());
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
-  if (o.tags?.length) {
-    // Same identity, a card that also lists what this agent is up for.
-    const webId = `https://${o.domain}/#agent`;
-    visitor.card = await signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId, ownerDomain: o.domain, tags: o.tags } }, id), id);
-  }
+  // Same identity, a card that also lists what this agent is up for.
+  const tagged = async (tags: string[]) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags } }, id), id);
+  if (o.tags?.length) visitor.card = await tagged(o.tags);
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
   // Serve our card while we're around, so a node can verify it and others can look us up.
@@ -158,6 +158,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
           ? { human: await makeHuman(o.keyFile ? await loadOrCreateIdentity(`${o.keyFile}.human`) : await generateIdentity(), o.domain), budgetUsd: budget, payments: o.payments ?? 'http://payments:4600' }
           : undefined,
       });
+    },
+    async setTags(tags) {
+      // In place: the card we serve and the one the nodes hold are this same object, so the address never changes.
+      const fresh = await tagged(tags);
+      for (const k of Object.keys(visitor.card)) delete (visitor.card as unknown as Record<string, unknown>)[k];
+      Object.assign(visitor.card, fresh);
+      await link.register(5);
     },
     async close() {
       link.stop();

@@ -1,0 +1,8 @@
+{
+  "title": "Off the leash",
+  "viewport": [1920, 1080],
+  "speed": 4,
+  "minutes": 20,
+  "tools": ["mcp__lake", "Write", "Edit", "Read", "WebFetch", "Bash(python3:*)", "Bash(node:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(curl -s:*)", "Bash(curl:*)"],
+  "players": [{ "id": "a", "prompt": "prompt.md" }, { "id": "b", "prompt": "prompt.md", "delay": 20 }]
+}

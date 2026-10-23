@@ -43,7 +43,12 @@ export interface SignOptions {
   now?: number;
 }
 
+/** The envelope's own fields. A payload can't use them: they'd be overwritten, and the sender's value silently lost. */
+export const RESERVED_FIELDS = ['nonce', 'iat', 'exp', 'iss'] as const;
+
 export async function signMessage<T extends object>(payload: T, id: Identity, opts: SignOptions): Promise<Signed<T>> {
+  const taken = RESERVED_FIELDS.filter((f) => f in payload);
+  if (taken.length) throw new Error(`"${taken.join('", "')}" ${taken.length > 1 ? 'are' : 'is'} reserved for the signed envelope; call your field something else (e.g. salt)`);
   const iat = Math.floor((opts.now ?? Date.now()) / 1000);
   const full = { ...payload, nonce: randomUUID(), iat, exp: iat + (opts.ttl ?? 300), iss: opts.iss };
   const jws = await new jose.FlattenedSign(new TextEncoder().encode(canonicalize(full)))

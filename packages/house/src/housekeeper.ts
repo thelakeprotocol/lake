@@ -161,7 +161,9 @@ export class Housekeeper {
 
   private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {
     const offer = p.offer;
-    if (!isOffer(offer)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected a Lake offer' });
+    // Checked at the door, and never repeated back: whatever a sender typed shouldn't reach the owner's panel or another agent's log.
+    const bad = offerProblem(offer);
+    if (bad) return this.reply({ kind: 'rejected', code: 'malformed', why: bad });
     if (offer.requester !== domain) {
       // Blame lands on the impersonator's own verified domain and key, never on the domain it pretended to be.
       this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why: 'impersonation', claimed: domain, key, verified: true }));
@@ -172,7 +174,8 @@ export class Housekeeper {
     const decide = async (decision: Decision, reason: string, extra: Partial<Extract<Reply, { kind: 'decision' }>> = {}) => {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision, reason }));
       if (decision === 'ask') this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
-      const holds = [...new Set((await this.claims(offer.fields)).map((c) => c.field))];
+      // What this house holds is said only to someone it is dealing with, never to someone it just turned away.
+      const holds = decision === 'join' || decision === 'counter' ? [...new Set((await this.claims(offer.fields)).map((c) => c.field))] : [];
       return this.reply({ kind: 'decision', offerId: offer.id, decision, reason, holds, notes, ...extra });
     };
 
@@ -358,8 +361,16 @@ export class Housekeeper {
   }
 }
 
-function isOffer(o: unknown): o is Offer {
+/** Why an offer isn't a well-formed Lake offer (SPEC §5.1), in our words, or null. Purposes and fields are codes, not prose. */
+function offerProblem(o: unknown): string | null {
   const x = o as Offer;
-  return !!x && typeof x.id === 'string' && typeof x.requester === 'string' && typeof x.purpose === 'string'
-    && Array.isArray(x.fields) && x.fields.every((f) => typeof f === 'string') && typeof x.retention === 'string' && typeof x.priceUsd === 'number';
+  if (!x || typeof x.id !== 'string' || typeof x.requester !== 'string') return 'expected a Lake offer';
+  if (typeof x.purpose !== 'string' || !CODE.test(x.purpose)) return 'purpose must be a short code like "research" (lowercase letters, digits, dashes)';
+  if (!Array.isArray(x.fields) || !x.fields.length || x.fields.length > 32 || !x.fields.every((f) => typeof f === 'string' && FIELD.test(f))) return 'fields must be 1 to 32 field names (lowercase letters, digits, underscores)';
+  if (typeof x.retention !== 'string' || !RETENTION.test(x.retention)) return 'retention must be "none" or an ISO 8601 duration like "P30D"';
+  if (typeof x.priceUsd !== 'number' || !Number.isFinite(x.priceUsd) || x.priceUsd < 0) return 'price must be zero or more';
+  return null;
 }
+const CODE = /^[a-z][a-z0-9-]{0,39}$/;
+const FIELD = /^[a-z][a-z0-9_]{0,39}$/;
+const RETENTION = /^(none|P(?=\d|T\d)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?)$/;

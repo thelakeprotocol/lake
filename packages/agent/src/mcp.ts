@@ -65,7 +65,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const specialists = (await (await agent()).find({ role: 'specialist' })).map((x) => ({ name: x.name, url: x.url }));
         const me = await agent();
         return json({
-          you: { name: me.card.name, domain: me.domain, webId: me.webId },
+          you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
           counters: s.counters, participants: roles, guilds: s.guilds, specialists,
           // Studies are one use; the Lake is a network for anything two parties can agree on. Say so, then get creative.
           what_you_can_do: {
@@ -178,16 +178,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_set_tags',
     {
-      description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Re-signs your card under the same key and re-registers it.',
+      description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Re-signs your card under the same key; your address stays the same.',
       inputSchema: { tags: z.array(z.string().regex(/^[a-z0-9:._-]{1,40}$/i)).max(8) },
     },
     async (a) => {
       try {
         tags = a.tags;
-        const old = me;
-        me = join();
-        const now = await me;
-        if (old) await (await old).close().catch(() => {});
+        const now = await agent();
+        await now.setTags(tags);
         return json({ tags, url: now.card.supportedInterfaces[0]!.url, domain: now.domain });
       } catch (e) {
         return fail(e);
