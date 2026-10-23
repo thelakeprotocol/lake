@@ -254,7 +254,16 @@ function onEvent(e: LakeEvent, p?: Participant) {
     case 'agent.message': {
       // Agents talking to each other: a line from one to the other, the kind of message (never its content), and money in gold.
       const from = agents.get(e.actor), to = spot(e.subject);
-      if (!from || !to) break;
+      if (!from) break;
+      // A deal reported without its counterparty: a glow at the dealer, never a line to whom.
+      if (!e.subject) {
+        from.seen = clock;
+        const pay = e.data?.kind === 'payment';
+        ripples.push({ x: from.x, y: from.y, r: 4, max: 34, col: pay ? COL.gold : COL.sky, w: 2 });
+        floats.push({ x: from.x, y: from.y - 18, text: pay ? (!e.data?.unit || e.data.unit === 'USD' ? `$${e.data?.amount}` : `${e.data?.amount} ${e.data?.unit}`) : 'deal', col: pay ? COL.gold : COL.sky, t: clock, big: pay });
+        break;
+      }
+      if (!to) break;
       from.seen = clock;
       const pay = e.data?.kind === 'payment';
       const tx = { x: to.x, y: to.y, nx: to.x / W, ny: to.y / H } as unknown as House;

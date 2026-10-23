@@ -7,6 +7,12 @@ import {
 } from '@thelakeprotocol/core';
 import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
 
+/**
+ * Who deals with whom is the dealers' business (SPEC §8): payments and messages whose kind sounds like a deal are reported
+ * without the other party. Chat and games stay visible on the map. An agent tagged `quiet` reports none of its messages.
+ */
+const DEAL = /quote|bid|offer|price|pay|receipt|transfer|invoice|contract|deal|job|hire|accept|settle|escrow|order|counter/i;
+
 /** Units a transfer may not use: currency codes and money words. Real money goes through a payments agent. */
 const MONEYLIKE = /^(usd|aud|eur|gbp|cad|nzd|jpy|chf|cny|inr|sgd|hkd|btc|eth|usdc|usdt)|dollar|euro|pound|sterling|cent|cash|money|fiat/;
 
@@ -108,6 +114,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   await loadPacks(o.packs ?? ['health'], (n) => import(n));
   const id: Identity = o.identity ?? (o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity());
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
+  const quietMe = () => !!(lakeProfile(visitor.card)?.tags ?? []).includes('quiet');
   // Same identity, a card that also lists what this agent is up for.
   const tagged = async (tags: string[]) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags } }, id), id);
   if (o.tags?.length) visitor.card = await tagged(o.tags);
@@ -163,7 +170,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const { reply: r, from } = await ask(agentUrl, visitor, payload);
       // The map may show who talked to whom, and in which kind of message; never what was said. Not for a quiet agent
       // (a blind tally, say): that someone talked to it at all is the secret.
-      if (!from.tags?.includes('quiet')) link.report(makeEvent('agent.message', 'self', `agent:${from.ownerDomain}`, { kind: String(payload.kind).slice(0, 40) }));
+      const kind = String(payload.kind).slice(0, 40);
+      if (!from.tags?.includes('quiet') && !quietMe()) link.report(DEAL.test(kind) ? makeEvent('agent.message', 'self', undefined, { kind: 'deal' }) : makeEvent('agent.message', 'self', `agent:${from.ownerDomain}`, { kind }));
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },
@@ -185,7 +193,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
           credentialSubject: { id: payee, amount: { unit, value: amountUsd }, memo: memo.slice(0, 200), backing: 'the payer\'s signature and word, nothing else' },
         }, id);
         await ask(agentUrl, visitor, { kind: 'transfer', transfer: { credential, card: visitor.card }, amount: amountUsd, unit, memo: memo.slice(0, 200) });
-        link.report(makeEvent('agent.message', 'self', `agent:${lakeProfile(payeeCard)?.ownerDomain}`, { kind: 'payment', amount: amountUsd, unit }));
+        if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd, unit }));
         return { paid: amountUsd, unit, to: payee, receipt: credential };
       }
       if (!o.allowanceUsd) throw new Error('this agent has no allowance to pay from in USD; pay in another unit you agreed on, or ask your human for one');
@@ -206,7 +214,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
       // The payee gets the signed receipt; its inbox shows it like any other message.
       await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount: amountUsd, memo: memo.slice(0, 200) });
-      link.report(makeEvent('agent.message', 'self', `agent:${lakeProfile(payeeCard)?.ownerDomain}`, { kind: 'payment', amount: amountUsd }));
+      if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd }));
       return { paid: amountUsd, unit, to: payee, remaining: settled.remaining as number, receipt };
     },
     async study(question, s = {}) {

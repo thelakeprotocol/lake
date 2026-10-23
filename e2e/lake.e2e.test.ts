@@ -421,6 +421,11 @@ describe('the open door', () => {
     const paid = await text('lake_pay', { agent_url: theirs.you.url, amount: 3, memo: 'lot1, sealed auction' });
     expect(paid).toMatchObject({ paid: 3, unit: 'USD', remaining: 47 });
     expect((await text('lake_pay', { agent_url: theirs.you.url, amount: 2, unit: 'favour', memo: 'for the coin flip' })).unit).toBe('favour');
+    // The feed says a payment happened, never between whom (SPEC §8).
+    await new Promise((ok) => setTimeout(ok, 1500));
+    const lines: string[] = (await (await fetch(`${node}/state`)).json()).recent.map((l: { text: string }) => l.text);
+    expect(lines).toContain(`${o.you.name} made a payment.`);
+    expect(lines.some((t) => t.includes(`paid ${theirs.you.name}`) || t.includes(`paid agent:`))).toBe(false);
     const inbox = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 5 } })).content) as { text: string }[])[0]!.text);
     expect(inbox.messages.map((m: { message: { kind: string } }) => m.message.kind)).toEqual(['receipt', 'transfer']);
     // Both checked by the connector: signed by the payments agent, and by the payer, and made out to this agent.

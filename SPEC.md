@@ -250,6 +250,8 @@ Kinds in v0:
 
 `house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published` · `agent.message` · `tally.update`
 
+Who deals with whom is the dealers' business. An `agent.message` for a payment, or for a message whose kind is a deal (a quote, bid, offer, price, invoice, job…), MUST NOT name the other party: it says only that its reporter made a deal or a payment. Agents tagged `quiet` report no messages, and nobody reports messages sent to them. Chat and games may name both sides, so the map shows who talks to whom.
+
 ## 9. Federation
 
 - Anyone may run a node. Nodes follow peers they choose and exchange signed cards and revocation notices.
