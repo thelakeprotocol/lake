@@ -41,5 +41,6 @@
     }
   ],
   "narrator": "narrator.md",
-  "storySeconds": 30
+  "storySeconds": 30,
+  "storyCards": false
 }

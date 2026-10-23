@@ -60,12 +60,17 @@ if (config.narrator) {
   const prompt = fill(readFileSync(join(root, demo, config.narrator), 'utf8')).replaceAll('{{players}}', config.players.map((p) => p.id).join(', '));
   await new Promise((done) => spawn('claude', ['-p', prompt, '--allowedTools', 'Read', 'Glob', 'Grep', 'Write', 'Bash(python3:*)', '--output-format', 'text'],
     { cwd: run, stdio: ['ignore', 'inherit', 'inherit'] }).on('exit', done));
-  if (readdirSync(join(run, 'story')).includes('STORY.md')) {
-    const card = await (await browser.newContext({ viewport: { width, height } })).newPage();
-    await card.goto(`http://localhost:${port}/?story`, { waitUntil: 'load' });
-    await card.waitForTimeout(2500);
-    story = join(run, 'story', 'story.png');
-    await card.screenshot({ path: story });
+  // The story can end the video as two cards, or just be the text that goes with it (storyCards: false).
+  if (config.storyCards !== false && readdirSync(join(run, 'story')).includes('STORY.md')) {
+    // Two cards: what they did, then how it played out.
+    story = [];
+    for (const n of [1, 2]) {
+      const card = await (await browser.newContext({ viewport: { width, height } })).newPage();
+      await card.goto(`http://localhost:${port}/?story=${n}`, { waitUntil: 'load' });
+      await card.waitForTimeout(2500);
+      story.push(join(run, 'story', `story-${n}.png`));
+      await card.screenshot({ path: story.at(-1) });
+    }
   }
 }
 await browser.close();
@@ -78,8 +83,8 @@ const speed = config.speed ?? 1;
 const ffmpeg = (args) => new Promise((ok) => spawn('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }).on('exit', ok));
 const probe = await new Promise((ok) => { let s = ''; spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', webm]).stdout.on('data', (d) => (s += d)).on('end', () => ok(Number(s))); });
 const tail = Math.max(1, probe - 12);
-const hold = config.storySeconds ?? 24;
-const card = story ? ['-loop', '1', '-t', String(hold), '-i', story] : [];
-const end = story ? `[1:v]scale=${width}:${height},setsar=1,fps=30,fade=t=in:st=0:d=0.8[c];[a][b][c]concat=n=3:v=1,fps=30,format=yuv420p[v]` : '[a][b]concat=n=2:v=1,fps=30,format=yuv420p[v]';
+const holds = [config.statsSeconds ?? 9, config.storySeconds ?? 24];
+const card = story ? story.flatMap((png, i) => ['-loop', '1', '-t', String(holds[i]), '-i', png]) : [];
+const end = story ? `${story.map((_, i) => `[${i + 1}:v]scale=${width}:${height},setsar=1,fps=30,fade=t=in:st=0:d=0.6[c${i}];`).join('')}[a][b]${story.map((_, i) => `[c${i}]`).join('')}concat=n=${2 + story.length}:v=1,fps=30,format=yuv420p[v]` : '[a][b]concat=n=2:v=1,fps=30,format=yuv420p[v]';
 await ffmpeg(['-i', webm, ...card, '-filter_complex', `[0:v]trim=0:${tail},setpts=(PTS-STARTPTS)/${speed}[a];[0:v]trim=${tail},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=2[b];${end}`, '-map', '[v]', '-c:v', 'libx264', '-crf', '28', '-preset', 'slow', '-movflags', '+faststart', out]);
 console.log(`players exited ${codes.join(', ')} · ${out}`);
