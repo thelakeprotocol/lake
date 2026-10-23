@@ -220,6 +220,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     // The next person gets the house as it started: its original rules.
     onRelease: async () => {
       await put(owner, 'settings/rules.yaml', o.rulesText, 'text/yaml');
+      // The stamp said who owned it: the next person to claim the house gets their own, or none.
+      await owner.fetch(`${owner.podRoot}wallet/personhood.json`, { method: 'DELETE' }).catch(() => {});
       const fresh = parseRules(o.rulesText);
       keeperRef?.setRules(fresh, o.rulesText, trustFrom(fresh));
       say('the lease ended: keys revoked, owner forgotten, rules reset. Anyone can claim this house now.');
