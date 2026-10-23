@@ -209,7 +209,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
   }, 15_000).unref();
 
-  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList() }));
+  // `recent` is what the map's log shows anyway: what just happened, in one line each, newest first.
+  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList(), recent: recent.slice(-20).reverse().map((l) => ({ at: l.event.at, kind: l.event.kind, text: l.text })) }));
 
   // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
   // A node republishes the blocklists of the peers it chose to follow, alongside its own.

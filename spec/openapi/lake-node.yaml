@@ -69,6 +69,7 @@ paths:
                   counters: { $ref: '#/components/schemas/Counters' }
                   participants: { type: array, items: { type: object, properties: { id: { type: string }, role: { type: string }, label: { type: string }, tags: { type: array, items: { type: string } }, domain: { type: string }, skills: { type: array, items: { type: string }, description: "skill ids from its card" } } } }
                   guilds: { type: array, items: { type: object, properties: { tag: { type: string }, members: { type: integer } } } }
+                  recent: { type: array, description: 'The last 20 events, newest first, one line each (what the map log shows)', items: { type: object, properties: { at: { type: string }, kind: { type: string }, text: { type: string } } } }
   /events (WebSocket):
     get:
       summary: Event stream (WebSocket upgrade on /events)

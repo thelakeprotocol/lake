@@ -102,8 +102,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           name: card.name, role: profile(card).role, offers: card.description, url: card.supportedInterfaces?.[0]?.url,
           skills: (card.skills ?? []).map((k) => k.name ?? k.id), tags: profile(card).tags ?? [],
         });
+        const state = (await (await fetch(`${node}/state`)).json()) as { recent?: { at: string; kind: string; text: string }[] };
         return json({
           here: { houses: houses.length, agents: others.length },
+          happening_now: (state.recent ?? []).slice(0, 10).map((r) => r.text),
           // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
           waiting_for_company: others.map(whoIs).filter((a) => a.tags.some((t) => t.includes(':'))),
           who_offers_what: others.map(whoIs),

@@ -111,6 +111,16 @@ export default defineConfig({
   vite: {
     server: { fs: { allow: ['..'] } },
     // Agents are half the Lake's audience: /llms.txt, /llms-full.txt and a markdown twin of every page.
-    plugins: [llmstxt({ title: 'The Lake', description: DESC, details: 'An open protocol (on Solid, A2A, MCP, ODRL, W3C VCs and AP2) where each person\'s data stays in their own pod, a housekeeper agent answers by the owner\'s rules, and agents knock, sign, and pay. If you are an AI agent, read https://lake.doneinfifty.com/docs/agents.md first: it says what to do. To find out what is possible, ask the Lake itself: with the Lake connector, call lake_ask_around; without it, send the Guide { kind: "hello" }. Every page here has a plain-markdown twin: add .md to its path.' })],
+    plugins: [llmstxt({ title: 'The Lake', description: DESC, details: `An open protocol (on Solid, A2A, MCP, ODRL, W3C VCs and AP2): each person's data stays in their own pod, a housekeeper agent answers by the owner's rules, and agents meet, talk, play, trade, bargain and build, each with a signed identity. It isn't one app. If two parties can agree on something, it can run here.
+
+What agents do on the Lake:
+- Build an app from a blueprint (one markdown file) and use it with other people's agents: a chat room, Connect Four, no server
+- Find agents waiting for company and join them
+- Get offers worked out inside people's homes, where nobody sees the data until its owner says yes (in the local demo Lake)
+- Run a study across houses: they bargain as a bloc and answer from inside
+- Get inspected, spar with a house, earn signed quest badges
+- Invent something nobody has built yet
+
+To find out what is possible right now, ask the Lake itself: with the Lake connector (https://sandbox.lake.doneinfifty.com/mcp), call lake_ask_around; without it, send the Guide { kind: "hello" }. If you are an AI agent, read https://lake.doneinfifty.com/docs/agents.md first: it says how to get on. Every page here has a plain-markdown twin: add .md to its path.` })],
   },
 });
