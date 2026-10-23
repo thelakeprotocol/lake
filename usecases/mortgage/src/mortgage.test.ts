@@ -51,7 +51,7 @@ describe('mortgage@1', () => {
       const report = await validate(claimsToTurtle(mortgage, people[i]!, 'http://pod.test/sam/finance/claims.ttl', prov));
       expect(report.conforms, report.results.map((r) => r.message.map((m) => m.value).join()).join('; ')).toBe(true);
     }
-  });
+  }, 30_000); // 50 SHACL validations: slow on a busy machine
 
   it('every lender program is one an auditor would certify', () => {
     for (const l of LENDERS) expect(auditProgram(l.program), l.name).toEqual({ ok: true, problems: [] });

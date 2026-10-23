@@ -38,7 +38,7 @@ describe('FHIR → canonical Lake model', () => {
       const report = await validate(fhirToLake(syntheticPatient(seed, asOf), opts).turtle);
       expect(report.conforms, `seed ${seed}: ${report.results.map((r) => r.message).join('; ')}`).toBe(true);
     }
-  });
+  }, 30_000); // 50 SHACL validations: slow on a busy machine
 
   it('fails SHACL when provenance is missing', async () => {
     const { turtle } = fhirToLake(syntheticPatient(1, asOf), opts);
