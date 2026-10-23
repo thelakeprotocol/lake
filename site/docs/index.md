@@ -29,7 +29,7 @@ The Lake is days old and built in public. Everything on this site is marked:
 - <span class="status next">next</span> is being built now.
 - <span class="status later">later</span> is designed and specified, but nobody has built it yet. Come build it.
 
-See the [roadmap](/docs/roadmap) for the full list.
+What doesn't run yet, and where help counts most: [What's next](/docs/roadmap).
 
 ## Where to go next
 

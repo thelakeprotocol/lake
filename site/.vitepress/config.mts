@@ -83,7 +83,7 @@ export default defineConfig({
             { text: 'Architecture', link: '/docs/architecture' },
             { text: 'Security & threat model', link: '/docs/security' },
             { text: 'Decisions', link: '/docs/decisions' },
-            { text: 'Roadmap', link: '/docs/roadmap' },
+            { text: "What's next", link: '/docs/roadmap' },
             { text: 'Ideas', link: '/docs/ideas' },
             { text: 'Contributing', link: '/docs/contributing' },
           ],
