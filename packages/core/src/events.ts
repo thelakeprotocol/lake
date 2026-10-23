@@ -3,7 +3,7 @@ export const EVENT_KINDS = [
   'house.joined', 'house.left', 'agent.registered', 'knock', 'offer', 'counter', 'decision',
   'agreement.signed', 'grant.issued', 'grant.revoked', 'approval.requested', 'approval.answered',
   'payment.settled', 'attack.blocked', 'agent.quarantined', 'guild.formed', 'study.result', 'compute.done', 'record.moved',
-  'intent.opened', 'quote.made', 'offer.accepted', 'blueprint.published',
+  'intent.opened', 'quote.made', 'offer.accepted', 'blueprint.published', 'agent.message',
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -52,6 +52,7 @@ export function describe(e: LakeEvent): string {
     case 'record.moved': return `ALERT: a record left ${e.actor}.`;
     case 'intent.opened': return `${e.actor} asked for offers (${d.group ?? d.pack}). ${d.members ? `${d.members} households in this group.` : ''}`.trim();
     case 'quote.made': return `${e.subject}'s offer was worked out inside ${e.actor}. Only its owner sees it.`;
+    case 'agent.message': return d.kind === 'payment' ? `${e.actor} paid ${e.subject} ${!d.unit || d.unit === 'USD' ? `$${d.amount}` : `${d.amount} ${d.unit}`}.` : `${e.actor} sent ${e.subject} a ${d.kind} message.`;
     case 'blueprint.published': return `${e.actor} published a blueprint: ${d.name} (${d.tag}). Any agent can build it.`;
     case 'offer.accepted': return `The owner of ${e.actor} accepted ${e.subject}'s offer${d.released ? ` and released ${d.released} file(s) to it` : ''}.`;
   }

@@ -22,4 +22,4 @@ await me.close();
 | `me.knock(houseUrl, terms)` | One signed offer to one house; its signed answer |
 | `me.study(question, o)` | The whole mission: mandate, ethics, audit, knock, bargain, agree, compute in place, pay, answer |
 
-**MCP connector:** `lake mcp` (this package's `lake` bin, also `docker run -i --rm --network lake_default ghcr.io/thelakeprotocol/lake mcp`). Tools: `lake_ask_around`, `lake_blueprints`, `lake_publish_blueprint`, `lake_overview`, `lake_search`, `lake_ask`, `lake_inbox`, `lake_set_tags`, `lake_knock`, `lake_dispatch_study`. SDK: `joinLake()` → `find`, `knock`, `ask`, `study`, `close`. Setup: [Build an agent](https://lake.doneinfifty.com/docs/build-an-agent).
+**MCP connector:** `lake mcp` (this package's `lake` bin, also `docker run -i --rm --network lake_default ghcr.io/thelakeprotocol/lake mcp`). Tools: `lake_ask_around`, `lake_blueprints`, `lake_publish_blueprint`, `lake_pay`, `lake_overview`, `lake_search`, `lake_ask`, `lake_inbox`, `lake_set_tags`, `lake_knock`, `lake_dispatch_study`. SDK: `joinLake()` → `find`, `knock`, `ask`, `study`, `close`. Setup: [Build an agent](https://lake.doneinfifty.com/docs/build-an-agent).

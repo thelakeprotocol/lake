@@ -13,10 +13,10 @@ export interface Human {
   webId: string;
 }
 
-export async function makeHuman(id: Identity, domain: string): Promise<Human> {
+export async function makeHuman(id: Identity, domain: string, name = `Research lead (${domain})`): Promise<Human> {
   const webId = `https://${domain}/people/lead#me`;
   const card = await signCard(
-    buildCard({ name: `Research lead (${domain})`, description: 'A person who signs spending mandates for agents.', url: `https://${domain}/people/lead`, skills: [], profile: { role: 'agent', webId, ownerDomain: domain, tags: ['human'] } }, id),
+    buildCard({ name, description: 'A person who signs spending mandates for agents.', url: `https://${domain}/people/lead`, skills: [], profile: { role: 'agent', webId, ownerDomain: domain, tags: ['human'] } }, id),
     id,
   );
   return { id, card, webId };
@@ -266,8 +266,9 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const notOnX = rate(cells[0b101]!, cells[0b001]!);
   const reliable = n >= 200;
   const pct = (x: number) => `${Math.round(x * 100)}%`;
-  const summary = `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (≈${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (≈${notOnX.n})`;
-  log('answer', `${summary}${reliable ? '' : `. Only ${n} answers: randomised answers need a few hundred houses before this means anything`}`);
+  // Nobody took part: say so, rather than print a rate made of nothing.
+  const summary = n === 0 ? 'No answer: no house took part.' : `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (≈${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (≈${notOnX.n})`;
+  log('answer', n === 0 ? summary : `${summary}${reliable ? '' : `. Only ${n} answers: randomised answers need a few hundred houses before this means anything`}`);
   // Houses batch their reports for ~150 ms; let theirs land first so the log reads in order.
   await new Promise((r) => setTimeout(r, 400));
   report('study.result', { participants: n, summary: reliable ? summary : `${n} answers, too few to call` });

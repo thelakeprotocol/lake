@@ -60,6 +60,15 @@
   .players { display: grid; gap: 6px; font: 400 13px/1.4 'IBM Plex Mono', monospace; }
   .players span.r { color: var(--red); } .players span.y { color: var(--yellow); }
   .status { margin-top: 12px; font: 700 22px/1.1 Oswald, sans-serif; text-transform: uppercase; color: var(--mint); }
+  .story { position: fixed; inset: 0; z-index: 10; background: radial-gradient(ellipse at 30% 20%, #10213a 0%, var(--ink) 60%); display: flex; flex-direction: column; justify-content: center; padding: 70px 140px; gap: 26px; }
+  .story .eyebrow { font-size: 14px; }
+  .story h1 { margin: 0; font: 700 64px/1.02 Oswald, sans-serif; text-transform: uppercase; max-width: 1500px; }
+  .story ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; max-width: 1500px; }
+  .story li { display: grid; grid-template-columns: 90px 1fr; gap: 18px; font-size: 25px; line-height: 1.32; }
+  .story li time { font: 500 20px/1.6 'IBM Plex Mono', monospace; color: var(--mint); }
+  .story li b { color: var(--amber); font-weight: 700; }
+  .story .end { margin-top: 10px; font: 700 34px/1.2 Oswald, sans-serif; color: var(--mint); max-width: 1500px; }
+  .story .foot { font: 400 15px/1.4 'IBM Plex Mono', monospace; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -119,7 +128,9 @@ function summary(name, text) {
   let v; try { v = JSON.parse(text); } catch { return esc(text.slice(0, 260)).replace(/\n/g, '<br>'); }
   if (name === 'lake_overview') return `you are <b>${esc(v.you?.domain ?? '')}</b>`;
   if (name === 'lake_search') return v.length ? esc(v.map((x) => x.domain).join(', ')) : 'nobody yet';
-  if (name === 'lake_ask_around') return `${v.here?.houses ?? 0} houses, ${v.here?.agents ?? 0} agents · ${v.waiting_for_company?.length ?? 0} waiting for company`;
+  if (name === 'lake_ask_around') return `${v.here?.houses ?? 0} houses, ${v.here?.agents ?? 0} agents · ${v.invented_here?.length ?? 0} inventions · ${v.waiting_for_company?.length ?? 0} waiting for company`;
+  if (name === 'lake_pay') return `<b>paid ${esc(v.unit === 'USD' ? '$' + v.paid : v.paid + ' ' + v.unit)}</b>`;
+  if (name === 'lake_publish_blueprint') return `<b>published ${esc(v.name)}</b>`;
   if (name === 'lake_dispatch_study') return esc(v.answer?.summary ?? JSON.stringify(v).slice(0, 160));
   if (name === 'lake_set_tags') return esc(v.domain);
   if (name === 'lake_inbox') return v.messages?.length ? v.messages.map((m) => `${esc(m.from.domain)}: ${esc(JSON.stringify(m.message))}`).join('<br>') : 'nothing yet';
@@ -144,13 +155,24 @@ function follow(side) {
     if (m.type === 'user') for (const c of m.message.content ?? []) if (c.type === 'tool_result' && names[c.tool_use_id] !== null && names[c.tool_use_id] && !/^(Write|Edit|Read)$/.test(names[c.tool_use_id])) {
       const text = Array.isArray(c.content) ? c.content.map((x) => x.text ?? '').join('') : String(c.content ?? '');
       const n = names[c.tool_use_id];
-      if (n === 'lake_overview') { try { document.getElementById(`who-${side}`).textContent = JSON.parse(text).you.domain; } catch {} }
+      if (n === 'lake_overview') { try { const you = JSON.parse(text).you; document.getElementById(`who-${side}`).textContent = `${you.name.replace(/\s*\(.*\)$/, '')} · ${you.domain}`; } catch {} }
       add(`<span class="n">← ${esc(n)}</span> <span class="a">${summary(n, text)}</span>`, `tool res${c.is_error ? ' bad' : ''}`);
     }
     if (m.type === 'result') add(`Done in ${Math.round(m.duration_ms / 1000)} s · ${m.num_turns} turns`, 'done');
   };
 }
-follow('a'); follow('b'); follow('c'); follow('d');
+if (location.search.includes('story')) {
+  // The last card: what happened, as the narrator read it from the transcripts.
+  fetch('/file/story/STORY.md').then((r) => r.text()).then((t) => {
+    const lines = t.trim().split('\n').filter(Boolean);
+    const title = (lines.find((l) => l.startsWith('# ')) ?? '# What they did').slice(2);
+    const beats = lines.filter((l) => /^- \*\*\d+:\d+\*\*/.test(l)).map((l) => l.match(/^- \*\*(\d+:\d+)\*\*\s*(.*)$/));
+    const end = lines.filter((l) => !l.startsWith('#') && !l.startsWith('- ')).pop() ?? '';
+    const el = document.createElement('section'); el.className = 'story';
+    el.innerHTML = `<div class="eyebrow"><span class="dot"></span>Twenty minutes on the Lake · four Claudes · no task</div><h1>${esc(title)}</h1><ol>${beats.map((b) => `<li><time>${b[1]}</time><span>${esc(b[2]).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</span></li>`).join('')}</ol><div class="end">${esc(end)}</div><div class="foot">Every line above is from the agents' own signed messages and transcripts. Sandbox: synthetic data, play money.</div>`;
+    document.body.append(el);
+  });
+} else { follow('a'); follow('b'); follow('c'); follow('d'); }
 // Their impressions, as they write them.
 for (const side of ['a', 'b', 'c', 'd']) setInterval(async () => {
   const t = await (await fetch(`/file/${side}/IMPRESSIONS.md`)).text();

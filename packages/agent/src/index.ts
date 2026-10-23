@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, exampleStudies, generateIdentity, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signMessage, verifyLakeData,
+  buildCard, cardUrlFor, exampleStudies, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
@@ -44,6 +44,13 @@ export interface LakeAgentOptions {
   ethics?: string;
   auditor?: string;
   payments?: string;
+  /**
+   * What this agent may pay other agents (lake_pay), under one Intent Mandate. On a real Lake the human signs it
+   * on their own device; a sandbox connector signs a play-money allowance in their place and says so. 0: none.
+   */
+  allowanceUsd?: number;
+  /** The node's public address, when `node` is an internal one (shown to assistants as the map). */
+  publicNode?: string;
 }
 
 export interface StudyOptions {
@@ -75,6 +82,12 @@ export interface LakeAgent {
   setTags(tags: string[]): Promise<void>;
   /** Put a blueprint you wrote on the Lake (SPEC §11.3), signed by you; others find and read it there. */
   publishBlueprint(markdown: string): Promise<{ name: string; version: string; url: string }>;
+  /**
+   * Pay another agent. In USD: under this agent's allowance, settled by a payments agent, the receipt delivered to the
+   * payee. In any other unit the two agreed on (hours, favours, a naming right): a transfer the payer signs and sends;
+   * nothing backs it but the signature and the payer's word.
+   */
+  pay(agentUrl: string, amount: number, memo: string, unit?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string }>;
   close(): Promise<void>;
 }
 
@@ -116,6 +129,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
   if (o.onMessage) link.keepAlive(20_000); // an agent that takes messages stays findable
+  let allowance: Promise<{ credential: string; card: AgentCard }> | undefined;
 
   return {
     card: visitor.card,
@@ -142,8 +156,47 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       return (await knock(houseUrl, visitor, terms)).reply;
     },
     async ask(agentUrl, payload) {
-      const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = (await ask(agentUrl, visitor, payload)).reply;
+      const { reply: r, from } = await ask(agentUrl, visitor, payload);
+      // The map may show who talked to whom, and in which kind of message; never what was said.
+      link.report(makeEvent('agent.message', 'self', `agent:${from.ownerDomain}`, { kind: String(payload.kind).slice(0, 40) }));
+      const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
+    },
+    async pay(agentUrl, amountUsd, memo, unit = 'USD') {
+      if (!(amountUsd > 0)) throw new Error('pay a positive amount');
+      const payeeCard = (await (await fetch(cardUrlFor(agentUrl))).json()) as AgentCard;
+      const payee = lakeProfile(payeeCard)?.webId;
+      if (!payee) throw new Error(`no Lake agent at ${agentUrl}`);
+      if (unit !== 'USD') {
+        if (!/^[a-z][a-z0-9-]{0,31}$/.test(unit)) throw new Error('a unit is a short lowercase word, like hour or favour');
+        const credential = await issueCredential({
+          '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeTransfer'], issuer: visitor.webId, validFrom: new Date().toISOString(),
+          credentialSubject: { id: payee, amount: { unit, value: amountUsd }, memo: memo.slice(0, 200), backing: 'the payer\'s signature and word, nothing else' },
+        }, id);
+        await ask(agentUrl, visitor, { kind: 'transfer', transfer: { credential, card: visitor.card }, amount: amountUsd, unit, memo: memo.slice(0, 200) });
+        link.report(makeEvent('agent.message', 'self', `agent:${lakeProfile(payeeCard)?.ownerDomain}`, { kind: 'payment', amount: amountUsd, unit }));
+        return { paid: amountUsd, unit, to: payee, receipt: credential };
+      }
+      if (!o.allowanceUsd) throw new Error('this agent has no allowance to pay from in USD; pay in another unit you agreed on, or ask your human for one');
+      allowance ??= (async () => {
+        const human = await makeHuman(await generateIdentity(), o.domain, `Spending allowance for ${o.domain}`);
+        const credential = await signIntentMandate(human.id, human.webId, {
+          id: visitor.webId, natural_language_description: `What ${o.domain} may pay other agents`, study: `urn:lake:allowance:${o.domain}`,
+          budget: { currency: 'USD', amount: o.allowanceUsd! }, intent_expiry: new Date(Date.now() + 86_400_000).toISOString(), user_cart_confirmation_required: false,
+        });
+        return { credential, card: human.card };
+      })();
+      const intent = await allowance;
+      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount: amountUsd, intentMandate: intent.credential, agreement: `urn:lake:memo:${memo.slice(0, 80)}`, currency: 'USD' });
+      const payments = o.payments ?? 'http://payments:4600';
+      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent, payments: [payment] })).reply;
+      if (settled.kind !== 'settled') throw new Error((settled.problems ?? [settled.why ?? 'refused']).join('; '));
+      const receipt = settled.receipts[0].credential as string;
+      const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
+      // The payee gets the signed receipt; its inbox shows it like any other message.
+      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount: amountUsd, memo: memo.slice(0, 200) });
+      link.report(makeEvent('agent.message', 'self', `agent:${lakeProfile(payeeCard)?.ownerDomain}`, { kind: 'payment', amount: amountUsd }));
+      return { paid: amountUsd, unit, to: payee, remaining: settled.remaining as number, receipt };
     },
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;

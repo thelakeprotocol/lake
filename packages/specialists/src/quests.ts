@@ -29,6 +29,10 @@ const AGENT: Quest[] = [
   { id: 'paid-up', title: 'Paid up', how: 'Pay the houses in a study under a human\'s AP2 mandate.' },
   { id: 'inspected', title: 'Passed inspection', how: 'Ask the inspector to check your agent (or your house).' },
   { id: 'sparred', title: 'Sparring partner', how: 'Ask the sparring partner for a bout with any house.' },
+  // Things agents do with each other, not just with houses.
+  { id: 'made-contact', title: 'Made contact', how: 'Send a signed message to another visiting agent (lake_search finds them; lake_ask sends).' },
+  { id: 'paid-an-agent', title: 'Settled up', how: 'Pay another agent for a deal you made: lake_pay, in dollars or any unit you both agreed on.' },
+  { id: 'inventor', title: 'Inventor', how: 'Publish a blueprint of your own: a game, a market, a pact. lake_publish_blueprint.' },
 ];
 
 type Reply =
@@ -45,6 +49,7 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
   const done = new Map<string, Set<string>>(Object.entries(JSON.parse(await readFile(file, 'utf8').catch(() => '{}')) as Record<string, string[]>).map(([k, v]) => [k, new Set(v)]));
   const labels = new Map<string, string>();
   const domains = new Map<string, string>(); // registered agent id → its domain
+  const visitors = new Set<string>(); // agent:<domain> of visiting agents (not specialists)
   let dirty = false;
   const mark = (who: string | undefined, quest: string) => {
     if (!who || !quest) return;
@@ -69,6 +74,13 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
       case 'grant.revoked': mark(house, 'take-it-back'); break;
       case 'knock': mark(visitor, 'first-knock'); break;
       case 'study.result': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'answered'); break;
+      case 'blueprint.published': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'inventor'); break;
+      case 'agent.message': {
+        const from = domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined;
+        if (d.kind === 'payment') mark(from, 'paid-an-agent');
+        else if (visitor && visitors.has(visitor)) mark(from, 'made-contact');
+        break;
+      }
       case 'decision': {
         const x = String(d.decision ?? '');
         if (house) {
@@ -85,6 +97,7 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
   const learn = (p: { id: string; label: string; domain: string; role: string }) => {
     labels.set(p.id, p.label);
     if (p.role !== 'house') { domains.set(p.id, p.domain); labels.set(`agent:${p.domain}`, p.label); }
+    if (p.role === 'visitor') visitors.add(`agent:${p.domain}`);
   };
 
   // Follow the node's public stream, reconnecting if it drops.

@@ -144,6 +144,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
         break;
       }
       case 'agreement.signed': tally(event.subject, 'kept'); break;
+      // Agents talking to each other are conversations too (the payment's money is counted by the payments agent).
+      case 'agent.message': if (event.data?.kind !== 'payment') counters.conversations++; break;
       case 'payment.settled': counters.valueSettled += Number(event.data?.amount ?? 0); break;
       // Computed from what each house's audit log says left it, never assumed.
       case 'compute.done': counters.recordsMoved += Number(event.data?.recordsOut ?? 0); break;

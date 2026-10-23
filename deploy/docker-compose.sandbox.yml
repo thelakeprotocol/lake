@@ -84,6 +84,9 @@ services:
       LAKE_ETHICS_URL: "http://specialists:4300/ethics"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
       LAKE_PAYMENTS_URL: "http://specialists:4300/payments"
+      LAKE_PUBLIC_NODE_URL: "https://${LAKE_DOMAIN}"
+      # Play money each conversation's agent may pay other agents (lake_pay), signed by the sandbox in its human's place.
+      LAKE_ALLOWANCE_USD: "50"
     ports: ["127.0.0.1:4800:4800"]
     depends_on: [houses]
     mem_limit: 180m

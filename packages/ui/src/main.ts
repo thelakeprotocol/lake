@@ -18,7 +18,7 @@ const hash = (s: string) => { let h = 2166136261; for (const c of s) h = Math.im
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 interface House { id: string; label: string; nx: number; ny: number; hx: number; hy: number; group?: string; born: number; resp: '' | 'join' | 'decline' | 'ask' | 'counter'; respT: number; alert: number; leaving: number; phase: number; computedT: number; tags: string[] }
-interface Spec { id: string; label: string; nx: number; ny: number }
+interface Spec { id: string; label: string; nx: number; ny: number; domain?: string }
 interface Agent { id: string; domain: string; label: string; x: number; y: number; trail: { x: number; y: number }[]; seen: number; goto?: { x: number; y: number; until: number } }
 interface Visitor { id: string; x: number; y: number; vx: number; vy: number; bad: boolean; target: House | null; seen: number; q: number }
 interface Thread { ax: number; ay: number; h: House; life: number; col: string }
@@ -50,6 +50,23 @@ let sparks: Spark[] = [];
 /** Guilds: houses sharing a tag, linked in violet. */
 const guilds: { tag: string; born: number }[] = [];
 let haggle: { was: number; price: number; t: number; at: Agent } | null = null;
+/** Words that float up from a spot for a few seconds: an invention's name, a payment, a message kind. */
+let floats: { x: number; y: number; text: string; col: string; t: number; big?: boolean }[] = [];
+let invented = 0;
+/** Where an agent rests: its own spot on a ring round the middle, so several agents don't stack up. */
+const home = (ag: Agent) => {
+  // Spread by arrival order round the ring (similar ids would land side by side), nudged by the id so it's stable.
+  const i = [...agents.keys()].indexOf(ag.id), n = Math.max(agents.size, 4);
+  const a = ((i < 0 ? hash(ag.id) * n : i) / n) * 6.283 + 0.4, r = Math.min(W, H) * 0.22;
+  return { x: W / 2 + Math.cos(a) * r * 1.6, y: H / 2 + Math.sin(a) * r };
+};
+/** Any agent or specialist by its `agent:<domain>` label. */
+const spot = (label?: string) => {
+  const ag = agentByLabel(label);
+  if (ag) return { x: ag.x, y: ag.y };
+  const sp = [...specs.values()].find((x) => `agent:${x.domain}` === label);
+  return sp ? { x: sp.nx * W, y: sp.ny * H } : null;
+};
 const docks = new Map<string, Dock>();
 const dockByLabel = (s?: string) => [...docks.values()].find((d) => s === `agent:${d.domain}` || s === d.id);
 const groups = new Map<string, Group>();
@@ -105,7 +122,7 @@ function addParticipant(p: Participant, fresh: boolean) {
     // Round the edge of the Lake, left of the docks; a sandbox has ten specialists.
     const slots = [[0.16, 0.26], [0.78, 0.26], [0.84, 0.8], [0.17, 0.8], [0.47, 0.16], [0.31, 0.11], [0.63, 0.11], [0.05, 0.5], [0.47, 0.86], [0.05, 0.16]];
     const [nx, ny] = slots[specs.size % slots.length]!;
-    specs.set(p.id, { id: p.id, label: p.label.replace(/\s*\(.*\)$/, ''), nx: nx!, ny: ny! });
+    specs.set(p.id, { id: p.id, label: p.label.replace(/\s*\(.*\)$/, ''), nx: nx!, ny: ny!, domain: p.domain });
   }
 }
 
@@ -234,6 +251,27 @@ function onEvent(e: LakeEvent, p?: Participant) {
       if (h && ag) threads.push({ ax: ag.x, ay: ag.y, h, life: 1, col: COL.mint });
       break;
     }
+    case 'agent.message': {
+      // Agents talking to each other: a line from one to the other, the kind of message (never its content), and money in gold.
+      const from = agents.get(e.actor), to = spot(e.subject);
+      if (!from || !to) break;
+      from.seen = clock;
+      const pay = e.data?.kind === 'payment';
+      const tx = { x: to.x, y: to.y, nx: to.x / W, ny: to.y / H } as unknown as House;
+      threads.push({ ax: from.x, ay: from.y, h: tx, life: pay ? 1.6 : 1, col: pay ? COL.gold : COL.sky });
+      const what = pay ? (!e.data?.unit || e.data.unit === 'USD' ? `$${e.data?.amount}` : `${e.data?.amount} ${e.data?.unit}`) : String(e.data?.kind ?? '');
+      floats.push({ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 - 6, text: what, col: pay ? COL.gold : COL.sky, t: clock, big: pay });
+      break;
+    }
+    case 'blueprint.published': {
+      invented++;
+      const by = agents.get(e.actor) ?? specs.get(e.actor);
+      const x = by ? ('x' in by ? by.x : by.nx * W) : W / 2, y = by ? ('y' in by ? by.y : by.ny * H) : H / 2;
+      for (let i = 0; i < 26; i++) sparks.push({ x, y, vx: rand(-90, 90), vy: rand(-90, 90), life: 1.2 });
+      ripples.push({ x, y, r: 4, max: 140, col: COL.mint, w: 3 });
+      floats.push({ x, y: y - 28, text: `invented: ${e.data?.name}`, col: COL.mint, t: clock, big: true });
+      break;
+    }
     case 'study.result': {
       const ag = agents.get(e.actor);
       if (ag) { ag.seen = clock; ripples.push({ x: ag.x, y: ag.y, r: 4, max: 120, col: COL.mint, w: 3 }); }
@@ -300,8 +338,9 @@ function onEvent(e: LakeEvent, p?: Participant) {
 function update(dt: number) {
   clock += dt;
   for (const [id, ag] of agents) {
-    if (clock - ag.seen > 60) { agents.delete(id); continue; }
-    const to = ag.goto && clock < ag.goto.until ? ag.goto : { x: W / 2, y: H / 2 };
+    // Agents can think quietly for a while; they leave the map only after a long silence.
+    if (clock - ag.seen > 900) { agents.delete(id); continue; }
+    const to = ag.goto && clock < ag.goto.until ? ag.goto : home(ag);
     ag.x += (to.x - ag.x) * Math.min(1, dt * 2.5);
     ag.y += (to.y - ag.y) * Math.min(1, dt * 2.5);
     ag.trail.push({ x: ag.x, y: ag.y });
@@ -333,6 +372,7 @@ function update(dt: number) {
   threads = threads.filter((t) => (t.life -= dt * 0.6) > 0);
   ripples = ripples.filter((r) => (r.r += dt * 160) < r.max);
   sparks = sparks.filter((p) => { p.life -= dt * 1.3; p.x += p.vx * dt; p.y += p.vy * dt; return p.life > 0; });
+  floats = floats.filter((f) => clock - f.t < (f.big ? 6 : 2.2));
 }
 
 function draw(now: number) {
@@ -461,6 +501,22 @@ function draw(now: number) {
     ctx.globalAlpha = 1;
   }
   for (const p of sparks) { ctx.fillStyle = rgba(COL.fg, p.life); ctx.fillRect(p.x, p.y, 2, 2); }
+  for (const f of floats) {
+    const age = clock - f.t, life = f.big ? 6 : 2.2;
+    ctx.globalAlpha = Math.min(1, (life - age) / 0.8, age * 4);
+    ctx.textAlign = 'center'; ctx.fillStyle = f.col;
+    ctx.font = f.big ? `700 ${Math.max(16, Math.min(26, W / 55))}px Oswald, "Arial Narrow", sans-serif` : '500 11px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.fillText(f.big ? f.text.toUpperCase() : f.text, f.x, f.y - age * 8);
+    ctx.globalAlpha = 1;
+  }
+  if (invented) {
+    const y0 = quoted.size ? 100 : 44;
+    ctx.textAlign = 'left'; ctx.fillStyle = COL.mint;
+    ctx.font = `700 ${Math.max(22, Math.min(40, W / 34))}px Oswald, "Arial Narrow", sans-serif`;
+    ctx.fillText(String(invented), 18, y0);
+    ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillStyle = rgba(COL.fg, 0.75);
+    ctx.fillText(`INVENTION${invented === 1 ? '' : 'S'} PUBLISHED HERE`, 18, y0 + 18);
+  }
   for (const ag of agents.values()) {
     ctx.strokeStyle = rgba(COL.orange, 0.35); ctx.lineWidth = 2; ctx.beginPath();
     ag.trail.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
@@ -469,9 +525,9 @@ function draw(now: number) {
     ctx.strokeStyle = COL.orange; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(ag.x, ag.y, rr, 0, 6.283); ctx.stroke();
     ctx.fillStyle = COL.orange; ctx.beginPath(); ctx.arc(ag.x, ag.y, 6, 0, 6.283); ctx.fill();
     // A moving label smears across the fading canvas; show it only when the agent is still.
-    const to = ag.goto && clock < ag.goto.until ? ag.goto : { x: W / 2, y: H / 2 };
+    const to = ag.goto && clock < ag.goto.until ? ag.goto : home(ag);
     if (Math.hypot(to.x - ag.x, to.y - ag.y) < 8) {
-      ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillText(ag.label.toUpperCase(), ag.x, ag.y + rr + 16);
+      ctx.font = '500 11px "IBM Plex Mono", ui-monospace, monospace'; ctx.fillText(ag.label.replace(/\s*\(.*\)$/, '').toUpperCase(), ag.x, ag.y + rr + 16);
     }
   }
 }

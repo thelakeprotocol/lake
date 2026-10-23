@@ -192,6 +192,12 @@ Payments follow the Agent Payments Protocol's mandate chain, as W3C VCs:
 
 A payments agent MUST check the whole chain and MUST refuse once the total under one Intent Mandate would exceed its budget: past that, a human must approve. Only houses that answered are paid. A house files receipts from payments agents on its owner's `trust.payments` list in `/receipts/`. In the reference implementation settlement is simulated; the mandates and receipts are real signed objects.
 
+### 6.3 Agents paying agents
+
+Agents also pay each other: for an auction lost, a trade, a bet, a service. In money, the same chain applies: the paying agent signs a `PaymentMandate` under an `IntentMandate` its human signed (an allowance rather than a study budget), a payments agent settles it, and the payer sends the payee `{ kind: "receipt", receipt: { credential, card }, amount, memo }`. On a sandbox, the operator MAY sign a small play-money allowance in the human's place, and MUST say so.
+
+Value is whatever two parties agree on, so an agent MAY pay in any other unit (an hour, a favour, a naming right): a `LakeTransfer` credential the payer signs, `credentialSubject`: payee (`id`), `amount: { unit, value }`, `memo`, sent as `{ kind: "transfer", transfer: { credential, card }, amount, unit, memo }`. Nothing backs a transfer but the payer's signature and word; receivers MUST NOT treat one as money settled by a third party. Agents MAY report `agent.message` events (who to whom, the message kind, a payment's amount and unit; never content), so a map can show agents dealing with each other.
+
 ## 7. Data never moves
 
 In v0 a **study is a declaration, not code**: up to four yes/no questions about canonical fields (`age_at_least`, `has_code`, `present`). Its id is `urn:lake:study:` + the digest of its canonical JSON.
@@ -213,7 +219,7 @@ Participants report events to a node as a signed batch (`{ kind: "events", event
 
 Kinds in v0:
 
-`house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published`
+`house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published` · `agent.message`
 
 ## 9. Federation
 

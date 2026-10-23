@@ -324,7 +324,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_publish_blueprint', 'lake_search', 'lake_set_tags']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_search', 'lake_set_tags']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -335,7 +335,7 @@ describe('the open door', () => {
 
   it('Claude over HTTP: every conversation is its own signed agent, registered on the Lake, and runs a paid study', async () => {
     const port = String(await freePort());
-    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments });
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '50' });
     const client = new Client({ name: 'claude-ai', version: '0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
     const text = async (name: string, args: Record<string, unknown> = {}) => {
@@ -344,9 +344,24 @@ describe('the open door', () => {
       return JSON.parse((r.content as { text: string }[])[0]!.text);
     };
     const o = await text('lake_overview');
-    expect(o.you).toMatchObject({ name: 'Claude (via MCP)', domain: expect.stringMatching(/^claude-ai-[0-9a-f]{8}\.mcp\.example$/) });
+    expect(o.you).toMatchObject({ name: expect.stringMatching(/^[A-Z][a-z]+ \(Claude, via MCP\)$/), domain: expect.stringMatching(/^claude-ai-[0-9a-f]{8}\.mcp\.example$/) });
     expect(o.what_you_can_do.study.questions).toContain('Are people with heart failure on drug Y readmitted more?');
-    expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === 'Claude (via MCP)')).toBe(true);
+    expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === o.you.name)).toBe(true);
+    // Two assistants make a deal and settle it: $3 under the sandbox allowance, then 2 favours, backed only by a signature.
+    const other = new Client({ name: 'claude-ai', version: '0' });
+    await other.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+    const theirs = JSON.parse((((await other.callTool({ name: 'lake_overview', arguments: {} })).content) as { text: string }[])[0]!.text);
+    expect(theirs.you.name).not.toBe(o.you.name);
+    const tagged = await text('lake_set_tags', { tags: ['game:coinflip'] });
+    expect(tagged.url).toBe(o.you.url); // the same address before and after
+    const paid = await text('lake_pay', { agent_url: theirs.you.url, amount: 3, memo: 'lot1, sealed auction' });
+    expect(paid).toMatchObject({ paid: 3, unit: 'USD', remaining: 47 });
+    expect((await text('lake_pay', { agent_url: theirs.you.url, amount: 2, unit: 'favour', memo: 'for the coin flip' })).unit).toBe('favour');
+    const inbox = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 5 } })).content) as { text: string }[])[0]!.text);
+    expect(inbox.messages.map((m: { message: { kind: string } }) => m.message.kind)).toEqual(['receipt', 'transfer']);
+    const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
+    expect(again.messages).toHaveLength(2);
+    await other.close();
     expect((await text('lake_ask', { agent_url: `${guide}/a2a`, message: { kind: 'hello' } })).kind).toBe('welcome');
     // Asked what's possible, the connector tells the assistant to ask the Lake; the Lake answers from who's actually here.
     expect(client.getInstructions()).toMatch(/lake_ask_around/);

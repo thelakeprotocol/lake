@@ -10,6 +10,7 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   const app = lakeMcpHttpApp({
     node: env.LAKE_NODE_URL ?? 'http://lake-node:7000', publicUrl: a['public-url'] ?? `http://localhost:${port}`,
     ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL,
+    allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
     log: (m) => console.log(m),
   });
   app.listen(port, () => console.log(`Lake MCP over HTTP on :${port}/mcp`));
@@ -24,6 +25,7 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     port: Number(env.LAKE_MCP_PORT ?? 4890),
     keyFile: env.LAKE_KEY_FILE,
     ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL,
+    allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
   });
   await server.connect(new StdioServerTransport());
 } else {
