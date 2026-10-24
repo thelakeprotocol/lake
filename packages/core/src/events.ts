@@ -1,7 +1,7 @@
 /** Every observable thing that happens in the Lake. Events carry ids, kinds and counts — never record contents. */
 export const EVENT_KINDS = [
   'house.joined', 'house.left', 'agent.registered', 'knock', 'offer', 'counter', 'decision',
-  'agreement.signed', 'grant.issued', 'grant.revoked', 'approval.requested', 'approval.answered',
+  'agreement.signed', 'grant.issued', 'grant.revoked', 'approval.requested', 'approval.answered', 'approval.withdrawn',
   'payment.settled', 'attack.blocked', 'agent.quarantined', 'guild.formed', 'study.result', 'compute.done', 'record.moved',
   'intent.opened', 'quote.made', 'offer.accepted', 'blueprint.published', 'agent.message', 'tally.update',
 ] as const;
@@ -35,7 +35,7 @@ export function makeEvent(kind: EventKind, actor: string, subject?: string, data
  * visible; sensitive services are quiet anyway. Attacks keep the attacker's key.
  */
 /** Events where one party acted for another: the public feed says what happened, never between whom (SPEC §8). */
-export const PAIRED_KINDS = new Set<string>(['knock', 'decision', 'approval.requested', 'approval.answered', 'grant.issued', 'compute.done', 'agreement.signed', 'quote.made', 'offer.accepted']);
+export const PAIRED_KINDS = new Set<string>(['knock', 'decision', 'approval.requested', 'approval.answered', 'approval.withdrawn', 'grant.issued', 'compute.done', 'agreement.signed', 'quote.made', 'offer.accepted']);
 
 /** The version of an event anyone may see. */
 export function publicView(e: LakeEvent): LakeEvent {
@@ -61,6 +61,7 @@ export function describe(e: LakeEvent): string {
     case 'grant.revoked': return `${e.actor} revoked ${d.count ?? 1} key(s). Connections cut.`;
     case 'approval.requested': return e.subject ? `${e.actor} asked its owner about ${e.subject}.` : `${e.actor} asked its owner.`;
     case 'approval.answered': return `The owner of ${e.actor} tapped ${d.answer}.`;
+    case 'approval.withdrawn': return e.subject ? `${e.subject} took back its request to ${e.actor}'s owner.` : `A visitor took back its request to ${e.actor}'s owner.`;
     case 'payment.settled': return `Payments settled $${d.amount} with ${d.count} participant(s).`;
     // Worded for what it is: a quarantined key is the agent's own key (run 21's assistant read "an agent claiming" as an
     // impersonation of that agent); an impersonation names who pretended to be whom.

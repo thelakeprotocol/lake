@@ -66,14 +66,17 @@ export async function verifyOwnerKey(credential: string, houseJwk: JWK, houseWeb
   return { ...s.ownerKey, alg: 'EdDSA' };
 }
 
-/** An allowance the owner signs on their device: what their assistant may spend for them, until when (SPEC §6.2). */
-export const allowanceDraft = (houseWebId: string, assistantWebId: string, amountUsd: number, until: Date, status?: unknown) => ({
+/** An allowance the owner signs on their device: what their assistant may spend for them, in which currency, until when (SPEC §6.2). */
+export const allowanceDraft = (houseWebId: string, assistantWebId: string, amount: number, until: Date, status?: unknown, currency = 'USD') => ({
   '@context': ['https://www.w3.org/ns/credentials/v2'],
   type: ['VerifiableCredential', 'IntentMandate'],
   issuer: houseWebId,
   credentialSubject: {
     id: assistantWebId, natural_language_description: 'What my assistant may spend for me on the Lake', study: `urn:lake:allowance:${houseWebId}`,
-    budget: { currency: 'USD', amount: amountUsd }, intent_expiry: until.toISOString(), user_cart_confirmation_required: false,
+    budget: { currency, amount }, intent_expiry: until.toISOString(), user_cart_confirmation_required: false,
   } satisfies IntentMandateSubject,
   ...(status ? { credentialStatus: status } : {}),
 });
+
+/** A currency, as AP2 and receipts name it: an ISO 4217 code. */
+export const isCurrency = (c: unknown): c is string => typeof c === 'string' && /^[A-Z]{3}$/.test(c);

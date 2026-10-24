@@ -25,7 +25,7 @@ services:
     image: ghcr.io/thelakeprotocol/lake-node:latest
     container_name: lake-node-a
     hostname: lake-node
-    command: ["--domain", "lake.local", "--url", "http://lake-node:7000", "--follow", "http://lake-node-b:7000"]
+    command: ["--domain", "lake.local", "--url", "http://lake-node:7000", "--follow", "http://lake-node-b:7000", "--show-intent-houses"]
     environment: { LAKE_APPROVALS_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001/owner/", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}" }
     volumes: [node:/data]
     ports: ["7000:7000"]

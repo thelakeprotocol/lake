@@ -51,6 +51,15 @@ describe('shopping@1', () => {
     const gf = households.find((c) => codes(c, 'dietary_needs').includes('gluten-free'))!;
     expect(runProgram(GROCERS[0]!.program, gf, intent).eligible).toBe(false); // Big Mart: no gluten-free
     expect(runProgram(GROCERS[2]!.program, gf, intent).eligible).toBe(true); // Green Basket: every diet
+    // And it says why, inside the house, for the owner only.
+    expect(runProgram(GROCERS[0]!.program, gf, intent).notes).toContain("We can't cater for: gluten free");
+    expect(runProgram(GROCERS[2]!.program, gf, intent).notes).toBeUndefined();
+  });
+
+  it('names the staples a grocer would swap, and where it does not deliver', () => {
+    const c = households.find((x) => codes(x, 'staples').includes('lentils'))!;
+    expect(runProgram(GROCERS[0]!.program, c, intent).notes).toContain("Lentils: we'd send a substitute");
+    expect(runProgram(GROCERS[1]!.program, c, { ...intent, region: 'wa' }).notes).toContain("We don't deliver to your region (only VIC, NSW)");
   });
 
   it('the street gets a group price, and Corner Grocer only delivers locally', () => {

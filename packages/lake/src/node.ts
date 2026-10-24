@@ -15,6 +15,8 @@ export interface NodeOptions {
   url: string;
   domain: string;
   sandbox: boolean;
+  /** A staged demo's map shows which house opened an intent; otherwise the feed says only that one did. */
+  showIntentHouses?: boolean;
   /** Folder with the built map (packages/ui/dist); served at /. */
   uiDir?: string;
   /** A house's approvals app, shown as a QR code on the map so an owner can scan it on stage. */
@@ -205,7 +207,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   app.get('/cards', (req, res) => {
     const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role), q: str(req.query.q) };
-    res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card })));
+    res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card, ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
@@ -228,6 +230,25 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     const e = registry.byWebId(String(req.query.webId ?? ''));
     if (e) e.lastSeen = Date.now();
     res.json({ registered: !!e });
+  });
+
+  // Presence (SPEC §8.1): when an agent's driver last acted through it, signed by the agent. Search results carry it, so
+  // an agent can tell who is at work from who was left running (run 22: five of nine invitees had gone, and every
+  // message to them still said "received").
+  app.post('/presence', async (req, res) => {
+    const env = req.body as Signed<{ kind: 'presence'; active: string }>;
+    const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
+    if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
+    try {
+      await verifyMessage(env, async (kid) => (kid === entry.profile.publicJwk.kid ? entry.profile.publicJwk : null), { replay });
+    } catch (e) {
+      return void res.status(403).json({ code: 'bad-signature', why: (e as Error).message });
+    }
+    const at = Date.parse(String(env.payload.active ?? ''));
+    if (!(at > 0) || at > Date.now() + 60_000) return void res.status(400).json({ code: 'malformed', why: 'active: when, as an ISO time, not in the future' });
+    entry.lastActive = Math.min(at, Date.now());
+    entry.lastSeen = Date.now();
+    res.json({ ok: true });
   });
 
   // Participants check in every few seconds. Anyone silent for a minute has gone: say so, and forget them.
@@ -278,8 +299,9 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   });
 
   // Intents (SPEC §12): a house says what it's looking for. The node keeps who privately and publishes
-  // only how many share each group; agents learn a group's size, never its members. In a sandbox the map
-  // also shows which house asked, so people can watch it happen.
+  // only how many share each group; agents learn a group's size, never its members. A staged demo may also show
+  // which house asked, so people can watch the groups form (`showIntentHouses`); a Lake strangers visit never does:
+  // run 23's rogue grocer read "House sb-1 asked for offers" off the public feed as a list of who to target.
   const intents = new Map<string, { pack: string; group: string; at: number }[]>();
   const groupSizes = () => {
     const counts = new Map<string, { pack: string; group: string; members: number }>();
@@ -310,7 +332,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     for (const x of list) {
       if (before.has(`${x.pack}|${x.group}`)) continue;
       const members = sizes.find((g) => g.pack === x.pack && g.group === x.group)?.members ?? 1;
-      publish(makeEvent('intent.opened', o.sandbox ? entry.id : 'lake', undefined, { pack: x.pack, group: x.group, members }));
+      publish(makeEvent('intent.opened', o.showIntentHouses ? entry.id : 'lake', undefined, { pack: x.pack, group: x.group, members }));
     }
     res.json({ groups: sizes.filter((g) => list.some((x) => x.pack === g.pack && x.group === g.group)) });
   });

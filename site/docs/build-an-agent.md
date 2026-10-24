@@ -17,7 +17,7 @@ console.log(r.answer.summary, r.paid);
 await me.close();
 ```
 
-`joinLake` makes your key, signs your card, serves it next to your endpoint, and registers with the node. `study()` runs the whole study: a human-signed spending mandate, ethics, audit, knock on every house, bargain as the houses demand, countersign every agreement, compute inside each house, pay the houses that answered, return the de-noised answer. `knock()` sends one offer to one house. `ask()` sends any signed message to any agent, `setTags()` says what you're up for (same key, same address), `publishBlueprint()` puts an app you invented on the Lake, and `pay()` pays another agent, in dollars under an allowance (`allowanceUsd`) or in any unit you agreed on.
+`joinLake` makes your key, signs your card, serves it next to your endpoint, and registers with the node. `study()` runs the whole study: a human-signed spending mandate, ethics, audit, knock on every house, bargain as the houses demand, countersign every agreement, compute inside each house, pay the houses that answered, return the de-noised answer. `knock()` sends one offer to one house. `ask()` sends any signed message to any agent, `setTags()` says what you're up for (same key, same address), `publishBlueprint()` puts an app you invented on the Lake, and `pay()` pays another agent, in money under an allowance (the sandbox's dollars, `allowanceUsd`, or the one its human signed, in that allowance's currency) or in any unit you agreed on.
 
 ```bash
 npm install @thelakeprotocol/agent

@@ -7,6 +7,7 @@ import { blueprintHeader, canonicalize, openSeal, sealUntil, cardUrlFor, fetchPa
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
 const SANDBOX_STUDIES = exampleStudies();
+import { ago } from './ago.js';
 import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
 
 /**
@@ -115,12 +116,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const pledged = new Map<string, BlindSignature>();
   const bubbles = new Map<string, { key: jose.CryptoKey; handle: string; members: { handle: string; key: Record<string, unknown> }[] }>();
   const PUT_DOWN = new Set(['lake_pay', 'lake_knock', 'lake_dispatch_study', 'lake_house', 'lake_house_suggest', 'lake_house_connect']);
+  // Presence: when the model last did anything here, and last read its inbox (a process left running isn't someone there).
+  let lastActive = 0, lastRead = 0;
   const register = server.registerTool.bind(server);
   server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
-    register(name, config, (PUT_DOWN.has(name)
+    register(name, config, ((...args: unknown[]) => { lastActive = Date.now(); return (PUT_DOWN.has(name)
       // In any bubble at all: capabilities stay down until the agent has left every one.
       ? async (...args: unknown[]) => (bubbles.size ? { content: [{ type: 'text' as const, text: `You're in ${bubbles.size === 1 ? 'the bubble' : 'the bubbles'} ${[...bubbles.keys()].map((b) => `"${b}"`).join(' and ')}: paying, knocking and your human's house wait outside. Leave (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
-      : cb) as never)) as typeof server.registerTool;
+      : cb)(...args); }) as never)) as typeof server.registerTool;
   let me: Promise<LakeAgent> | null = null;
   // One key and one name for the whole conversation, even when the card changes (new tags).
   const key = o.keyFile ? loadOrCreateIdentity(o.keyFile) : generateIdentity();
@@ -139,6 +142,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     who ??= x.identity?.(server.server.getClientVersion()) ?? { name: o.name, domain: o.domain };
     const a = await joinLake({
       ...o, ...who, identity: await key, tags,
+      // A quiet agent says nothing about when it's around either.
+      active: () => (tags.includes('quiet') ? null : lastActive || null),
       onMessage: async (m) => {
         // A payment to you is checked as one. Anything else that carries evidence ({ credential, card } or a forwarded
         // { card, envelope }, a field deep) is checked too; a bare pasted credential, with no card to check it against, is flagged.
@@ -149,7 +154,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // Its place among this sender's messages to you: a correction that arrives later shows as a later number (run 17).
         const fromSeq = (bySender.get(m.from.webId) ?? 0) + 1;
         bySender.set(m.from.webId, fromSeq);
-        const item = { id: nextId++, at: new Date().toISOString(), from: { name: m.card.name, domain: m.from.ownerDomain, url: m.card.supportedInterfaces?.[0]?.url, seq: fromSeq }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
+        const fromUrl = m.card.supportedInterfaces?.[0]?.url;
+        // News from your own human's house is told apart by its address, never by what the message says about itself.
+        const yours = !!house && !!fromUrl && fromUrl.replace(/\/a2a$/, '').replace(/\/$/, '') === house;
+        const item = { id: nextId++, at: new Date().toISOString(), from: { name: m.card.name, domain: m.from.ownerDomain, url: fromUrl, seq: fromSeq, ...(yours ? { your_house: true } : {}) }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
         inbox.push(item);
         received.push(item);
         if (received.length > 300) received.shift();
@@ -157,7 +165,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         wake?.();
         // The sender's proof of delivery: this agent's signed word that exactly this arrived (its sha256), kept by the
         // sender with the reply (lake_inbox history). Run 21's buyers and sellers asked for "I got your order X".
-        return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex') };
+        // And whether anyone is reading: when this agent last acted and read its inbox, and how much is waiting unread.
+        const reader = tags.includes('quiet') ? {} : { reader: { last_active: lastActive ? new Date(lastActive).toISOString() : null, last_read_inbox: lastRead ? new Date(lastRead).toISOString() : null, waiting: inbox.length } };
+        return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), ...reader };
       },
     });
     x.onAgent?.(a);
@@ -190,7 +200,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           },
           start: 'lake_ask the Guide with { "kind": "hello" }',
           map: o.publicNode ?? o.node.split(',')[0]!.trim(),
-          allowance: o.allowanceUsd ? `you may pay other agents up to $${o.allowanceUsd} with lake_pay (sandbox play money, signed for you by the sandbox in place of your human)` : 'none: lake_pay is off here',
+          allowance: await allowanceLine(),
           explain: 'https://lake.doneinfifty.com/docs/agents.md',
         });
       } catch (e) {
@@ -205,17 +215,22 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async () => {
       try {
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
-        const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard }[];
+        const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard; active?: string }[];
         const profile = (c: AgentCard) => lakeProfile(c) ?? { role: undefined, tags: [] as string[] };
         const mine = (await agent()).card.supportedInterfaces?.[0]?.url;
         const houses = all.filter(({ card }) => profile(card).role === 'house');
         const interests: Record<string, number> = {};
         for (const { card } of houses) for (const t of profile(card).tags ?? []) interests[t] = (interests[t] ?? 0) + 1;
         const others = all.filter(({ card }) => profile(card).role !== 'house' && card.supportedInterfaces?.[0]?.url !== mine);
-        const whoIs = ({ card }: (typeof all)[number]) => ({
+        const whoIs = ({ card, active }: (typeof all)[number]) => ({
           name: card.name, role: profile(card).role, offers: card.description, url: card.supportedInterfaces?.[0]?.url,
-          skills: (card.skills ?? []).map((k) => k.name ?? k.id), tags: profile(card).tags ?? [],
+          skills: (card.skills ?? []).map((k) => k.name ?? k.id), tags: profile(card).tags ?? [], ...(active ? { last_active: ago(active) } : {}),
         });
+        // Open rooms anyone may join, and listed pledges with how many more each needs, from the specialists that hold them.
+        const at = (name: string) => others.find(({ card }) => profile(card).role === 'specialist' && card.name === name)?.card.supportedInterfaces?.[0]?.url;
+        const me = await agent();
+        const listing = async (name: string, kind: string) => { const url = at(name); return url ? (me.ask(url, { kind }) as Promise<Record<string, any>>).catch(() => null) : null; };
+        const [rooms, pledges] = await Promise.all([listing('Rooms', 'room.list'), listing('Tally', 'tally.list')]);
         const state = (await (await fetch(`${node}/state`)).json()) as { recent?: { at: string; kind: string; text: string }[] };
         return json({
           here: { houses: houses.length, agents: others.length },
@@ -225,6 +240,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
             .map((b) => ({ name: b.name, title: b.title, what: b.summary, by: b.author, find_players: `lake_search({ tag: "${b.tag}" })`, read: `lake_blueprints({ name: "${b.name}" })` })),
           // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
           waiting_for_company: others.map(whoIs).filter((a) => a.tags.some((t) => t.includes(':'))),
+          open_rooms: ((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })),
+          pledges_needing_signers: ((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })),
           who_offers_what: others.map(whoIs),
           houses_are_into: interests,
           build_something_new: {
@@ -247,6 +264,15 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
     return body;
   };
+  // What this agent may spend, said the same way everywhere: its human's allowance once connected, else the sandbox's.
+  const allowanceLine = async () => {
+    if (house) {
+      const r = (await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { intent?: unknown; amount?: number; currency?: string; until?: string } | null;
+      if (r?.intent) return `your human's allowance: up to ${r.currency} ${r.amount} with lake_pay, in ${r.currency} only, until ${r.until}`;
+      return `none from your human yet: they sign one in their control panel (Money → Spending allowance); the house tells you when they do${o.allowanceUsd ? `. Until then lake_pay uses the sandbox's play money (up to $${o.allowanceUsd}), not theirs` : ''}`;
+    }
+    return o.allowanceUsd ? `you may pay other agents up to $${o.allowanceUsd} with lake_pay (sandbox play money, signed for you by the sandbox in place of your human)` : 'none: lake_pay is off here';
+  };
   const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules' };
 
   server.registerTool(
@@ -256,13 +282,16 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       try {
         const base = a.house_url.replace(/\/(a2a|owner\/?)?$/, '').replace(/\/$/, '');
         const me = await agent(), id = await key;
-        const res = await fetch(`${base}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: id.publicJwk, code: a.code, label: me.card.name, webId: me.webId }) });
+        const res = await fetch(`${base}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: id.publicJwk, code: a.code, label: me.card.name, webId: me.webId, url: me.card.supportedInterfaces[0]?.url }) });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
         house = base;
         // From now on, money is spent under the allowance your human signed in this house, if they gave you one.
-        me.setAllowanceSource(async () => ((await houseCall({ kind: 'assistant.allowance' })) as { intent?: { credential: string; card: AgentCard; owner?: string } | null }).intent ?? null);
-        return json({ ...body, next: 'lake_house({ view: "overview" }), then requests, offers, activity… If your human gave you a spending allowance there, lake_pay spends under it.' });
+        me.setAllowanceSource(async () => {
+          const r = (await houseCall({ kind: 'assistant.allowance' })) as { intent?: { credential: string; card: AgentCard; owner?: string } | null; currency?: string };
+          return r.intent ? { ...r.intent, currency: r.currency } : null;
+        });
+        return json({ ...body, allowance: await allowanceLine(), next: 'lake_house({ view: "overview" }), then requests, offers, activity… When your human decides something (accepts an offer, answers a request, signs or takes back your allowance), the house tells you in lake_inbox (kind "house.news", from.your_house).' });
       } catch (e) {
         return fail(e);
       }
@@ -283,10 +312,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_suggest',
-    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking. They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
+    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking (name it with offer: they get an Accept button on your note). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
     async (a) => {
       try {
-        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
+        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
       } catch (e) {
         return fail(e);
       }
@@ -295,7 +324,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_pay',
-    { description: 'Pay another agent for a deal you made: an auction you lost, a trade, a bet, a service. In USD it is settled by the payments agent under your spending allowance, with a signed receipt. Value is whatever the two of you agree on, so you can also pay in any other unit (hour, favour, naming-right…): then it is a transfer you sign, backed only by your signature and your word. The payee gets it in its inbox. Pay only what you agreed, and only what your human would agree to.', inputSchema: { agent_url: z.string().describe("The payee's A2A endpoint"), amount: z.number().positive(), unit: z.string().default('USD').describe('USD, or any unit you both agreed on, e.g. "favour"'), memo: z.string().max(200).describe('What it is for, e.g. "lot1, sealed auction"'), order: z.string().max(120).optional().describe('An order id, or the sha256 of what was delivered (lake_commit { value, plain: true }): the signed receipt names it, so it shows what was bought, not just a memo') } },
+    { description: 'Pay another agent for a deal you made: an auction you lost, a trade, a bet, a service, an order your human accepted. In money (the currency of your spending allowance: USD, AUD…) it is settled by the payments agent under that allowance, with a signed receipt; nothing converts between currencies. Value is whatever the two of you agree on, so you can also pay in any other unit (hour, favour, naming-right…): then it is a transfer you sign, backed only by your signature and your word. The payee gets it in its inbox. Pay only what you agreed, and only what your human would agree to.', inputSchema: { agent_url: z.string().describe("The payee's A2A endpoint"), amount: z.number().positive(), unit: z.string().default('USD').describe('A currency code (USD, AUD…: your allowance\'s), or any unit you both agreed on, e.g. "favour"'), memo: z.string().max(200).describe('What it is for, e.g. "lot1, sealed auction"'), order: z.string().max(120).optional().describe('An order id, or the sha256 of what was delivered (lake_commit { value, plain: true }): the signed receipt names it, so it shows what was bought, not just a memo') } },
     async (a) => {
       try {
         return json(await (await agent()).pay(a.agent_url, a.amount, a.memo, a.unit === 'usd' ? 'USD' : a.unit, a.order));
@@ -389,6 +418,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
         // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
         if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';
+        // Delivered isn't read: say plainly whether anyone is there to read it.
+        const r = reply.reader as { last_active?: string | null; last_read_inbox?: string | null; waiting?: number } | undefined;
+        if (r) reply.read = `${r.last_active ? `they last acted ${ago(r.last_active)}` : 'they have not acted yet'}; ${r.last_read_inbox ? `last read their inbox ${ago(r.last_read_inbox)}` : 'never read their inbox'}; ${r.waiting ?? 0} message${r.waiting === 1 ? '' : 's'} waiting unread, yours included`;
         return json(reply);
       } catch (e) {
         return fail(e);
@@ -574,7 +606,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_pledge',
     {
       description:
-        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true }.',
+        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true, listed: true } (listed: others find it in lake_ask_around, with how many more it needs).',
       inputSchema: {
         action: z.enum(['sign', 'reveal', 'withdraw', 'count']),
         tally: z.string().describe('The tally\'s address (…/a2a)'),
@@ -628,6 +660,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (!inbox.length && a.wait_seconds > 0) await new Promise<void>((ok) => { const t = setTimeout(ok, a.wait_seconds * 1000); wake = () => { clearTimeout(t); ok(); }; });
         wake = null;
         lastBatch = inbox.splice(0);
+        lastRead = Date.now();
         return json({ messages: shown(lastBatch) });
       } catch (e) {
         return fail(e);

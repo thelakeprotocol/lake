@@ -29,11 +29,17 @@ export interface QuoteProgram {
   outputs: Record<string, string>;
   /** Plain-English labels and units for the outputs, for the owner's panel. */
   labels?: Record<string, { label: string; unit?: string }>;
+  /**
+   * Plain-English notes for the owner, each shown when its CEL condition holds: why an offer isn't for them ("we can't
+   * cater for a nut allergy"), what changes ("lentils: we'd send a substitute"). Worked out in the house like the rest,
+   * seen by the owner only. Text the quoter wrote, so it only explains: it never changes the result.
+   */
+  notes?: { when: string; say: string }[];
   /** Who sees the result. Always the owner, never the asker. */
   output: 'owner';
 }
 
-const LIMITS = { outputs: 12, lets: 24, nodes: 300, depth: 32 };
+const LIMITS = { outputs: 12, lets: 24, notes: 16, noteLength: 160, nodes: 300, depth: 32 };
 
 /**
  * Every program may read how many households share the owner's intent group (the node publishes it). A
@@ -116,10 +122,17 @@ export function auditProgram(p: QuoteProgram): { ok: boolean; problems: string[]
   }
   typed('eligible', p.eligible, ['bool']);
   for (const [k, e] of outputs) typed(`outputs.${k}`, e, ['double']);
+  if (p.notes !== undefined) {
+    if (!Array.isArray(p.notes) || p.notes.length > LIMITS.notes) problems.push(`notes: a list of at most ${LIMITS.notes}`);
+    else p.notes.forEach((n, i) => {
+      if (typeof n?.say !== 'string' || !n.say.trim() || n.say.length > LIMITS.noteLength) problems.push(`notes[${i}].say: plain text, 1 to ${LIMITS.noteLength} characters`);
+      typed(`notes[${i}].when`, n?.when, ['bool']);
+    });
+  }
   return { ok: problems.length === 0, problems };
 }
 
-export interface QuoteResult { eligible: boolean; outputs: Record<string, number> }
+export interface QuoteResult { eligible: boolean; outputs: Record<string, number>; /** The notes whose condition held, eligible or not. */ notes?: string[] }
 
 /** Runs inside the house, on its claims and the owner's own intent terms. Assumes an audited program. */
 export function runProgram(p: QuoteProgram, claims: Claim[], terms: Record<string, string | number> = {}): QuoteResult {
@@ -150,8 +163,10 @@ export function runProgram(p: QuoteProgram, claims: Claim[], terms: Record<strin
       const v = Number(env.evaluate(e, context));
       outputs[k] = Number.isFinite(v) ? Math.round(v * 100) / 100 : Number.NaN;
     }
+    // A note that can't be worked out (missing data) just isn't shown.
+    const notes = (p.notes ?? []).filter((n) => { try { return env.evaluate(n.when, context) === true; } catch { return false; } }).map((n) => n.say);
     // Missing data or a broken sum is "not eligible", never a made-up number.
-    return { eligible: eligible && Object.values(outputs).every(Number.isFinite), outputs };
+    return { eligible: eligible && Object.values(outputs).every(Number.isFinite), outputs, ...(notes.length ? { notes } : {}) };
   } catch {
     return none;
   }

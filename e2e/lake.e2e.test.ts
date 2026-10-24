@@ -182,6 +182,19 @@ describe('the Lake node', () => {
     expect((await forged.json()).code).toBe('forged-card');
   });
 
+  it('shows when an agent last acted, in its own signed word, and refuses a time to come', async () => {
+    const me = await joinLake({ name: 'Presence test', domain: 'presence.example', node, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+    const say = async (active: string, by = me.visitor.id) => fetch(`${node}/presence`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'presence', active }, by, { iss: me.webId })) });
+    expect((await say(new Date(Date.now() + 3_600_000).toISOString())).status).toBe(400);
+    expect((await say(new Date().toISOString(), await generateIdentity())).status).toBe(403); // not its key
+    const at = new Date(Date.now() - 120_000).toISOString();
+    expect((await say(at)).status).toBe(200);
+    const found = (await (await fetch(`${node}/cards?q=Presence`)).json()) as { card: { name: string }; active?: string }[];
+    expect(found.find((f) => f.card.name === 'Presence test')?.active).toBe(at);
+    expect((await me.find({ q: 'Presence' })).find((f) => f.name === 'Presence test')?.last_active).toBe('2 min ago');
+    await me.close();
+  });
+
   it('refuses events from anyone not registered', async () => {
     const id = await generateIdentity();
     const env = await signMessage({ kind: 'events', events: [{ id: 'x', kind: 'record.moved', at: new Date().toISOString(), actor: 'house:stan' }] }, id, { iss: 'https://fake.example/#me' });
@@ -362,19 +375,21 @@ describe('the owner', () => {
     expect((await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: helper.id.publicJwk, code, label: 'Wallet helper', webId: helper.webId }) })).status).toBe(200);
     const kid = helper.id.publicJwk.kid;
     // The house drafts it; the owner's device signs exactly that; the house checks it matches.
-    const { id, draft } = await ownerCall({ kind: 'panel.allowance.draft', kid, amountUsd: 7, days: 3 });
+    const { id, draft } = await ownerCall({ kind: 'panel.allowance.draft', kid, amount: 7, days: 3 });
     expect(draft.credentialSubject).toMatchObject({ id: helper.webId, budget: { currency: 'USD', amount: 7 } });
     expect(draft.credentialStatus).toMatchObject({ type: 'BitstringStatusListEntry' });
     const signed = await issueCredential({ ...draft, validFrom: new Date().toISOString() } as never, owner);
-    expect(await ownerCall({ kind: 'panel.allowance.set', id, credential: signed })).toMatchObject({ ok: true, amountUsd: 7 });
+    expect(await ownerCall({ kind: 'panel.allowance.set', id, credential: signed })).toMatchObject({ ok: true, amount: 7, currency: 'USD' });
     // Signed by anyone else, refused.
-    const { id: id2, draft: d2 } = await ownerCall({ kind: 'panel.allowance.draft', kid, amountUsd: 500, days: 3 });
+    const { id: id2, draft: d2 } = await ownerCall({ kind: 'panel.allowance.draft', kid, amount: 500, days: 3 });
     expect(await ownerCall({ kind: 'panel.allowance.set', id: id2, credential: await issueCredential({ ...d2, validFrom: new Date().toISOString() } as never, await generateIdentity()) })).toMatchObject({ error: expect.stringContaining('not signed by your key') });
     // The assistant fetches it from the house and pays under it: the payments agent checks the owner's key by the house's word.
     const mine = await (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'assistant.allowance' }, helper.id, { iss: 'assistant' })) })).json();
-    expect(mine).toMatchObject({ amountUsd: 7, intent: { credential: signed, owner: expect.any(String) } });
-    const pay = async (amount: number) => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test' })] })).reply;
-    expect(await pay(3)).toMatchObject({ kind: 'settled', remaining: 4 });
+    expect(mine).toMatchObject({ amount: 7, currency: 'USD', intent: { credential: signed, owner: expect.any(String) } });
+    const pay = async (amount: number, currency = 'USD') => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test', currency })] })).reply;
+    // Nothing converts: dollars signed for are spent in dollars.
+    expect(await pay(3, 'AUD')).toMatchObject({ kind: 'refused', problems: ['the allowance is in USD; this payment is in AUD'] });
+    expect(await pay(3)).toMatchObject({ kind: 'settled', currency: 'USD', remaining: 4 });
     expect(await pay(5)).toMatchObject({ kind: 'refused' }); // over what's left
     // Taken back: its bit goes up on the house's status list, and payments refuse it at once.
     expect(await ownerCall({ kind: 'panel.allowance.revoke', kid })).toMatchObject({ revoked: true });
@@ -928,7 +943,7 @@ describe('mortgage offers, priced inside the house', () => {
 
 describe('the weekly shop, priced inside the house', () => {
   // Three households in Victoria wanting this week's shop: a group of three; three authorised grocers.
-  const buyers: { name: string; call: (payload: Record<string, unknown>) => Promise<any> }[] = [];
+  const buyers: { name: string; url: string; phone: Identity; call: (payload: Record<string, unknown>) => Promise<any> }[] = [];
   let firstProc = 0;
 
   beforeAll(async () => {
@@ -946,7 +961,7 @@ describe('the weekly shop, priced inside the house', () => {
       const url = `http://localhost:${hp}`;
       const phone = await generateIdentity('phone');
       await fetch(`${url}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk }) });
-      buyers.push({ name, call: async (payload) => (await fetch(`${url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: 'owner' })) })).json() });
+      buyers.push({ name, url, phone, call: async (payload) => (await fetch(`${url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: 'owner' })) })).json() });
     }
   }, 240_000);
 
@@ -979,6 +994,39 @@ describe('the weekly shop, priced inside the house', () => {
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
     // Not eight weeks of receipts: the list.
     expect(entry).toMatchObject({ to: best.quoter.webId, released: ['claims: household_size, dietary_needs, staples'], consent: 'owner, live' });
+  });
+
+  it("the owner's assistant suggests an offer, hears when it's accepted, and pays the grocer in its currency under the allowance", async () => {
+    const b = buyers[1]!;
+    const news: Record<string, any>[] = [];
+    const me = await joinLake({ name: 'Rook', domain: 'rook.example', node, port: await freePort(), payments, packs: ['health', 'shopping'], onMessage: async (m) => { if (m.payload.kind === 'house.news') news.push(m.payload); return { kind: 'received' }; } });
+    const asAssistant = async (payload: Record<string, unknown>) => (await fetch(`${b.url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, me.visitor.id, { iss: 'assistant' })) })).json();
+    const { code } = await b.call({ kind: 'panel.assistant.invite', label: 'Rook' });
+    expect((await fetch(`${b.url}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: me.visitor.id.publicJwk, code, label: 'Rook', webId: me.webId, url: me.card.supportedInterfaces[0]!.url }) })).status).toBe(200);
+    me.setAllowanceSource(async () => { const r = await asAssistant({ kind: 'assistant.allowance' }); return r.intent ? { ...r.intent, currency: r.currency } : null; });
+    // The owner signs AUD 150 on their phone; the assistant hears of it.
+    const kid = String(me.visitor.id.publicJwk.kid);
+    const { id, draft } = await b.call({ kind: 'panel.allowance.draft', kid, amount: 150, currency: 'AUD', days: 3 });
+    expect(draft.credentialSubject.budget).toEqual({ currency: 'AUD', amount: 150 });
+    await b.call({ kind: 'panel.allowance.set', id, credential: await issueCredential({ ...draft, validFrom: new Date().toISOString() } as never, b.phone) });
+    // The owner sees why an offer isn't for them, worked out in the house (and the clearer total label).
+    const m = await b.call({ kind: 'panel.market' });
+    for (const o of m.offers) expect(o.labels.total.label).toBe('Total to pay, delivery included');
+    const pick = m.offers.find((o: any) => o.result.eligible && o.status === 'open');
+    // A note that names an offer must name a real one; this one does, and the owner's phone accepts it.
+    expect(await asAssistant({ kind: 'assistant.suggest', text: 'Take this one', offer: 'nope' })).toMatchObject({ error: expect.stringContaining('no offer') });
+    expect(await asAssistant({ kind: 'assistant.suggest', text: `Take ${pick.quoter.name}`, offer: pick.id.slice(0, 8) })).toMatchObject({ ok: true });
+    expect((await b.call({ kind: 'list' })).suggestions[0]).toMatchObject({ offer: pick.id });
+    await b.call({ kind: 'panel.offer.accept', offer: pick.id });
+    for (let i = 0; i < 40 && !news.some((n) => n.about === 'offer.accepted'); i++) await new Promise((r) => setTimeout(r, 250));
+    expect(news.find((n) => n.about === 'allowance')).toMatchObject({ amount: 150, currency: 'AUD' });
+    const accepted = news.find((n) => n.about === 'offer.accepted')!;
+    expect(accepted).toMatchObject({ offer: pick.id, currency: 'AUD', from: { name: pick.quoter.name }, answer: { kind: 'agreed', order: pick.id } });
+    // It pays in AUD, naming the order; dollars are refused (nothing converts).
+    await expect(me.pay(accepted.from.url, accepted.outputs.total, 'weekly shop', 'USD', pick.id)).rejects.toThrow(/allowance is in AUD/);
+    const paid = await me.pay(accepted.from.url, accepted.outputs.total, 'weekly shop', 'AUD', pick.id);
+    expect(paid).toMatchObject({ paid: accepted.outputs.total, unit: 'AUD', under: "your human's signed allowance", remaining: Math.round((150 - accepted.outputs.total) * 100) / 100 });
+    await me.close();
   });
 });
 

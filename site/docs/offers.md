@@ -71,6 +71,6 @@ People already shop with AI by hand: ask it what to buy, photograph the shelf, a
 - **Your data:** a receipt wallet signs your grocery receipts; inside your house they become a few facts: how many people, dietary needs (sensitive: they can say something about health or belief), the staples you buy most weeks, your usual spend.
 - **Your intent:** "this week's shop, up to $180, delivered this week", in your state. Households on the same street wanting the same get a group price.
 - **The offers:** three demo grocers price your basket *inside your house*: a cheap supermarket that can't serve every diet (and makes no offer if it can't serve yours), a local grocer, an organic shop that serves every diet. Only you see the totals, delivery fees, substitutions and whether it's within budget.
-- **Accept:** only your shopping list goes, to that one grocer, not your receipts. It confirms the order, and your agent pays it under the [spending allowance](/docs/approvals) you signed, naming the order on the receipt.
+- **Accept:** only your shopping list goes, to that one grocer, not your receipts. It confirms the order; your house tells your agent, and it pays under the [spending allowance](/docs/approvals) you signed (in AUD, the shops' currency), naming the order on the receipt. An offer that isn't for you says why ("we can't cater for: nut allergy"), and one that swaps a staple says which, worked out in your house for you only.
 
 `lake quoters --packs shopping` runs the grocers; a house joins with `--packs health,shopping`.

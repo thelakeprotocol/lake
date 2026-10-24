@@ -51,12 +51,18 @@ export function grocerProgram(title: string, r: GrocerRules): QuoteProgram {
       within_budget: 'total <= budget ? 1.0 : 0.0',
     },
     labels: {
-      total: { label: 'Basket, delivered', unit: 'AUD' },
-      delivery_fee: { label: 'Delivery', unit: 'AUD' },
+      total: { label: 'Total to pay, delivery included', unit: 'AUD' },
+      delivery_fee: { label: 'of which delivery', unit: 'AUD' },
       substitutions: { label: 'Staples swapped for a substitute' },
       group_off: { label: 'Street discount', unit: '%' },
       within_budget: { label: 'Within your budget', unit: 'yes/no' },
     },
+    // Why it isn't for you, and what you'd get instead: run 23's households had to guess both.
+    notes: [
+      ...(r.regions.length < ALL.length ? [{ when: `!(region in ${list(r.regions)})`, say: `We don't deliver to your region (only ${r.regions.map((x) => x.toUpperCase()).join(', ')})` }] : []),
+      ...DIETS.filter((d) => !r.serves.includes(d)).map((d) => ({ when: `'${d}' in dietary_needs`, say: `We can't cater for: ${d.replace('-', ' ')}` })),
+      ...r.lacks.map((x) => ({ when: `'${x}' in staples`, say: `${x[0]!.toUpperCase()}${x.slice(1)}: we'd send a substitute` })),
+    ],
     output: 'owner',
   };
 }

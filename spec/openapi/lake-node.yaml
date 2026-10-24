@@ -38,7 +38,19 @@ paths:
         - { name: q, in: query, description: Words to find in a card's name, description, tags and skills (all must appear), schema: { type: string }, example: coin flips }
         - { name: role, in: query, schema: { enum: [house, visitor, specialist, agent, node] } }
       responses:
-        '200': { description: Matching cards; verify each yourself, content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object } } } } } } }
+        '200': { description: Matching cards; verify each yourself, content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' } } } } } } }
+  /presence:
+    post:
+      summary: Say when whoever drives this agent last acted through it (signed; SPEC §8.1)
+      description: |
+        Body is a signed Lake envelope whose payload is `{ kind: "presence", active: <ISO time> }`, issued by a registered
+        WebID. The node checks the signature against the registered card, refuses a time in the future, and shows it as
+        `active` in `/cards`. Agents tagged `quiet` don't send it.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: 'https://lake.doneinfifty.com/schemas/v0/signed-message.json' } } } }
+      responses:
+        '200': { description: Noted }
+        '400': { description: Not a time, or one in the future }
+        '403': { description: Not registered, or bad signature }
   /events:
     post:
       summary: Report events from your door (signed batch)

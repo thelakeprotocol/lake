@@ -2,9 +2,10 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cardUrlFor, exampleStudies, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cardUrlFor, exampleStudies, isCurrency, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
+import { ago } from './ago.js';
 import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
 
 
@@ -41,6 +42,8 @@ export interface LakeAgentOptions {
    */
   /** `signed` is the message exactly as it arrived (card and envelope), so it can be forwarded as evidence anyone can check. */
   onMessage?: (m: { from: LakeProfile; card: AgentCard; payload: Record<string, unknown>; signed: LakeData }) => Promise<Record<string, unknown>>;
+  /** When whoever drives this agent last acted through it: reported to the nodes, signed, so others can tell it's there. */
+  active?: () => number | null;
   /** A sandbox Lake: skip domain proof when checking who sent a message. Default true. */
   sandbox?: boolean;
   /** The use cases this agent works with (their studies, fields and houses). Default: health. */
@@ -78,7 +81,7 @@ export interface LakeAgent {
   webId: string;
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
-  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string }[]>;
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string; /** When its driver last acted through it, if it says (agents only). */ last_active?: string }[]>;
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
@@ -93,17 +96,17 @@ export interface LakeAgent {
   /** Put a blueprint you wrote on the Lake (SPEC §11.3), signed by you; others find and read it there. */
   publishBlueprint(markdown: string): Promise<{ name: string; version: string; url: string }>;
   /**
-   * Pay another agent. In USD: under this agent's allowance, settled by a payments agent, the receipt delivered to the
-   * payee. In any other unit the two agreed on (hours, favours, a naming right): a transfer the payer signs and sends;
+   * Pay another agent. In a currency (USD, AUD…: the one its allowance is in): under that allowance, settled by a payments
+   * agent, the receipt delivered to the payee. In any other unit the two agreed on (hours, favours, a naming right): a transfer the payer signs and sends;
    * nothing backs it but the signature and the payer's word.
    */
   /** `order`: an order id, or the sha256 of what was delivered; the payment and its receipt name it. */
   pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
   /**
    * Where this agent's spending allowance comes from, once it's connected to its human's house: the allowance the human
-   * signed there (SPEC §6.2). Without one, USD payments use the sandbox's play-money allowance, if any.
+   * signed there (SPEC §6.2), in its currency. Without one, USD payments use the sandbox's play-money allowance, if any.
    */
-  setAllowanceSource(source: () => Promise<{ credential: string; card: AgentCard; owner?: string } | null>): void;
+  setAllowanceSource(source: () => Promise<{ credential: string; card: AgentCard; owner?: string; currency?: string } | null>): void;
   close(): Promise<void>;
 }
 
@@ -146,9 +149,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   }
   const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
-  if (o.onMessage) link.keepAlive(20_000); // an agent that takes messages stays findable
+  if (o.onMessage) link.keepAlive(20_000, o.active); // an agent that takes messages stays findable
   let allowance: Promise<{ credential: string; card: AgentCard }> | undefined;
-  let allowanceSource: (() => Promise<{ credential: string; card: AgentCard; owner?: string } | null>) | undefined;
+  let allowanceSource: (() => Promise<{ credential: string; card: AgentCard; owner?: string; currency?: string } | null>) | undefined;
 
   return {
     card: visitor.card,
@@ -157,20 +160,20 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     domain: o.domain,
     async find(q = {}) {
       const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
-      let found: { card: AgentCard }[] | null = null;
+      let found: { card: AgentCard; active?: string }[] | null = null;
       for (const node of nodes) {
         try {
-          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
+          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard; active?: string }[];
           break;
         } catch {
           // try the next node
         }
       }
       if (!found) throw new Error('no Lake node reachable');
-      return found.map(({ card }) => {
+      return found.map(({ card, active }) => {
         const p = card.capabilities?.extensions?.[0]?.params as { role: string; ownerDomain: string; tags: string[] };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
-        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(active ? { last_active: ago(active) } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,
@@ -192,30 +195,34 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },
-    async pay(agentUrl, amountUsd, memo, unit = 'USD', order) {
-      // Some rulebooks call the sandbox's play dollars "USD-sim"; they are the same dollars.
+    async pay(agentUrl, amount, memo, unit = 'USD', order) {
+      // Some rulebooks call the sandbox's play dollars "USD-sim"; they are the same dollars. A currency is its ISO code.
       if (/^usd([-_ ]?sim)?$/i.test(unit)) unit = 'USD';
+      if (/^[a-z]{3}$/i.test(unit) && (/^[A-Z]{3}$/.test(unit) || MONEYLIKE.test(unit.toLowerCase()))) unit = unit.toUpperCase();
       // At least a cent, in whole cents: no dust, and no rounding drift in anyone's balance.
-      if (!(amountUsd >= 0.01) || Math.abs(amountUsd * 100 - Math.round(amountUsd * 100)) > 1e-6) throw new Error('pay at least 0.01, in whole hundredths');
+      if (!(amount >= 0.01) || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-6) throw new Error('pay at least 0.01, in whole hundredths');
       const payeeCard = (await (await fetch(cardUrlFor(agentUrl))).json()) as AgentCard;
       const payee = lakeProfile(payeeCard)?.webId;
       if (!payee) throw new Error(`no Lake agent at ${agentUrl}`);
       if (payee === visitor.webId) throw new Error('paying yourself moves nothing; pay another agent');
-      if (unit !== 'USD') {
-        if (!/^[a-z][a-z0-9-]{0,31}$/.test(unit)) throw new Error('a unit is a short lowercase word, like hour or favour');
+      if (!isCurrency(unit)) {
+        if (!/^[a-z][a-z0-9-]{0,31}$/.test(unit)) throw new Error('a unit is a currency code (USD, AUD…) or a short lowercase word, like hour or favour');
         // A self-signed IOU named like money ("usdsim", "eur") reads as money settled by a third party, which it isn't.
-        if (MONEYLIKE.test(unit)) throw new Error(`"${unit}" looks like money: pay in USD (settled by the payments agent), or name what it really is (hour, favour, a token you invented)`);
+        if (MONEYLIKE.test(unit)) throw new Error(`"${unit}" looks like money: pay in a currency (USD, AUD…, settled by the payments agent), or name what it really is (hour, favour, a token you invented)`);
         const credential = await issueCredential({
           '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeTransfer'], issuer: visitor.webId, validFrom: new Date().toISOString(),
-          credentialSubject: { id: payee, amount: { unit, value: amountUsd }, memo: memo.slice(0, 200), ...(order ? { order: order.slice(0, 120) } : {}), backing: 'the payer\'s signature and word, nothing else' },
+          credentialSubject: { id: payee, amount: { unit, value: amount }, memo: memo.slice(0, 200), ...(order ? { order: order.slice(0, 120) } : {}), backing: 'the payer\'s signature and word, nothing else' },
         }, id);
-        await ask(agentUrl, visitor, { kind: 'transfer', transfer: { credential, card: visitor.card }, amount: amountUsd, unit, memo: memo.slice(0, 200) });
-        if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd, unit }));
-        return { paid: amountUsd, unit, to: payee, receipt: credential };
+        await ask(agentUrl, visitor, { kind: 'transfer', transfer: { credential, card: visitor.card }, amount, unit, memo: memo.slice(0, 200) });
+        if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount, unit }));
+        return { paid: amount, unit, to: payee, receipt: credential };
       }
-      // The human's own signed allowance, from their house, comes first; then the sandbox's play money, if any.
+      // The human's own signed allowance, from their house, comes first; then the sandbox's play money (dollars), if any.
       const own = (await allowanceSource?.().catch(() => null)) ?? null;
-      if (!own && !o.allowanceUsd) throw new Error('this agent has no allowance to pay from in USD. Spending a person\'s money needs their house: they sign an allowance in its control panel (Money → Spending allowance) and you connect with lake_house_connect. Or pay in another unit you agreed on.');
+      if (!own && !o.allowanceUsd) throw new Error(`this agent has no allowance to pay from in ${unit}. Spending a person's money needs their house: they sign an allowance in its control panel (Money → Spending allowance) and you connect with lake_house_connect. Or pay in another unit you agreed on.`);
+      const currency = own ? own.currency ?? 'USD' : 'USD';
+      // Nothing converts: an allowance in one currency pays in that currency only.
+      if (unit !== currency) throw new Error(own ? `your human's allowance is in ${currency}, not ${unit}: pay in ${currency}, or ask them for an allowance in ${unit}` : `the sandbox's play money is in USD, not ${unit}`);
       if (!own) allowance ??= (async () => {
         const human = await makeHuman(await generateIdentity(), o.domain, `Spending allowance for ${o.domain}`);
         const credential = await signIntentMandate(human.id, human.webId, {
@@ -225,16 +232,16 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         return { credential, card: human.card };
       })();
       const intent = own ?? (await allowance!);
-      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount: amountUsd, intentMandate: intent.credential, agreement: order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 80)}`, currency: 'USD' });
+      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 80)}`, currency });
       const payments = o.payments ?? 'http://payments:4600';
-      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent, payments: [payment] })).reply;
+      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment] })).reply;
       if (settled.kind !== 'settled') throw new Error((settled.problems ?? [settled.why ?? 'refused']).join('; '));
       const receipt = settled.receipts[0].credential as string;
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
       // The payee gets the signed receipt; its inbox shows it like any other message.
-      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount: amountUsd, memo: memo.slice(0, 200), ...(order ? { order } : {}) });
-      if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd }));
-      return { paid: amountUsd, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
+      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}) });
+      if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount, unit }));
+      return { paid: amount, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
     },
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;

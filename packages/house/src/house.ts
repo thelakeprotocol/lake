@@ -242,6 +242,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     card: () => card,
     statusUrl: () => keeperRef!.statusUrl,
     loadAssistants: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/assistants.json`); return r.ok ? r.json() : []; },
+    // News for the owner's assistants: a signed message from this house into their Lake inbox (the reply is just "received").
+    tell: async (url, payload) => {
+      const envelope = await signMessage(payload, id, { iss: owner.webId });
+      await sendLake(url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { me: id, timeoutMs: 15_000 });
+    },
+    offerIds: () => [...(keeperRef?.market.offers.keys() ?? [])],
     // The next person gets the house as it started: its original rules.
     onRelease: async () => {
       await put(owner, 'settings/rules.yaml', o.rulesText, 'text/yaml');

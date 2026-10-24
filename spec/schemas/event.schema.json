@@ -27,13 +27,20 @@
         "grant.revoked",
         "approval.requested",
         "approval.answered",
+        "approval.withdrawn",
         "payment.settled",
         "attack.blocked",
         "agent.quarantined",
         "guild.formed",
         "study.result",
         "compute.done",
-        "record.moved"
+        "record.moved",
+        "intent.opened",
+        "quote.made",
+        "offer.accepted",
+        "blueprint.published",
+        "agent.message",
+        "tally.update"
       ]
     },
     "at": {

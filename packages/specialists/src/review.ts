@@ -162,14 +162,17 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     if (!mandate.type.includes('IntentMandate') || m.id !== agentWebId) return { kind: 'refused', problems: ['the Intent Mandate is not for this agent'] };
     if (Date.parse(m.intent_expiry) < Date.now()) return { kind: 'refused', problems: ['the Intent Mandate has expired'] };
     const digest = digestSRI(intent.credential);
+    const currency = m.budget.currency ?? 'USD';
     const checked: { payee: string; amount: number; agreement: string }[] = [];
     for (const pm of payments) {
       try {
         const vc = await verifyCredential(pm, agent.publicJwk);
-        const x = vc.credentialSubject as unknown as { id: string; amount: { value: number }; intentMandate: string; agreement: string };
+        const x = vc.credentialSubject as unknown as { id: string; amount: { value: number; currency?: string }; intentMandate: string; agreement: string };
         if (!vc.type.includes('PaymentMandate') || x.intentMandate !== digest || !(x.amount.value > 0)) throw new Error();
+        // The owner signed a budget in one currency: a payment in another isn't under it (nothing here converts).
+        if ((x.amount.currency ?? 'USD') !== currency) return { kind: 'refused', problems: [`the allowance is in ${currency}; this payment is in ${x.amount.currency ?? 'USD'}`] };
         // Whole cents, at least one; and an agent can't pay itself (it would only inflate what looks settled).
-        if (x.amount.value < 0.01 || Math.abs(x.amount.value * 100 - Math.round(x.amount.value * 100)) > 1e-6) return { kind: 'refused', problems: [`$${x.amount.value}: pay at least $0.01, in whole cents`] };
+        if (x.amount.value < 0.01 || Math.abs(x.amount.value * 100 - Math.round(x.amount.value * 100)) > 1e-6) return { kind: 'refused', problems: [`${currency} ${x.amount.value}: pay at least 0.01, in whole cents`] };
         if (x.id === agentWebId) return { kind: 'refused', problems: ['an agent can\'t pay itself'] };
         checked.push({ payee: x.id, amount: Math.round(x.amount.value * 100), agreement: x.agreement });
       } catch {
@@ -181,18 +184,18 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     const already = spent.get(digest) ?? 0;
     const cap = Math.round(m.budget.amount * 100);
     if (already + total > cap) {
-      return { kind: 'refused', problems: [`$${(already + total) / 100} is over the $${m.budget.amount} the human signed for: a human must approve`] };
+      return { kind: 'refused', problems: [`${currency} ${(already + total) / 100} is over the ${currency} ${m.budget.amount} the human signed for: a human must approve`] };
     }
     spent.set(digest, already + total);
     const receipts = await Promise.all(
       checked.map(async (c) => ({
         payee: c.payee,
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
-        credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency: m.budget.currency ?? 'USD', value: c.amount / 100 }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated', settlementId: randomUUID() }, 3650),
+        credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated', settlementId: randomUUID() }, 3650),
       })),
     );
     o.onSettled?.(total / 100, checked.length);
-    return { kind: 'settled', receipts, total: total / 100, remaining: (cap - already - total) / 100 };
+    return { kind: 'settled', receipts, currency, total: total / 100, remaining: (cap - already - total) / 100 };
   });
   return { app: s.app, card: s.card, webId: s.webId };
 }

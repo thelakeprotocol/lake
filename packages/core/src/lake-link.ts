@@ -68,13 +68,28 @@ export class LakeLink {
   /** Nodes forget (restarts, resets). Check now and then, and register again if this one has forgotten us. */
   private alive: ReturnType<typeof setInterval> | null = null;
 
-  keepAlive(everyMs = 15_000) {
+  /**
+   * `active`: when whoever drives this agent (a person, a model) last did something through it, as distinct from the
+   * process being up. Reported, signed, whenever it changes, so others can tell an agent at work from one left running.
+   */
+  keepAlive(everyMs = 15_000, active?: () => number | null) {
     this.stop();
+    let told = 0;
     this.alive = setInterval(async () => {
+      const at = active?.() ?? 0;
+      if (at > told && this.id) {
+        try {
+          const env = await signMessage({ kind: 'presence', active: new Date(at).toISOString() }, this.o.identity, { iss: this.o.webId });
+          if ((await fetch(`${this.o.nodeUrl}/presence`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) })).ok) told = at;
+        } catch {
+          // next time
+        }
+      }
       try {
         const r = (await (await fetch(`${this.o.nodeUrl}/registered?webId=${encodeURIComponent(this.o.webId)}`, { signal: AbortSignal.timeout(3000) })).json()) as { registered: boolean };
         if (!r.registered) {
           this.id = null;
+          told = 0;
           await this.register(1);
         }
       } catch {
@@ -131,8 +146,8 @@ export class LakeLinks {
     for (const l of this.links) l.report(e);
   }
 
-  keepAlive(everyMs?: number) {
-    for (const l of this.links) l.keepAlive(everyMs);
+  keepAlive(everyMs?: number, active?: () => number | null) {
+    for (const l of this.links) l.keepAlive(everyMs, active);
   }
 
   stop() {

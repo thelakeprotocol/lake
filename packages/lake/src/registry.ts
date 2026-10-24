@@ -13,6 +13,8 @@ export interface Entry {
   via: 'direct' | string;
   /** Last time the participant checked in (registration, keep-alive, or an event report). */
   lastSeen: number;
+  /** When the agent's driver last acted through it (its own signed word), if it says. */
+  lastActive?: number;
 }
 
 export type Refusal = { code: 'not-lake' | 'forged-card' | 'domain' | 'unreachable' | 'card-mismatch'; why: string };

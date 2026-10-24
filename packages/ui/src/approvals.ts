@@ -128,7 +128,7 @@ async function home(box: HTMLElement) {
   const [o, feed, { suggestions, assistants }] = await Promise.all([
     call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
-    call<{ suggestions: { id: string; from: string; text: string; at: string }[]; assistants: { label: string }[] }>({ kind: 'list' }),
+    call<{ suggestions: Note[]; assistants: { label: string }[] }>({ kind: 'list' }),
   ]);
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
@@ -433,11 +433,12 @@ function renderRules(message?: { ok: boolean; text: string }) {
 type Term = { kind: string; label: string; options: (string | number)[]; unit?: string; names?: Record<string, string> };
 type Offer = {
   id: string; pack: string; quoter: { name: string; domain: string }; title: string; status: string; groupSize: number; fee?: number; currency?: string;
-  result: { eligible: boolean; outputs: Record<string, number> }; labels?: Record<string, { label: string; unit?: string }>; answer?: Record<string, unknown>;
+  result: { eligible: boolean; outputs: Record<string, number>; notes?: string[] }; labels?: Record<string, { label: string; unit?: string }>; answer?: Record<string, unknown>;
 };
 const isCurrency = (unit?: string) => !!unit && /^[A-Z]{3}$/.test(unit);
 // In the reader's own locale: an Australian browser shows $1,269, a British one A$1,269.
-const money0 = (n: number, currency = 'USD') => new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(n);
+// Whole amounts stay whole (a loan's monthly payment); a grocery total keeps its cents.
+const money0 = (n: number, currency = 'USD') => new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: Number.isInteger(n) ? 0 : 2 }).format(n);
 const fmt = (v: number, unit?: string) => (isCurrency(unit) ? money0(v, unit) : unit === '%' ? `${v}%` : unit === 'yes/no' ? (v ? 'yes' : 'no') : String(v));
 /** One choice of an intent term, as the owner reads it: a price range in its currency, a state's name. */
 const choice = (t: Term | undefined, x: string | number) =>
@@ -471,13 +472,19 @@ async function offers(box: HTMLElement) {
     blocks.push(h('div', { class: 'card ok', style: 'max-width:820px' },
       h('h3', {}, `Looking for ${p.title.toLowerCase()}`),
       h('p', { class: 'muted', style: 'margin:6px 0 10px' }, `${Object.entries(intent.terms).map(([k, x]) => `${p.terms[k]?.label ?? k}: ${choice(p.terms[k], x)}`).join(' · ')}`),
-      h('div', { class: 'r-meta' }, `${intent.members} household${intent.members === 1 ? '' : 's'} in your group · ${mine.length} lender${mine.length === 1 ? '' : 's'} priced it · ${eligible.length} offer${eligible.length === 1 ? '' : 's'} for you`),
+      h('div', { class: 'r-meta' }, `${intent.members} household${intent.members === 1 ? '' : 's'} in your group · ${mine.length} priced it · ${eligible.length} offer${eligible.length === 1 ? '' : 's'} for you`),
       h('div', { style: 'margin-top:12px' }, stop)));
-    if (!mine.length) blocks.push(h('p', { class: 'muted' }, 'Waiting for authorised lenders to price it…'));
+    if (!mine.length) blocks.push(h('p', { class: 'muted' }, 'Waiting for authorised agents to price it…'));
     for (const o of mine) {
       const out = o.result.outputs;
       const lab = (k: string) => o.labels?.[k] ?? { label: k };
-      const head = o.result.eligible ? h('div', { class: 'r-title', style: 'font-size:22px;font-family:var(--f-display)' }, `${out.rate}%`, h('span', { class: 'muted', style: 'font-size:14px;margin-left:10px;font-family:var(--f-body)' }, `${fmt(out.monthly ?? 0, lab('monthly').unit)} a month`)) : h('div', { class: 'r-title muted' }, 'Not for you this time');
+      // The headline: a loan's rate and monthly payment, or else the program's first output under its own label.
+      const first = Object.keys(out)[0]!;
+      const headline = out.rate !== undefined
+        ? [`${out.rate}%`, h('span', { class: 'muted', style: 'font-size:14px;margin-left:10px;font-family:var(--f-body)' }, `${fmt(out.monthly ?? 0, lab('monthly').unit)} a month`)]
+        : [fmt(out[first]!, lab(first).unit), h('span', { class: 'muted', style: 'font-size:14px;margin-left:10px;font-family:var(--f-body)' }, lab(first).label)];
+      const head = o.result.eligible ? h('div', { class: 'r-title', style: 'font-size:22px;font-family:var(--f-display)' }, ...headline) : h('div', { class: 'r-title muted' }, 'Not for you this time');
+      const shown = out.rate !== undefined ? ['rate', 'monthly', 'group_off'] : [first, 'group_off'];
       const accept = h('button', { class: 'btn allow', type: 'button' }, o.status === 'accepted' ? 'Accepted' : 'Accept');
       if (o.status === 'accepted' || !o.result.eligible || eligible.some((x) => x.status === 'accepted')) accept.disabled = true;
       accept.onclick = async () => {
@@ -491,8 +498,10 @@ async function offers(box: HTMLElement) {
         h('div', { class: 'who', style: 'font-size:16px' }, o.quoter.name, (out.group_off ?? 0) > 0 ? h('span', { class: 'chip share', style: 'margin-left:8px' }, `group rate −${out.group_off}%`) : ''),
         head,
         // Every other output the program declares, by its own labels; the headline ones are above, and zeros say nothing.
-        o.result.eligible ? h('dl', { class: 'facts' }, ...Object.keys(out).filter((k) => !['rate', 'monthly', 'group_off'].includes(k) && out[k]).map((k) => h('div', {}, h('dt', {}, lab(k).label), h('dd', {}, fmt(out[k]!, lab(k).unit)))),
+        o.result.eligible ? h('dl', { class: 'facts' }, ...Object.keys(out).filter((k) => !shown.includes(k) && out[k]).map((k) => h('div', {}, h('dt', {}, lab(k).label), h('dd', {}, fmt(out[k]!, lab(k).unit)))),
           o.fee ? h('div', {}, h('dt', {}, 'Pays you'), h('dd', {}, `${money0(o.fee, o.currency)} if you accept`)) : '') : '',
+        // The quoter's notes, worked out in your house: why it's not for you, or what would change.
+        o.result.notes?.length ? h('ul', { class: 'r-meta', style: 'margin:8px 0 0 18px' }, ...o.result.notes.map((n) => h('li', {}, n))) : '',
         o.answer ? h('p', { class: 'advice' }, h('b', {}, o.quoter.name), String(o.answer.kind === 'agreed' ? `Yes: ${o.answer.what ?? 'agreed'}. ${o.answer.feePaid ? `${money0(Number(o.answer.feePaid), o.currency)} paid to you.` : ''} Next: ${o.answer.next ?? ''}` : o.answer.why ?? o.answer.kind)) : '',
         o.result.eligible ? h('div', { class: 'actions', style: 'grid-template-columns:1fr' }, accept) : ''));
     }
@@ -523,7 +532,7 @@ let invite: { msg: string; until: number } | null = null;
 
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
 async function myagent(box: HTMLElement) {
-  const v = await call<{ assistants: Assistant[]; suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
+  const v = await call<{ assistants: Assistant[]; suggestions: Note[] }>({ kind: 'list' });
   const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
   if (invite && invite.until < Date.now()) invite = null;
   const give = h('button', { class: 'btn primary', type: 'button' }, v.assistants.length ? 'Give another agent a key' : 'Give my AI agent a key');
@@ -551,7 +560,7 @@ async function myagent(box: HTMLElement) {
     v.assistants.length
       ? h('div', {}, h('h2', {}, 'Connected'), h('ul', { class: 'rows' }, ...v.assistants.map((a) => h('li', {},
           h('div', {}, h('div', { class: 'r-title' }, a.label.replace(/\s*\(.*\)$/, '')),
-            h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest${a.allowance ? ` · may spend up to $${a.allowance.amountUsd} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
+            h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest${a.allowance ? ` · may spend up to ${money$(a.allowance.amount, a.allowance.currency)} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
             allowanceForm(a)),
           h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } }, 'Revoke')))))
       : h('p', { class: 'muted', style: 'margin-top:14px' }, 'No agent connected yet.'),
@@ -560,7 +569,7 @@ async function myagent(box: HTMLElement) {
   );
 }
 
-interface Assistant { kid: string; label: string; addedAt: string; canHaveAllowance?: boolean; allowance?: { amountUsd: number; until: string } }
+interface Assistant { kid: string; label: string; addedAt: string; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 
 /**
  * A spending allowance for one assistant (SPEC §6.2): the house drafts it, this device signs it with your key, and the
@@ -573,13 +582,15 @@ function allowanceForm(a: Assistant): Node {
   }
   if (!a.canHaveAllowance) return h('div', { class: 'r-meta' }, 'To give it spending money, connect it again with a new code.');
   const amount = h('input', { type: 'number', min: '1', max: '500', step: '1', value: '10', style: 'width:5em' }) as HTMLInputElement;
+  // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
+  const currency = h('select', {}, ...CURRENCIES.map((c) => h('option', { value: c }, c))) as HTMLSelectElement;
   const days = h('select', {}, ...[1, 3, 7, 30].map((d) => h('option', { value: String(d), ...(d === 7 ? { selected: true } : {}) }, `${d} day${d === 1 ? '' : 's'}`))) as HTMLSelectElement;
   const msg = h('span', { class: 'muted' });
   const sign = h('button', { class: 'btn small', type: 'button' }, 'Sign and give') as HTMLButtonElement;
   sign.onclick = async () => {
     sign.disabled = true;
     try {
-      const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amountUsd: Number(amount.value), days: Number(days.value) });
+      const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amount: Number(amount.value), currency: currency.value, days: Number(days.value) });
       if (d.error) throw new Error(d.error);
       const credential = signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey());
       const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential });
@@ -590,13 +601,26 @@ function allowanceForm(a: Assistant): Node {
       sign.disabled = false;
     }
   };
-  return h('div', { class: 'r-meta', style: 'margin-top:6px' }, 'Spending money: $', amount, ' for ', days, ' ', sign, ' ', msg);
+  return h('div', { class: 'r-meta', style: 'margin-top:6px' }, 'Spending money: ', currency, ' ', amount, ' for ', days, ' ', sign, ' ', msg);
 }
 
-function suggestionList(list: { id: string; from: string; text: string; at: string }[]): Node {
+const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
+const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
+
+type Note = { id: string; from: string; text: string; at: string; offer?: string };
+function suggestionList(list: Note[]): Node {
   return h('ul', { class: 'rows' }, ...list.map((x) => h('li', {},
     h('div', {}, h('div', { class: 'r-title' }, x.text), h('div', { class: 'r-meta' }, `${x.from} · ${time(x.at)}`)),
-    h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.dismiss', id: x.id }); void show(); } }, 'Dismiss'))));
+    h('div', {},
+      // A note about an offer carries its Accept: still your tap, on your key, like on the Offers tab.
+      x.offer ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
+        (e.target as HTMLButtonElement).disabled = true;
+        const r = await call<{ error?: string }>({ kind: 'panel.offer.accept', offer: x.offer });
+        if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
+        void show();
+      } }, 'Accept the offer') : '',
+      ' ',
+      h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.dismiss', id: x.id }); void show(); } }, 'Dismiss')))));
 }
 
 // ---- Money ----
@@ -606,7 +630,7 @@ async function money(box: HTMLElement) {
     h('dl', { class: 'tiles' }, h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.total}`)), h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.receipts.length)))),
     h('p', { class: 'lede' }, 'Every payment comes with a receipt signed by a payments agent you trust, filed in your pod. In the sandbox, settlement is simulated.'),
     m.receipts.length ? h('ul', { class: 'rows', style: 'margin-top:14px' }, ...m.receipts.map((r) => h('li', {},
-      h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `$${r.amount} from ${who(r.payer)}` : `$${r.amount}`), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · signed by ${who(r.from)} · ${r.settlement}`)),
+      h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `${money$(r.amount, r.currency)} from ${who(r.payer)}` : money$(r.amount, r.currency)), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · signed by ${who(r.from)} · ${r.settlement}`)),
       h('span', { class: 'chip share' }, 'signed'))))
       : h('p', { class: 'muted' }, 'No payments yet.'),
   );

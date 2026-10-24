@@ -47,7 +47,7 @@ const caption = (text, sub, extra = {}) => { captions.push({ t: Date.now(), text
 const [np, sp, qp, hp, pp] = await Promise.all([free(), free(), free(), free(), free()]);
 const node = `http://localhost:${np}`, spec = `http://localhost:${sp}`;
 console.log(`run in ${out}`);
-await start('node', ['packages/lake/dist/main.js', '--port', String(np), '--domain', 'lake.local', '--guild-min', '100000', '--data', join(out, 'node'), '--record', join(out, 'run.jsonl')], /Lake node on/);
+await start('node', ['packages/lake/dist/main.js', '--port', String(np), '--domain', 'lake.local', '--guild-min', '100000', '--show-intent-houses', '--data', join(out, 'node'), '--record', join(out, 'run.jsonl')], /Lake node on/);
 await start('specialists', ['packages/specialists/dist/main.js', 'bank,register,auditor,payments', '--packs', 'mortgage', '--port', String(sp), '--url', spec, '--lake', node, '--data', join(out, 'specialists')], /payments .* at/);
 await start('lenders', ['packages/agent/dist/cli.js', 'quoters', '--packs', 'mortgage', '--port', String(qp), '--public-url', `http://localhost:${qp}`, '--node', node,
   '--auditor', `${spec}/auditor`, '--authority', `${spec}/register`, '--payments', `${spec}/payments`], /8 quoters on/);

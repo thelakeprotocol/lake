@@ -24,6 +24,8 @@ interface Tally {
    * A blind pledge (SPEC §11.4): signatures are anonymous passes from a separate issuer, so this tally never learns who
    * signed; each pass carries a commitment to its signer, opened by the signer once the pledge has filled.
    */
+  /** The opener asked for it to be listed (tally.list), so others can find it and see how many more it needs. */
+  listed?: boolean;
   blind?: { issuer: string; publicJwk: JsonWebKey; passes: { commit: string; withdraw: string; at: string; revealed?: { webId: string; domain: string; url: string } }[]; spent: string[] };
 }
 
@@ -127,7 +129,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     return { kind: 'tally.count', ...view(t), ...(show ? { signers: revealed().map(({ domain, url }) => ({ domain, url })), unrevealed: b.passes.length - revealed().length } : {}) };
   };
 
-  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind? }, { kind: "tally.sign", id }, { kind: "tally.withdraw", id } or { kind: "tally.count", id }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, listed? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -139,7 +141,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         ...(deadline > Date.now() && deadline < Date.now() + MAX_DAYS * 86_400_000 ? [] : [`deadline: a time in the next ${MAX_DAYS} days`]),
       ];
       if (problems.length) return { kind: 'refused', problems };
-      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}) };
+      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}) };
       if (p.blind === true) {
         // A blind pledge: the pass issuer makes a key for it alone; signers get their passes there, not here.
         if (!o.passesUrl) return { kind: 'refused', problems: ['this tally has no pass issuer for blind pledges'] };
@@ -152,7 +154,12 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       report(t);
       return { kind: 'tally.opened', ...view(t) };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind? }, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    // Pledges their openers listed, still open: what each says and how many more it needs (run 22's pledges lapsed one short).
+    if (p.kind === 'tally.list') {
+      for (const t of tallies.values()) lapse(t);
+      return { kind: 'tally.list', pledges: [...tallies.values()].filter((t) => t.listed && t.state === 'open').map((t) => ({ ...view(t), needs: Math.max(0, t.threshold - counted(t)) })) };
+    }
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     const t = tallies.get(id);
     if (!t) return { kind: 'refused', problems: [`no tally called "${id}"`] };
     lapse(t);

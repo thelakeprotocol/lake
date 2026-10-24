@@ -174,7 +174,10 @@ export class Housekeeper {
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     if ((v.payload.kind as string) === 'withdraw') {
       const id = String((v.payload as { offerId?: string }).offerId ?? '');
-      return this.reply(this.o.desk.withdraw(id, v.profile.webId) ? { kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] } : { kind: 'rejected', code: 'malformed', why: 'no waiting request of yours with that id' });
+      if (!this.o.desk.withdraw(id, v.profile.webId)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no waiting request of yours with that id' });
+      // The owner saw the request arrive; they see it go too (run 23's assistants read a vanished request as "decided").
+      this.o.emit(makeEvent('approval.withdrawn', this.actor, visitor));
+      return this.reply({ kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);

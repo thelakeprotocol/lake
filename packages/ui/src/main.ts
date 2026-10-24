@@ -315,7 +315,7 @@ function onEvent(e: LakeEvent, p?: Participant) {
       if (h) { const { x, y } = at(h); ripples.push({ x, y, r: 4, max: 70, col: COL.amber, w: 1.5 }); }
       break;
     case 'intent.opened':
-      // In a sandbox the node names the house; in production only 'lake' asks, and nobody moves.
+      // On a staged demo (--show-intent-houses) the node names the house; otherwise only 'lake' asks, and nobody moves.
       if (h && e.data?.group) {
         joinGroup(h, String(e.data.group));
         const { x, y } = at(h);
