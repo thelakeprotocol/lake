@@ -51,6 +51,8 @@ services:
     command: ["--tenants", "${LAKE_TENANTS:-6}", "--tenant-prefix", "sb-", "--public-url", "https://${LAKE_DOMAIN}", "--pod-url", "https://${LAKE_DOMAIN}/pods/", "--open-pairing"]
     environment:
       NODE_OPTIONS: "--max-old-space-size=256"
+      # Two houses start at a time: ten pods starting together overloaded the 1 GB droplet after deploys (run 28).
+      LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       # Health and the weekly shop (shopping@1); never mortgage on the sandbox.

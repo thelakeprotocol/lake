@@ -46,6 +46,8 @@ const { values: a } = parseArgs({
     production: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     tenants: { type: 'string', default: process.env.LAKE_TENANTS },
+    // How many hosted houses start (and join) at once: a small machine starting ten pods together runs out of memory.
+    'start-concurrency': { type: 'string', default: process.env.LAKE_START_CONCURRENCY ?? '8' },
     'tenant-prefix': { type: 'string', default: process.env.LAKE_TENANT_PREFIX },
     'personas-dir': { type: 'string', default: process.env.LAKE_PERSONAS ?? '/personas' },
     relay: { type: 'boolean', default: process.env.LAKE_RELAY === '1' },
@@ -156,7 +158,8 @@ async function hosted(n: number) {
   const app = express();
   const houses: House[] = [];
   let warnings = 0;
-  await pool(names, 8, async (name) => {
+  const at = Math.max(1, Number(a['start-concurrency']) || 8);
+  await pool(names, at, async (name) => {
     // Each hosted house gets its own rules file: a persona, its own owner name, one or two interests.
     const h = seedFrom(name);
     // Personas are picked by their `# weight:`, the same one every time for the same house; `{{pick:a,b}}` picks a choice the same way.
@@ -192,7 +195,7 @@ async function hosted(n: number) {
   });
 
   const server = app.listen(port, async () => {
-    await pool(houses, 16, (h) => h.join());
+    await pool(houses, at * 2, (h) => h.join());
     log(`${houses.length} houses joined in ${((Date.now() - t0) / 1000).toFixed(1)}s${warnings ? ` (${warnings} warnings)` : ''}; each at ${baseUrl}/t/<name>/a2a`);
   });
   const stop = async () => {
