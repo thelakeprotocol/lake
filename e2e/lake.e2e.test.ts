@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, generateIdentity, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, checkCredentialStatus, generateIdentity, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -101,6 +101,10 @@ describe('one house', () => {
     const { reply } = await knock(houses.stan!, await visitor('gp.example'), presets().gp!);
     expect(reply).toMatchObject({ kind: 'decision', decision: 'join', grantHours: 48, holds: ['medications'] });
     expect(String(reply.grant).split('.')).toHaveLength(3);
+    // Its bit on the house's public status list: anyone can check it, and it isn't revoked.
+    const vc = JSON.parse(Buffer.from(String(reply.grant).split('.')[1]!, 'base64url').toString());
+    expect(vc.credentialStatus).toMatchObject({ type: 'BitstringStatusListEntry', statusListCredential: `${houses.stan}/status/revocation` });
+    expect(await checkCredentialStatus(vc)).toMatchObject({ checked: true, revoked: false });
   });
 
   it('asks the owner when no rule covers it, declines what a rule refuses, and never tells the visitor the owner\'s rules', async () => {
@@ -280,6 +284,8 @@ describe('the owner', () => {
     const { reply } = await ask(houses.strict!, later, { kind: 'compute', grant: key, study: readmissionStudy() });
     expect(reply).toMatchObject({ kind: 'excluded', why: 'the owner revoked this key' });
     expect(Date.now() - t0).toBeLessThan(1000);
+    // And anyone can see it on the house's public status list.
+    expect(await checkCredentialStatus(JSON.parse(Buffer.from(key.split('.')[1]!, 'base64url').toString()))).toMatchObject({ checked: true, revoked: true });
   });
 
   it('runs the control panel: overview, rules edited and saved in the pod, everything exported', async () => {

@@ -1,0 +1,20 @@
+{
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkJpdHN0cmluZ1N0YXR1c0xpc3RDcmVkZW50aWFsIl0sImlzc3VlciI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMzo0NzowNy43MDNaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS90L3N0YW4vc3RhdHVzL3Jldm9jYXRpb24jbGlzdCIsInR5cGUiOiJCaXRzdHJpbmdTdGF0dXNMaXN0Iiwic3RhdHVzUHVycG9zZSI6InJldm9jYXRpb24iLCJlbmNvZGVkTGlzdCI6InVINHNJQUFBQUFBQUFBLTNhQVEwQUFBakRzT1BmTkRMZ1NhdGdBcFo4Tk5jQkFBQUFBQUFBQUFBQUFGREZnUXNBQUFBQV9SYWhzNzdrQUVBQUFBIn19.G1lTtlZXag3ptuYQmc9pfdWKWxibrOc_QkxyclXIi-QDNC1ou4acT-KXf1meiH2gPw5PkRT8kbZn1G7p32fEAA",
+  "decoded": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "type": [
+      "VerifiableCredential",
+      "BitstringStatusListCredential"
+    ],
+    "issuer": "https://pods.example/stan/profile/card#me",
+    "validFrom": "2026-10-24T03:47:07.703Z",
+    "credentialSubject": {
+      "id": "https://pods.example/t/stan/status/revocation#list",
+      "type": "BitstringStatusList",
+      "statusPurpose": "revocation",
+      "encodedList": "uH4sIAAAAAAAAA-3aAQ0AAAjDsOPfNDLgSatgApZ8NNcBAAAAAAAAAAAAAFDFgQsAAAAA_Rahs77kAEAAAA"
+    }
+  }
+}

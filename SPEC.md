@@ -194,6 +194,7 @@ Houses that counter the same offer and opted in with `join_collectives: true` sa
 - Only the owner's key issues a grant: through a live Allow, or through a standing `join` rule the owner signed.
 - An agent MUST NOT be able to mint, widen or extend a grant. The pod's access layer MUST enforce this, not only agent code.
 - Revocation is immediate. A revoked grant MUST stop working within 1 second on the reference implementation.
+- Anyone can check a grant (the **W3C Bitstring Status List**): each grant carries a `credentialStatus` (`BitstringStatusListEntry`, `statusPurpose: revocation`, a `statusListIndex`, and `statusListCredential` the house's list at `<house>/status/revocation`, next to its card). The house MUST serve that list as a `BitstringStatusListCredential` it signs, at least 131,072 bits, and set a grant's bit when it is revoked or used up. It SHOULD pick each grant's bit at random. A live grant's draft carries its entry, and the owner's device signs it unchanged. A checker fetches the whole list, so the house never learns which key is being checked, and MUST verify the list with the key of the card at the same address, whose WebID is the grant's issuer.
 
 ### 6.1 The owner's key
 

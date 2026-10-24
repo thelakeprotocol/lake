@@ -1,9 +1,9 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  makeEvent, readAccessGrant, ReplayGuard, verifyCredential, verifyMessage,
+  makeEvent, readAccessGrant, ReplayGuard, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -107,6 +107,9 @@ export class OwnerDesk {
       writeGrant: (id: string, jws: string) => Promise<void>;
       saveRevoked: (ids: string[]) => Promise<void>;
       loadRevoked: () => Promise<string[]>;
+      /** Each key's bit on the house's public status list (SPEC §6), kept with the agreements. */
+      saveStatus?: (indexes: Record<string, number>) => Promise<void>;
+      loadStatus?: () => Promise<Record<string, number>>;
       /**
        * Sandbox houses anyone can claim: a claim is a lease, not a deed. When it ends (or the owner hands
        * the house back), every key is revoked, the house forgets its owner, and `onRelease` resets it.
@@ -154,6 +157,7 @@ export class OwnerDesk {
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
+    for (const [id, i] of Object.entries((await this.o.loadStatus?.().catch(() => ({}))) ?? {})) this.statusIndexes.set(id, Number(i));
     for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a);
     return { paired: !!this.ownerJwk, token: this.token };
   }
@@ -161,6 +165,23 @@ export class OwnerDesk {
   private revokedIds = new Set<string>();
   isRevoked(id: string) {
     return this.revokedIds.has(id) || !!this.grants.get(id)?.revoked;
+  }
+
+  /** Each key's bit on the house's public status list: a random place, so where it sits says nothing about it. */
+  private statusIndexes = new Map<string, number>();
+  async statusIndex(id: string): Promise<number> {
+    let i = this.statusIndexes.get(id);
+    if (i === undefined) {
+      const used = new Set(this.statusIndexes.values());
+      do i = randomInt(0, STATUS_LIST_LENGTH); while (used.has(i));
+      this.statusIndexes.set(id, i);
+      await this.o.saveStatus?.(Object.fromEntries(this.statusIndexes));
+    }
+    return i;
+  }
+  /** The bits to set: every key taken back or used up. */
+  revokedIndexes(): number[] {
+    return [...this.statusIndexes].filter(([id]) => this.isRevoked(id)).map(([, i]) => i);
   }
 
   record(g: Omit<GrantRecord, 'revoked'>) {
@@ -378,6 +399,8 @@ export class OwnerDesk {
     const ok = !!s &&
       vc.issuer === this.o.webId && s.owner === this.o.webId && s.grantee === req.visitor.webId && s.offer === req.offerId &&
       s.purpose === req.purpose && (s.study ?? null) === req.study && s.fields.every((f) => req.fields.includes(f)) &&
+      // Its bit on the status list is the one the house drafted, so anyone can check it hasn't been revoked.
+      JSON.stringify((vc as { credentialStatus?: unknown }).credentialStatus) === JSON.stringify((req.grantDraft as { credentialStatus?: unknown } | undefined)?.credentialStatus) &&
       until > Date.now() && until <= Date.now() + MAX_GRANT_MS + 60_000;
     if (!ok) return { error: 'grant does not match the request you were shown' };
     await this.o.writeGrant(req.offerId, grant);

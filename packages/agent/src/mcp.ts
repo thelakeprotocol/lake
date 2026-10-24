@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { checkCredentialStatus, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -75,7 +75,10 @@ async function verifyEvidence(x: unknown): Promise<Record<string, unknown>> {
     if (e.credential) {
       const vc = await verifyCredential(e.credential, signer.publicJwk);
       const sub = vc.credentialSubject as Record<string, unknown>;
-      return { verified: true, what: 'credential', type: vc.type.filter((t: string) => t !== 'VerifiableCredential'), signedBy: signer.ownerDomain, signer: e.card.name, about: sub.id, says: sub, validUntil: (vc as { validUntil?: string }).validUntil };
+      // A credential that names a bit on its issuer's status list can be checked for revocation by anyone.
+      const status = await checkCredentialStatus(vc).catch((err: Error) => ({ checked: false as const, why: err.message }));
+      return { verified: true, what: 'credential', type: vc.type.filter((t: string) => t !== 'VerifiableCredential'), signedBy: signer.ownerDomain, signer: e.card.name, about: sub.id, says: sub, validUntil: (vc as { validUntil?: string }).validUntil,
+        ...(status.checked ? { revoked: status.revoked } : 'why' in status ? { revoked: 'unknown', statusProblem: status.why } : {}) };
     }
     if (e.envelope) {
       const iat = Number(e.envelope.payload?.iat ?? 0) * 1000;
@@ -417,7 +420,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_verify',
     {
-      description: 'Check evidence someone showed you: a credential with its issuer\'s card ({ credential, card }: a receipt, an approval, a stamp) or a signed message with its sender\'s card ({ card, envelope }, from lake_inbox with raw: true). Says whether it verifies, who signed it and what it says. Use it before trusting a forwarded receipt or quote; claims nobody signed prove nothing.',
+      description: 'Check evidence someone showed you: a credential with its issuer\'s card ({ credential, card }: a receipt, an approval, a stamp, a house\'s key; where the credential has a status entry, it also says whether it was revoked) or a signed message with its sender\'s card ({ card, envelope }, from lake_inbox with raw: true). Says whether it verifies, who signed it and what it says. Use it before trusting a forwarded receipt or quote; claims nobody signed prove nothing.',
       inputSchema: { evidence: z.record(z.string(), z.unknown()).describe('{ credential, card } or { card, envelope }') },
     },
     async (a) => json(await verifyEvidence(a.evidence)),

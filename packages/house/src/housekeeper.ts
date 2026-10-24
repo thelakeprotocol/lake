@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -70,6 +70,19 @@ export class Housekeeper {
 
   /** What the owner is looking for, and the offers priced for them inside this house. */
   readonly market: Market;
+
+  /** This house's public revocation list (SPEC §6), next to its card. */
+  get statusUrl() {
+    return `${this.o.card.supportedInterfaces[0]!.url.replace(/\/a2a$/, '')}/status/revocation`;
+  }
+  private statusCache: { key: string; jws: string } | null = null;
+  /** The list, signed by this house: rebuilt only when a bit changes. */
+  async statusList(): Promise<string> {
+    const set = this.o.desk.revokedIndexes().sort((a, b) => a - b);
+    const key = set.join(',');
+    if (this.statusCache?.key !== key) this.statusCache = { key, jws: await statusListCredential(this.o.webId, this.statusUrl, set, this.o.id) };
+    return this.statusCache.jws;
+  }
 
   constructor(private o: HousekeeperOptions) {
     this.actor = `house:${o.name}`;
@@ -222,7 +235,7 @@ export class Housekeeper {
       filed = this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
-        grantDraft: accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }),
+        grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
@@ -249,6 +262,8 @@ export class Housekeeper {
         issuer: this.o.webId,
         validFrom: new Date().toISOString(),
         validUntil: until.toISOString(),
+        // Its bit on this house's public status list: anyone can check it hasn't been revoked or used up.
+        credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)),
       } as never,
       this.o.id,
     );

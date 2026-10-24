@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "lHW8_BkTSxZolsVNU_2Gj5_p4R9VB0eGC5ODyXR3mNk",
+              "x": "Jyj_bggGkTC1s4sxZzQ4tEbCeeNUYpovqOh0Rw0dxrA",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,7 +66,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "AS1ValycOoUmdlwO7Ms4nmlkCoXrw8d2entO3F4jYB3XOxgIp4G7ZNOVR1IEXIfFd_zXXM9kFNaqBdnovEfFCA"
+        "signature": "ItjRYAYuZu7zNiwz7sVBvIW29DWX24hLkcMwEAFUPsSoSYu5d4Znc1gmBUFqkXcECgsV9qnnZSlSHtMNafLjAQ"
       }
     ]
   },
@@ -77,7 +77,7 @@
       "decision": "join",
       "reason": "matches your rule 1",
       "grantHours": 48,
-      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3NjaGVtYS5pbnJ1cHQuY29tL2NyZWRlbnRpYWxzL3YyLmpzb25sZCJdLCJ0eXBlIjpbIlZlcmlmaWFibGVDcmVkZW50aWFsIiwiU29saWRBY2Nlc3NHcmFudCJdLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwicHJvdmlkZWRDb25zZW50Ijp7Im1vZGUiOlsiaHR0cDovL3d3dy53My5vcmcvbnMvYXV0aC9hY2wjUmVhZCJdLCJoYXNTdGF0dXMiOiJodHRwczovL3czaWQub3JnL0dDb25zZW50I0NvbnNlbnRTdGF0dXNFeHBsaWNpdGx5R2l2ZW4iLCJmb3JQZXJzb25hbERhdGEiOlsidXJuOmxha2U6ZmllbGQ6YWdlX2JhbmQiLCJ1cm46bGFrZTpmaWVsZDptZWRpY2F0aW9ucyIsInVybjpsYWtlOmZpZWxkOnJlYWRtaXNzaW9ucyJdLCJmb3JQdXJwb3NlIjpbImh0dHBzOi8vdzNpZC5vcmcvZHB2I1Jlc2VhcmNoQW5kRGV2ZWxvcG1lbnQiXSwiaXNQcm92aWRlZFRvIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQifSwibGFrZSI6eyJvZmZlciI6IjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMiIsInN0dWR5IjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNsaHJkczRndHUyNk11MVluS0N5TDJoTUFLSlR6TUN3WGUrc3dxSGozRkU9IiwiZmllbGRzIjpbImFnZV9iYW5kIiwibWVkaWNhdGlvbnMiLCJyZWFkbWlzc2lvbnMiXSwicHVycG9zZSI6InJlc2VhcmNoIiwiYXV0aG9yaXplZEJ5Ijoic3RhbmRpbmcgcnVsZSAxIiwidXNlcyI6MSwicnVsZXMiOiJzaGEyNTYtOHduZnRDMSt2R3RFOExCcjhONHhFeHdCdXZtU2RqZVdPeC90c0NXUCs1ST0iLCJhZ3JlZW1lbnQiOiJ1cm46bGFrZTphZ3JlZW1lbnQ6MGIzZThjNTUtNmYwYS00YzYxLThkM2UtNTVkMWMzZjBhOWIyOm5vSDhmTE1uVW45UCJ9fSwiaXNzdWVyIjoiaHR0cHM6Ly9wb2RzLmV4YW1wbGUvc3Rhbi9wcm9maWxlL2NhcmQjbWUiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAyOjE5OjAzLjQxM1oiLCJ2YWxpZFVudGlsIjoiMjAyNi0xMC0yNlQwMjoxOTowMy40MTNaIn0.2T6g0SC5DNAFiGOKzJ0O4YnU4u7f6mnnDNhnSTZ-DM9-iTEefMHlFSCwnWxuQLIXXaVgLAiD1aHXkomJ2yvXAQ",
+      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3NjaGVtYS5pbnJ1cHQuY29tL2NyZWRlbnRpYWxzL3YyLmpzb25sZCJdLCJ0eXBlIjpbIlZlcmlmaWFibGVDcmVkZW50aWFsIiwiU29saWRBY2Nlc3NHcmFudCJdLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwicHJvdmlkZWRDb25zZW50Ijp7Im1vZGUiOlsiaHR0cDovL3d3dy53My5vcmcvbnMvYXV0aC9hY2wjUmVhZCJdLCJoYXNTdGF0dXMiOiJodHRwczovL3czaWQub3JnL0dDb25zZW50I0NvbnNlbnRTdGF0dXNFeHBsaWNpdGx5R2l2ZW4iLCJmb3JQZXJzb25hbERhdGEiOlsidXJuOmxha2U6ZmllbGQ6YWdlX2JhbmQiLCJ1cm46bGFrZTpmaWVsZDptZWRpY2F0aW9ucyIsInVybjpsYWtlOmZpZWxkOnJlYWRtaXNzaW9ucyJdLCJmb3JQdXJwb3NlIjpbImh0dHBzOi8vdzNpZC5vcmcvZHB2I1Jlc2VhcmNoQW5kRGV2ZWxvcG1lbnQiXSwiaXNQcm92aWRlZFRvIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQifSwibGFrZSI6eyJvZmZlciI6IjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMiIsInN0dWR5IjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNsaHJkczRndHUyNk11MVluS0N5TDJoTUFLSlR6TUN3WGUrc3dxSGozRkU9IiwiZmllbGRzIjpbImFnZV9iYW5kIiwibWVkaWNhdGlvbnMiLCJyZWFkbWlzc2lvbnMiXSwicHVycG9zZSI6InJlc2VhcmNoIiwiYXV0aG9yaXplZEJ5Ijoic3RhbmRpbmcgcnVsZSAxIiwidXNlcyI6MSwicnVsZXMiOiJzaGEyNTYtOHduZnRDMSt2R3RFOExCcjhONHhFeHdCdXZtU2RqZVdPeC90c0NXUCs1ST0iLCJhZ3JlZW1lbnQiOiJ1cm46bGFrZTphZ3JlZW1lbnQ6MGIzZThjNTUtNmYwYS00YzYxLThkM2UtNTVkMWMzZjBhOWIyOm5vSDhmTE1uVW45UCJ9fSwiaXNzdWVyIjoiaHR0cHM6Ly9wb2RzLmV4YW1wbGUvc3Rhbi9wcm9maWxlL2NhcmQjbWUiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAzOjQ3OjA3LjcwMVoiLCJ2YWxpZFVudGlsIjoiMjAyNi0xMC0yNlQwMzo0NzowNy43MDBaIiwiY3JlZGVudGlhbFN0YXR1cyI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3Qvc3Rhbi9zdGF0dXMvcmV2b2NhdGlvbiM0ODIxMyIsInR5cGUiOiJCaXRzdHJpbmdTdGF0dXNMaXN0RW50cnkiLCJzdGF0dXNQdXJwb3NlIjoicmV2b2NhdGlvbiIsInN0YXR1c0xpc3RJbmRleCI6IjQ4MjEzIiwic3RhdHVzTGlzdENyZWRlbnRpYWwiOiJodHRwczovL3BvZHMuZXhhbXBsZS90L3N0YW4vc3RhdHVzL3Jldm9jYXRpb24ifX0.OxJUJ-dvUftSvCqJdNeFo6HDFGPWBouJaSQTvvACuEHMwTyotqzzsO8RsG-3xHF9i4UOWiHqeAUJfBGAEkhVAw",
       "agreement": {
         "agreement": {
           "@context": [
@@ -107,7 +107,7 @@
                   "leftOperand": "dateTime",
                   "operator": "lt",
                   "rightOperand": {
-                    "@value": "2026-10-26T02:19:03.413Z",
+                    "@value": "2026-10-26T03:47:07.700Z",
                     "@type": "xsd:dateTime"
                   }
                 }
@@ -147,7 +147,7 @@
         "signatures": [
           {
             "by": "https://pods.example/stan/profile/card#me",
-            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Im9kcmwrandzIn0..E8OPj6NR2qRBmTOIuILlgxz5PEgwFmf-VfA-Ua_tI7KcpUUKpjvCTSyauOmAW_gSi2SarXfzdn45zR4J9xTVBA"
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Im9kcmwrandzIn0..F9amtlFHLXzPUOOWKxMUcuRJF9DbuUF6kgxkuLLrCUF3hBuF_9F5KDSgXUoak_s4OE0MyhwfDuUEIG1ge5HZCg"
           }
         ]
       },
@@ -156,14 +156,14 @@
         "medications"
       ],
       "notes": [],
-      "nonce": "40c4cd9e-de49-4387-a3c4-e79ba4a9364c",
-      "iat": 1792808343,
-      "exp": 1792808643,
+      "nonce": "66c12b66-7bff-4fbc-84c3-99a614dd3e18",
+      "iat": 1792813627,
+      "exp": 1792813927,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "Lye9Cn1Yf2cKPLqW4OMrg_khlUrDt7adL5Ade7zLkirPcynRWIixk0nLDzLyIh22XzYX0w-1Eoe0j_VBmndfBw"
+      "signature": "o9QoZ7B954p9fdzY6hkY5JZyRfi2D-9Fl1azgo9nBMh7VElGR-9VG2J8Sw9b2kjATLqMYPuO7fTuW7Iqz7yLBQ"
     }
   }
 }

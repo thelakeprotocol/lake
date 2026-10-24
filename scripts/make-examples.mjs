@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   accessGrantDraft, agreementFor, aggregateReports, buildCard, collectiveCounter, generateIdentity, issueCredential, digestSRI, makeEvent, newVerifyKey, prepareReport, settleReport, shardAnswer, signAgreement, signCard,
-  signIntentMandate, signMessage, signPaymentMandate, studyId,
+  signIntentMandate, signMessage, signPaymentMandate, statusEntry, statusListCredential, studyId,
 } from '../packages/core/dist/index.js';
 
 const out = join(import.meta.dirname, '..', 'spec', 'examples');
@@ -66,9 +66,13 @@ const revised = { ...offer, id: '0b3e8c55-6f0a-4c61-8d3e-55d1c3f0a9b2', fields: 
 const until = new Date(Date.now() + 48 * 36e5);
 const agreement = agreementFor(revised, house.webId, visitor.webId, until);
 const houseSig = await signAgreement(agreement, house.id);
-const grant = await issueCredential({ ...accessGrantDraft(house.webId, visitor.webId, { offer: revised.id, study: sid, fields: bloc.fields, purpose: 'research', authorizedBy: 'standing rule 1', uses: 1, rules: digestSRI('rules.yaml as written'), agreement: agreement.uid }), issuer: house.webId, validFrom: new Date().toISOString(), validUntil: until.toISOString() }, house.id);
+// Every house publishes its revocation list next to its card; each grant names its own bit on it.
+const statusUrl = 'https://pods.example/t/stan/status/revocation';
+const grant = await issueCredential({ ...accessGrantDraft(house.webId, visitor.webId, { offer: revised.id, study: sid, fields: bloc.fields, purpose: 'research', authorizedBy: 'standing rule 1', uses: 1, rules: digestSRI('rules.yaml as written'), agreement: agreement.uid }), issuer: house.webId, validFrom: new Date().toISOString(), validUntil: until.toISOString(), credentialStatus: statusEntry(statusUrl, 48_213) }, house.id);
 write('4-join.json', await envelope(house, { kind: 'decision', offerId: revised.id, decision: 'join', reason: 'matches your rule 1', grantHours: 48, grant, agreement: { agreement, signatures: [{ by: house.webId, jws: houseSig }] }, holds: ['age_band', 'medications'], notes: [] }), 'Step 4. The house joins: a grant under the owner\'s standing rule, and an ODRL Agreement it has signed.');
 write('grant.json', { credential: grant, decoded: decode(grant) }, 'The grant, decoded: a Solid Access Grant (Inrupt format, GConsent): the owner (id) gives the visitor (isProvidedTo) read access to these data, for this purpose (a DPV term), with the Lake terms alongside: which offer and study, single use, which rule allowed it.');
+const statusList = await statusListCredential(house.webId, statusUrl, [1_207, 90_311], house.id);
+write('status-list.json', { credential: statusList, decoded: decode(statusList) }, 'A house\'s revocation list (W3C Bitstring Status List), served at /status/revocation: 131,072 bits, gzipped; a set bit is a key taken back or used up. The grant above names bit 48213 (not set). Anyone can check a key without the house learning which.');
 
 const countersignature = await signAgreement(agreement, visitor.id);
 const count = 'run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13';
