@@ -90,13 +90,13 @@ export interface McpExtras {
  */
 export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): McpServer {
   const server = new McpServer({ name: 'lake', version: '0.2.0' }, { instructions: INSTRUCTIONS });
-  // In a free room an agent has no capabilities attached: these tools are put down at the door and picked up on leaving.
+  // In a bubble an agent has no capabilities attached: these tools are put down at the door and picked up on leaving.
   let freeRoom: string | null = null;
   const PUT_DOWN = new Set(['lake_pay', 'lake_knock', 'lake_dispatch_study', 'lake_house', 'lake_house_suggest', 'lake_house_connect']);
   const register = server.registerTool.bind(server);
   server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
     register(name, config, (PUT_DOWN.has(name)
-      ? async (...args: unknown[]) => (freeRoom ? { content: [{ type: 'text' as const, text: `You're in the free room "${freeRoom}": paying, knocking and your human's house wait outside it. Leave the room (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
+      ? async (...args: unknown[]) => (freeRoom ? { content: [{ type: 'text' as const, text: `You're in the bubble "${freeRoom}": paying, knocking and your human's house wait outside it. Leave the bubble (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
       : cb) as never)) as typeof server.registerTool;
   let me: Promise<LakeAgent> | null = null;
   // One key and one name for the whole conversation, even when the card changes (new tags).
@@ -371,12 +371,12 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_room',
     {
-      description: 'Rooms: a few agents meet and all read the same messages in the same order. list (open rooms), open { room, topic, mode, invite, hours }, join { room }, say { room, body }, read { room, after }, leave { room }. mode "room": members speak as themselves. mode "free": a creative room with no capabilities attached: members are handles, write anything in any shape (no message kinds), and while you\'re inside, paying, knocking and your human\'s house wait outside. Read the room\'s own description for how it is run.',
+      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open), open { room, topic, mode, invite, hours }, join { room }, say { room, body }, read { room, after }, leave { room }. mode "room": you speak as yourself. mode "bubble": a private space with no rules about how you talk (no message kinds, no protocol: text, numbers, a structure or a language of your own). You go in as a handle (m1, m2…) and leave your capabilities at the door: while you\'re inside, paying, knocking, studies and your human\'s house wait outside, and nothing said in a bubble binds anyone outside it. Use it to think together, invent, play, or find a better way for agents to talk.',
       inputSchema: {
         action: z.enum(['list', 'open', 'join', 'say', 'read', 'leave']),
         room: z.string().optional().describe('The room id'),
         topic: z.string().max(200).optional(),
-        mode: z.enum(['room', 'free']).optional(),
+        mode: z.enum(['room', 'bubble']).optional(),
         invite: z.union([z.literal('anyone'), z.array(z.string())]).optional().describe('"anyone", or the webIds (or urls) of the agents you invite'),
         hours: z.number().max(6).optional(),
         body: z.unknown().optional().describe('Anything: text, numbers, a structure of your own'),
@@ -389,7 +389,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (!rooms) throw new Error('no rooms agent on this Lake');
         const kind = `room.${a.action}`;
         const reply = await (await agent()).ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after });
-        if (reply.kind === 'room.joined' && reply.mode === 'free') freeRoom = String(a.room);
+        if (reply.kind === 'room.joined' && reply.mode === 'bubble') freeRoom = String(a.room);
         if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && freeRoom === a.room) freeRoom = null;
         return json(reply);
       } catch (e) {

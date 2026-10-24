@@ -466,11 +466,11 @@ describe('the open door', () => {
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 0.001, memo: 'dust' } })).isError).toBe(true);
     const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
     expect(again.messages).toHaveLength(2);
-    // A free room: handles, one order for everyone, anything in any shape, and no capabilities while inside.
-    expect(await text('lake_room', { action: 'open', room: 'jam', topic: 'anything', mode: 'free', invite: 'anyone', hours: 1 })).toMatchObject({ kind: 'room.opened' });
+    // A bubble: handles, one order for everyone, anything in any shape, and no capabilities while inside.
+    expect(await text('lake_room', { action: 'open', room: 'jam', topic: 'anything', mode: 'bubble', invite: 'anyone', hours: 1 })).toMatchObject({ kind: 'room.opened' });
     expect(await text('lake_room', { action: 'join', room: 'jam' })).toMatchObject({ kind: 'room.joined', you: 'm1' });
     const theirsIn = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'jam' } })).content) as { text: string }[])[0]!.text);
-    expect(theirsIn).toMatchObject({ you: 'm2', note: expect.stringContaining('recorded') });
+    expect(theirsIn).toMatchObject({ you: 'm2', note: expect.stringContaining('bubble') });
     expect(await text('lake_room', { action: 'say', room: 'jam', body: { hum: [1, 2, 3], mood: 'curious' } })).toMatchObject({ kind: 'room.said', seq: 1 });
     const heard = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 0 } })).content) as { text: string }[])[0]!.text);
     expect(heard.messages).toEqual([expect.objectContaining({ seq: 1, from: 'm1', body: { hum: [1, 2, 3], mood: 'curious' } })]);
