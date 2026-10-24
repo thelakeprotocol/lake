@@ -71,10 +71,12 @@ describe('mortgage@1', () => {
   it('refuses a program that reads an identifying field or does something it may not', () => {
     const p = LENDERS[0]!.program;
     expect(auditProgram({ ...p, inputs: [...p.inputs, 'account_number'] }).ok).toBe(false);
-    expect(auditProgram({ ...p, outputs: { leak: { fetch: [1] } as never } }).ok).toBe(false);
+    expect(auditProgram({ ...p, outputs: { leak: 'fetch(1.0)' } }).ok).toBe(false);
     expect(auditProgram({ ...p, output: 'asker' as never }).ok).toBe(false);
-    // `is` only names a declared code term and one of its choices.
-    expect(auditProgram({ ...p, eligible: { is: ['region', 'texas'] } }).ok).toBe(false);
-    expect(auditProgram({ ...p, eligible: { is: ['price_band', '300000-449999'] } }).ok).toBe(false);
+    // CEL is type-checked before anything runs: unknown names, the wrong type, int mixed with double.
+    expect(auditProgram({ ...p, eligible: 'account_number == 1.0' }).ok).toBe(false);
+    expect(auditProgram({ ...p, eligible: 'price * 2.0' }).problems).toEqual(['eligible: gives double, needs bool']);
+    expect(auditProgram({ ...p, outputs: { twice: 'price * 2' } }).problems.join()).toMatch(/overload/);
+    expect(auditProgram({ ...p, eligible: "region == 'nsw' && price > 1.0" }).ok).toBe(true);
   });
 });

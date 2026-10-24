@@ -34,7 +34,7 @@ The node learns something too, privately: which group you're in. It publishes on
 
 ## 4. The lender sends rules, not questions
 
-Each lender answers with a **quote program**: its lending rules as a declaration, not code. Rate bands by loan-to-value, lenders mortgage insurance above 80%, the First Home Guarantee under your state's cap, repayments tested at APRA's 3-point buffer against take-home pay after living costs, a debt-to-income cap. An auditor certified the program; your house checks the certificate, checks the program again itself, and checks the lender's authorisation, before running it on your data.
+Each lender answers with a **quote program**: its lending rules as a declaration, not code, written in [CEL](https://cel.dev) (Google's Common Expression Language, which can't loop or reach out, and is type-checked before it runs). Rate bands by loan-to-value, lenders mortgage insurance above 80%, the First Home Guarantee under your state's cap, repayments tested at APRA's 3-point buffer against take-home pay after living costs, a debt-to-income cap. An auditor certified the program; your house checks the certificate, checks the program again itself, and checks the lender's authorisation, before running it on your data.
 
 Then it keeps the result. The lender gets the same reply whether you qualify or not: *quoted*. It learns nothing about you.
 

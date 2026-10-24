@@ -1,5 +1,3 @@
-import type { Expr } from '@thelakeprotocol/core';
-
 /**
  * Australian resident income tax for 2026–27 (the 16% rate falls to 15% from 1 July 2026), plus the 2%
  * Medicare levy. Simplified: no offsets, no levy thresholds, no HELP repayments. Used three ways, so they
@@ -29,16 +27,15 @@ export function grossFromNet(net: number): number {
   return (lo + hi) / 2;
 }
 
-/** The same tax, as a quote-program expression over a gross income. */
-export function taxExpr(gross: Expr): Expr {
-  return {
-    '+': [
-      { '*': [gross, MEDICARE] },
-      ...BRACKETS.map(([from, rate], i): Expr => {
-        const to = BRACKETS[i + 1]?.[0];
-        const top: Expr = to === undefined ? gross : { min: [gross, to] };
-        return { '*': [{ max: [0, { '-': [top, from] }] }, rate] };
-      }),
-    ],
-  };
+/** A number as a CEL double literal: CEL never mixes int and double, so 2 is written 2.0. */
+export const dbl = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n));
+
+/** The same tax, as a CEL expression over a gross income (a quote program's language). */
+export function taxExpr(gross: string): string {
+  const parts = [`${gross} * ${dbl(MEDICARE)}`, ...BRACKETS.map(([from, rate], i) => {
+    const to = BRACKETS[i + 1]?.[0];
+    const top = to === undefined ? gross : `min(${gross}, ${dbl(to)})`;
+    return `max(0.0, ${top} - ${dbl(from)}) * ${dbl(rate)}`;
+  })];
+  return `(${parts.join(' + ')})`;
 }

@@ -1,3 +1,4 @@
+import { Environment } from '@marcbachmann/cel-js';
 import { canonicalize } from './canonical.js';
 import { fieldSpec, pack, type Claim } from './pack.js';
 import { digestSRI } from './vc.js';
@@ -5,12 +6,13 @@ import { digestSRI } from './vc.js';
 /**
  * A quote program: an offer computed inside the house, on the owner's own data, shown only to the owner
  * (SPEC §12). It is a declaration, not code: a few named inputs (pack fields, and the public terms of
- * the owner's intent), arithmetic over them, a yes/no `eligible`, and numeric outputs. No loops, no I/O,
- * nothing sent back: the asker learns only that a quote was delivered, eligible or not. An auditor
- * certifies it; the house re-checks it and runs it.
+ * the owner's intent), expressions over them in CEL (Google's Common Expression Language: no loops, no I/O,
+ * always terminates, type-checked before it runs), a yes/no `eligible`, and numeric outputs. Nothing is sent
+ * back: the asker learns only that a quote was delivered, eligible or not. An auditor certifies it; the house
+ * re-checks it and runs it.
  */
 export interface QuoteProgram {
-  v: 1;
+  v: 2;
   kind: 'quote';
   /** The pack it reads, with major version: `mortgage@1`. */
   pack: string;
@@ -19,25 +21,19 @@ export interface QuoteProgram {
   inputs: string[];
   /** Public terms of the owner's intent it reads (e.g. `price_band`, `term_years`). */
   terms?: string[];
-  /** Named intermediate values, evaluated in order; later ones may use earlier ones. */
-  let?: Record<string, Expr>;
-  eligible: Expr;
-  /** What the owner sees: numbers only. */
-  outputs: Record<string, Expr>;
+  /** Named intermediate values, CEL expressions evaluated in order; later ones may use earlier ones. */
+  let?: Record<string, string>;
+  /** A CEL expression of type bool. */
+  eligible: string;
+  /** What the owner sees: CEL expressions of type double. */
+  outputs: Record<string, string>;
   /** Plain-English labels and units for the outputs, for the owner's panel. */
   labels?: Record<string, { label: string; unit?: string }>;
   /** Who sees the result. Always the owner, never the asker. */
   output: 'owner';
 }
 
-export type Expr = number | boolean | { var: string } | { has: [string, string] } | { is: [string, string] } | { [op: string]: Expr[] | BandArgs | AnnuityArgs };
-interface BandArgs { of: Expr; table: [number, number][]; else?: number }
-interface AnnuityArgs { principal: Expr; rate_pct: Expr; years: Expr }
-
-const ARITH = ['+', '-', '*', '/', 'min', 'max', 'round', 'floor', 'ceil'] as const;
-const LOGIC = ['<', '<=', '>', '>=', '==', '!=', 'and', 'or', 'not', 'if'] as const;
-const OPS = new Set<string>([...ARITH, ...LOGIC, 'band', 'annuity', 'has', 'is']);
-const LIMITS = { nodes: 400, depth: 16, outputs: 12, lets: 24 };
+const LIMITS = { outputs: 12, lets: 24, nodes: 300, depth: 32 };
 
 /**
  * Every program may read how many households share the owner's intent group (the node publishes it). A
@@ -47,67 +43,79 @@ export const GROUP_SIZE = 'group_size';
 
 export const programId = (p: QuoteProgram) => `urn:lake:program:${digestSRI(canonicalize(p))}`;
 
+/**
+ * The functions a program may call besides CEL's own operators: lookups and finance the declarations need, all pure.
+ * CEL never mixes int and double: write 2.0, not 2, next to a double.
+ */
+const FUNCTIONS: [string, (...a: never[]) => unknown][] = [
+  // [[upto, value], …]: the value of the first row whose `upto` is at least x; none: not a number.
+  ['band(double, list<list<double>>): double', (x: number, table: number[][]) => table.find((r) => x <= r[0]!)?.[1] ?? Number.NaN],
+  ['annuity(double, double, double): double', (principal: number, ratePct: number, years: number) => {
+    const r = ratePct / 100 / 12, n = years * 12;
+    return r === 0 ? principal / n : (principal * r) / (1 - (1 + r) ** -n);
+  }],
+  ['min(double, double): double', (a: number, b: number) => Math.min(a, b)],
+  ['max(double, double): double', (a: number, b: number) => Math.max(a, b)],
+  ['round(double, int): double', (x: number, digits: bigint) => { const k = 10 ** Number(digits); return Math.round(x * k) / k; }],
+  ['floor(double): double', (x: number) => Math.floor(x)],
+  ['ceil(double): double', (x: number) => Math.ceil(x)],
+];
+
+/** What each name a program reads is, in CEL: numbers as double, a flag as bool, the codes a claim holds as a list. */
+function inputType(f: string): string | null {
+  const kind = fieldSpec(f)?.kind;
+  return kind === 'number' || kind === 'band' ? 'double' : kind === 'flag' ? 'bool' : kind === 'code' ? 'list<string>' : null;
+}
+function termType(packId: string, t: string): string | null {
+  if (t === GROUP_SIZE) return 'double';
+  const spec = pack(packId)?.intent?.terms[t];
+  return !spec ? null : spec.kind === 'code' ? 'string' : 'double';
+}
+
+function environment() {
+  const env = new Environment({ limits: { maxAstNodes: LIMITS.nodes, maxDepth: LIMITS.depth, maxListElements: 64, maxMapEntries: 0, maxCallArguments: 4 } });
+  for (const [sig, fn] of FUNCTIONS) env.registerFunction(sig, fn as never);
+  return env;
+}
+
 /** What an auditor checks, and what a house re-checks before running one. */
 export function auditProgram(p: QuoteProgram): { ok: boolean; problems: string[] } {
   const problems: string[] = [];
-  if (p?.v !== 1 || p.kind !== 'quote') return { ok: false, problems: ['only v1 quote programs are understood'] };
+  if (p?.v !== 2 || p.kind !== 'quote') return { ok: false, problems: ['only v2 quote programs (CEL) are understood'] };
   if (p.output !== 'owner') problems.push('a quote goes to the owner only');
   const owner = pack(p.pack ?? '');
   if (!owner) problems.push(`no pack here called ${p.pack}`);
+  const env = environment();
   for (const f of p.inputs ?? []) {
     const spec = fieldSpec(f);
     if (!spec || spec.pack.id !== owner?.id) problems.push(`input "${f}" is not a field of ${p.pack}`);
-    if (owner?.identifying?.includes(f)) problems.push(`"${f}" is identifying; no program may read it`);
+    else if (owner?.identifying?.includes(f)) problems.push(`"${f}" is identifying; no program may read it`);
+    else env.registerVariable(f, inputType(f)!);
   }
-  for (const t of p.terms ?? []) if (t !== GROUP_SIZE && !owner?.intent?.terms[t]) problems.push(`term "${t}" is not one ${p.pack} intents carry`);
-  const lets = Object.keys(p.let ?? {});
+  for (const t of p.terms ?? []) {
+    const type = owner ? termType(owner.id, t) : null;
+    if (!type) problems.push(`term "${t}" is not one ${p.pack} intents carry`);
+    else env.registerVariable(t, type);
+  }
+  if (problems.length) return { ok: false, problems };
+  const lets = Object.entries(p.let ?? {});
   if (lets.length > LIMITS.lets) problems.push(`at most ${LIMITS.lets} intermediate values`);
-  if (Object.keys(p.outputs ?? {}).length < 1 || Object.keys(p.outputs ?? {}).length > LIMITS.outputs) problems.push(`1 to ${LIMITS.outputs} outputs`);
-  let nodes = 0;
-  const known = new Set([...(p.inputs ?? []), ...(p.terms ?? [])]);
-  const walk = (e: Expr, depth: number, where: string) => {
-    if (++nodes > LIMITS.nodes) return;
-    if (depth > LIMITS.depth) { problems.push(`${where}: nested too deep`); return; }
-    if (typeof e === 'number') { if (!Number.isFinite(e)) problems.push(`${where}: not a finite number`); return; }
-    if (typeof e === 'boolean') return;
-    if (!e || typeof e !== 'object' || Array.isArray(e)) { problems.push(`${where}: not an expression`); return; }
-    const keys = Object.keys(e);
-    if (keys.length !== 1) { problems.push(`${where}: one operator per expression`); return; }
-    const op = keys[0]!;
-    const arg = (e as Record<string, unknown>)[op];
-    if (op === 'var') { if (typeof arg !== 'string' || !known.has(arg)) problems.push(`${where}: unknown name "${String(arg)}"`); return; }
-    // { has: [field, code] }: does a code field hold this code? Only for code fields the program declares.
-    if (op === 'has') {
-      const [f, code] = (arg as unknown as [string, string]) ?? [];
-      if (!(p.inputs ?? []).includes(f) || fieldSpec(f)?.kind !== 'code' || typeof code !== 'string') problems.push(`${where}: has takes a declared code field and a code`);
-      return;
-    }
-    // { is: [term, choice] }: is a code term of the owner's intent this choice? Only for code terms the program declares.
-    if (op === 'is') {
-      const [t, choice] = (arg as unknown as [string, string]) ?? [];
-      const spec = owner?.intent?.terms[t];
-      if (!(p.terms ?? []).includes(t) || spec?.kind !== 'code' || !spec.options.map(String).includes(choice)) problems.push(`${where}: is takes a declared code term and one of its choices`);
-      return;
-    }
-    if (!OPS.has(op)) { problems.push(`${where}: "${op}" is not an operator programs may use`); return; }
-    if (op === 'band') {
-      const b = arg as BandArgs;
-      if (!Array.isArray(b?.table) || !b.table.every((r) => Array.isArray(r) && r.length === 2 && r.every(Number.isFinite))) problems.push(`${where}: band needs a table of [upto, value] pairs`);
-      walk(b?.of as Expr, depth + 1, where);
-      return;
-    }
-    if (op === 'annuity') {
-      const a = arg as AnnuityArgs;
-      for (const k of ['principal', 'rate_pct', 'years'] as const) walk(a?.[k] as Expr, depth + 1, where);
-      return;
-    }
-    if (!Array.isArray(arg)) { problems.push(`${where}: "${op}" takes a list`); return; }
-    for (const x of arg) walk(x as Expr, depth + 1, where);
+  const outputs = Object.entries(p.outputs ?? {});
+  if (outputs.length < 1 || outputs.length > LIMITS.outputs) problems.push(`1 to ${LIMITS.outputs} outputs`);
+  const typed = (where: string, e: unknown, want?: string[]): string | null => {
+    if (typeof e !== 'string') { problems.push(`${where}: a CEL expression, as a string`); return null; }
+    const c = env.check(e);
+    if (!c.valid) { problems.push(`${where}: ${String(c.error?.message ?? 'not valid CEL').split('\n')[0]}`); return null; }
+    if (want && !want.includes(c.type!)) { problems.push(`${where}: gives ${c.type}, needs ${want.join(' or ')}`); return null; }
+    return c.type!;
   };
-  for (const [k, e] of Object.entries(p.let ?? {})) { walk(e, 0, `let.${k}`); known.add(k); }
-  walk(p.eligible, 0, 'eligible');
-  for (const [k, e] of Object.entries(p.outputs ?? {})) walk(e, 0, `outputs.${k}`);
-  if (nodes > LIMITS.nodes) problems.push(`at most ${LIMITS.nodes} operations`);
+  for (const [k, e] of lets) {
+    if (env.hasVariable(k)) { problems.push(`let.${k}: the name is taken`); continue; }
+    const type = typed(`let.${k}`, e, ['double', 'bool']);
+    if (type) env.registerVariable(k, type);
+  }
+  typed('eligible', p.eligible, ['bool']);
+  for (const [k, e] of outputs) typed(`outputs.${k}`, e, ['double']);
   return { ok: problems.length === 0, problems };
 }
 
@@ -115,71 +123,38 @@ export interface QuoteResult { eligible: boolean; outputs: Record<string, number
 
 /** Runs inside the house, on its claims and the owner's own intent terms. Assumes an audited program. */
 export function runProgram(p: QuoteProgram, claims: Claim[], terms: Record<string, string | number> = {}): QuoteResult {
-  const env = new Map<string, number>();
+  const env = environment();
+  const context: Record<string, unknown> = {};
   for (const f of p.inputs) {
     const mine = claims.filter((c) => c.field === f);
-    const kind = fieldSpec(f)?.kind;
-    // Numbers and bands read as their (lower-bound) value; flags and codes as how many there are.
-    env.set(f, kind === 'number' || kind === 'band' ? Number.parseFloat(mine[0]?.value ?? 'NaN') : mine.length);
+    const type = inputType(f)!;
+    env.registerVariable(f, type);
+    // Numbers and bands read as their (lower-bound) value; a flag as whether it's there; codes as the list held.
+    context[f] = type === 'double' ? Number.parseFloat(mine[0]?.value ?? 'NaN') : type === 'bool' ? mine.length > 0 : mine.map((c) => String(c.code ?? c.value));
   }
-  for (const t of p.terms ?? []) env.set(t, typeof terms[t] === 'number' ? (terms[t] as number) : Number.parseFloat(String(terms[t] ?? 'NaN')));
-  const num = (e: Expr): number => {
-    if (typeof e === 'number') return e;
-    if (typeof e === 'boolean') return e ? 1 : 0;
-    const [op, arg] = Object.entries(e)[0]!;
-    const xs = () => (arg as Expr[]).map(num);
-    switch (op) {
-      case 'var': return env.get(arg as unknown as string) ?? Number.NaN;
-      case 'has': { const [f, code] = arg as unknown as [string, string]; return claims.some((c) => c.field === f && (c.code ?? c.value) === code) ? 1 : 0; }
-      case 'is': { const [t, choice] = arg as unknown as [string, string]; return String(terms[t]) === choice ? 1 : 0; }
-      case '+': return xs().reduce((a, b) => a + b, 0);
-      case '-': { const v = xs(); return v.length === 1 ? -v[0]! : v.slice(1).reduce((a, b) => a - b, v[0]!); }
-      case '*': return xs().reduce((a, b) => a * b, 1);
-      case '/': { const [a, b] = xs(); return b === 0 ? Number.NaN : a! / b!; }
-      case 'min': return Math.min(...xs());
-      case 'max': return Math.max(...xs());
-      case 'round': { const [a, d = 0] = xs(); const k = 10 ** d; return Math.round(a! * k) / k; }
-      case 'floor': return Math.floor(xs()[0]!);
-      case 'ceil': return Math.ceil(xs()[0]!);
-      case 'if': { const [c, a, b] = arg as Expr[]; return truthy(c!) ? num(a!) : num(b!); }
-      case 'band': {
-        const b = arg as BandArgs;
-        const v = num(b.of);
-        return b.table.find(([upto]) => v <= upto)?.[1] ?? b.else ?? Number.NaN;
-      }
-      case 'annuity': {
-        const a = arg as AnnuityArgs;
-        const P = num(a.principal), r = num(a.rate_pct) / 100 / 12, n = num(a.years) * 12;
-        return r === 0 ? P / n : (P * r) / (1 - (1 + r) ** -n);
-      }
-      default: return truthy(e) ? 1 : 0;
-    }
-  };
-  const truthy = (e: Expr): boolean => {
-    if (typeof e === 'boolean') return e;
-    if (typeof e === 'number') return e !== 0;
-    const [op, arg] = Object.entries(e)[0]!;
-    const xs = () => (arg as Expr[]).map(num);
-    switch (op) {
-      case '<': { const [a, b] = xs(); return a! < b!; }
-      case '<=': { const [a, b] = xs(); return a! <= b!; }
-      case '>': { const [a, b] = xs(); return a! > b!; }
-      case '>=': { const [a, b] = xs(); return a! >= b!; }
-      case '==': { const [a, b] = xs(); return a === b; }
-      case '!=': { const [a, b] = xs(); return a !== b; }
-      case 'and': return (arg as Expr[]).every(truthy);
-      case 'or': return (arg as Expr[]).some(truthy);
-      case 'not': return !truthy((arg as Expr[])[0]!);
-      default: { const v = num(e); return Number.isFinite(v) && v !== 0; }
-    }
-  };
-  for (const [k, e] of Object.entries(p.let ?? {})) env.set(k, num(e));
-  const eligible = truthy(p.eligible);
-  const outputs: Record<string, number> = {};
-  for (const [k, e] of Object.entries(p.outputs)) {
-    const v = num(e);
-    outputs[k] = Number.isFinite(v) ? Math.round(v * 100) / 100 : Number.NaN;
+  for (const t of p.terms ?? []) {
+    const type = termType(packOf(p), t)!;
+    env.registerVariable(t, type);
+    context[t] = type === 'string' ? String(terms[t] ?? '') : typeof terms[t] === 'number' ? terms[t] : Number.parseFloat(String(terms[t] ?? 'NaN'));
   }
-  // Missing data or a broken sum is "not eligible", never a made-up number.
-  return { eligible: eligible && Object.values(outputs).every(Number.isFinite), outputs };
+  const none = { eligible: false, outputs: Object.fromEntries(Object.keys(p.outputs).map((k) => [k, Number.NaN])) };
+  try {
+    for (const [k, e] of Object.entries(p.let ?? {})) {
+      const value = env.evaluate(e, context);
+      env.registerVariable(k, typeof value === 'boolean' ? 'bool' : 'double');
+      context[k] = value;
+    }
+    const eligible = env.evaluate(p.eligible, context) === true;
+    const outputs: Record<string, number> = {};
+    for (const [k, e] of Object.entries(p.outputs)) {
+      const v = Number(env.evaluate(e, context));
+      outputs[k] = Number.isFinite(v) ? Math.round(v * 100) / 100 : Number.NaN;
+    }
+    // Missing data or a broken sum is "not eligible", never a made-up number.
+    return { eligible: eligible && Object.values(outputs).every(Number.isFinite), outputs };
+  } catch {
+    return none;
+  }
 }
+
+const packOf = (p: QuoteProgram) => pack(p.pack)!.id;

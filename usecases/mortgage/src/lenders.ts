@@ -1,5 +1,5 @@
-import type { Expr, QuoteProgram, QuoterExample } from '@thelakeprotocol/core';
-import { taxExpr } from './tax.js';
+import type { QuoteProgram, QuoterExample } from '@thelakeprotocol/core';
+import { dbl, taxExpr } from './tax.js';
 
 /**
  * How an Australian lender decides, simplified from how they really do it, as a quote program the house
@@ -36,14 +36,14 @@ export const FHG_CAPS: Record<string, number> = { nsw: 1_500_000, vic: 950_000, 
 /** LMI premium as a share of the loan, by LVR band. Indicative; real premiums vary by insurer and loan size. */
 const LMI: [number, number][] = [[0.8, 0], [0.85, 0.012], [0.9, 0.022], [0.95, 0.036]];
 
-const v = (name: string): Expr => ({ var: name });
+const table = (rows: [number, number][]) => `[${rows.map(([a, b]) => `[${dbl(a)}, ${dbl(b)}]`).join(', ')}]`;
 
 export function lenderProgram(title: string, r: LenderRules): QuoteProgram {
   const maxLvr = r.rates.at(-1)![0];
-  // The state's cap, as a chain of `is` checks on the owner's own intent.
-  const cap = Object.entries(FHG_CAPS).reduceRight<Expr>((rest, [state, c]) => ({ if: [{ is: ['region', state] }, c, rest] }), 0);
+  // The state's cap, read from the owner's own intent.
+  const cap = Object.entries(FHG_CAPS).reduceRight((rest, [state, c]) => `region == '${state}' ? ${dbl(c)} : ${rest}`, '0.0');
   return {
-    v: 1,
+    v: 2,
     kind: 'quote',
     pack: 'mortgage@1',
     title,
@@ -51,38 +51,36 @@ export function lenderProgram(title: string, r: LenderRules): QuoteProgram {
     terms: ['region', 'price_band', 'term_years', 'first_time_buyer', 'group_size'],
     let: {
       // The price band's lower bound: a conservative estimate of the purchase price.
-      price: v('price_band'),
-      fhg: r.fhg ? { and: [{ is: ['first_time_buyer', 'yes'] }, { '<=': [v('price'), cap] }] } : false,
+      price: 'price_band',
+      fhg: r.fhg ? `first_time_buyer == 'yes' && price <= (${cap})` : 'false',
       // Some savings go on stamp duty and fees; the rest is the deposit, up to 40%.
-      deposit: { min: [{ '*': [v('savings'), 0.85] }, { '*': [v('price'), 0.4] }] },
-      base_loan: { '-': [v('price'), v('deposit')] },
-      lvr: { '/': [v('base_loan'), v('price')] },
-      lmi: { if: [v('fhg'), 0, { '*': [v('base_loan'), { band: { of: v('lvr'), table: LMI, else: 0.05 } }] }] },
-      loan: { '+': [v('base_loan'), v('lmi')] },
-      group_off: r.group ? { if: [{ '>=': [v('group_size'), r.group.minMembers] }, r.group.off, 0] } : 0,
-      rate: { '-': [{ '+': [{ band: { of: v('lvr'), table: r.rates } }, { '*': [v('missed_payments_12m'), r.missedLoading ?? 0] }] }, v('group_off')] },
-      stressed: { annuity: { principal: v('loan'), rate_pct: { '+': [v('rate'), BUFFER] }, years: v('term_years') } },
-      take_home: { '/': [{ '-': [v('income_annual'), taxExpr(v('income_annual'))] }, 12] },
-      surplus: { '-': [v('take_home'), r.living, v('monthly_commitments')] },
+      deposit: 'min(savings * 0.85, price * 0.4)',
+      base_loan: 'price - deposit',
+      lvr: 'base_loan / price',
+      lmi: `fhg ? 0.0 : base_loan * band(lvr, ${table([...LMI, [1e9, 0.05]])})`,
+      loan: 'base_loan + lmi',
+      group_off: r.group ? `group_size >= ${dbl(r.group.minMembers)} ? ${dbl(r.group.off)} : 0.0` : '0.0',
+      rate: `band(lvr, ${table(r.rates)}) + missed_payments_12m * ${dbl(r.missedLoading ?? 0)} - group_off`,
+      stressed: `annuity(loan, rate + ${dbl(BUFFER)}, term_years)`,
+      take_home: `(income_annual - ${taxExpr('income_annual')}) / 12.0`,
+      surplus: `take_home - ${dbl(r.living)} - monthly_commitments`,
     },
-    eligible: {
-      and: [
-        { '<=': [v('lvr'), maxLvr] },
-        { '<=': [v('loan'), { '*': [v('income_annual'), r.maxDti] }] },
-        { '<=': [v('missed_payments_12m'), r.maxMissed] },
-        { '<=': [v('stressed'), v('surplus')] },
-        ...(r.selfEmployed ? [] : [{ not: [{ has: ['employment', 'self-employed'] }] } as Expr]),
-      ],
-    },
+    eligible: [
+      `lvr <= ${dbl(maxLvr)}`,
+      `loan <= income_annual * ${dbl(r.maxDti)}`,
+      `missed_payments_12m <= ${dbl(r.maxMissed)}`,
+      'stressed <= surplus',
+      ...(r.selfEmployed ? [] : ["!('self-employed' in employment)"]),
+    ].join(' && '),
     outputs: {
-      rate: { round: [v('rate'), 2] },
-      monthly: { round: [{ annuity: { principal: v('loan'), rate_pct: v('rate'), years: v('term_years') } }, 0] },
-      loan: { round: [v('loan'), -3] },
-      lvr_pct: { round: [{ '*': [v('lvr'), 100] }, 0] },
-      lmi: { round: [v('lmi'), -2] },
-      first_home_guarantee: { if: [v('fhg'), 1, 0] },
-      max_loan: { round: [{ min: [{ '*': [v('income_annual'), r.maxDti] }, { '*': [v('price'), maxLvr] }] }, -3] },
-      group_off: v('group_off'),
+      rate: 'round(rate, 2)',
+      monthly: 'round(annuity(loan, rate, term_years), 0)',
+      loan: 'round(loan, -3)',
+      lvr_pct: 'round(lvr * 100.0, 0)',
+      lmi: 'round(lmi, -2)',
+      first_home_guarantee: 'fhg ? 1.0 : 0.0',
+      max_loan: `round(min(income_annual * ${dbl(r.maxDti)}, price * ${dbl(maxLvr)}), -3)`,
+      group_off: 'group_off',
     },
     labels: {
       rate: { label: 'Rate (variable)', unit: '%' },
