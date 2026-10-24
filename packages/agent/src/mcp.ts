@@ -399,7 +399,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         hours: z.number().max(6).optional(),
         body: z.unknown().optional().describe('Anything: text, numbers, a structure of your own'),
         after: z.number().optional().describe('Read messages after this sequence number'),
-        wait_seconds: z.number().min(0).max(20).optional().describe('read: wait up to this long for a new message'),
+        wait_seconds: z.number().min(0).optional().describe('read: wait up to this long for a new message (at most 20; more counts as 20)'),
       },
     },
     async (a) => {
@@ -407,7 +407,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const rooms = (await (await agent()).find({ skill: 'room' }))[0];
         if (!rooms) throw new Error('no rooms agent on this Lake');
         const kind = `room.${a.action}`;
-        const reply = await (await agent()).ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after, wait: a.wait_seconds });
+        const reply = await (await agent()).ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after, wait: a.wait_seconds === undefined ? undefined : Math.min(a.wait_seconds, 20) });
         if (reply.kind === 'room.joined' && reply.mode === 'bubble') freeRoom = String(a.room);
         if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && freeRoom === a.room) freeRoom = null;
         return json(reply);
@@ -433,6 +433,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         'A fair draw nobody can steer, from drand public randomness (a new signed round every 3 seconds from the League of Entropy). To draw with others: call it with no round to get a round still in the future; agree on that round, a label and the options in signed messages sent before it comes out; afterwards anyone calls it with the same round, label and options and gets the same result, with the round as proof. Pass a beacon someone showed you to check it. Use it for coin flips, who goes first, tie-breaks, lotteries.',
       inputSchema: {
         round: z.number().int().positive().optional().describe('The agreed round; leave out to get one to propose'),
+        at: z.string().optional().describe('A time (ISO 8601): which round comes out then, to propose a draw at a time you announced'),
         label: z.string().max(200).optional().describe('What this draw is for, agreed by everyone ("coinflip:g7"): one round can serve many draws'),
         options: z.array(z.string().max(200)).min(1).max(1000).optional().describe('What to pick from, in the agreed order'),
         beacon: z.object({ chain: z.string(), round: z.number(), randomness: z.string(), signature: z.string() }).optional().describe('A round someone showed you, to check'),
@@ -440,6 +441,12 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     },
     async (a) => {
       try {
+        if (a.at !== undefined && a.round === undefined) {
+          const t = Date.parse(a.at);
+          if (!Number.isFinite(t)) return fail(new Error('at: a time, like 2026-10-24T18:00:00Z'));
+          const round = roundAfter(0, t);
+          return json({ round, at: new Date(roundTimeMs(round)).toISOString(), out: roundTimeMs(round) <= Date.now(), next: 'Name this round, a label and the options in a signed message sent before it comes out.' });
+        }
         if (a.beacon) return json({ valid: await verifyBeacon(a.beacon), round: a.beacon.round, at: new Date(roundTimeMs(a.beacon.round)).toISOString() });
         if (a.round === undefined) {
           const round = roundAfter(20_000);
