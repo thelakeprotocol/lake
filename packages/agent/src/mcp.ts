@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { blueprintHeader, canonicalize, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { blueprintHeader, canonicalize, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -126,6 +126,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const key = o.keyFile ? loadOrCreateIdentity(o.keyFile) : generateIdentity();
   let who: { name: string; domain: string } | undefined;
   let tags: string[] = [];
+  let about: string | undefined;
   const inbox: { id: number; at: string; from: { name: string; domain: string; url?: string }; message: Record<string, unknown>; checked?: Checked | Record<string, unknown>; signed?: unknown }[] = [];
   // Everything received, kept beyond the last batch: with what this agent sent, the record it can show in a dispute.
   const received: typeof inbox = [];
@@ -338,7 +339,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_search',
-    { description: 'Find participants by skill (e.g. "health-study"), interest tag (e.g. "research-volunteers") or role (house, specialist, visitor, agent).', inputSchema: { skill: z.string().optional(), tag: z.string().optional(), role: z.string().optional() } },
+    { description: 'Find participants by skill (e.g. "health-study"), interest tag (e.g. "research-volunteers"; a prefix works too: "writer" finds "writer:poems"), role (house, specialist, visitor, agent) or free text (q: words in a name, description or tags).', inputSchema: { skill: z.string().optional(), tag: z.string().optional(), role: z.string().optional(), q: z.string().max(120).optional().describe('Words to look for in names, descriptions and tags') } },
     async (q) => {
       try {
         // "agent" means any agent that isn't a house: visitors, assistants and specialists (run 17 found nothing).
@@ -399,13 +400,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_set_tags',
     {
       description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Re-signs your card under the same key; your address stays the same.',
-      inputSchema: { tags: z.array(z.string().regex(/^[a-z0-9:._-]{1,40}$/i)).max(8) },
+      inputSchema: { tags: z.array(z.string().regex(/^[a-z0-9:._-]{1,40}$/i)).max(8), about: z.string().max(200).optional().describe('One line on your card: what you offer or look for, in your own words (found by lake_search { q })') },
     },
     async (a) => {
       try {
         tags = a.tags;
+        if (a.about !== undefined) about = a.about;
         const now = await agent();
-        await now.setTags(tags);
+        await now.setTags(tags, about);
         return json({ tags, url: now.card.supportedInterfaces[0]!.url, domain: now.domain });
       } catch (e) {
         return fail(e);
@@ -535,15 +537,31 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_commit',
     {
       description:
-        'Commit to a value without showing it, and open it later: for sealed bids, hidden moves, secret ballots, "I said it first". Give value to get { commit, salt }: send the commit now, keep the salt; later reveal value and salt, and anyone checks with { check: { value, salt, commit } }. The commit is sha256(value + "|" + salt) in hex, as the pledge and coin-flip blueprints use, so code anywhere can check it too.',
+        'Commit to a value without showing it, and open it later: for sealed bids, hidden moves, secret ballots, "I said it first". Or seal it to a drand round (until_round) so it opens by itself and nobody can withhold a reveal. Give value to get { commit, salt }: send the commit now, keep the salt; later reveal value and salt, and anyone checks with { check: { value, salt, commit } }. The commit is sha256(value + "|" + salt) in hex, as the pledge and coin-flip blueprints use, so code anywhere can check it too.',
       inputSchema: {
         value: z.string().max(10_000).optional().describe('What to commit to (text; for a structure, use JSON text)'),
         plain: z.boolean().default(false).describe('A public fingerprint instead: sha256(value) with no salt, e.g. of a piece of work you deliver or receive, to name it in an order or a payment'),
+        until_round: z.number().int().positive().optional().describe('A timelock seal instead: value encrypted to this drand round (lake_draw gives one), which nobody can open before it comes out and anyone can open after. No reveal step, so nobody can withhold a reveal'),
+        open: z.string().optional().describe('A timelock seal to open (its round must be out)'),
         check: z.object({ value: z.string(), salt: z.string().optional(), commit: z.string() }).optional().describe('A reveal to check against its commit (no salt: a plain fingerprint)'),
       },
     },
     async (a) => {
       const hash = (v: string, salt: string) => createHash('sha256').update(`${v}|${salt}`).digest('hex');
+      if (a.open) {
+        try {
+          return json({ value: await openSeal(a.open) });
+        } catch (e) {
+          return fail(e);
+        }
+      }
+      if (a.until_round !== undefined && a.value !== undefined) {
+        try {
+          return json({ sealed: await sealUntil(a.until_round, a.value), round: a.until_round, opens: new Date(roundTimeMs(a.until_round)).toISOString(), next: 'Post the sealed text. Once the round is out, anyone opens it with lake_commit { open }: no reveal needed.' });
+        } catch (e) {
+          return fail(e);
+        }
+      }
       if (a.check) return json({ matches: (a.check.salt ? hash(a.check.value, a.check.salt) : createHash('sha256').update(a.check.value).digest('hex')) === a.check.commit.toLowerCase(), commit: a.check.commit });
       if (a.value === undefined) return fail(new Error('give value to commit to, or check: { value, salt, commit }'));
       if (a.plain) return json({ sha256: createHash('sha256').update(a.value).digest('hex'), next: 'Anyone with the same text gets the same sha256: name it in an order or a payment (lake_pay { order }), or check it with { check: { value, commit } }.' });

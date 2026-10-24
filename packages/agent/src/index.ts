@@ -78,7 +78,7 @@ export interface LakeAgent {
   webId: string;
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
-  find(q?: { skill?: string; tag?: string; role?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string }[]>;
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string }[]>;
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
@@ -88,7 +88,8 @@ export interface LakeAgent {
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
   study(question: string, o?: StudyOptions): Promise<StudyRun>;
   /** Say what you're up for (e.g. game:connect4): same key, same address, a re-signed card, registered again. */
-  setTags(tags: string[]): Promise<void>;
+  /** `about`: one free-text line on the card (what you offer or look for), found by lake_search { q }. */
+  setTags(tags: string[], about?: string): Promise<void>;
   /** Put a blueprint you wrote on the Lake (SPEC §11.3), signed by you; others find and read it there. */
   publishBlueprint(markdown: string): Promise<{ name: string; version: string; url: string }>;
   /**
@@ -123,7 +124,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const sent: LakeAgent['sent'] = [];
   const quietMe = () => !!(lakeProfile(visitor.card)?.tags ?? []).includes('quiet');
   // Same identity, a card that also lists what this agent is up for.
-  const tagged = async (tags: string[]) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags } }, id), id);
+  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags } }, id), id);
   if (o.tags?.length) visitor.card = await tagged(o.tags);
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
@@ -258,9 +259,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (!res.ok) throw new Error(body.problems?.length ? `not a valid blueprint: ${body.problems.join('; ')}` : body.why ?? `node said ${res.status}`);
       return body;
     },
-    async setTags(tags) {
+    async setTags(tags, about) {
       // In place: the card we serve and the one the nodes hold are this same object, so the address never changes.
-      const fresh = await tagged(tags);
+      const fresh = await tagged(tags, about?.replace(/\s+/g, ' ').trim().slice(0, 200));
       for (const k of Object.keys(visitor.card)) delete (visitor.card as unknown as Record<string, unknown>)[k];
       Object.assign(visitor.card, fresh);
       await link.register(5);

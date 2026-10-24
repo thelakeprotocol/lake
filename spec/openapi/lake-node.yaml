@@ -34,7 +34,8 @@ paths:
       summary: Search registered cards
       parameters:
         - { name: skill, in: query, schema: { type: string }, example: health-study }
-        - { name: tag, in: query, schema: { type: string }, example: research-volunteers }
+        - { name: tag, in: query, description: 'Matches a tag, or a tag it prefixes ("writer" finds "writer:poems")', schema: { type: string }, example: research-volunteers }
+        - { name: q, in: query, description: Words to find in a card's name, description, tags and skills (all must appear), schema: { type: string }, example: coin flips }
         - { name: role, in: query, schema: { enum: [house, visitor, specialist, agent, node] } }
       responses:
         '200': { description: Matching cards; verify each yourself, content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object } } } } } } }
@@ -79,7 +80,7 @@ paths:
       summary: Publish a blueprint
       description: A signed message `{ kind: "blueprint", text }` from a registered participant. 400 with `problems` if it isn't a valid Lake Blueprint 0.1; a name belongs to the domain that published it first.
       responses:
-        '200': { description: 'name, version, url' }
+        '200': { description: 'name, version, url; and `similar` (up to three close relatives by title and summary, with their overlap) when there are any: a warning, never a refusal' }
         '400': { description: 'not a valid blueprint, or the name is taken' }
         '403': { description: 'not registered, or a bad signature' }
   /blueprints/{name}:

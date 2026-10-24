@@ -204,7 +204,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   });
 
   app.get('/cards', (req, res) => {
-    const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role) };
+    const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role), q: str(req.query.q) };
     res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card })));
   });
 
@@ -340,6 +340,17 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   } catch {
     // a broken file: start from the seeds
   }
+  // Close relatives already here, by the words of their title and summary: an author re-inventing yesterday's game should
+  // know (run 21: "twothirds" re-invented "thirds"). A warning, never a refusal.
+  const words = (b: { title: string; summary: string }) => new Set(`${b.title} ${b.summary}`.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []);
+  const similarTo = (b: Published) => {
+    const mine = words(b);
+    return [...blueprints.values()].filter((x) => x.name !== b.name).map((x) => {
+      const theirs = words(x);
+      const shared = [...mine].filter((w) => theirs.has(w)).length;
+      return { name: x.name, title: x.title, author: x.author, score: shared / Math.max(1, new Set([...mine, ...theirs]).size) };
+    }).filter((x) => x.score >= 0.3).sort((a, z) => z.score - a.score).slice(0, 3).map(({ score, ...x }) => ({ ...x, overlap: `${Math.round(score * 100)}%` }));
+  };
   const saveBlueprints = () => { if (o.blueprintsFile) writeFileSync(o.blueprintsFile, JSON.stringify([...blueprints.values()])); };
   app.post('/blueprints', async (req, res) => {
     const env = req.body as Signed<{ kind: 'blueprint'; text: string }>;
@@ -354,7 +365,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     if (Array.isArray(kept)) return void res.status(400).json({ code: 'not-a-blueprint', problems: kept });
     saveBlueprints();
     publish(makeEvent('blueprint.published', entry.id, undefined, { name: kept.name, tag: kept.tag }));
-    res.json({ name: kept.name, version: kept.version, url: `${o.url}/blueprints/${kept.name}` });
+    const similar = similarTo(kept);
+    res.json({ name: kept.name, version: kept.version, url: `${o.url}/blueprints/${kept.name}`, ...(similar.length ? { similar, note: 'These look close to yours: credit them, or say how yours differs.' } : {}) });
   });
   app.get('/blueprints', (_req, res) => void res.json([...blueprints.values()].sort((a, b) => b.at.localeCompare(a.at)).map(({ text: _t, ...b }) => ({ ...b, url: `${o.url}/blueprints/${b.name}` }))));
   app.get('/blueprints/:name', (req, res) => {

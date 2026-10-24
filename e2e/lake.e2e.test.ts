@@ -510,8 +510,11 @@ describe('the open door', () => {
     await other.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
     const theirs = JSON.parse((((await other.callTool({ name: 'lake_overview', arguments: {} })).content) as { text: string }[])[0]!.text);
     expect(theirs.you.name).not.toBe(o.you.name);
-    const tagged = await text('lake_set_tags', { tags: ['game:coinflip'] });
+    const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
+    // Forgiving search: a tag prefix, and words in a card's own line.
+    expect((await text('lake_search', { tag: 'game' })).some((c: { url: string }) => c.url === o.you.url)).toBe(true);
+    expect((await text('lake_search', { q: 'coin flips' })).some((c: { url: string }) => c.url === o.you.url)).toBe(true);
     // A fair draw: a round still to come to agree on, and anyone can check a round shown as proof (drand; offline here).
     const proposed = await text('lake_draw', {});
     expect(Date.parse(proposed.at)).toBeGreaterThan(Date.now() + 15_000);
@@ -631,8 +634,11 @@ describe('the open door', () => {
     const filled = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'sign', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);
     expect(filled).toMatchObject({ kind: 'tally.triggered', count: 2 });
     expect(await text('lake_pledge', { action: 'reveal', tally, id: 'e2e-blind' })).toMatchObject({ kind: 'tally.revealed', signers: [{ domain: o.you.domain }], unrevealed: 1 });
+    expect((await t(client, { kind: 'tally.count', id: 'e2e-blind' }))).toMatchObject({ revealed: 1, bound: false });
     const both = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'reveal', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);
     expect(both.signers).toHaveLength(2);
+    // It binds once enough signers stand by it, not just once enough passes are in.
+    expect(both).toMatchObject({ revealed: 2, bound: true });
     // Taken back before it fills, still anonymously.
     await t(client, { kind: 'tally.open', id: 'e2e-blind-2', text: 'Maybe later.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), blind: true });
     expect(await text('lake_pledge', { action: 'sign', tally, id: 'e2e-blind-2' })).toMatchObject({ count: 1 });
@@ -650,7 +656,10 @@ describe('the open door', () => {
     const mine = (await readFile('spec/blueprints/coinflip.md', 'utf8')).replace('name: coinflip', 'name: dice').replaceAll('coinflip.', 'dice.').replace('tag: game:coinflip', 'tag: game:dice');
     const bad = await client.callTool({ name: 'lake_publish_blueprint', arguments: { markdown: '# just a note' } });
     expect(bad.isError).toBe(true);
-    expect((await text('lake_publish_blueprint', { markdown: mine })).name).toBe('dice');
+    const published = await text('lake_publish_blueprint', { markdown: mine });
+    expect(published.name).toBe('dice');
+    // A close relative already here is named: "dice" is the coin flip with new names (run 21's "twothirds" was "thirds").
+    expect(published.similar.map((x: { name: string }) => x.name)).toContain('coinflip');
     const taken = await client.callTool({ name: 'lake_publish_blueprint', arguments: { markdown: (await readFile('spec/blueprints/coinflip.md', 'utf8')) } });
     expect(taken.isError).toBe(true); // the node's own seed: the name belongs to it
     expect((await text('lake_ask_around')).invented_here.map((b: { name: string }) => b.name)).toEqual(expect.arrayContaining(['dice', 'coinflip', 'pledge']));
@@ -679,7 +688,8 @@ describe('the open door', () => {
     const me = (await alice('lake_overview')).you;
     const found = await alice('lake_search', { tag: 'game:connect4' });
     expect(found.map((f: { domain: string }) => f.domain)).toEqual([b.domain]);
-    expect(await alice('lake_ask', { agent_url: found[0].url, message: { kind: 'game.move', game: 'connect4', col: 3 } })).toMatchObject({ kind: 'received' });
+    // The other side's signed "received" names exactly what arrived: proof of delivery (run 21's buyers and sellers).
+    expect(await alice('lake_ask', { agent_url: found[0].url, message: { kind: 'game.move', game: 'connect4', col: 3 } })).toMatchObject({ kind: 'received', digest: expect.stringMatching(/^[0-9a-f]{64}$/), delivered: expect.stringMatching(/^exactly what you sent/) });
     const got = await bob('lake_inbox', { wait_seconds: 5 });
     expect(got.messages).toEqual([expect.objectContaining({ from: expect.objectContaining({ domain: me.domain }), message: { kind: 'game.move', game: 'connect4', col: 3 } })]);
     expect((await bob('lake_inbox', { wait_seconds: 0 })).messages).toEqual([]);

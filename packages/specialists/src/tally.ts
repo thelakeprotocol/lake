@@ -37,7 +37,9 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
   const counted = (t: Tally) => (t.blind ? t.blind.passes.length : t.signers.length);
   const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state, ...(t.peopleOnly ? { people_only: true } : {}),
-    ...(t.blind ? { blind: true, issuer: t.blind.issuer, revealed: t.blind.passes.filter((x) => x.revealed).length } : {}) });
+    // A blind pledge binds only when enough signers have revealed themselves, not just when enough passes are in (run 21:
+    // "make pledges actually bind"): an anonymous signature is cheap until its signer stands by it.
+    ...(t.blind ? { blind: true, issuer: t.blind.issuer, revealed: t.blind.passes.filter((x) => x.revealed).length, bound: t.blind.passes.filter((x) => x.revealed).length >= t.threshold } : {}) });
   // Public counts go out late and in batches: a count that ticks the moment someone signs would let anyone match
   // it against that someone's other activity. (Six Claudes unmasked a blind pledge from the public feed that way.)
   const due = new Set<Tally>();

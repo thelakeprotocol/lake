@@ -72,12 +72,20 @@ export class Registry {
     return undefined;
   }
 
-  search(q: { skill?: string; tag?: string; role?: string }): Entry[] {
+  /**
+   * Cards by role, tag, skill or free text. Forgiving where it can be (run 21's agents missed each other by a near-miss
+   * tag): a tag also matches by prefix ("writer" finds "writer:poems"), and `q` matches words in a card's name,
+   * description, tags and skills.
+   */
+  search(q: { skill?: string; tag?: string; role?: string; q?: string }): Entry[] {
+    const tag = q.tag?.toLowerCase();
+    const words = (q.q ?? '').toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
     return [...this.entries.values()].filter(
       (e) =>
         (!q.role || e.profile.role === q.role) &&
-        (!q.tag || e.profile.tags.includes(q.tag)) &&
-        (!q.skill || e.card.skills.some((s) => s.id === q.skill)),
+        (!tag || e.profile.tags.some((t) => t.toLowerCase() === tag || t.toLowerCase().startsWith(`${tag}:`) || t.toLowerCase().startsWith(tag))) &&
+        (!q.skill || e.card.skills.some((s) => s.id === q.skill)) &&
+        (!words.length || ((text) => words.every((w) => text.includes(w)))([e.card.name, e.card.description, ...e.profile.tags, ...e.card.skills.map((s) => `${s.id} ${s.name} ${s.description}`)].join(' ').toLowerCase())),
     );
   }
 

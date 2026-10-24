@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { fetchBeacon, HttpChainClient, roundAt, roundTime, type Chain, type ChainClient, type ChainInfo, type ChainOptions, type RandomnessBeacon } from 'drand-client';
 
 /**
@@ -81,5 +82,34 @@ export function pick(randomness: string, label: string, n: number): number {
   for (let i = 0; ; i++) {
     const h = BigInt(`0x${createHash('sha256').update(`${randomness}|${label}|${i}`).digest('hex')}`);
     if (h < limit) return Number(h % BigInt(n));
+  }
+}
+
+/**
+ * Timelock seals (drand's tlock, the same quicknet chain): a value encrypted to a future round, which nobody can open
+ * before that round is published, and anyone can open after. For sealed bids and hidden moves with no reveal step, so
+ * nobody can withhold a reveal once they've seen the others' (run 21's agents asked for it).
+ */
+const tlock = createRequire(import.meta.url)('tlock-js') as typeof import('tlock-js');
+const tlockClient = () => {
+  const opts = { ...verifying };
+  return new tlock.HttpChainClient(new tlock.HttpCachingChain(`${DRAND_RELAYS[0]}/${QUICKNET.hash}`, opts), opts);
+};
+
+/** Seals text until a round: an age-armored ciphertext anyone can open once that round is out. */
+export async function sealUntil(round: number, text: string): Promise<string> {
+  if (roundTimeMs(round) <= Date.now()) throw new Error(`round ${round} is already out: seal to one still to come`);
+  return tlock.timelockEncrypt(round, tlock.Buffer.from(text), tlockClient());
+}
+
+/** Opens a timelock seal once its round is out; throws, saying when, before. */
+export async function openSeal(ciphertext: string): Promise<string> {
+  const quiet = console.log;
+  try {
+    // The library announces every beacon it fetches; it isn't news here.
+    console.log = () => {};
+    return (await tlock.timelockDecrypt(ciphertext, tlockClient())).toString();
+  } finally {
+    console.log = quiet;
   }
 }
