@@ -3,8 +3,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  makeEvent, readAccessGrant, ReplayGuard, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
-  type JWK, type LakeEvent, type Signed, type Study,
+  allowanceDraft, makeEvent, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  type AgentCard, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
 /** An offer the rules couldn't settle: waiting for the owner's tap. */
@@ -73,9 +73,14 @@ const MAX_GRANT_MS = 48 * 3_600_000;
  * offers, activity, data, rules) and suggest; it may never Allow, change rules, accept, revoke or export. Only
  * the owner's key cuts keys.
  */
-export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: string }
+export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: string; /** Its Lake WebID, for an allowance to name. */ webId?: string }
+/** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
+export interface Allowance { kid: string; credential: string; statusId: string; amountUsd: number; until: string; at: string }
 export interface Suggestion { id: string; from: string; text: string; request?: string; at: string }
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.data', 'panel.market', 'assistant.suggest']);
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance']);
+// Play money on a sandbox; a real Lake would take the cap from the owner's own settings.
+const MAX_ALLOWANCE_USD = 500;
+const MAX_ALLOWANCE_DAYS = 31;
 
 /**
  * The owner's side of the house. The owner's key is made on their own device and never leaves it;
@@ -109,6 +114,13 @@ export class OwnerDesk {
       loadRevoked: () => Promise<string[]>;
       /** Each key's bit on the house's public status list (SPEC §6), kept with the agreements. */
       saveStatus?: (indexes: Record<string, number>) => Promise<void>;
+      /** Spending allowances the owner signed for their assistants, kept in the wallet. */
+      saveAllowances?: (a: Allowance[]) => Promise<void>;
+      loadAllowances?: () => Promise<Allowance[]>;
+      /** The house's word that a key is its owner's (for a payments agent), its card, and its status list's address. */
+      vouchOwner?: (ownerJwk: JWK) => Promise<string>;
+      card?: () => AgentCard;
+      statusUrl?: () => string;
       loadStatus?: () => Promise<Record<string, number>>;
       /**
        * Sandbox houses anyone can claim: a claim is a lease, not a deed. When it ends (or the owner hands
@@ -159,10 +171,19 @@ export class OwnerDesk {
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
     for (const [id, i] of Object.entries((await this.o.loadStatus?.().catch(() => ({}))) ?? {})) this.statusIndexes.set(id, Number(i));
     for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a);
+    for (const a of (await this.o.loadAllowances?.().catch(() => [])) ?? []) this.allowances.set(a.kid, a);
     return { paired: !!this.ownerJwk, token: this.token };
   }
 
   private revokedIds = new Set<string>();
+  readonly allowances = new Map<string, Allowance>();
+  private allowanceDrafts = new Map<string, { kid: string; statusId: string; draft: Record<string, unknown> }>();
+  private saveAllowances = () => this.o.saveAllowances?.([...this.allowances.values()]);
+  /** An allowance still good: not taken back, not past its date. */
+  allowanceFor(kid: string): Allowance | undefined {
+    const a = this.allowances.get(kid);
+    return a && !this.isRevoked(a.statusId) && Date.parse(a.until) > Date.now() ? a : undefined;
+  }
   isRevoked(id: string) {
     return this.revokedIds.has(id) || !!this.grants.get(id)?.revoked;
   }
@@ -259,14 +280,14 @@ export class OwnerDesk {
 
     // The owner's assistant pairs with a one-time code the owner made in the panel; its key can look and suggest only.
     r.post('/assistant', async (req, res) => {
-      const { publicJwk, code, label } = req.body ?? {};
+      const { publicJwk, code, label, webId } = req.body ?? {};
       if (!publicJwk?.x || publicJwk.crv !== 'Ed25519' || !publicJwk.kid) return void res.status(400).json({ error: 'send an Ed25519 public key with a kid' });
       const invite = this.invites.get(String(code ?? ''));
       if (!invite || invite.until < Date.now()) return void res.status(403).json({ error: 'wrong or expired code: ask your human for a new one' });
       this.invites.delete(String(code));
       const kid = String(publicJwk.kid);
       if (kid === this.ownerJwk?.kid) return void res.status(400).json({ error: 'that is the owner\'s own key' });
-      const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString() };
+      const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}) };
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY] });
@@ -306,6 +327,13 @@ export class OwnerDesk {
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
+        if (p.kind === 'assistant.allowance') {
+          // What this assistant may spend for its human: the owner's signed mandate, the house's card and its word for the
+          // owner's key, so a payments agent can check the whole chain. The house signs no money itself.
+          const a = this.allowanceFor(assistant.kid);
+          if (!a || !this.o.vouchOwner || !this.o.card) return void res.json({ intent: null, why: 'your human has not given you an allowance (control panel: Money → Spending allowance)' });
+          return void res.json({ intent: { credential: a.credential, card: this.o.card(), owner: await this.o.vouchOwner(this.ownerJwk!) }, amountUsd: a.amountUsd, until: a.until });
+        }
       }
       if (p.kind === 'panel.assistant.invite') {
         // Fifteen minutes, one use: long enough to paste into a chat with your agent.
@@ -319,6 +347,48 @@ export class OwnerDesk {
         if (kid === 'all') this.assistants.clear();
         await this.o.saveAssistants?.([...this.assistants.values()]);
         return void res.json({ revoked: gone });
+      }
+      if (p.kind === 'panel.allowance.draft') {
+        const q = p as unknown as { kid?: string; amountUsd?: number; days?: number };
+        const a = this.assistants.get(String(q.kid ?? ''));
+        const amount = Number(q.amountUsd), days = Number(q.days ?? 7);
+        if (!a?.webId) return void res.status(400).json({ error: a ? 'that assistant connected before allowances existed: reconnect it with a new code' : 'no assistant with that key' });
+        if (!(amount > 0 && amount <= MAX_ALLOWANCE_USD)) return void res.status(400).json({ error: `amountUsd: more than 0, at most ${MAX_ALLOWANCE_USD}` });
+        if (!(days >= 1 && days <= MAX_ALLOWANCE_DAYS)) return void res.status(400).json({ error: `days: 1 to ${MAX_ALLOWANCE_DAYS}` });
+        if (!this.o.statusUrl) return void res.status(501).json({ error: 'this house cannot keep allowances' });
+        const statusId = `allowance:${randomBytes(6).toString('hex')}`;
+        const draft = allowanceDraft(this.o.webId, a.webId, amount, new Date(Date.now() + days * 86_400_000), statusEntry(this.o.statusUrl(), await this.statusIndex(statusId)));
+        this.allowanceDrafts.set(statusId, { kid: a.kid, statusId, draft });
+        return void res.json({ id: statusId, draft, note: 'sign it on this device and send it back with panel.allowance.set' });
+      }
+      if (p.kind === 'panel.allowance.set') {
+        const q = p as unknown as { id?: string; credential?: string };
+        const d = this.allowanceDrafts.get(String(q.id ?? ''));
+        if (!d) return void res.status(404).json({ error: 'no allowance draft with that id: start again' });
+        let vc;
+        try {
+          vc = await verifyCredential(String(q.credential ?? ''), this.ownerJwk);
+        } catch {
+          return void res.status(403).json({ error: 'the allowance is not signed by your key' });
+        }
+        // Exactly what was drafted: same assistant, amount, expiry and status bit.
+        const same = ['issuer', 'type', 'credentialSubject', 'credentialStatus'].every((k) => JSON.stringify((vc as unknown as Record<string, unknown>)[k]) === JSON.stringify(d.draft[k]));
+        if (!same) return void res.status(400).json({ error: 'the allowance does not match its draft' });
+        const s = vc.credentialSubject as unknown as { budget: { amount: number }; intent_expiry: string };
+        const old = this.allowances.get(d.kid);
+        if (old) await this.revoke(old.statusId);
+        this.allowances.set(d.kid, { kid: d.kid, credential: String(q.credential), statusId: d.statusId, amountUsd: s.budget.amount, until: s.intent_expiry, at: new Date().toISOString() });
+        this.allowanceDrafts.delete(d.statusId);
+        await this.saveAllowances();
+        return void res.json({ ok: true, amountUsd: s.budget.amount, until: s.intent_expiry });
+      }
+      if (p.kind === 'panel.allowance.revoke') {
+        const a = this.allowances.get(String((p as unknown as { kid?: string }).kid ?? ''));
+        if (!a) return void res.status(404).json({ error: 'no allowance for that assistant' });
+        await this.revoke(a.statusId);
+        this.allowances.delete(a.kid);
+        await this.saveAllowances();
+        return void res.json({ revoked: true, note: 'its bit is set on your house\'s status list: payments refuse it from now on' });
       }
       if (p.kind === 'panel.assistant.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
@@ -372,7 +442,7 @@ export class OwnerDesk {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
-      assistants: [...this.assistants.values()].map(({ kid, label, addedAt }) => ({ kid, label, addedAt })),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amountUsd: a.amountUsd, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

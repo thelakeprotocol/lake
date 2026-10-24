@@ -244,11 +244,13 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       try {
         const base = a.house_url.replace(/\/(a2a|owner\/?)?$/, '').replace(/\/$/, '');
         const me = await agent(), id = await key;
-        const res = await fetch(`${base}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: id.publicJwk, code: a.code, label: me.card.name }) });
+        const res = await fetch(`${base}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: id.publicJwk, code: a.code, label: me.card.name, webId: me.webId }) });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
         house = base;
-        return json({ ...body, next: 'lake_house({ view: "overview" }), then requests, offers, activity…' });
+        // From now on, money is spent under the allowance your human signed in this house, if they gave you one.
+        me.setAllowanceSource(async () => ((await houseCall({ kind: 'assistant.allowance' })) as { intent?: { credential: string; card: AgentCard; owner?: string } | null }).intent ?? null);
+        return json({ ...body, next: 'lake_house({ view: "overview" }), then requests, offers, activity… If your human gave you a spending allowance there, lake_pay spends under it.' });
       } catch (e) {
         return fail(e);
       }

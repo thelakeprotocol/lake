@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, ownerKeyCredential, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -232,6 +232,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     leaseHours: o.leaseHours,
     clearOwnerKey: async () => { await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`, { method: 'DELETE' }); },
     saveAssistants: (keys) => put(owner, 'wallet/assistants.json', JSON.stringify(keys), 'application/json'),
+    saveAllowances: (a) => put(owner, 'wallet/allowances.json', JSON.stringify(a), 'application/json'),
+    loadAllowances: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/allowances.json`); return r.ok ? r.json() : []; },
+    // The house vouches for its owner's key (for a payments agent checking an allowance); it never signs money itself.
+    vouchOwner: (ownerJwk) => ownerKeyCredential(id, owner.webId, ownerJwk, 1),
+    card: () => card,
+    statusUrl: () => keeperRef!.statusUrl,
     loadAssistants: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/assistants.json`); return r.ok ? r.json() : []; },
     // The next person gets the house as it started: its original rules.
     onRelease: async () => {

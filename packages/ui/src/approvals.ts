@@ -520,7 +520,7 @@ let invite: { msg: string; until: number } | null = null;
 
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
 async function myagent(box: HTMLElement) {
-  const v = await call<{ assistants: { kid: string; label: string; addedAt: string }[]; suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
+  const v = await call<{ assistants: Assistant[]; suggestions: { id: string; from: string; text: string; at: string }[] }>({ kind: 'list' });
   const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
   if (invite && invite.until < Date.now()) invite = null;
   const give = h('button', { class: 'btn primary', type: 'button' }, v.assistants.length ? 'Give another agent a key' : 'Give my AI agent a key');
@@ -547,12 +547,47 @@ async function myagent(box: HTMLElement) {
     code || give,
     v.assistants.length
       ? h('div', {}, h('h2', {}, 'Connected'), h('ul', { class: 'rows' }, ...v.assistants.map((a) => h('li', {},
-          h('div', {}, h('div', { class: 'r-title' }, a.label.replace(/\s*\(.*\)$/, '')), h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest`)),
+          h('div', {}, h('div', { class: 'r-title' }, a.label.replace(/\s*\(.*\)$/, '')),
+            h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest${a.allowance ? ` · may spend up to $${a.allowance.amountUsd} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
+            allowanceForm(a)),
           h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } }, 'Revoke')))))
       : h('p', { class: 'muted', style: 'margin-top:14px' }, 'No agent connected yet.'),
     h('h2', {}, 'What it suggests'),
     v.suggestions.length ? suggestionList(v.suggestions) : h('p', { class: 'muted' }, 'Nothing yet. Its suggestions show up here and on Home.'),
   );
+}
+
+interface Assistant { kid: string; label: string; addedAt: string; canHaveAllowance?: boolean; allowance?: { amountUsd: number; until: string } }
+
+/**
+ * A spending allowance for one assistant (SPEC §6.2): the house drafts it, this device signs it with your key, and the
+ * house checks it matches. Your assistant spends under it with lake_pay; payments refuse anything over it, after its
+ * date, or once you take it back.
+ */
+function allowanceForm(a: Assistant): Node {
+  if (a.allowance) {
+    return h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.allowance.revoke', kid: a.kid }); void show(); } }, 'Take the allowance back');
+  }
+  if (!a.canHaveAllowance) return h('div', { class: 'r-meta' }, 'To give it spending money, connect it again with a new code.');
+  const amount = h('input', { type: 'number', min: '1', max: '500', step: '1', value: '10', style: 'width:5em' }) as HTMLInputElement;
+  const days = h('select', {}, ...[1, 3, 7, 30].map((d) => h('option', { value: String(d), ...(d === 7 ? { selected: true } : {}) }, `${d} day${d === 1 ? '' : 's'}`))) as HTMLSelectElement;
+  const msg = h('span', { class: 'muted' });
+  const sign = h('button', { class: 'btn small', type: 'button' }, 'Sign and give') as HTMLButtonElement;
+  sign.onclick = async () => {
+    sign.disabled = true;
+    try {
+      const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amountUsd: Number(amount.value), days: Number(days.value) });
+      if (d.error) throw new Error(d.error);
+      const credential = signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey());
+      const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential });
+      if (!r.ok) throw new Error(r.error ?? 'refused');
+      void show();
+    } catch (e) {
+      msg.textContent = (e as Error).message;
+      sign.disabled = false;
+    }
+  };
+  return h('div', { class: 'r-meta', style: 'margin-top:6px' }, 'Spending money: $', amount, ' for ', days, ' ', sign, ' ', msg);
 }
 
 function suggestionList(list: { id: string; from: string; text: string; at: string }[]): Node {

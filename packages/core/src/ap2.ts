@@ -1,4 +1,5 @@
-import { issueCredential, digestSRI } from './vc.js';
+import type { JWK } from 'jose';
+import { issueCredential, digestSRI, verifyCredential } from './vc.js';
 import type { Identity } from './crypto.js';
 
 /**
@@ -35,3 +36,44 @@ export function signPaymentMandate(agent: Identity, agentWebId: string, o: { pay
     agent,
   );
 }
+
+/**
+ * A house vouching that a key is its owner's (SPEC §6.2): the owner signs a spending allowance with a key that is on no
+ * card, as the house's WebID, and whoever checks the allowance (a payments agent) checks this first, against the house's
+ * card. The house never signs the money itself. Shown only to whoever must check it, so it doesn't link the owner's houses.
+ */
+export const OWNER_KEY_TYPE = 'LakeOwnerKey';
+
+export function ownerKeyCredential(house: Identity, houseWebId: string, ownerJwk: JWK, days = 30): Promise<string> {
+  const now = Date.now();
+  return issueCredential(
+    {
+      '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', OWNER_KEY_TYPE], issuer: houseWebId,
+      validFrom: new Date(now).toISOString(), validUntil: new Date(now + days * 86_400_000).toISOString(),
+      credentialSubject: { id: houseWebId, ownerKey: { kty: ownerJwk.kty, crv: ownerJwk.crv, x: ownerJwk.x, kid: ownerJwk.kid } },
+    } as never,
+    house,
+  );
+}
+
+/** The owner's key a house vouches for, once the vouching verifies against the house's own key and WebID. */
+export async function verifyOwnerKey(credential: string, houseJwk: JWK, houseWebId: string): Promise<JWK> {
+  const vc = await verifyCredential(credential, houseJwk);
+  const s = vc.credentialSubject as { id?: string; ownerKey?: JWK };
+  if (!vc.type.includes(OWNER_KEY_TYPE) || vc.issuer !== houseWebId || s.id !== houseWebId || !s.ownerKey?.x) throw new Error('not this house\'s word for its owner\'s key');
+  const until = (vc as { validUntil?: string }).validUntil;
+  if (until && Date.parse(until) < Date.now()) throw new Error('the house\'s word for its owner\'s key has expired');
+  return { ...s.ownerKey, alg: 'EdDSA' };
+}
+
+/** An allowance the owner signs on their device: what their assistant may spend for them, until when (SPEC §6.2). */
+export const allowanceDraft = (houseWebId: string, assistantWebId: string, amountUsd: number, until: Date, status?: unknown) => ({
+  '@context': ['https://www.w3.org/ns/credentials/v2'],
+  type: ['VerifiableCredential', 'IntentMandate'],
+  issuer: houseWebId,
+  credentialSubject: {
+    id: assistantWebId, natural_language_description: 'What my assistant may spend for me on the Lake', study: `urn:lake:allowance:${houseWebId}`,
+    budget: { currency: 'USD', amount: amountUsd }, intent_expiry: until.toISOString(), user_cart_confirmation_required: false,
+  } satisfies IntentMandateSubject,
+  ...(status ? { credentialStatus: status } : {}),
+});

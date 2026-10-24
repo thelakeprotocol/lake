@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditProgram, auditStudy, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
   packId, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -125,7 +125,7 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
   const spent = new Map<string, number>();
   const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed.', 'payments', async (p, agentWebId, agent) => {
     if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...] }'] };
-    const intent = p.intent as { credential: string; card: AgentCard } | undefined;
+    const intent = p.intent as { credential: string; card: AgentCard; owner?: string } | undefined;
     const payments = (p.payments as string[] | undefined) ?? [];
     if (!intent?.credential || !intent.card) return { kind: 'refused', problems: ['no Intent Mandate'] };
     let human;
@@ -134,13 +134,27 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     } catch (e) {
       return { kind: 'refused', problems: [`the human's card: ${(e as Error).message}`] };
     }
-    if (human.ownerDomain !== agent.ownerDomain) return { kind: 'refused', problems: ['the Intent Mandate was signed by someone outside the agent\'s organisation'] };
+    // An owner's allowance: signed with the owner's own key, which their house vouches for (the card is the house's). The
+    // owner names the assistant in it, so it needn't share the assistant's organisation. Otherwise: a person of the
+    // agent's own organisation signed it with the key on their card.
+    let signerJwk = human.publicJwk;
+    if (intent.owner) {
+      try {
+        signerJwk = await verifyOwnerKey(intent.owner, human.publicJwk, human.webId);
+      } catch (e) {
+        return { kind: 'refused', problems: [`the house's word for its owner's key: ${(e as Error).message}`] };
+      }
+    } else if (human.ownerDomain !== agent.ownerDomain) return { kind: 'refused', problems: ['the Intent Mandate was signed by someone outside the agent\'s organisation'] };
     let mandate;
     try {
-      mandate = await verifyCredential(intent.credential, human.publicJwk);
+      mandate = await verifyCredential(intent.credential, signerJwk);
     } catch {
       return { kind: 'refused', problems: ['the Intent Mandate signature does not verify'] };
     }
+    if (intent.owner && mandate.issuer !== human.webId) return { kind: 'refused', problems: ['the allowance was not issued as this house\'s owner'] };
+    // Taken back? The owner revokes an allowance on the house's public status list.
+    const status = await checkCredentialStatus(mandate as never).catch((e: Error) => ({ checked: true as const, revoked: true, why: e.message }));
+    if (status.checked && status.revoked) return { kind: 'refused', problems: ['the owner has taken this allowance back'] };
     const m = mandate.credentialSubject as unknown as { id: string; budget: { amount: number; currency?: string }; intent_expiry: string };
     if (!mandate.type.includes('IntentMandate') || m.id !== agentWebId) return { kind: 'refused', problems: ['the Intent Mandate is not for this agent'] };
     if (Date.parse(m.intent_expiry) < Date.now()) return { kind: 'refused', problems: ['the Intent Mandate has expired'] };

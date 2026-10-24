@@ -94,7 +94,12 @@ export interface LakeAgent {
    * payee. In any other unit the two agreed on (hours, favours, a naming right): a transfer the payer signs and sends;
    * nothing backs it but the signature and the payer's word.
    */
-  pay(agentUrl: string, amount: number, memo: string, unit?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string }>;
+  pay(agentUrl: string, amount: number, memo: string, unit?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  /**
+   * Where this agent's spending allowance comes from, once it's connected to its human's house: the allowance the human
+   * signed there (SPEC §6.2). Without one, USD payments use the sandbox's play-money allowance, if any.
+   */
+  setAllowanceSource(source: () => Promise<{ credential: string; card: AgentCard; owner?: string } | null>): void;
   close(): Promise<void>;
 }
 
@@ -139,6 +144,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   await link.register(10);
   if (o.onMessage) link.keepAlive(20_000); // an agent that takes messages stays findable
   let allowance: Promise<{ credential: string; card: AgentCard }> | undefined;
+  let allowanceSource: (() => Promise<{ credential: string; card: AgentCard; owner?: string } | null>) | undefined;
 
   return {
     card: visitor.card,
@@ -163,6 +169,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       });
     },
     sent,
+    setAllowanceSource(source) { allowanceSource = source; },
     async knock(houseUrl, terms) {
       // The house reports the knock; the agent doesn't, or the two reports would pair it with the house (SPEC §8).
       const { reply } = await knock(houseUrl, visitor, terms);
@@ -201,8 +208,10 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd, unit }));
         return { paid: amountUsd, unit, to: payee, receipt: credential };
       }
-      if (!o.allowanceUsd) throw new Error('this agent has no allowance to pay from in USD; pay in another unit you agreed on, or ask your human for one');
-      allowance ??= (async () => {
+      // The human's own signed allowance, from their house, comes first; then the sandbox's play money, if any.
+      const own = (await allowanceSource?.().catch(() => null)) ?? null;
+      if (!own && !o.allowanceUsd) throw new Error('this agent has no allowance to pay from in USD. Spending a person\'s money needs their house: they sign an allowance in its control panel (Money → Spending allowance) and you connect with lake_house_connect. Or pay in another unit you agreed on.');
+      if (!own) allowance ??= (async () => {
         const human = await makeHuman(await generateIdentity(), o.domain, `Spending allowance for ${o.domain}`);
         const credential = await signIntentMandate(human.id, human.webId, {
           id: visitor.webId, natural_language_description: `What ${o.domain} may pay other agents`, study: `urn:lake:allowance:${o.domain}`,
@@ -210,7 +219,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         });
         return { credential, card: human.card };
       })();
-      const intent = await allowance;
+      const intent = own ?? (await allowance!);
       const payment = await signPaymentMandate(id, visitor.webId, { payee, amount: amountUsd, intentMandate: intent.credential, agreement: `urn:lake:memo:${memo.slice(0, 80)}`, currency: 'USD' });
       const payments = o.payments ?? 'http://payments:4600';
       const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent, payments: [payment] })).reply;
@@ -220,7 +229,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       // The payee gets the signed receipt; its inbox shows it like any other message.
       await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount: amountUsd, memo: memo.slice(0, 200) });
       if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd }));
-      return { paid: amountUsd, unit, to: payee, remaining: settled.remaining as number, receipt };
+      return { paid: amountUsd, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
     },
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;

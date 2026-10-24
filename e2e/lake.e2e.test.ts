@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, checkCredentialStatus, generateIdentity, postLakePart, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, checkCredentialStatus, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -339,6 +339,32 @@ describe('the owner', () => {
     expect(seen.assistants.map((a: { label: string }) => a.label)).toEqual(['Atlas']);
     await ownerCall({ kind: 'panel.assistant.revoke', kid: seen.assistants[0].kid });
     expect((await as({ kind: 'panel.overview' })).status).toBe(403);
+  });
+
+  it("lets the owner give their assistant a spending allowance, signed on their device, that payments honour until it's taken back", async () => {
+    // The assistant pairs as a Lake agent, giving its WebID so an allowance can name it.
+    const helper = await visitor('helper.example');
+    const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Wallet helper' });
+    expect((await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: helper.id.publicJwk, code, label: 'Wallet helper', webId: helper.webId }) })).status).toBe(200);
+    const kid = helper.id.publicJwk.kid;
+    // The house drafts it; the owner's device signs exactly that; the house checks it matches.
+    const { id, draft } = await ownerCall({ kind: 'panel.allowance.draft', kid, amountUsd: 7, days: 3 });
+    expect(draft.credentialSubject).toMatchObject({ id: helper.webId, budget: { currency: 'USD', amount: 7 } });
+    expect(draft.credentialStatus).toMatchObject({ type: 'BitstringStatusListEntry' });
+    const signed = await issueCredential({ ...draft, validFrom: new Date().toISOString() } as never, owner);
+    expect(await ownerCall({ kind: 'panel.allowance.set', id, credential: signed })).toMatchObject({ ok: true, amountUsd: 7 });
+    // Signed by anyone else, refused.
+    const { id: id2, draft: d2 } = await ownerCall({ kind: 'panel.allowance.draft', kid, amountUsd: 500, days: 3 });
+    expect(await ownerCall({ kind: 'panel.allowance.set', id: id2, credential: await issueCredential({ ...d2, validFrom: new Date().toISOString() } as never, await generateIdentity()) })).toMatchObject({ error: expect.stringContaining('not signed by your key') });
+    // The assistant fetches it from the house and pays under it: the payments agent checks the owner's key by the house's word.
+    const mine = await (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'assistant.allowance' }, helper.id, { iss: 'assistant' })) })).json();
+    expect(mine).toMatchObject({ amountUsd: 7, intent: { credential: signed, owner: expect.any(String) } });
+    const pay = async (amount: number) => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test' })] })).reply;
+    expect(await pay(3)).toMatchObject({ kind: 'settled', remaining: 4 });
+    expect(await pay(5)).toMatchObject({ kind: 'refused' }); // over what's left
+    // Taken back: its bit goes up on the house's status list, and payments refuse it at once.
+    expect(await ownerCall({ kind: 'panel.allowance.revoke', kid })).toMatchObject({ revoked: true });
+    expect(await pay(1)).toMatchObject({ kind: 'refused', problems: ['the owner has taken this allowance back'] });
   });
 
   it('one person, one house: a person stamp, and a people-only pledge counts two houses of one owner once', async () => {
