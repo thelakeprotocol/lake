@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, randomize, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, oneHot, sendLake, splitCount, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -23,7 +23,7 @@ export interface HousekeeperOptions {
   /** One signed record per pack this house takes part in, and where its files are. */
   records: { pack: LakePack; paths: RecordPaths; claimsUrl: string }[];
   sandbox: boolean;
-  /** Seeded demo runs: the same seed gives the same randomised answers. */
+  /** Seeded demo runs: the same seed gives the same records and the same answers. */
   seed?: string;
   /** The owner's side: pending asks, live grants, revocations. */
   desk: OwnerDesk;
@@ -42,12 +42,12 @@ export type Reply =
   | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[] }
   | { kind: 'filed'; receipt: string }
   | { kind: 'busy'; why: string; retryAfterMs: number }
-  | { kind: 'fragment'; study: string; fragment: number[] }
+  | { kind: 'counted'; study: string; count: string; tellers: string[] }
   | { kind: 'excluded'; study: string; why: string }
   | { kind: 'quoted'; ref: string };
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment } }
-interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string }
+interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string; count?: string }
 interface StatusPayload { kind: 'status'; offerId: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
 interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core').QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number; currency?: string }
@@ -57,7 +57,7 @@ const HOUR = 3_600_000;
 /**
  * Answers every knock by the owner's rules, in code. A "join" under a standing rule the owner wrote is
  * the owner's pre-approval: the housekeeper records it as a signed grant that names that rule.
- * Certified studies run here, inside the house; only a randomised answer leaves.
+ * Certified studies run here, inside the house; the answer leaves only as two unreadable pieces, one per teller.
  */
 export class Housekeeper {
   private replay = new ReplayGuard();
@@ -191,6 +191,9 @@ export class Housekeeper {
       const local = auditStudy(p.study);
       // Code without a valid certificate never runs here, whatever the rules say (SPEC §7).
       if (!audit.ok || !local.ok) return decide('decline', `uncertified studies never run here (${audit.ok ? local.problems.join('; ') : audit.why})`);
+      // The owner's answer will go, split, to these two tellers: both must be ones the owner trusts.
+      const strangers = p.study.privacy.tellers.filter((c) => !this.o.trust.tellers.includes(c.domain)).map((c) => c.domain);
+      if (strangers.length) return decide('decline', `its answers would go to tellers your owner doesn't trust: ${strangers.join(', ')}`);
       auditCertified = true;
       const ethics = await checkAttachment(p.attachments?.ethics, { trusted: this.o.trust.ethics, type: 'LakeEthicsApproval', subject: id, sandbox: this.o.sandbox });
       const approvedFields = ethics.ok ? ((ethics.vc.credentialSubject.fields as string[] | undefined) ?? []) : [];
@@ -273,16 +276,39 @@ export class Housekeeper {
     if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
     if (!chain.ok) return excluded(`my record failed its checks: ${chain.why}`);
 
-    // Inside the house: read only the granted fields, through the pod's MCP door, and randomise.
+    const tellers = p.study.privacy.tellers;
+    const strangers = tellers.filter((c) => !this.o.trust.tellers.includes(c.domain)).map((c) => c.domain);
+    if (strangers.length) return excluded(`its answers would go to tellers your owner doesn't trust: ${strangers.join(', ')}`);
+    if (typeof p.count !== 'string' || !p.count) return excluded('name the count the tellers opened for this run (count)');
+
+    // Inside the house: read only the granted fields, through the pod's MCP door, and answer truthfully. The answer
+    // leaves only as two pieces, one per teller; each piece alone is a random number (SPEC §7, §11.5).
     const fields = studyFields(p.study).filter((f) => g.fields.includes(f));
     const claims = await this.claims(fields);
-    const rand = this.o.seed ? rng(seedFrom(`${this.o.seed}|${id}|${this.o.webId}`)) : Math.random;
-    const fragment = randomize(p.study, cellOf(p.study, claims), rand);
-    const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: 'one randomised answer' };
+    const pieces = splitCount(oneHot(p.study, cellOf(p.study, claims)));
+    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.piece', id: p.count, piece: pieces[i] })));
+    const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
+    if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
+    const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable pieces to ${tellers.map((c) => c.domain).join(' and ')}` };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
     if (g.uses === 1) await this.o.desk.spend(g.offer);
-    return this.reply({ kind: 'fragment', study: id, fragment });
+    return this.reply({ kind: 'counted', study: id, count: p.count, tellers: tellers.map((c) => c.domain) });
+  }
+
+  /** Sends a signed message to a teller and checks the answer comes from the teller it should: true, or why not. */
+  private async tell(c: { url: string; domain: string }, payload: Record<string, unknown>): Promise<true | string> {
+    try {
+      const envelope = await signMessage(payload, this.o.id, { iss: this.o.webId });
+      const raw = await sendLake(c.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: this.o.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 15_000 });
+      const v = await verifyLakeData(raw, { sandbox: this.o.sandbox });
+      if (!v.ok) return `its reply did not verify: ${v.rejection.why}`;
+      if (v.profile.ownerDomain !== c.domain) return `answered as ${v.profile.ownerDomain}, not ${c.domain}`;
+      const r = v.payload as { kind?: string; problems?: string[] };
+      return r.kind === 'count.received' ? true : (r.problems ?? [String(r.kind)]).join('; ');
+    } catch (e) {
+      return (e as Error).message.slice(0, 120);
+    }
   }
 
   private async agree(offer: Offer, visitorWebId: string, until: Date, save = true): Promise<SignedAgreement> {

@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  agreementFor, buildCard, collectiveCounter, generateIdentity, issueCredential, digestSRI, makeEvent, randomize, signAgreement, signCard,
+  agreementFor, addCounts, buildCard, collectiveCounter, combineCounts, generateIdentity, issueCredential, digestSRI, makeEvent, oneHot, signAgreement, signCard, splitCount,
   signIntentMandate, signMessage, signPaymentMandate, studyId,
 } from '../packages/core/dist/index.js';
 
@@ -30,6 +30,8 @@ const house = await agent('house', 'pods.example', 'House stan', '/t/stan/a2a', 
 const ethics = await agent('specialist', 'ethics.example', 'Ethics', '/a2a', ['ethics-review'], '/#ethics-review');
 const auditor = await agent('specialist', 'audit.example', 'Auditor', '/a2a', ['study-audit'], '/#study-audit');
 const payments = await agent('specialist', 'payments.example', 'Payments', '/a2a', ['payments'], '/#payments');
+const tellerA = await agent('specialist', 'teller-a.example', 'Teller A', '/a2a', ['teller', 'quiet'], '/#teller');
+const tellerB = await agent('specialist', 'teller-b.example', 'Teller B', '/a2a', ['teller', 'quiet'], '/#teller');
 
 write('visitor-card.json', visitor.card, 'A visitor agent\'s signed A2A Agent Card with the Lake extension.');
 write('house-card.json', house.card, 'A hosted house\'s signed card. Its card lives next to its endpoint: /t/stan/.well-known/agent-card.json.');
@@ -41,14 +43,14 @@ const study = {
     { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
     { name: 'readmitted', field: 'readmissions', op: 'present' },
   ],
-  privacy: { mechanism: 'unary-randomized-response', epsilon: 2 }, minTier: 'issuer-signed',
+  privacy: { mechanism: 'split-count', tellers: [{ url: 'https://teller-a.example/a2a', domain: 'teller-a.example' }, { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }], min: 20 }, minTier: 'issuer-signed',
 };
 const sid = studyId(study);
 write('study.json', { id: sid, study }, 'A declarative study. Its id is urn:lake:study: + the digest of its canonical JSON.');
 
 const fields = ['age_band', 'medications', 'readmissions', 'postcode'];
 const ethicsVc = await vc(ethics, 'LakeEthicsApproval', { id: sid, question: study.question, purpose: 'research', fields, sponsor: visitor.webId, reviewedBy: 'example' });
-const auditVc = await vc(auditor, 'LakeStudyCertificate', { id: sid, checks: ['declarative study, no code', 'answers randomised before leaving a house'] });
+const auditVc = await vc(auditor, 'LakeStudyCertificate', { id: sid, checks: ['declarative study, no code', 'answers split between two tellers run by different parties', 'totals only', 'no table from fewer than 20 houses'] });
 write('ethics-approval.json', { credential: ethicsVc, card: ethics.card, decoded: decode(ethicsVc) }, 'An ethics approval (VC-JOSE) for this study and these fields, with its issuer\'s card. Counts only if the owner trusts ethics.example.');
 write('study-certificate.json', { credential: auditVc, card: auditor.card, decoded: decode(auditVc) }, 'An auditor\'s certificate for the study. Without one from a trusted auditor, no house runs it.');
 
@@ -69,9 +71,19 @@ write('4-join.json', await envelope(house, { kind: 'decision', offerId: revised.
 write('grant.json', { credential: grant, decoded: decode(grant) }, 'The grant, decoded: who, which study, which fields, until when, authorised by which rule.');
 
 const countersignature = await signAgreement(agreement, visitor.id);
-write('5-compute.json', await envelope(visitor, { kind: 'compute', grant, study, countersignature }), 'Step 5. The visitor countersigns the agreement and asks the house to run the study inside its pod.');
-let s = 42; const rand = () => ((s = (s * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
-write('6-fragment.json', await envelope(house, { kind: 'fragment', study: sid, fragment: randomize(study, 0b011, rand) }), 'Step 6. The only thing that leaves the house: one randomised answer (unary randomised response, ε = 2).');
+const count = 'run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13';
+write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, length: 8, min: 20, deadline: new Date(Date.now() + 36e5).toISOString() }), 'Before any house answers, the visitor opens one count at each of the study\'s two tellers (SPEC §11.5).');
+write('5-compute.json', await envelope(visitor, { kind: 'compute', grant, study, countersignature, count }), 'Step 5. The visitor countersigns the agreement and asks the house to run the study inside its pod, naming the count.');
+// The house's true answer (over 60, on drug X, not readmitted: cell 0b011), split into two pieces that each look random.
+let s = 42; const rand = (max) => ((s = (s * 1103515245 + 12345) % 2 ** 31) % max);
+const [pieceA, pieceB] = splitCount(oneHot(study, 0b011), rand);
+write('count-piece.json', await envelope(house, { kind: 'count.piece', id: count, piece: pieceA }), 'Step 6a. What teller A gets from the house: eight numbers that look random. Teller B gets the other piece; only the two together, summed over many houses, give anything.');
+write('6-counted.json', await envelope(house, { kind: 'counted', study: sid, count, tellers: ['teller-a.example', 'teller-b.example'] }), 'Step 6. The house tells the visitor it sent its two pieces. Nothing about its owner is in this message.');
+// Two more houses, so the sums below are a real (tiny) table.
+const others = [splitCount(oneHot(study, 0b111), rand), splitCount(oneHot(study, 0b011), rand)];
+const members = [house.webId, 'https://pods.example/ana/profile/card#me', 'https://pods.example/ben/profile/card#me'];
+const sumA = addCounts(pieceA, ...others.map((p) => p[0])), sumB = addCounts(pieceB, ...others.map((p) => p[1]));
+write('count-sum.json', await envelope(tellerA, { kind: 'count.sum', id: count, members: members.length, sum: sumA }), `Each teller closes the count once, over the members the visitor names, and publishes one sum. Teller A's sum alone is random; added to teller B's it gives the exact table: ${JSON.stringify(combineCounts(sumA, sumB))}.`);
 
 const intent = await signIntentMandate(human.id, human.webId, { id: visitor.webId, natural_language_description: study.question, study: sid, budget: { currency: 'USD', amount: 5000 }, intent_expiry: new Date(Date.now() + 7 * 864e5).toISOString(), user_cart_confirmation_required: false });
 write('intent-mandate.json', { credential: intent, card: human.card, decoded: decode(intent) }, 'AP2 Intent Mandate, signed by a human at the visitor\'s organisation: this study, $5,000 at most.');

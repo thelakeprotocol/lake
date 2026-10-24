@@ -24,7 +24,7 @@ docker run --network lake_default --hostname house-you -v ./rules.yaml:/rules.ya
 | `--owner-url` | `LAKE_OWNER_URL` | `--public-url` | Base URL the owner's phone uses for `/owner/` |
 | `--open-pairing` | `LAKE_OPEN_PAIRING=1` | off | Sandbox only: the first device to open the app becomes the owner |
 | `--auditor-url` | `LAKE_AUDITOR_URL` | `http://auditor:4400` | Who certifies this house's converter |
-| `--seed` | `LAKE_SEED` | none | Same seed, same randomised answers |
+| `--seed` | `LAKE_SEED` | none | Same seed, same synthetic records and answers |
 
 | Module | Does |
 |---|---|

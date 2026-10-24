@@ -76,7 +76,7 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
       const study = p.study as Study;
       const audit = auditStudy(study);
       if (!audit.ok) return { kind: 'refused', problems: audit.problems };
-      const credential = await s.vc('LakeStudyCertificate', { id: studyId(study), checks: ['declarative study, no code', 'answers randomised before leaving a house', 'aggregates only', `privacy budget ε=${study.privacy.epsilon}`] }, 90);
+      const credential = await s.vc('LakeStudyCertificate', { id: studyId(study), checks: ['declarative study, no code', 'answers split between two tellers run by different parties', 'totals only', `no table from fewer than ${study.privacy.min} houses`] }, 90);
       return { kind: 'certified', credential, notes: [] };
     }
     if (p.kind === 'audit-program') {

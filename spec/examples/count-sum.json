@@ -1,0 +1,88 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "Teller A",
+    "description": "Teller A (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://teller-a.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://teller-a.example",
+      "organization": "teller-a.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "specialist",
+            "webId": "https://teller-a.example/#teller",
+            "ownerDomain": "teller-a.example",
+            "tags": [
+              "teller",
+              "quiet"
+            ],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "sTp5jLCMIOd-P26XYCS2BqS__Twqpr1tYsWJ44uNy2U",
+              "kty": "OKP",
+              "kid": "specialist-teller-a.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtdGVsbGVyLWEuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
+        "signature": "fGrUMizennGdm_byU6k_epZHCph9Ch1JgVdFDQvDN9T0Oh633N5R8YweaRlZhvHfL3Dnx18-DejseVFTbr4ECw"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "count.sum",
+      "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
+      "members": 3,
+      "sum": [
+        1580421979,
+        1386399681,
+        111942850,
+        1149980162,
+        1964295681,
+        1378672129,
+        1556026881,
+        974188032
+      ],
+      "nonce": "9e06fd37-9234-4148-bafc-20b573c917f3",
+      "iat": 1792800445,
+      "exp": 1792800745,
+      "iss": "https://teller-a.example/#teller"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtdGVsbGVyLWEuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
+      "signature": "TrGXS9UeSASTQU0MZn0Lj3xJq8ps2jUAT8MADN4uZCssEeEDK78mT7d23cohnLPfvAsP3W1MoL0FOD1av6U1Dg"
+    }
+  }
+}

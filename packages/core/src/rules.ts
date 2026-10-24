@@ -15,7 +15,7 @@ export interface Rules {
   negotiation?: { join_collectives?: boolean };
   tags?: string[];
   /** Whose signatures count. An approval from anyone not listed counts as no approval. */
-  trust?: { ethics?: string[]; auditors?: string[]; issuers?: string[]; payments?: string[]; regulators?: string[] };
+  trust?: { ethics?: string[]; auditors?: string[]; issuers?: string[]; payments?: string[]; regulators?: string[]; tellers?: string[] };
   /**
    * What the owner is looking for, standing: "offers for a mortgage, around this price, in this region".
    * The house announces each one to authorised agents, who price it inside the house (SPEC §12).
@@ -39,7 +39,7 @@ export interface Rule {
 const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least', 'price_below'] as const;
 type MatchKey = (typeof MATCH_KEYS)[number];
 const DECISIONS = ['join', 'decline', 'ask'];
-const TRUST_LISTS = ['ethics', 'auditors', 'issuers', 'payments', 'regulators'];
+const TRUST_LISTS = ['ethics', 'auditors', 'issuers', 'payments', 'regulators', 'tellers'];
 
 export class RulesError extends Error {}
 

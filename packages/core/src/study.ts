@@ -1,12 +1,13 @@
 import { canonicalize } from './canonical.js';
+import { tellersProblem, type TellerRef } from './count.js';
 import { fieldSpec, type Claim, type PackField } from './pack.js';
 import { digestSRI } from './vc.js';
 
 /**
  * A study is a declaration, not code: which yes/no questions to ask of each house's canonical claims.
- * Each house answers with ONE cell of the contingency table, randomised locally (unary randomised
- * response, a local-differential-privacy mechanism), so no single answer reveals its owner.
- * Across many houses the noise cancels and the researcher recovers the table.
+ * Each house works out, truthfully, which ONE cell of the contingency table its owner falls in, and sends
+ * that one-hot row split into two random-looking pieces, one to each of two tellers (SPEC §7, §11.5). The
+ * researcher gets the exact table and never sees any house's row.
  */
 export type Field = string;
 
@@ -32,7 +33,8 @@ export interface Study {
   question: string;
   kind: 'contingency';
   predicates: Predicate[];
-  privacy: { mechanism: 'unary-randomized-response'; epsilon: number };
+  /** Who counts the answers, and the fewest houses a published table may come from. */
+  privacy: { mechanism: 'split-count'; tellers: TellerRef[]; min: number };
   minTier: 'issuer-signed';
 }
 
@@ -41,8 +43,6 @@ export type { Claim };
 export const studyId = (s: Study) => `urn:lake:study:${digestSRI(canonicalize(s))}`;
 export const studyFields = (s: Study): Field[] => [...new Set(s.predicates.map((p) => p.field))];
 export const cellCount = (s: Study) => 2 ** s.predicates.length;
-
-const MAX_EPSILON = 4;
 
 /** What an Auditor checks, and what a house re-checks before running anything. */
 export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
@@ -56,8 +56,12 @@ export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
     else if (!OPS[spec.kind].includes(p.op) || !valueOk) problems.push(`question "${p.name}" can't ask "${p.op}" of ${spec.kind} field "${p.field}"`);
     if (spec?.pack.identifying?.includes(p?.field)) problems.push(`"${p.field}" is identifying; no study may read it`);
   }
-  if (s?.privacy?.mechanism !== 'unary-randomized-response') problems.push('answers must be randomised (unary randomised response)');
-  else if (!(s.privacy.epsilon > 0 && s.privacy.epsilon <= MAX_EPSILON)) problems.push(`privacy budget must be in (0, ${MAX_EPSILON}]`);
+  if (s?.privacy?.mechanism !== 'split-count') problems.push('answers must go, split, to two tellers (split-count)');
+  else {
+    const bad = tellersProblem(s.privacy.tellers);
+    if (bad) problems.push(`tellers: ${bad}`);
+    if (!(Number.isInteger(s.privacy.min) && s.privacy.min >= 2)) problems.push('min: the fewest houses a table may come from, at least 2');
+  }
   if (s?.minTier !== 'issuer-signed') problems.push('only issuer-signed values may be used');
   return { ok: problems.length === 0, problems };
 }
@@ -80,24 +84,8 @@ export function cellOf(s: Study, claims: Claim[]): number {
   return s.predicates.reduce((acc, p, i) => acc | (holds(p, claims) ? 1 << i : 0), 0);
 }
 
-const probs = (eps: number) => {
-  const e = Math.exp(eps / 2);
-  return { p: e / (1 + e), q: 1 / (1 + e) };
-};
-
-/** The one thing a house sends back: a randomised one-hot vector. Deniable by construction. */
-export function randomize(s: Study, cell: number, rand: () => number = Math.random): number[] {
-  const { p, q } = probs(s.privacy.epsilon);
-  return Array.from({ length: cellCount(s) }, (_, i) => (rand() < (i === cell ? p : q) ? 1 : 0));
-}
-
-/** Unbiased estimate of how many houses fall in each cell, from all randomised fragments. */
-export function estimate(s: Study, fragments: number[][]): { n: number; cells: number[] } {
-  const { p, q } = probs(s.privacy.epsilon);
-  const n = fragments.length;
-  const sums = Array.from({ length: cellCount(s) }, (_, i) => fragments.reduce((a, f) => a + (f[i] ?? 0), 0));
-  return { n, cells: sums.map((c) => Math.max(0, (c - n * q) / (p - q))) };
-}
+/** A house's answer, before it is split: 1 in the cell its owner falls in, 0 everywhere else. */
+export const oneHot = (s: Study, cell: number) => Array.from({ length: cellCount(s) }, (_, i) => (i === cell ? 1 : 0));
 
 /** Human labels for each cell, e.g. "over 60 · on drug X · not readmitted". */
 export function cellLabels(s: Study): string[] {

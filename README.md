@@ -101,9 +101,10 @@ docker compose run --rm lake dispatch --extra-fields postcode
 # DECIDE    2 counter · 1 ask
 # BARGAIN   2 housekeepers countered together: $5, not $2, and drop postcode
 # BARGAIN   accepted: everyone who joined or countered gets the bloc's terms
+# COUNT     opened a count at teller-a.lake.local and teller-b.lake.local: each house's answer goes to them as two unreadable pieces
 # COMPUTE   countersigning 2 agreement(s) and running the certified study inside each house
 # PAY       Payments settled $10 with 2 participants; 2 receipts filed in their pods. $4990 of the mandate left
-# ANSWER    … Only 2 answers: randomised answers need a few hundred houses before this means anything
+# ANSWER    No table: 2 answered, and no table is published from fewer than 3 houses.
 ```
 
 Your `rules.yaml` is the note on the fridge:
@@ -153,7 +154,7 @@ Honest, updated every merge.
 | ✅ | **Website + docs** | [lake.doneinfifty.com](https://lake.doneinfifty.com) |
 | ✅ | **M1 House**: real Solid pod + WebID, issuer-signed synthetic record, FHIR → canonical model (SHACL-valid), housekeeper answering A2A through MCP, `lake knock` | runs, end-to-end tested. Fresh house joins in ~11 s on a busy 4-core box; target is 5 s ([help wanted](https://github.com/thelakeprotocol/lake/issues)) |
 | ✅ | **M2 Lake node**: registry that verifies every card and checks the registrant serves it, signed event intake (the node stamps who said it), counters, WebSocket stream, live map | runs, end-to-end tested. No message bus: agents message each other directly ([why](https://lake.doneinfifty.com/docs/decisions)) |
-| ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and returns one randomised answer; de-biased result; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
+| ✅ | **M3 Mission**: ethics and audit as signed credentials from agents the owner trusts; discover; knock; decide; signed grants under standing rules; the study runs inside each house and sends its true answer only as two pieces to two tellers; the exact table from their sums; Records moved computed from each house's audit log | runs, end-to-end tested with 3 houses. Bargaining is M5, so run it at `--price 5` for now |
 | ✅ | **M4 Approvals app**: phone-first; the owner's key is made on the phone and signs every live Allow; the house checks the grant matches what the owner saw; Your keys with Revoke; revocation refuses the next request at once (tested under 1 s); QR code on the map; the research agent waits for taps | runs, end-to-end tested. No push notifications yet; over-asking is stopped by the housekeeper, not yet below it |
 | ✅ | **M5 Money**: ODRL agreements signed by both sides before any study runs; houses counter as one bloc ($2 → $5, drop the postcode); a human's AP2 Intent Mandate caps spending; the Payments agent checks the chain, refuses over budget, settles (simulated) and signs receipts filed in each pod | runs, end-to-end tested |
 | ✅ | **M6 Wild life**: background traders and attackers (`lake swarm`, `lake attack`); every attack blocked and logged, prompt injection included; quarantine by key after 3 blocks, published as a signed blocklist houses follow; reputation for verified agents, usable in rules; guilds | runs, end-to-end tested |

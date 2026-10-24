@@ -10,6 +10,7 @@ import { createSparring } from './sparring.js';
 import { createQuests } from './quests.js';
 import { createTally } from './tally.js';
 import { createPersonhood } from './person.js';
+import { createTeller } from './teller.js';
 
 const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
   auditor: { port: '4400', domain: 'audit.lake.local' },
@@ -21,6 +22,9 @@ const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; 
   quests: { port: '4740', domain: 'quests.lake.local' },
   tally: { port: '4750', domain: 'tally.lake.local' },
   person: { port: '4760', domain: 'person.lake.local' },
+  // Two tellers under different names, so studies have a pair. For real, the two are run by different organisations.
+  'teller-a': { port: '4770', domain: 'teller-a.lake.local' },
+  'teller-b': { port: '4780', domain: 'teller-b.lake.local' },
 };
 
 const { positionals, values } = parseArgs({
@@ -76,6 +80,7 @@ async function start(k: string, url: string) {
     : k === 'quests' ? await createQuests({ ...o, nodeUrl: nodes[0] ?? 'http://localhost:7000', dataDir: values.data! })
     : k === 'tally' ? await createTally({ ...o, dataDir: values.data! })
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
+    : k.startsWith('teller-') ? await createTeller({ ...o, dataDir: values.data!, name: `Teller ${k.slice(7).toUpperCase()}` })
     : await createAuditor(o);
   const join = async () => {
     log(`${k} ${s.webId} at ${url}`);

@@ -67,7 +67,7 @@ export interface House {
 }
 
 // Whose signatures count. A sandbox house with no trust section trusts the demo specialists and its packs' demo issuers, and says so.
-const DEMO_TRUST: Omit<Trust, 'issuers' | 'regulators'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
+const DEMO_TRUST: Omit<Trust, 'issuers' | 'regulators'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'], tellers: ['teller-a.lake.local', 'teller-b.lake.local'] };
 
 let appDir: string | undefined | null = null;
 function approvalsApp() {
@@ -93,6 +93,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       issuers: t?.issuers ?? (o.sandbox ? demoIssuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
       ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
       regulators: t?.regulators ?? (o.sandbox ? demoRegulators : []),
+      tellers: t?.tellers ?? (o.sandbox ? DEMO_TRUST.tellers : []),
     };
   };
   let link: LakeLinks | null = null;

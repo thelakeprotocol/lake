@@ -122,7 +122,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(12);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(14);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -241,6 +241,10 @@ describe('the owner', () => {
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc(req!.fields) as never, owner) })).toEqual({ ok: true });
     const r = await mission;
     expect(r.participants).toBe(3);
+    // Exact counts: every house that took part is in exactly one cell of the table, no blur.
+    expect(r.cells).toHaveLength(8);
+    expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
+    expect(r.cells.every((c) => Number.isInteger(c.count))).toBe(true);
 
     // Revoking cuts the agent off at once.
     const strict = r.grants.find((g) => g.url.startsWith(houses.strict!))!;
@@ -525,7 +529,9 @@ describe('a mission', () => {
   });
 
   it('cannot get uncertified study code run', async () => {
-    const sneaky = { ...readmissionStudy(), privacy: { mechanism: 'unary-randomized-response' as const, epsilon: 40 } };
+    // One teller counting alone would see every answer: no auditor certifies that.
+    const one = { url: `${specialistsUrl}/teller-a/a2a`, domain: 'teller-a.lake.local' };
+    const sneaky = readmissionStudy(undefined, [one, one]);
     await expect(run({ study: sneaky })).rejects.toThrow(/refused/);
   });
 

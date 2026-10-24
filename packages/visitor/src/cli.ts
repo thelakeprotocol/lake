@@ -16,7 +16,7 @@ const HELP = `lake — talk to the Lake
              [--tamper forge-card|unsigned|replay|impersonate] [--json]
 
   lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--budget 5000] [--as uni.example]
-                [--extra-fields postcode] [--epsilon 2] [--node http://lake-node:7000]
+                [--extra-fields postcode] [--node http://lake-node:7000]
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
                 [--wait 30] [--unpaid] [--concurrency 32] [--port 4800] [--json]
 
@@ -48,7 +48,6 @@ const { positionals, values: a } = parseArgs({
     tamper: { type: 'string', default: 'none' },
     goal: { type: 'string', default: 'Do over-60s on drug X get readmitted less?' },
     'extra-fields': { type: 'string' },
-    epsilon: { type: 'string', default: '2' },
     node: { type: 'string', default: process.env.LAKE_NODE_URL ?? 'http://lake-node:7000' },
     ethics: { type: 'string', default: process.env.LAKE_ETHICS_URL ?? 'http://ethics:4500' },
     auditor: { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
@@ -202,11 +201,11 @@ async function dispatchCmd(chosen?: Study) {
   await link.register(6);
 
   const say = (step: string, detail: string) => { if (!a.json) console.log(`${step.toUpperCase().padEnd(9)} ${detail}`); };
-  // Studies are certified in advance: run one the loaded packs offer (by its question), with the privacy budget asked for.
+  // Studies are certified in advance: run one the loaded packs offer (by its question). Its tellers come from the Lake.
   const known = exampleStudies();
   const base = chosen ?? known.find((s) => s.question.toLowerCase() === a.goal!.toLowerCase()) ?? known[0];
   if (!base) throw new Error('no pack loaded offers a study; try --packs health');
-  const study = chosen ?? { ...base, privacy: { ...base.privacy, epsilon: Number(a.epsilon) } };
+  const study = chosen ?? base;
   // Unpaid means offering nothing: an agent never promises money it can't pay.
   const price = Number(a.price ?? (a.unpaid ? 0 : 2));
   say('dispatch', `"${study.question}"  (as ${domain}, $${price} per participant)`);

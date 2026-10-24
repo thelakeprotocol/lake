@@ -50,7 +50,7 @@ Each joining house signs the final **ODRL Agreement** and stores it in `/agreeme
 
 The study is a declaration, not code: a few yes/no questions about canonical fields. It runs **inside each house**. Before answering, the house re-verifies its chain: a trusted issuer signed the original, the original is unchanged, a trusted auditor certified the converter, the converted record is the housekeeper's signed copy. A tampered house drops out.
 
-Then it reads only the granted fields through its pod's MCP door, works out which cell of the table its owner falls in, and sends back **one randomised answer** (local differential privacy). One answer is deniable; a thousand cancel out the noise. Every computation goes in the house's audit log with `recordsOut: 0`.
+Then it reads only the granted fields through its pod's MCP door and works out, truthfully, which cell of the table its owner falls in. That answer leaves only as **two pieces**, one to each of the study's two **tellers** (run by different parties). Each piece on its own is a random number. Each teller adds up the pieces it got and publishes one sum, once; the two sums together are the exact table. Nobody sees a single house's answer, and nothing is blurred. Every computation goes in the house's audit log with `recordsOut: 0`.
 
 ## 9. Pay
 
@@ -58,6 +58,6 @@ The **Payments** agent verifies the mandate chain and settles $5 with each parti
 
 ## 10. Answer
 
-The agent combines the fragments and publishes `study.result`. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
+The agent closes the count at both tellers over the same houses, adds the two sums into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
 
 Grants expire after 48 hours, or the moment an owner revokes them.

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, cardUrlFor, cellLabels, fieldSpec, collectiveCounter, estimate, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
-  type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type Study,
+  buildCard, cardUrlFor, cellCount, cellLabels, combineCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  pickTellers, type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type TellerRef, type Study,
 } from '@thelakeprotocol/core';
 import { readFile, writeFile } from 'node:fs/promises';
 import { ask, type Visitor } from './knock.js';
@@ -56,7 +56,8 @@ export interface MissionResult {
   bloc: { members: number; priceUsd: number; fields: string[] } | null;
   participants: number;
   excluded: { house: string; why: string }[];
-  cells: { label: string; estimate: number }[];
+  /** The exact table, from the two tellers' sums; empty when too few houses answered to publish one. */
+  cells: { label: string; count: number }[];
   answer: { onX: { rate: number; n: number }; notOnX: { rate: number; n: number }; summary: string; reliable: boolean };
   paid: { total: number; houses: number; receiptsFiled: number; refused?: string; notFiled?: string[] } | null;
   seconds: number;
@@ -83,9 +84,12 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const t0 = Date.now();
   const log = o.log ?? (() => {});
   const report = (kind: Parameters<typeof makeEvent>[0], data: Record<string, string | number | boolean>) => o.link?.report(makeEvent(kind, 'self', undefined, data));
-  const id = studyId(o.study);
+  // Who counts the answers is part of the study (ethics and the auditor approve it, houses check they trust both):
+  // a study that names none gets two from the Lake before anything else.
+  const study: Study = o.study.privacy.tellers?.length ? o.study : { ...o.study, privacy: { ...o.study.privacy, tellers: await findTellers(o, log) } };
+  const id = studyId(study);
   const beat = () => new Promise((r) => setTimeout(r, o.paceMs ?? 0));
-  const fields = [...studyFields(o.study), ...(o.extraFields ?? [])];
+  const fields = [...studyFields(study), ...(o.extraFields ?? [])];
   // Every agreement this agent countersigns is a promise to pay. Without a budget to pay from, it offers $0 and accepts nothing more.
   const budget = o.money?.budgetUsd ?? 0;
   if (o.priceUsd > 0 && !o.money) throw new Error(`can't offer $${o.priceUsd} a house with no budget to pay it: set a budget, or offer $0`);
@@ -93,7 +97,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   let intent: Attachment | null = null;
   if (o.money) {
     const credential = await signIntentMandate(o.money.human.id, o.money.human.webId, {
-      id: o.visitor.webId, natural_language_description: o.study.question, study: id,
+      id: o.visitor.webId, natural_language_description: study.question, study: id,
       budget: { currency: 'USD', amount: o.money.budgetUsd }, intent_expiry: new Date(Date.now() + 7 * 86_400_000).toISOString(), user_cart_confirmation_required: false,
     });
     intent = { credential, card: o.money.human.card };
@@ -101,7 +105,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   }
 
   log('ethics', 'asking the ethics agent to review the protocol');
-  const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study: o.study, purpose: 'research', fields, retention: 'none' } });
+  const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study, purpose: 'research', fields, retention: 'none' } });
   if (ethics.reply.kind !== 'approved') throw new Error(`ethics refused: ${(ethics.reply.problems ?? []).join('; ')}`);
   // Named by its signed domain, not the address it was reached at (inside a hosting setup, an internal hostname).
   log('ethics', `approved by ${ethics.from.ownerDomain}`);
@@ -109,7 +113,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   await beat();
 
   log('audit', 'asking the auditor to certify the study');
-  const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study: o.study });
+  const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study });
   if (audit.reply.kind !== 'certified') throw new Error(`auditor refused: ${(audit.reply.problems ?? []).join('; ')}`);
   log('audit', `certified by ${audit.from.ownerDomain}`);
   const auditAtt: Attachment = { credential: audit.reply.credential, card: await cardOf(o.auditor) };
@@ -125,7 +129,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const knockAll = async (targets: House[], offer: Offer, tally: boolean) => {
     await pool(targets, o.concurrency ?? 32, async (h) => {
       try {
-        const { reply } = await askPatiently(h.url, o.visitor, { kind: 'offer', offer, study: o.study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
+        const { reply } = await askPatiently(h.url, o.visitor, { kind: 'offer', offer, study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
         const d = reply.kind === 'decision' ? String(reply.decision) : 'rejected';
         if (tally) decisions[d] = (decisions[d] ?? 0) + 1;
         if (d === 'join' && reply.grant) joined.set(h.url, { house: h, grant: reply.grant, agreement: reply.agreement, priceUsd: offer.priceUsd });
@@ -161,7 +165,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     await beat();
     const everyone = [...new Map([...joined.values()].map((j) => [j.house.url, j.house])).values(), ...counters.map((c) => c.house)];
     const cost = b.priceUsd * everyone.length;
-    const missing = studyFields(o.study).filter((f) => !b.fields.includes(f));
+    const missing = studyFields(study).filter((f) => !b.fields.includes(f));
     if (missing.length) log('bargain', `declined: the bloc refuses ${missing.join(', ')}, which the study needs`);
     else if (cost > budget) log('bargain', o.money ? `declined: $${cost} is over the $${budget} mandate; a human must approve` : `declined: the bloc asks $${b.priceUsd} a house, and this study has no budget to pay it`);
     else {
@@ -205,16 +209,24 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   });
   if (affordable.length < joined.size) log('compute', `${joined.size - affordable.length} house(s) agreed, but the $${budget} budget can't pay them; not countersigning those`);
   log('compute', `countersigning ${affordable.length} agreement(s) and running the certified study inside each house`);
-  const fragments: number[][] = [];
-  const answered: Joined[] = [];
+  // One count per run, opened at both tellers: each house sends one piece to each, and each teller publishes once.
+  const tellers = study.privacy.tellers;
+  const count = `run-${randomUUID()}`;
+  if (affordable.length) {
+    for (const c of tellers) {
+      const { reply, from } = await askPatiently(c.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString() });
+      if (from.ownerDomain !== c.domain) throw new Error(`the teller at ${c.domain} answered as ${from.ownerDomain}`);
+      if (reply.kind !== 'count.opened') throw new Error(`${c.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
+    }
+    log('count', `opened a count at ${tellers.map((c) => c.domain).join(' and ')}: each house's answer goes to them as two unreadable pieces`);
+  }
+  const answered: (Joined & { webId: string })[] = [];
   await pool(affordable, o.concurrency ?? 32, async (j) => {
     try {
       const countersignature = j.agreement ? await signAgreement(j.agreement.agreement, o.visitor.id) : undefined;
-      const { reply } = await askPatiently(j.house.url, o.visitor, { kind: 'compute', grant: j.grant, study: o.study, countersignature });
-      if (reply.kind === 'fragment' && reply.study === id && Array.isArray(reply.fragment)) {
-        fragments.push(reply.fragment as number[]);
-        answered.push(j);
-      } else excluded.push({ house: j.house.name, why: String(reply.why ?? reply.kind) });
+      const { reply, from } = await askPatiently(j.house.url, o.visitor, { kind: 'compute', grant: j.grant, study, countersignature, count });
+      if (reply.kind === 'counted' && reply.study === id && reply.count === count) answered.push({ ...j, webId: from.webId });
+      else excluded.push({ house: j.house.name, why: String(reply.why ?? reply.kind) });
     } catch (e) {
       excluded.push({ house: j.house.name, why: (e as Error).message });
     }
@@ -261,29 +273,76 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
     }
   }
 
-  const { n, cells } = estimate(o.study, fragments);
+  // Close both counts over the same houses: the ones that said they sent pieces and that both tellers heard from.
+  // `took` is how many houses answered; `n` is how many the published table comes from (0 when too few to publish).
+  let n = 0, took = 0;
+  let cells = Array<number>(cellCount(study)).fill(0);
+  let tooFew = '';
+  if (answered.length) {
+    const lists = await Promise.all(tellers.map(async (c) => new Set(((await askPatiently(c.url, o.visitor, { kind: 'count.members', id: count })).reply.members as string[] | undefined) ?? [])));
+    const members = answered.map((j) => j.webId).filter((w) => lists.every((l) => l.has(w))).sort();
+    took = members.length;
+    if (members.length < study.privacy.min) tooFew = `${members.length} answered, and no table is published from fewer than ${study.privacy.min} houses`;
+    else {
+      const sums = await Promise.all(tellers.map(async (c) => (await askPatiently(c.url, o.visitor, { kind: 'count.close', id: count, members })).reply));
+      const bad = sums.find((r) => r.kind !== 'count.sum');
+      if (bad) tooFew = `a teller would not publish: ${(bad.problems ?? [bad.kind]).join('; ')}`;
+      else {
+        cells = combineCounts(sums[0]!.sum, sums[1]!.sum);
+        n = members.length;
+      }
+    }
+  }
   // Bits: 0 the group (over 60), 1 the exposure (on drug X), 2 the outcome (readmitted).
-  const [group, exposure, outcome] = o.study.predicates.map((p) => p.name);
+  const [group, exposure, outcome] = study.predicates.map((p) => p.name);
   const rate = (readm: number, not: number) => ({ rate: readm + not > 0 ? readm / (readm + not) : 0, n: Math.round(readm + not) });
   const onX = rate(cells[0b111]!, cells[0b011]!);
   const notOnX = rate(cells[0b101]!, cells[0b001]!);
-  const reliable = n >= 200;
+  // Exact counts: a table from a handful of houses is true, just small.
+  const reliable = n >= 50;
   const pct = (x: number) => `${Math.round(x * 100)}%`;
   // Nobody took part: say so, rather than print a rate made of nothing.
-  const summary = n === 0 ? 'No answer: no house took part.' : `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (≈${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (≈${notOnX.n})`;
-  log('answer', n === 0 ? summary : `${summary}${reliable ? '' : `. Only ${n} answers: randomised answers need a few hundred houses before this means anything`}`);
+  const summary = n === 0 ? (tooFew ? `No table: ${tooFew}.` : 'No answer: no house took part.') : `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (${notOnX.n})`;
+  log('answer', n === 0 ? summary : `${summary}. Exact counts from ${n} houses${reliable ? '' : '; a small sample, so read it with care'}`);
   // Houses batch their reports for ~150 ms; let theirs land first so the log reads in order.
   await new Promise((r) => setTimeout(r, 400));
-  report('study.result', { participants: n, summary: reliable ? summary : `${n} answers, too few to call` });
+  report('study.result', { participants: took, summary });
   await o.link?.flush();
 
   return {
-    study: id, question: o.study.question, houses: houses.length, decisions, bloc, participants: n, excluded,
-    cells: cellLabels(o.study).map((label, i) => ({ label, estimate: Math.round(cells[i]! * 10) / 10 })),
+    study: id, question: study.question, houses: houses.length, decisions, bloc, participants: took, excluded,
+    cells: n ? cellLabels(study).map((label, i) => ({ label, count: cells[i]! })) : [],
     answer: { onX, notOnX, summary, reliable }, paid,
     seconds: Math.round((Date.now() - t0) / 100) / 10,
     grants: [...joined.values()].map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
   };
+}
+
+/** Two tellers from the Lake, run under different names: what a study needs before anyone approves it. */
+async function findTellers(o: DispatchOptions, log: (step: string, detail: string) => void): Promise<TellerRef[]> {
+  const nodes = (Array.isArray(o.node) ? o.node : o.node.split(',')).map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
+  for (const node of nodes) {
+    try {
+      const found = (await (await fetch(`${node}/cards?skill=teller`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
+      const picked = pickTellers(found.map((f) => f.card));
+      if (picked.length === 2) {
+        log('count', `the answers will be counted by ${picked[0]!.domain} and ${picked[1]!.domain}`);
+        if (o.houseCache) await writeFile(`${o.houseCache}.tellers`, JSON.stringify(picked)).catch(() => {});
+        return picked;
+      }
+    } catch {
+      // try the next node
+    }
+  }
+  // Like houses, tellers are remembered: with every node down, a study still runs with the pair it used last time.
+  if (o.houseCache) {
+    const cached = JSON.parse(await readFile(`${o.houseCache}.tellers`, 'utf8').catch(() => '[]')) as TellerRef[];
+    if (cached.length === 2) {
+      log('count', `every node is down: counting with ${cached[0]!.domain} and ${cached[1]!.domain}, as last time`);
+      return cached;
+    }
+  }
+  throw new Error('no two tellers on the Lake: a study needs two, run by different parties, to count its answers');
 }
 
 /** Ask each node in turn; fall back to the houses remembered last time. Nodes are search indexes, not gatekeepers. */

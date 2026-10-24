@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "w-ZZadd_nS1aHiP7pvUQC-Q9Wn579MwcXaeslIoElZ0",
+              "x": "nezuqUPWJmiE2M_mRI_3M0szMgHSN02_2XsdVnc7pyw",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,32 +66,32 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "fVi6OBfZp_UJIDf1N-dWvsANIQ8bLWoqqVtI66P_GRzv1Mj0WVSXOh4fJM6txu1VPdwt3MnIVFuYfq8zGDGKDg"
+        "signature": "BPO4l3-JTJujdTfOvVS1cr_Wh4g8p0vqtTZObCJQIyp7lOGKHmsiUOYSpwax1G8-DoJTecQRRB9c2BOK14jlBQ"
       }
     ]
   },
   "envelope": {
     "payload": {
-      "kind": "fragment",
-      "study": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
-      "fragment": [
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
-        0,
-        1
+      "kind": "count.piece",
+      "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
+      "piece": [
+        1250496027,
+        1116302080,
+        1964818176,
+        1500480256,
+        1617229568,
+        1480547072,
+        1119088384,
+        326038272
       ],
-      "nonce": "0e6bd10e-35e9-4528-9174-1cb94aa29d79",
-      "iat": 1792497013,
-      "exp": 1792497313,
+      "nonce": "db2d950c-1d0a-4d02-bcbb-095bef1e4809",
+      "iat": 1792800445,
+      "exp": 1792800745,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "PGcm4yMkQuwYU8Eq9EyK5Bl7_0pQryUCzdNpX14urQWPGfqiQkctmd06a2Fsy2HB_exKHCATtIIk4UuirfIjBw"
+      "signature": "1tWlhdH1uKsipgvt6VZKmoSwchk5wsNjcx45kCxd-EybvhDizYrN6yhnQK_aB9aUHfJ9qW1041o5yWSgrQsPAw"
     }
   }
 }

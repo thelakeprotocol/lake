@@ -353,7 +353,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_dispatch_study',
     {
       description:
-        'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (only randomised answers leave), pay under a signed budget, and return the answer. Records moved stays 0.',
+        'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (each answer leaves only as two unreadable pieces, to two tellers; you get exact totals), pay under a signed budget, and return the answer. Records moved stays 0.',
       inputSchema: {
         question: z.string().default(SANDBOX_STUDIES[0]!.question).describe(`One of the questions this Lake's auditor certifies: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`),
         price_usd: z.number().optional().describe('Offered per house; default $2, or $0 when the budget is 0'),

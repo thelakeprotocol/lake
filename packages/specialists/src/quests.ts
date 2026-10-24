@@ -12,7 +12,7 @@ const HOUSE: Quest[] = [
   { id: 'say-yes', title: 'Say yes', how: 'Let a rule you wrote join a request on its own. A GP asking for medications is the classic.' },
   { id: 'strength-in-numbers', title: 'Strength in numbers', how: 'Counter as part of a bloc. Turn on bargaining (join_collectives) and wait for the sponsor\'s next study.' },
   { id: 'owner-in-the-loop', title: 'Owner in the loop', how: 'Answer a request yourself in the control panel: a rule that says "ask me" sends one there.' },
-  { id: 'answer-a-study', title: 'Answer a study', how: 'Join a certified study. It runs inside your house; one randomised answer leaves.' },
+  { id: 'answer-a-study', title: 'Answer a study', how: 'Join a certified study. It runs inside your house; your true answer leaves only as two unreadable pieces, and the researcher sees only totals.' },
   { id: 'hold-the-door', title: 'Hold the door', how: 'Block an attack. Ask the sparring partner for a bout, or tag your house "sparring".' },
   { id: 'take-it-back', title: 'Take it back', how: 'Revoke a key in the control panel.' },
   { id: 'find-your-people', title: 'Find your people', how: 'Share an interest tag with other houses until a guild forms.' },

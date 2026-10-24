@@ -1,5 +1,5 @@
 {
-  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTIwVDExOjUwOjEzLjI0NloiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0xOFQxMTo1MDoxMy4yNDZaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc24vdWxiUEV4K1d6LzgzTnBqTWg2b29RVFV3NnEzSGg1UUVRZzArR1hSVT0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHJhbmRvbWlzZWQgYmVmb3JlIGxlYXZpbmcgYSBob3VzZSJdfX0.FWdYu_dyXhq9sX6EwImlLcVAZy1SBVpr0k2WP7owqDiD8qn78OtTsekHZVgXvKdXI57hQkYqwbEqMZpCIGhbBw",
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAwOjA3OjI1LjUyNloiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0yMlQwMDowNzoyNS41MjZaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtSVhMV2JXQTJhUG52ZS8vam5QbERPRFg4VHB1cnpjOVU2NUFIZ2JQOVlWND0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHNwbGl0IGJldHdlZW4gdHdvIHRlbGxlcnMgcnVuIGJ5IGRpZmZlcmVudCBwYXJ0aWVzIiwidG90YWxzIG9ubHkiLCJubyB0YWJsZSBmcm9tIGZld2VyIHRoYW4gMjAgaG91c2VzIl19fQ.BFhottFwxPO0n4Ho7j-O3aMFWhYQ9n615iDg-eRy8gkkBhiw0_twqdQoBonGP5N7N0QRnkyrv4IwCC54QNiAAA",
   "card": {
     "name": "Auditor",
     "description": "Auditor (example)",
@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "Y_ViOVG5gg8dGwav97bfMHyPXPIntEbdjpT8SDYMmiY",
+              "x": "KbJk8B32GNPH-HG2Am5QJ59MyBQGLssUry5Bngi5qyk",
               "kty": "OKP",
               "kid": "specialist-audit.example",
               "alg": "EdDSA"
@@ -55,7 +55,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "A9a4_KXDzZymDsXEj4JK38ulF-GPh8cQgAcVGF-LboGrxNZ12405DeiPFK-Fgt7PH12OvsGPiGYx7jrP8k67AA"
+        "signature": "1_x71o2mIeApZzv_6WFQXwGBvqqwN8MMjAK0zKHiWM9kWXdTfSPdVVdta1ueYsGStpje_ezkejM4I5EhiWKcCQ"
       }
     ]
   },
@@ -68,13 +68,15 @@
       "LakeStudyCertificate"
     ],
     "issuer": "https://audit.example/#study-audit",
-    "validFrom": "2026-10-20T11:50:13.246Z",
-    "validUntil": "2027-01-18T11:50:13.246Z",
+    "validFrom": "2026-10-24T00:07:25.526Z",
+    "validUntil": "2027-01-22T00:07:25.526Z",
     "credentialSubject": {
-      "id": "urn:lake:study:sha256-sn/ulbPEx+Wz/83NpjMh6ooQTUw6q3Hh5QEQg0+GXRU=",
+      "id": "urn:lake:study:sha256-IXLWbWA2aPnve//jnPlDODX8Tpurzc9U65AHgbP9YV4=",
       "checks": [
         "declarative study, no code",
-        "answers randomised before leaving a house"
+        "answers split between two tellers run by different parties",
+        "totals only",
+        "no table from fewer than 20 houses"
       ]
     }
   }

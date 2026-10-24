@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditStudy, buildCard, cellOf, estimate, generateIdentity, issueCredential, randomize, registerPack, signCard, checkAttachment, studyId, type Study } from './index.js';
+import { addCounts, auditStudy, buildCard, cellOf, combineCounts, generateIdentity, issueCredential, oneHot, registerPack, signCard, splitCount, checkAttachment, studyId, COUNT_MODULUS, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -21,7 +21,7 @@ const study: Study = {
     { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
     { name: 'readmitted', field: 'readmissions', op: 'present' },
   ],
-  privacy: { mechanism: 'unary-randomized-response', epsilon: 2 },
+  privacy: { mechanism: 'split-count', tellers: [{ url: 'https://teller-a.example/a2a', domain: 'teller-a.example' }, { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }], min: 20 },
   minTier: 'issuer-signed',
 };
 
@@ -36,31 +36,27 @@ describe('studies', () => {
     expect(cellOf(study, [{ field: 'age_band', value: '40-49' }, { field: 'readmissions', value: 'x' }])).toBe(0b100);
   });
 
-  it('recover the true table from randomised answers, within 3 standard errors at 4,000 houses', () => {
+  it('give the exact table from two tellers, and neither teller alone learns anything', () => {
     const rand = seeded(42);
     const truth = Array(8).fill(0);
-    const fragments = Array.from({ length: 4000 }, () => {
-      const cell = Math.floor(rand() * 8) === 0 ? 7 : Math.floor(rand() * 4);
+    const pieces: [number[], number[]][] = Array.from({ length: 500 }, () => {
+      const cell = Math.floor(rand() * 8);
       truth[cell]++;
-      return randomize(study, cell, rand);
+      return splitCount(oneHot(study, cell));
     });
-    const { n, cells } = estimate(study, fragments);
-    expect(n).toBe(4000);
-    const e = Math.exp(1), p = e / (1 + e), q = 1 / (1 + e);
-    const se = Math.sqrt(n * 0.25) / (p - q); // worst-case binomial spread, rescaled by the estimator
-    cells.forEach((c, i) => expect(Math.abs(c - truth[i])).toBeLessThan(3 * se));
-    expect(se).toBeLessThan(70); // ~1.7% of 4,000: plenty to answer the demo question
+    const a = addCounts(...pieces.map((p) => p[0])), b = addCounts(...pieces.map((p) => p[1]));
+    expect(combineCounts(a, b)).toEqual(truth);
+    // One house's piece is a uniformly random number, the same for a 0 as for a 1: it says nothing on its own.
+    expect(pieces[0]![0].every((x) => x >= 0 && x < COUNT_MODULUS)).toBe(true);
+    expect(pieces[0]![0].some((x) => x > 1)).toBe(true);
   });
 
-  it('make any single answer deniable: a one-hot cell is not what gets sent', () => {
-    const rand = seeded(7);
-    const sent = Array.from({ length: 200 }, () => randomize(study, 3, rand));
-    expect(sent.filter((v) => v.join() === [0, 0, 0, 1, 0, 0, 0, 0].join()).length).toBeLessThan(40);
-  });
-
-  it('are refused when they ask for something the Lake cannot ask, or skip the noise', () => {
+  it('are refused when they ask for something the Lake cannot ask, or let anyone see a single answer', () => {
     expect(auditStudy(study).ok).toBe(true);
-    expect(auditStudy({ ...study, privacy: { mechanism: 'unary-randomized-response', epsilon: 50 } }).ok).toBe(false);
+    const one = study.privacy.tellers[0]!;
+    expect(auditStudy({ ...study, privacy: { ...study.privacy, tellers: [one, one] } }).problems.join()).toMatch(/different parties/);
+    expect(auditStudy({ ...study, privacy: { ...study.privacy, tellers: [one] } }).ok).toBe(false);
+    expect(auditStudy({ ...study, privacy: { mechanism: 'unary-randomized-response', epsilon: 2 } as never }).ok).toBe(false);
     expect(auditStudy({ ...study, predicates: [{ name: 'postcode', field: 'postcode' as never, op: 'present' }] }).ok).toBe(false);
   });
 });

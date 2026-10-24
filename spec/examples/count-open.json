@@ -1,0 +1,77 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "Research agent (uni.example)",
+    "description": "Research agent (uni.example) (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://uni.example/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://uni.example",
+      "organization": "uni.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "visitor",
+            "webId": "https://uni.example/#agent",
+            "ownerDomain": "uni.example",
+            "tags": [],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "HVxWmgQGHJ8FxFiVPfQooZRlfK54jWR-kTjUhPubtK8",
+              "kty": "OKP",
+              "kid": "visitor-uni.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
+        "signature": "Acrky8qFLN4exAfI34Ar09srgokE1rjfKac0wJeAf8hdIcJhptR67-9HswwKu7f1q-1K1FMuszMkrtG925N2Dw"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "count.open",
+      "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
+      "length": 8,
+      "min": 20,
+      "deadline": "2026-10-24T01:07:25.531Z",
+      "nonce": "d281719b-5a2e-4f39-80d0-d8e5a740cc87",
+      "iat": 1792800445,
+      "exp": 1792800745,
+      "iss": "https://uni.example/#agent"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
+      "signature": "hplyny0gB332zvZWc7S24xRvC-u90_EBBanXx9n2PNVf-ME3KWaOhUuCY9db4ZEtZ2wYtWV_MuYMC0d2wdUtCA"
+    }
+  }
+}

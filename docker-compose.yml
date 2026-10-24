@@ -107,7 +107,7 @@ services:
     build: { context: ., target: specialists }
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: guides
-    command: ["guide,inspector,sparring,quests,tally,person", "--port", "4700", "--url", "http://guides:4700", "--public-node", "http://localhost:7000", "--spar-every", "600"]
+    command: ["guide,inspector,sparring,quests,tally,person,teller-a,teller-b", "--port", "4700", "--url", "http://guides:4700", "--public-node", "http://localhost:7000", "--spar-every", "600"]
     depends_on: [lake-node]
     environment: { LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [guides:/data]

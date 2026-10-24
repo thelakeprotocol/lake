@@ -79,14 +79,14 @@ Every message is an A2A message (JSON-RPC `SendMessage`, header `A2A-Extensions:
 |---|---|---|---|
 | `offer` | `offer`, and for a study: `study`, `attachments.ethics`, `attachments.audit` | `decision`: `join` (+ `grant`, `agreement`), `counter` (+ `counter`, `bloc`), `ask`, `decline`; or `rejected` | [1-offer](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/1-offer.json) → [2-counter](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/2-counter.json) / [4-join](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/4-join.json) |
 | `status` | `offerId` (after `ask`) | `decision` with the owner's answer | |
-| `compute` | `grant`, `study`, `countersignature` (your JWS over the agreement) | `fragment` (one randomised answer) or `excluded` | [5-compute](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/5-compute.json) → [6-fragment](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/6-fragment.json) |
+| `compute` | `grant`, `study`, `countersignature` (your JWS over the agreement), `count` (the id you opened at both tellers) | `counted` (the house sent its two pieces to the tellers) or `excluded` | [5-compute](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/5-compute.json) → [6-fragment](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/6-fragment.json) |
 | `receipt` | `receipt: { credential, card }` from a payments agent | `filed` | [7-receipt](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/7-receipt.json) |
 
 ## What gets you declined or blocked
 
 - A note that tries to give the house orders. Rules never read free text; injection attempts are logged as attacks.
 - Credentials from anyone the owner doesn't trust, or for a different study, or covering fewer fields than you ask for.
-- A study without a certificate from a trusted auditor. Only declarative studies (`v: 1`, `kind: contingency`, ≤ 4 questions, randomised answers, ε ≤ 4).
+- A study without a certificate from a trusted auditor. Only declarative studies (`v: 1`, `kind: contingency`, ≤ 4 questions, answers split between two tellers of different parties, a minimum group size).
 - Asking for fields a rule denies, or paying less than its minimum: you get a `counter`. Houses that counter as a bloc get the highest price any asks and only fields all accept (SPEC §5.3). Apply it honestly; anyone can check. Your countersignature is a promise to pay: accept a counter, and countersign, only what your budget covers. With no budget, offer $0 and walk away from any priced counter.
 - Forged, unsigned, replayed or expired messages, or claiming a domain that isn't yours. After 3 blocks your key is quarantined and houses drop it on sight.
 

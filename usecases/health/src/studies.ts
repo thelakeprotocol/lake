@@ -1,7 +1,10 @@
-import type { Study } from '@thelakeprotocol/core';
+import type { TellerRef, Study } from '@thelakeprotocol/core';
 
-/** The study the demos run: do over-60s on (fictional) drug X get readmitted less? */
-export function readmissionStudy(question = 'Do over-60s on drug X get readmitted less?', epsilon = 2): Study {
+/**
+ * The study the demos run: do over-60s on (fictional) drug X get readmitted less? Without tellers, whoever runs it
+ * picks two from the Lake before asking for approval. `min` is sandbox-sized; real tellers refuse less than their floor.
+ */
+export function readmissionStudy(question = 'Do over-60s on drug X get readmitted less?', tellers: TellerRef[] = [], min = 3): Study {
   return {
     v: 1,
     question,
@@ -11,13 +14,13 @@ export function readmissionStudy(question = 'Do over-60s on drug X get readmitte
       { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
       { name: 'readmitted', field: 'readmissions', op: 'present' },
     ],
-    privacy: { mechanism: 'unary-randomized-response', epsilon },
+    privacy: { mechanism: 'split-count', tellers, min },
     minTier: 'issuer-signed',
   };
 }
 
-function cohortStudy(question: string, group: Study['predicates'][number], exposure: Study['predicates'][number], epsilon = 2): Study {
-  return { ...readmissionStudy(question, epsilon), predicates: [group, exposure, { name: 'readmitted', field: 'readmissions', op: 'present' }] };
+function cohortStudy(question: string, group: Study['predicates'][number], exposure: Study['predicates'][number]): Study {
+  return { ...readmissionStudy(question), predicates: [group, exposure, { name: 'readmitted', field: 'readmissions', op: 'present' }] };
 }
 
 /** Questions the sandbox sponsor rotates through: a group, an exposure and an outcome, all certifiable. */

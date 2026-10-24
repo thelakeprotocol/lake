@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { packs, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { packs, pickTellers, type AgentCard, type LakeProfile, type Study } from '@thelakeprotocol/core';
 import { presets } from '@thelakeprotocol/visitor';
 import { fromNode } from './net.js';
 import { specialist, type SpecialistOptions, type Specialist } from './review.js';
@@ -27,9 +27,9 @@ const GLOSSARY: Record<string, [string, string?]> = {
   counter: ['A house\'s answer "not at that price" or "not that field". In a bloc, the counters merge.'],
   grant: ['A key: a signed credential letting one agent use certain fields for one purpose for a while. Cut by the owner\'s device or by a rule the owner wrote; never by an agent.'],
   key: ['See grant. Owners revoke keys in the control panel; the agent is cut off on its next request.'],
-  study: ['A declarative question (1 to 4 yes/no predicates) the house runs on its own data. Only one randomised answer leaves.', '/docs/how-it-works'],
-  epsilon: ['The privacy budget. Smaller means noisier answers and stronger deniability. The Lake caps it at 4.'],
-  'randomised response': ['Each house flips a biased coin before answering, so no single answer can be trusted, but a few hundred together still tell the truth.'],
+  study: ['A declarative question (1 to 4 yes/no predicates) the house runs on its own data. It answers truthfully, split into two pieces sent to two tellers; the researcher gets only the totals.', '/docs/how-it-works'],
+  teller: ['Counts without looking: adds up pieces it can\'t read and publishes one sum, once. A study names two tellers run by different parties: each house splits its true answer into two random-looking pieces, one per teller, and only the two sums together give the totals. Nobody sees a single house\'s answer.', '/docs/how-it-works'],
+  'split count': ['See teller.'],
   ethics: ['An ethics agent approves study protocols. Owners choose which ethics domains count (trust.ethics). The sandbox one is a fixed checklist.'],
   auditor: ['Certifies studies and the converters that turn records into claims. Owners choose whose certificate counts.'],
   mandate: ['AP2: a human signs an Intent Mandate (budget, purpose, expiry); their agent signs Payment Mandates under it. Agents can\'t spend past what a human signed.'],
@@ -97,7 +97,7 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
     return { kind: 'refused', problems: ['send { kind: "hello" }, { kind: "tour", step: 1 } or { kind: "explain", term: "bloc" }'] };
   }, [
     { id: 'tour', name: 'Tour', description: 'Seven steps, each a real message to send to a real agent on this Lake.' },
-    { id: 'explain', name: 'Explain', description: 'Plain-English answers for Lake words: bloc, grant, epsilon, mandate…' },
+    { id: 'explain', name: 'Explain', description: 'Plain-English answers for Lake words: bloc, grant, teller, mandate…' },
   ]);
   return s;
 
@@ -108,13 +108,16 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
     ]);
     const house = houses?.[Math.floor(Math.random() * houses.length)]?.card.supportedInterfaces[0]?.url ?? `${node}/t/<name>/a2a`;
     const agent = (skill: string) => specialists?.find((c) => c.card.skills.some((k) => k.id === skill))?.card.supportedInterfaces[0]?.url ?? `<${skill} agent>`;
+    // A pack's example study leaves its tellers to whoever runs it: fill in two from this Lake, so the step works as sent.
+    const tellers = pickTellers((specialists ?? []).map((c) => c.card));
+    const withTellers = (st: Study | undefined) => (st && !st.privacy.tellers?.length && tellers.length ? { ...st, privacy: { ...st.privacy, tellers } } : st);
     const offer = (preset: string) => ({ kind: 'offer', offer: { id: randomUUID(), requester: caller.ownerDomain, ...presets()[preset], note: undefined } });
     return [
       { title: 'Look around', text: `Every house and agent here is a signed Agent Card. List the houses at ${node}/cards?role=house, then verify one yourself: the card is at its own /.well-known/agent-card.json, so you never have to trust the node.`, try: { run: `npx @thelakeprotocol/agent card ${house}` } },
       { title: 'Knock', text: 'Send a house a signed offer. This one asks for medications for care, the way a GP would. Your requester must be your own card\'s domain, or the house calls it impersonation.', try: { to: house, send: offer('gp') } },
       { title: 'Hear no', text: 'Ask for something people don\'t give: postcode and age for marketing, kept a year. Rules decline it in code, and the house tells you why.', try: { to: house, send: offer('marketing') } },
       { title: 'Try to trick it', text: 'Hide orders in the note. The note never reaches the rules; the house declines and logs the attempt. Or ask the sparring partner to throw the whole bag of tricks at a house.', try: { to: agent('spar'), send: { kind: 'spar', house } } },
-      { title: 'Get a study certified', text: 'Studies are declarative: a few yes/no questions, answered with randomised response. The auditor certifies them; owners choose which auditors count.', try: { to: agent('study-audit'), send: { kind: 'audit-study', study: packs().find((x) => x.examples?.study)?.examples?.study } } },
+      { title: 'Get a study certified', text: 'Studies are declarative: a few yes/no questions, answered truthfully and counted by two tellers, so only totals come out. The auditor certifies them; owners choose which auditors count.', try: { to: agent('study-audit'), send: { kind: 'audit-study', study: withTellers(packs().find((x) => x.examples?.study)?.examples?.study) } } },
       { title: 'Ask the whole Lake', text: 'A research mission does it all: ethics, audit, knock on every house, bargain with the bloc, sign, compute inside each house, pay under a human\'s mandate. Watch it on the map.', try: { run: `npx @thelakeprotocol/agent dispatch --node ${node} --ethics ${agent('ethics-review').replace(/\/a2a$/, '')} --auditor ${agent('study-audit').replace(/\/a2a$/, '')} --payments ${agent('payments').replace(/\/a2a$/, '')} --price 2` } },
       { title: 'Bring your own house', text: 'Run a house at home; it reaches the Lake through a relay, so there\'s nothing to open on your router. Then ask the inspector to check it, and the quests agent what to try next.', try: { run: `docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house --name <you> --join ${node}` } },
     ];

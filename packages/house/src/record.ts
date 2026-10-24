@@ -7,7 +7,7 @@ import { checkShapes } from './shapes.js';
 /** Where one pack's record lives in this pod (from the Type Index, or the pack's default folder). */
 export type RecordPaths = ReturnType<typeof packPaths>;
 
-export interface Trust { issuers: string[]; auditors: string[]; ethics: string[]; payments: string[]; regulators: string[] }
+export interface Trust { issuers: string[]; auditors: string[]; ethics: string[]; payments: string[]; regulators: string[]; tellers: string[] }
 
 export interface Issued {
   recordId: string;
