@@ -28,4 +28,4 @@
 
 - **Inrupt ESS and other Solid servers:** run the bring-your-own-pod test against them, not only the Community Solid Server.
 - **Over-asking refused below the housekeeper:** today the housekeeper and the pod's MCP door share a process; the pod itself should refuse what no agreement allows.
-- **A fresh house in under 5 seconds** (about 11 s today) and **a 1,000-house mission in about a minute** (about 10 minutes on a laptop).
+- **A fresh house in under 5 seconds** (about 11 s today) and **a 1,000-house study in about a minute** (about 10 minutes on a laptop).

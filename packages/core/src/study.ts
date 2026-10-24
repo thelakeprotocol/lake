@@ -34,7 +34,8 @@ export interface Study {
   kind: 'contingency';
   predicates: Predicate[];
   /** Who counts the answers, and the fewest houses a published table may come from. */
-  privacy: { mechanism: 'dap-prio3'; tellers: TellerRef[]; min: number };
+  /** noise: the tellers add discrete Laplace noise to the table they release, at this ε (DAP's differential-privacy option). */
+  privacy: { mechanism: 'dap-prio3'; tellers: TellerRef[]; min: number; noise?: { epsilon: number } };
   minTier: 'issuer-signed';
 }
 
@@ -61,6 +62,7 @@ export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
     const bad = tellersProblem(s.privacy.tellers);
     if (bad) problems.push(`tellers: ${bad}`);
     if (!(Number.isInteger(s.privacy.min) && s.privacy.min >= 2)) problems.push('min: the fewest houses a table may come from, at least 2');
+    if (s.privacy.noise !== undefined && !(s.privacy.noise.epsilon > 0 && s.privacy.noise.epsilon <= 10)) problems.push('noise.epsilon: between 0 and 10');
   }
   if (s?.minTier !== 'issuer-signed') problems.push('only issuer-signed values may be used');
   return { ok: problems.length === 0, problems };

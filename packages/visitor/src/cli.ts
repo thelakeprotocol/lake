@@ -191,11 +191,11 @@ async function knockCmd() {
 async function dispatchCmd(chosen?: Study) {
   const domain = a.as ?? 'uni.example';
   const port = Number(a.port);
-  // Serve our card while the mission runs, so a node can verify it and show us on the map.
+  // Serve our card while the study runs, so a node can verify it and show us on the map.
   const url = `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}/a2a`;
   const id = await loadOrCreateIdentity(`${homedir()}/.lake/visitor-${domain}.json`);
   const visitor = await makeVisitor(id, domain, `Research agent (${domain})`, url);
-  const reply = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'a research agent on a mission' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
+  const reply = async (): Promise<LakeData> => ({ lake: '0.1', card: visitor.card, envelope: (await signMessage({ kind: 'rejected', code: 'busy', why: 'a research agent running a study' }, id, { iss: visitor.webId })) as LakeData['envelope'] });
   const server = lakeAgentApp(visitor.card, reply).listen(port);
   const link = new LakeLinks({ nodeUrls: a.node!.split(',').map((u) => u.trim()), card: visitor.card, identity: id, webId: visitor.webId, log: (m) => { if (!a.json) console.log(`NODE      ${m}`); } });
   await link.register(6);

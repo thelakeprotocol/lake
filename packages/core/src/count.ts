@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import type { AgentCard } from '@a2a-js/sdk';
 import { Prio3Histogram } from '@divviup/prio3';
 
@@ -67,9 +67,29 @@ export function aggregateReports(length: number, prepared: { state: unknown; mes
   return toWire(v.aggregate(null, outputs));
 }
 
-/** The two tellers' aggregate shares, added up: the exact table, from `count` valid answers. */
-export const unshardCounts = (length: number, shares: [unknown, unknown], count: number): number[] =>
-  (histogram(length).unshard(null, shares.map(fromWire), count) as (number | bigint)[]).map(Number);
+/**
+ * Noise a teller adds to its own aggregate share before releasing it (DAP's differential-privacy option): a discrete
+ * Laplace draw per cell, scaled for one answer changing two cells by one. Houses still answer exactly; only the published
+ * table is blurred, a little, so subtracting one study from another can't single out one house.
+ */
+export function addNoise(length: number, share: unknown, epsilon: number): unknown {
+  const v = histogram(length) as unknown as { field: { modulus: bigint } };
+  const p = v.field.modulus;
+  const q = Math.exp(-epsilon / 2);
+  // Two-sided geometric: the difference of two geometric draws with the same ratio q.
+  const geometric = () => { let k = 0; while (randomInt(0, 2 ** 32) / 2 ** 32 < q) k++; return k; };
+  return toWire((fromWire(share) as bigint[]).map((x) => (((x + BigInt(geometric() - geometric())) % p) + p) % p));
+}
+
+/** The two tellers' aggregate shares, added up: the table, from `count` valid answers (exact unless the tellers added noise). */
+export const unshardCounts = (length: number, shares: [unknown, unknown], _count: number): number[] => {
+  // For a histogram, unsharding is adding the two shares cell by cell in the field. Done here in exact arithmetic,
+  // because the library converts to plain numbers, and noise can push a small cell below zero, which the field holds
+  // as a number near the modulus: the top half reads as negative.
+  const p = (histogram(length) as unknown as { field: { modulus: bigint } }).field.modulus;
+  const [a, b] = shares.map((x) => fromWire(x) as bigint[]) as [bigint[], bigint[]];
+  return a.map((x, i) => { const v = (x + b[i]!) % p; return Number(v > p / 2n ? v - p : v); });
+};
 
 /** Two tellers from a list of cards (those with the `teller` skill), under different names; fewer than two: none. */
 export function pickTellers(cards: AgentCard[]): TellerRef[] {

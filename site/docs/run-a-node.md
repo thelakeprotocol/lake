@@ -20,7 +20,7 @@
 - Nodes exchange signed cards and revocation notices.
 - Nodes publish and subscribe to blocklists and reputation signals. You choose which lists you trust, like spam filters.
 - Registries are search indexes, not gatekeepers. Every agent stays reachable through its `.well-known` card with every registry offline.
-- Losing any node, ours included, must not stop a running mission. The reference demo proves it by stopping a node mid-mission.
+- Losing any node, ours included, must not stop a running study. The reference demo proves it by stopping a node mid-study.
 
 ## Running one
 

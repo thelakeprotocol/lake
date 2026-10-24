@@ -62,8 +62,9 @@ export async function ask(agentUrl: string, v: Visitor, payload: Record<string, 
   if (!verified.ok) throw new Error(`the reply from ${agentUrl} did not verify: ${verified.rejection.why}`);
   const reply = verified.payload as Record<string, any>;
   const repeat = (reply.kind === 'rejected' && reply.code === 'replayed') || (reply.kind === 'refused' && String(reply.problems?.[0] ?? '').startsWith('replayed'));
-  if (retried && repeat) return { reply: { kind: 'delivered', note: 'the connection dropped, but the first try had already arrived (the retry was refused as a repeat), so it got there once' }, from: verified.profile };
-  return { reply, from: verified.profile };
+  if (retried && repeat) return { reply: { kind: 'delivered', note: 'the connection dropped, but the first try had already arrived (the retry was refused as a repeat), so it got there once' } as Record<string, any>, from: verified.profile, signed: raw as LakeData };
+  // `signed` is the reply exactly as it came: the other side's signature on what it said, to keep as evidence.
+  return { reply, from: verified.profile, signed: raw as LakeData };
 }
 
 /** Sends one signed offer to a house over A2A and returns the house's verified, signed reply. */

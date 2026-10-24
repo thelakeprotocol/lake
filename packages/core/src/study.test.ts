@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, studyId, toWire, unshardCounts, type Study } from './index.js';
+import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, studyId, toWire, unshardCounts, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -60,6 +60,23 @@ describe('studies', () => {
     }
     expect(leader).toHaveLength(5);
     expect(unshardCounts(8, [aggregateReports(8, leader), aggregateReports(8, helper)], 5)).toEqual(truth);
+  });
+
+  it('blur only the released table when the tellers add noise, never the answers', async () => {
+    const key = newVerifyKey(8);
+    const leader: { state: unknown; message: unknown }[] = [], helper: { state: unknown; message: unknown }[] = [];
+    for (let i = 0; i < 40; i++) {
+      const r = await shardAnswer(8, i % 4);
+      const a = await prepareReport(8, key, 0, { ...r, share: r.shares[0] });
+      const b = await prepareReport(8, key, 1, { ...r, share: r.shares[1] });
+      const message = await settleReport(8, [a.share, b.share]);
+      leader.push({ state: a.state, message });
+      helper.push({ state: b.state, message });
+    }
+    const exact = unshardCounts(8, [aggregateReports(8, leader), aggregateReports(8, helper)], 40);
+    expect(exact).toEqual([10, 10, 10, 10, 0, 0, 0, 0]);
+    const noisy = unshardCounts(8, [addNoise(8, aggregateReports(8, leader), 2), addNoise(8, aggregateReports(8, helper), 2)], 40);
+    noisy.forEach((c, i) => expect(Math.abs(c - exact[i]!)).toBeLessThan(15));
   });
 
   it('are refused when they ask for something the Lake cannot ask, or let anyone see a single answer', () => {

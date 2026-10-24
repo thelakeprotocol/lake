@@ -71,7 +71,7 @@ export async function createEthics(o: SpecialistOptions): Promise<{ app: express
 
 /** The demo Auditor: certifies declarative studies the Lake can run safely, and reviewed converter packages. */
 export async function createAuditor(o: SpecialistOptions): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
-  const s: Specialist = await specialist<Reply>(o, 'Auditor (demo)', 'Certifies studies (noisy aggregates of known questions) and converter packages.', 'study-audit', async (p) => {
+  const s: Specialist = await specialist<Reply>(o, 'Auditor (demo)', 'Certifies studies (exact totals of known questions, counted by two tellers) and converter packages.', 'study-audit', async (p) => {
     if (p.kind === 'audit-study') {
       const study = p.study as Study;
       const audit = auditStudy(study);
@@ -170,7 +170,8 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     const receipts = await Promise.all(
       checked.map(async (c) => ({
         payee: c.payee,
-        credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency: m.budget.currency ?? 'USD', value: c.amount / 100 }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated' }, 3650),
+        // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
+        credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency: m.budget.currency ?? 'USD', value: c.amount / 100 }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated', settlementId: randomUUID() }, 3650),
       })),
     );
     o.onSettled?.(total / 100, checked.length);

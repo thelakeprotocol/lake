@@ -7,7 +7,7 @@ lake knock <house-url> [--offer research|gp|marketing|injection] [--tamper forge
 lake dispatch [--goal "..."] [--price 5] [--extra-fields postcode] [--node …] [--ethics …] [--auditor …]
 ```
 
-`dispatch` runs the mission: ethics approval → study certificate → discover houses on the node → knock on each over A2A with the offer, the study and both credentials → collect decisions and grants → ask each joining house to run the study → two shares with a proof per house for two tellers (DAP, Prio3) → close at the Leader → add the two aggregate shares into the exact table → report the result. It serves its own card while it runs, so the node can verify it and show it on the map.
+`dispatch` runs a study: ethics approval → study certificate → discover houses on the node → knock on each over A2A with the offer, the study and both credentials → collect decisions and grants → ask each joining house to run the study → two shares with a proof per house for two tellers (DAP, Prio3) → close at the Leader → add the two aggregate shares into the exact table → report the result. It serves its own card while it runs, so the node can verify it and show it on the map.
 
 ```bash
 lake attack [--count 10] [<house-url> …]          # one attacker key tries every trick; all must be blocked

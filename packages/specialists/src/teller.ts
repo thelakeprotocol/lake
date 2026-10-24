@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { aggregateReports, newVerifyKey, prepareReport, sendLake, settleReport, signMessage, verifyLakeData, type LakeData, type TellerRef } from '@thelakeprotocol/core';
+import { addNoise, aggregateReports, newVerifyKey, prepareReport, sendLake, settleReport, signMessage, verifyLakeData, type LakeData, type TellerRef } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -22,6 +22,8 @@ interface Count {
   /** The other teller: for the Leader, its Helper; for the Helper, the Leader that set it up. */
   peer: TellerRef & { webId?: string };
   reports: Record<string, Report>;
+  /** Noise this teller adds to its share before release (DAP's differential-privacy option). */
+  noise?: { epsilon: number };
   /** The Helper's prepared states, between prepare and finish. */
   prepared?: Record<string, unknown>;
   aggregate?: { share: unknown; count: number; rejected: number; at: string };
@@ -57,6 +59,7 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
       case 'count.open': {
         const length = Number(p.length), min = Number(p.min), deadline = Date.parse(String(p.deadline ?? ''));
         const helper = p.helper as TellerRef | undefined;
+        const noise = p.noise as { epsilon?: number } | undefined;
         const problems = [
           ...(ID.test(id) ? [] : ['id: a short code']),
           ...(c ? [`id: "${id}" is taken`] : []),
@@ -64,13 +67,14 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
           ...(Number.isInteger(min) && min >= floor ? [] : [`min: at least ${floor} answers`]),
           ...(deadline > Date.now() && deadline < Date.now() + MAX_HOURS * 3_600_000 ? [] : [`deadline: within ${MAX_HOURS} hours`]),
           ...(helper?.url && helper.domain ? [] : ['helper: { url, domain } of the second teller']),
+          ...(noise === undefined || (Number(noise.epsilon) > 0 && Number(noise.epsilon) <= 10) ? [] : ['noise: { epsilon } between 0 and 10']),
         ];
         if (problems.length) return refused(...problems);
         const verifyKey = newVerifyKey(length);
         // The Helper must agree before anyone reports: without it, no answer can be counted.
-        const { reply, webId }: { reply: Record<string, any>; webId: string } = await tell(helper!, { kind: 'count.setup', id, length, min, deadline: new Date(deadline).toISOString(), verifyKey, opener: from, leader: { url: `${s.card.supportedInterfaces[0]!.url}`, domain: o.domain } }).catch((e: Error) => ({ reply: { kind: 'refused', problems: [e.message] }, webId: '' }));
+        const { reply, webId }: { reply: Record<string, any>; webId: string } = await tell(helper!, { kind: 'count.setup', id, length, min, deadline: new Date(deadline).toISOString(), verifyKey, opener: from, ...(noise ? { noise } : {}), leader: { url: `${s.card.supportedInterfaces[0]!.url}`, domain: o.domain } }).catch((e: Error) => ({ reply: { kind: 'refused', problems: [e.message] }, webId: '' }));
         if (reply.kind !== 'count.ready') return refused(`the Helper didn't set it up: ${(reply.problems ?? [reply.kind]).join('; ')}`);
-        counts.set(id, { id, role: 'leader', opener: from, length, min, deadline, verifyKey, peer: { ...helper!, webId }, reports: {} });
+        counts.set(id, { id, role: 'leader', opener: from, length, min, deadline, verifyKey, peer: { ...helper!, webId }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
         void save();
         return { kind: 'count.opened', id, length, min, deadline: new Date(deadline).toISOString(), helper: helper!.domain };
       }
@@ -80,7 +84,8 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         if (!leader?.url || !leader.domain || typeof p.verifyKey !== 'string') return refused('setup: leader, verifyKey');
         const min = Number(p.min);
         if (!(min >= floor)) return refused(`min: at least ${floor} answers`);
-        counts.set(id, { id, role: 'helper', opener: String(p.opener ?? ''), length: Number(p.length), min, deadline: Date.parse(String(p.deadline)), verifyKey: p.verifyKey, peer: { ...leader, webId: from }, reports: {} });
+        const noise = p.noise as { epsilon?: number } | undefined;
+        counts.set(id, { id, role: 'helper', opener: String(p.opener ?? ''), length: Number(p.length), min, deadline: Date.parse(String(p.deadline)), verifyKey: p.verifyKey, peer: { ...leader, webId: from }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
         void save();
         return { kind: 'count.ready', id };
       }
@@ -121,7 +126,8 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         const messages = (p.messages ?? {}) as Record<string, unknown>;
         const valid = Object.keys(messages).filter((m) => messages[m] && c.prepared?.[m]);
         if (valid.length < Math.max(c.min, floor)) return refused(`too few valid answers: ${valid.length}`);
-        c.aggregate = { share: aggregateReports(c.length, valid.map((m) => ({ state: c.prepared![m], message: messages[m] }))), count: valid.length, rejected: Number(p.rejected ?? 0), at: new Date().toISOString() };
+        const helperShare = aggregateReports(c.length, valid.map((m) => ({ state: c.prepared![m], message: messages[m] })));
+        c.aggregate = { share: c.noise ? addNoise(c.length, helperShare, c.noise.epsilon) : helperShare, count: valid.length, rejected: Number(p.rejected ?? 0), at: new Date().toISOString() };
         c.reports = {};
         c.prepared = {};
         void save();
@@ -146,7 +152,8 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         if (valid.length < Math.max(c.min, floor)) return refused(`too few valid answers: ${valid.length} (${rejected} failed their proof or never reached the Helper)`);
         const { reply: done } = await tell(c.peer, { kind: 'count.finish', id, messages, rejected });
         if (done.kind !== 'count.finished') return refused(`the Helper: ${(done.problems ?? [done.kind]).join('; ')}`);
-        c.aggregate = { share: aggregateReports(c.length, valid.map((m) => ({ state: mine[m]!.state, message: messages[m] }))), count: valid.length, rejected, at: new Date().toISOString() };
+        const leaderShare = aggregateReports(c.length, valid.map((m) => ({ state: mine[m]!.state, message: messages[m] })));
+        c.aggregate = { share: c.noise ? addNoise(c.length, leaderShare, c.noise.epsilon) : leaderShare, count: valid.length, rejected, at: new Date().toISOString() };
         c.reports = {};
         void save();
         return { kind: 'count.share', id, count: valid.length, rejected, share: c.aggregate.share };

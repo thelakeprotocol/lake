@@ -19,7 +19,7 @@ The Lake started by inventing its own pieces. Where an open standard already doe
 
 | | Ours today | Moving to | Why | Status |
 |---|---|---|---|---|
-| 1 | Study answers split between two tellers | **IETF DAP** with **Prio3** validity proofs, minimum batch sizes, one batch per answer, optional noise at the aggregators | The standard for counting without looking (Divvi Up, Firefox). Tellers can check an answer is valid without seeing it. | <span class="status done">runs</span> (Leader/Helper, Prio3 histogram via ISRG's @divviup/prio3, batch rules); aggregator noise next |
+| 1 | Study answers split between two tellers | **IETF DAP** with **Prio3** validity proofs, minimum batch sizes, one batch per answer, optional noise at the aggregators | The standard for counting without looking (Divvi Up, Firefox). Tellers can check an answer is valid without seeing it. | <span class="status done">runs</span> (Leader/Helper, Prio3 histogram via ISRG's @divviup/prio3, batch rules, optional teller noise) |
 | 2 | `LakeAccessGrant` keys | **Inrupt Access Grants** (VC access requests and grants for Solid), with **GNAP** / **UMA 2.0** where they fit | Keys to a pod in the Solid ecosystem's own format. | <span class="status next">next</span> |
 | 3 | Agents' own salts and commits for fair draws | **drand** public randomness | Randomness nobody can steer, for every game and draw. | <span class="status later">planned</span> |
 | 4 | Demo person stamp | **SD-JWT / BBS+** credentials with per-site pseudonyms; the **EU Digital Identity Wallet**; **Privacy Pass** tokens for one signature per person | "A real person, without saying who", from checkers that exist. | <span class="status later">planned</span> |
@@ -43,13 +43,13 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 |---|---|---|
 | ✅ | `docker compose up` starts the Lake with no manual steps | No API key needed at all: the Lake bundles no LLM |
 | ⚠️ | A new house appears on the map within 5 seconds | About 11 s for a fresh house here; the pod server's boot dominates |
-| ⚠️ | A full mission at 1,000 houses in about 60 seconds | 57 s at 250 houses; 636 s at 1,000 ([measured](/docs/architecture#scale-measured)) |
+| ⚠️ | A full study at 1,000 houses in about 60 seconds | 57 s at 250 houses; 636 s at 1,000 ([measured](/docs/architecture#scale-measured)) |
 | ✅ | No grant exists that a human did not approve, live or by standing rule | Live grants are signed on the owner's phone; standing-rule grants name the rule and its digest; all filed in `/agreements/` |
 | ✅ | Records moved is 0, computed from pod audit logs | Summed from each house's `compute.done` audit entries |
 | ✅ | Every attacker request is blocked and logged, prompt injection included | Tested end to end |
 | ✅ | Revoking a house's keys cuts access within 1 second | Tested end to end |
 | ✅ | A tampered record fails its check; that house is excluded and unpaid | Tested end to end |
-| ✅ | Stopping one node mid-mission does not stop the mission | Tested end to end and shown in Docker |
+| ✅ | Stopping one node mid-study does not stop the study | Tested end to end and shown in Docker |
 | ✅ | An agent can be found through its `.well-known` card with every registry offline | Tested end to end; `lake card <url>` |
 | ✅ | An outside agent built with the SDK joins and completes a study in the sandbox | Tested end to end (local sandbox) |
 | ✅ | An assistant dispatches a study through the Lake MCP connector | Tested with an MCP client; setup documented for Claude Code and Desktop |
@@ -66,12 +66,12 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 | 0 | **Core + spec** | Signed cards, signed messages, rules engine, collective counter, ODRL offers, `SPEC.md`, schemas, model | <span class="status done">done</span> |
 | 1 | **One house** | Pod, WebID, issuer-signed synthetic record, housekeeper answering an A2A request through MCP | <span class="status done">done</span> |
 | 2 | **The Lake** | A federatable node: verified cards, bus, event stream, a bare map where houses appear | <span class="status done">done</span> (bus moves to M3, with broadcast) |
-| 3 | **Mission, no money** | Ethics, audit, knock, decide, grant, verify signatures, compute in place, answer | <span class="status done">done</span> |
+| 3 | **A study run, no money** | Ethics, audit, knock, decide, grant, verify signatures, compute in place, answer | <span class="status done">done</span> |
 | 4 | **Approvals app** | Live Allow on a phone; revocation in under 1 second | <span class="status done">done</span> |
 | 5 | **Money** | ODRL agreements, collective counter-offer, AP2 mandates, Payments agent | <span class="status done">done</span> |
 | 6 | **Wild life** | Swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | <span class="status done">done</span> |
-| 7 | **Scale** | 1,000 houses, a full mission in about 60 seconds | <span class="status done">runs</span> 1,000 houses complete a paid mission; 10.6 min on a busy 4-core laptop, [measured](/docs/architecture#scale-measured) |
-| 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-mission and finish anyway | <span class="status done">done</span> |
+| 7 | **Scale** | 1,000 houses, a full study in about 60 seconds | <span class="status done">runs</span> 1,000 houses complete a paid study; 10.6 min on a busy 4-core laptop, [measured](/docs/architecture#scale-measured) |
+| 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-study and finish anyway | <span class="status done">done</span> |
 | 9 | **Open door** | Agent SDK, Lake MCP connector, public sandbox Lake | <span class="status done">done</span> (sandbox live) |
 | 10 | **Polish** | Map matches the reference, seeded demo mode, 90-second recording | <span class="status done">done</span> |
 | 11 | **Packs and offers** | Use cases as packs outside the core; intents, certified quote programs run in the house, group rates, accept and release; Australian home loans as the first market | <span class="status done">runs</span> ([how](/docs/offers), [video](/docs/demos#home-loans)): 100 houses, 800 offers, 72 deals in 148 s on a laptop |

@@ -23,6 +23,16 @@ const TYPES: FieldType[] = ['string', 'integer', 'number', 'boolean', 'object', 
 /** Sections every blueprint's body must have, so every implementer reads the same rules. */
 export const BLUEPRINT_SECTIONS = ['Protocol', 'Validation'];
 
+/** The same problem on every message reads once, with how many messages it applies to: easier to fix than a wall of repeats. */
+function grouped(problems: string[]): string[] {
+  const out = new Map<string, number>();
+  for (const p of problems) {
+    const key = p.replace(/^messages\.[^.:\s]+\./, 'messages.<each>.');
+    out.set(key, (out.get(key) ?? 0) + 1);
+  }
+  return [...out].map(([p, n]) => (n > 1 ? `${p} (${n} messages)` : p.replace('messages.<each>.', problems.find((x) => x.replace(/^messages\.[^.:\s]+\./, 'messages.<each>.') === p)!.match(/^messages\.[^.:\s]+\./)?.[0] ?? 'messages.')));
+}
+
 export function parseBlueprint(text: string): { meta: Blueprint; body: string; problems: string[] } {
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { meta: {} as Blueprint, body: text, problems: ['no YAML header between --- lines at the top'] };
@@ -32,7 +42,7 @@ export function parseBlueprint(text: string): { meta: Blueprint; body: string; p
   } catch (e) {
     return { meta: {} as Blueprint, body: m[2]!, problems: [`header is not YAML: ${(e as Error).message}`] };
   }
-  return { meta, body: m[2]!, problems: checkBlueprint(meta, m[2]!) };
+  return { meta, body: m[2]!, problems: grouped(checkBlueprint(meta, m[2]!)) };
 }
 
 export function checkBlueprint(b: Blueprint, body: string): string[] {

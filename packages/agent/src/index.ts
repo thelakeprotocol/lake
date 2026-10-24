@@ -5,18 +5,13 @@ import {
   buildCard, cardUrlFor, exampleStudies, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
-import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type Visitor } from '@thelakeprotocol/visitor';
+import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
 
-/**
- * Who deals with whom is the dealers' business (SPEC §8): payments and messages whose kind sounds like a deal are reported
- * without the other party. Chat and games stay visible on the map. An agent tagged `quiet` reports none of its messages.
- */
-const DEAL = /quote|bid|offer|price|pay|receipt|transfer|invoice|contract|deal|job|hire|accept|settle|escrow|order|counter/i;
 
 /** Units a transfer may not use: currency codes and money words. Real money goes through a payments agent. */
 const MONEYLIKE = /^(usd|aud|eur|gbp|cad|nzd|jpy|chf|cny|inr|sgd|hkd|btc|eth|usdc|usdt)|dollar|euro|pound|sterling|cent|cash|money|fiat/;
 
-export type { MissionResult, Study };
+export type { MissionResult, StudyRun, Study };
 
 export interface LakeAgentOptions {
   /** What people see on the map. */
@@ -86,8 +81,10 @@ export interface LakeAgent {
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
   ask(agentUrl: string, payload: Record<string, unknown> & { kind: string }): Promise<Record<string, unknown>>;
+  /** What this agent sent and the signed replies it got, newest last: its own evidence. */
+  sent: { at: string; to: string; message: Record<string, unknown>; reply: LakeData }[];
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
-  study(question: string, o?: StudyOptions): Promise<MissionResult>;
+  study(question: string, o?: StudyOptions): Promise<StudyRun>;
   /** Say what you're up for (e.g. game:connect4): same key, same address, a re-signed card, registered again. */
   setTags(tags: string[]): Promise<void>;
   /** Put a blueprint you wrote on the Lake (SPEC §11.3), signed by you; others find and read it there. */
@@ -115,6 +112,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   await loadPacks(o.packs ?? ['health'], (n) => import(n));
   const id: Identity = o.identity ?? (o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity());
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
+  const sent: LakeAgent['sent'] = [];
   const quietMe = () => !!(lakeProfile(visitor.card)?.tags ?? []).includes('quiet');
   // Same identity, a card that also lists what this agent is up for.
   const tagged = async (tags: string[]) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags } }, id), id);
@@ -164,6 +162,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
+    sent,
     async knock(houseUrl, terms) {
       const { reply } = await knock(houseUrl, visitor, terms);
       // The agent's own half of a knock: that it knocked and what it was told, never on which house (SPEC §8).
@@ -171,11 +170,14 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       return reply;
     },
     async ask(agentUrl, payload) {
-      const { reply: r, from } = await ask(agentUrl, visitor, payload);
-      // The map may show who talked to whom, and in which kind of message; never what was said. Not for a quiet agent
-      // (a blind tally, say): that someone talked to it at all is the secret.
-      const kind = String(payload.kind).slice(0, 40);
-      if (!from.tags?.includes('quiet') && !quietMe()) link.report(DEAL.test(kind) ? makeEvent('agent.message', 'self', undefined, { kind: 'deal' }) : makeEvent('agent.message', 'self', `agent:${from.ownerDomain}`, { kind }));
+      const { reply: r, from, signed } = await ask(agentUrl, visitor, payload);
+      // What this agent sent, and the other side's signed answer to it: evidence for a dispute, kept here only.
+      sent.push({ at: new Date().toISOString(), to: agentUrl, message: payload, reply: signed });
+      if (sent.length > 300) sent.shift();
+      // Who talks to whom, and about what, is theirs (SPEC §8): the feed hears that this agent sent a message, never to whom or
+      // what kind. (Guessing which kinds are private from their names leaked menus and findings on market day.) Nothing at all
+      // for a quiet agent or to one: that someone talked to it is the secret.
+      if (!from.tags?.includes('quiet') && !quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'message' }));
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },

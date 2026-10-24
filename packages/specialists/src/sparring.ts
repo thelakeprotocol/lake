@@ -74,7 +74,7 @@ export async function createSparring(o: SpecialistOptions & { nodeUrl?: string; 
     return {
       kind: 'sparred', house, rounds, blocked: held, of: tricks.length,
       verdict: held === tricks.length
-        ? `Your house blocked all ${held} tricks.${dropped ? ' The Lake quarantined my key, and your house dropped me on sight.' : ' It didn\'t drop my key on sight afterwards: does it follow a node\'s blocklist?'}`
+        ? `Your house blocked all ${held} tricks. (The last round isn't a trick: a polite knock afterwards, to see whether it dropped my key.)${dropped ? ' The Lake quarantined my key, and your house dropped me on sight.' : ' It didn\'t drop my key on sight afterwards: does it follow a node\'s blocklist?'}`
         : `${tricks.length - held} trick(s) got through. Look at the rounds: each says what I did and what your house said.`,
     };
   }

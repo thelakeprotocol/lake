@@ -49,14 +49,14 @@ docker compose --profile scale up -d --scale house-multi=4   # about 1,000 house
 
 ### Scale, measured
 
-On a 4-core, 16 GB laptop that was also running other work (load average around 3.5), a full paid mission (`lake dispatch --extra-fields postcode`: knock, bloc counter, re-offer, countersign, compute in place, pay, file receipts):
+On a 4-core, 16 GB laptop that was also running other work (load average around 3.5), a full paid study (`lake dispatch --extra-fields postcode`: knock, bloc counter, re-offer, countersign, compute in place, pay, file receipts):
 
-| Houses | Joined after | Mission | Answered and paid | Records moved |
+| Houses | Joined after | Study | Answered and paid | Records moved |
 |---|---|---|---|---|
 | 250 (1 process) | 95 s warm restart | **57 s** at concurrency 64 | 200 of 200 willing | 0 |
 | 1,000 (4 processes) | 279 s warm restart | **636 s** at concurrency 32 | 737 of 801 willing; 64 still busy after 3 retries | 0 |
 
-The time goes into the pod server's file-backed storage: about 5 reads and 4 writes per house per mission, plus DPoP token checks on each. The spec's target of about 60 seconds at 1,000 houses needs dedicated cores, more pod-server processes, or a faster storage backend. [Help wanted](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).
+The time goes into the pod server's file-backed storage: about 5 reads and 4 writes per house per study, plus DPoP token checks on each. The spec's target of about 60 seconds at 1,000 houses needs dedicated cores, more pod-server processes, or a faster storage backend. [Help wanted](https://github.com/thelakeprotocol/lake/issues/new?template=build.yml).
 
 What makes it hold up under load: signed cards and credentials are verified once per process; between full checks a house re-reads only its two data files against the digests its credentials pin; a house that can't read its pod in time answers `busy` instead of declining; agents retry busy or slow houses up to three times; payments settle in batches of 100.
 

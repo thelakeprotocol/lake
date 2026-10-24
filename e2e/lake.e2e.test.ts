@@ -18,7 +18,7 @@ import { ownerSession, startPod } from '../packages/house/src/pod.js';
 import { ask, knock, makeVisitor, presets } from '../packages/visitor/src/knock.js';
 
 // Boots a whole Lake from source: a node, the issuer, auditor and ethics specialists, and three houses
-// (each a real Community Solid Server + housekeeper), then knocks and runs a mission over A2A.
+// (each a real Community Solid Server + housekeeper), then knocks and runs studies over A2A.
 // This process plays visitors that read the health pack's fields and example offers.
 registerPack(health);
 const procs: ChildProcess[] = [];
@@ -241,7 +241,7 @@ describe('the owner', () => {
 
   it("waits for the owner's tap, and the study includes the house once the owner allows it", async () => {
     const v = await visitor('uni.example');
-    const mission = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20, ...(await funded()) });
+    const running = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20, ...(await funded()) });
     let req: { id: string; offerId: string; visitor: { webId: string }; fields: string[]; purpose: string; study: string } | undefined;
     for (let i = 0; i < 40 && !req; i++) {
       await new Promise((r) => setTimeout(r, 250));
@@ -256,7 +256,7 @@ describe('the owner', () => {
     // A grant wider than what the owner was shown is refused.
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc([...req!.fields, 'dob']) as never, owner) })).toMatchObject({ error: expect.any(String) });
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc(req!.fields) as never, owner) })).toEqual({ ok: true });
-    const r = await mission;
+    const r = await running;
     expect(r.participants).toBe(3);
     // Exact counts: every house that took part is in exactly one cell of the table, no blur.
     expect(r.cells).toHaveLength(8);
@@ -478,6 +478,12 @@ describe('the open door', () => {
     await new Promise((ok) => setTimeout(ok, 1100));
     expect(await text('lake_room', { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt })).toMatchObject({ kind: 'refused' });
     expect(await text('lake_room', { action: 'leave', room: 'jam' })).toMatchObject({ kind: 'room.left' });
+    // Its own record for a dispute: what it sent, each with the other side's signed reply.
+    const record = await text('lake_inbox', { history: true });
+    expect(record.sent.length).toBeGreaterThan(0);
+    expect(record.sent.at(-1).reply.envelope).toBeDefined();
+    // A signed reading of the node's counters, for a bet or a contract to name.
+    expect((await (await fetch(`${node}/snapshot`)).json()).payload).toMatchObject({ kind: 'snapshot', counters: expect.any(Object) });
     // "USD-sim" (some rulebooks' name for the sandbox's dollars) is paid as USD, settled.
     expect(await text('lake_pay', { agent_url: theirs.you.url, amount: 1, unit: 'USD-sim', memo: 'lot2' })).toMatchObject({ paid: 1, unit: 'USD' });
     // A blind tally: nobody, not even the opener, learns who signed until the threshold; then every signer is told at once.
@@ -541,7 +547,7 @@ describe('the open door', () => {
   }, 60_000);
 });
 
-describe('a mission', () => {
+describe('a study run', () => {
   const run = async (o: Partial<Parameters<typeof dispatch>[0]> = {}) =>
     dispatch({ visitor: await visitor('uni.example'), node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()), ...o });
 
@@ -792,11 +798,11 @@ describe('federation (runs last: it stops the nodes)', () => {
     expect(followed).toEqual(expect.arrayContaining(own));
   });
 
-  it('a mission finishes when a node dies in the middle of it', async () => {
-    const mission = dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()) });
+  it('a study finishes when a node dies in the middle of it', async () => {
+    const running = dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()) });
     await new Promise((r) => setTimeout(r, 300));
     procs[0]!.kill('SIGTERM'); // the first node, gone
-    const r = await mission;
+    const r = await running;
     expect(r.participants).toBeGreaterThan(0);
   });
 

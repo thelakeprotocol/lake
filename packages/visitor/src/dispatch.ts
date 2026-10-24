@@ -39,7 +39,7 @@ export interface DispatchOptions {
   waitSeconds?: number;
   /** Pause between steps, so people can watch the map (stage demos). */
   paceMs?: number;
-  /** Money: the human who signs the mandate, the cap, and who settles. Without it the mission runs unpaid. */
+  /** Money: the human who signs the mandate, the cap, and who settles. Without it the study runs unpaid. */
   money?: { human: Human; budgetUsd: number; payments: string };
   link?: { report(e: LakeEvent): void; flush(): Promise<void> } | null;
   log?: (step: string, detail: string) => void;
@@ -48,7 +48,7 @@ export interface DispatchOptions {
 interface House { id: string; name: string; url: string }
 interface Joined { house: House; grant: string; agreement?: SignedAgreement; priceUsd: number }
 
-export interface MissionResult {
+export interface StudyRun {
   study: string;
   question: string;
   houses: number;
@@ -64,6 +64,8 @@ export interface MissionResult {
   /** The keys this agent was given, by house. Its own to keep until they expire or are revoked. */
   grants: { house: string; url: string; grant: string }[];
 }
+/** The old name for a study run, kept so code written against it still compiles. */
+export type MissionResult = StudyRun;
 
 /** Asks, and if the house is busy or doesn't answer in time, asks again (up to 3 tries, jittered backoff). */
 async function askPatiently(url: string, v: Visitor, payload: Record<string, unknown>) {
@@ -79,8 +81,8 @@ async function askPatiently(url: string, v: Visitor, payload: Record<string, unk
   }
 }
 
-/** The research mission: mandate → ethics → audit → discover → knock → bargain → agree → compute in place → pay → answer. */
-export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
+/** A study run: mandate → ethics → audit → discover → knock → bargain → agree → compute in place → pay → answer. */
+export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   const t0 = Date.now();
   const log = o.log ?? (() => {});
   const report = (kind: Parameters<typeof makeEvent>[0], data: Record<string, string | number | boolean>) => o.link?.report(makeEvent(kind, 'self', undefined, data));
@@ -155,7 +157,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   await beat();
 
   // Houses that countered the same offer bargain as one bloc: the highest price, only fields all accept (SPEC §5.3).
-  let bloc: MissionResult['bloc'] = null;
+  let bloc: StudyRun['bloc'] = null;
   const b = collectiveCounter(counters.map((c) => c.counter));
   if (b) {
     bloc = { members: b.members, priceUsd: b.priceUsd, fields: b.fields };
@@ -200,7 +202,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   }
 
   // Countersign only what the budget can pay: a house beyond it never gets a signed promise, so no deal is left unpaid.
-  const excluded: MissionResult['excluded'] = [];
+  const excluded: StudyRun['excluded'] = [];
   let committed = 0;
   const affordable = [...joined.values()].filter((j) => {
     if (committed + j.priceUsd > budget) { excluded.push({ house: j.house.name, why: `over budget: $${budget} pays for no more houses at $${j.priceUsd}` }); return false; }
@@ -214,7 +216,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   const [leader, helper] = tellers as [TellerRef, TellerRef];
   const count = `run-${randomUUID()}`;
   if (affordable.length) {
-    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper });
+    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) });
     if (from.ownerDomain !== leader.domain) throw new Error(`the teller at ${leader.domain} answered as ${from.ownerDomain}`);
     if (reply.kind !== 'count.opened') throw new Error(`${leader.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
     log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof`);
@@ -233,7 +235,7 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
 
   await beat();
   // Only houses that answered get paid; excluded ones don't.
-  let paid: MissionResult['paid'] = null;
+  let paid: StudyRun['paid'] = null;
   if (o.money && intent && answered.length) {
     const webIdOf = (j: Joined) => String(j.agreement?.agreement.assigner ?? '');
     const payable = answered.filter((j) => j.agreement && j.priceUsd > 0);
@@ -296,7 +298,8 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   }
   // Bits: 0 the group (over 60), 1 the exposure (on drug X), 2 the outcome (readmitted).
   const [group, exposure, outcome] = study.predicates.map((p) => p.name);
-  const rate = (readm: number, not: number) => ({ rate: readm + not > 0 ? readm / (readm + not) : 0, n: Math.round(readm + not) });
+  // With teller noise a small cell can come out below zero: count it as zero for the rates.
+  const rate = (readmRaw: number, notRaw: number) => { const readm = Math.max(0, readmRaw), not = Math.max(0, notRaw); return { rate: readm + not > 0 ? readm / (readm + not) : 0, n: Math.round(readm + not) }; };
   const onX = rate(cells[0b111]!, cells[0b011]!);
   const notOnX = rate(cells[0b101]!, cells[0b001]!);
   // Exact counts: a table from a handful of houses is true, just small.

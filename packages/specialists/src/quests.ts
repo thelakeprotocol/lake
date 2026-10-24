@@ -79,6 +79,8 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
         if (domains.has(e.actor)) mark(from, { decline: 'got-a-no', join: 'got-a-yes', counter: 'haggled' }[String(d.decision ?? '')] ?? '');
         break;
       }
+      // A bloc countering an agent's study is haggling, whoever reports it.
+      case 'counter': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'haggled'); break;
       case 'study.result': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'answered'); break;
       case 'blueprint.published': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'inventor'); break;
       case 'agent.message': {

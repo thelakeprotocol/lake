@@ -167,6 +167,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   app.get('/.well-known/agent-card.json', (_req, res) => void res.json(card));
   app.get('/health', (_req, res) => void res.json({ ok: true }));
 
+  const announced = new Set<string>();
   app.post('/register', async (req, res) => {
     const r = await registry.register(req.body?.card);
     if (!r.ok) {
@@ -175,7 +176,10 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
     for (const old of r.replaced) if (old.profile.role === 'house') publish(makeEvent('house.left', old.id, undefined, { replaced: true }));
     const p = participant(r.entry);
-    publish(r.entry.profile.role === 'house' ? makeEvent('house.joined', r.entry.id, undefined, { label: r.entry.label }) : makeEvent('agent.registered', r.entry.id, undefined, { role: r.entry.profile.role, label: r.entry.label }), p);
+    // The same key registering again (a reconnect, a new tag) isn't news: the feed said it arrived the first time.
+    const again = r.entry.profile.role !== 'house' && announced.has(r.entry.profile.publicJwk.kid!);
+    announced.add(r.entry.profile.publicJwk.kid!);
+    if (!again) publish(r.entry.profile.role === 'house' ? makeEvent('house.joined', r.entry.id, undefined, { label: r.entry.label }) : makeEvent('agent.registered', r.entry.id, undefined, { role: r.entry.profile.role, label: r.entry.label }), p);
     if (r.entry.profile.role === 'house') guildCheck();
     res.json({ id: r.entry.id, domainVia: r.entry.domainVia });
   });
@@ -222,6 +226,9 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
   // A node republishes the blocklists of the peers it chose to follow, alongside its own.
+  // A signed, timestamped reading of the counters: something a bet or a contract can name and anyone can check later.
+  app.get('/snapshot', async (_req, res) => void res.json(await signMessage({ kind: 'snapshot', counters, at: new Date().toISOString() }, o.id, { iss: `${o.url}/#node`, ttl: 3600 })));
+
   app.get('/signals', async (_req, res) => {
     const body: Signals = { kind: 'signals', blocklist: [...new Set([...quarantined, ...peerBlocked])], reputation: reputation() };
     res.json(await signMessage(body, o.id, { iss: `${o.url}/#node`, ttl: 60 }));

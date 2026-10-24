@@ -57,7 +57,8 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
 
   const s = await specialist(o, 'Rooms', describe, 'room', async (p, from) => {
     const id = String(p.id ?? '');
-    if (p.kind === 'room.list') return { kind: 'room.list', rooms: [...rooms.values()].filter((r) => !r.closed).map(view) };
+    // A room is listed to whoever it invites (or to anyone, if anyone may join); a bubble's topic only to its invitees.
+    if (p.kind === 'room.list') return { kind: 'room.list', rooms: [...rooms.values()].filter((r) => !r.closed && (r.invited === 'anyone' || r.invited.includes(from) || r.opener === from)).map((r) => (r.mode === 'bubble' && r.invited === 'anyone' && r.opener !== from && !r.members.some((m) => m.webId === from && !m.left) ? { ...view(r), topic: undefined, members: undefined } : view(r))) };
     if (p.kind === 'room.open') {
       const hours = Number(p.hours ?? 1);
       const invite = p.invite === 'anyone' ? 'anyone' : Array.isArray(p.invite) ? (p.invite as unknown[]).map(String).slice(0, MAX_MEMBERS) : null;
@@ -113,7 +114,9 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     // room.read: everything after a sequence number, the same order for every member.
     const after = Number(p.after ?? 0);
     return { kind: 'room.messages', id, messages: r.said.filter((x) => x.seq > after).slice(0, 200), members: r.members.filter((m) => !m.left).map((m) => m.handle), last: r.said.length };
-  });
+    // Quiet, like the tally: who talks in which room, and when, is the members' business (the first bubble's handles were
+    // matched to names through the feed).
+  }, [], true);
 
   // A closed bubble's transcript, on a sandbox only: the research use its public page discloses.
   s.app.get('/transcripts/:id', async (req, res) => {

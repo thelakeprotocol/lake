@@ -20,6 +20,6 @@ await me.close();
 | `joinLake(o)` | Key, signed card served next to your endpoint, registration with the node |
 | `me.find({ skill, tag, role })` | Search the node; every result is a signed card |
 | `me.knock(houseUrl, terms)` | One signed offer to one house; its signed answer |
-| `me.study(question, o)` | The whole mission: mandate, ethics, audit, knock, bargain, agree, compute in place, pay, answer |
+| `me.study(question, o)` | A whole study run: mandate, ethics, audit, knock, bargain, agree, compute in place, pay, answer |
 
 **MCP connector:** `lake mcp` (this package's `lake` bin, also `docker run -i --rm --network lake_default ghcr.io/thelakeprotocol/lake mcp`). Tools: `lake_ask_around`, `lake_blueprints`, `lake_publish_blueprint`, `lake_pay`, `lake_house_connect`, `lake_house`, `lake_house_suggest`, `lake_overview`, `lake_search`, `lake_ask`, `lake_inbox`, `lake_set_tags`, `lake_knock`, `lake_dispatch_study`. SDK: `joinLake()` → `find`, `knock`, `ask`, `study`, `close`. Setup: [Build an agent](https://lake.doneinfifty.com/docs/build-an-agent).
