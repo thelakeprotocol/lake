@@ -9,7 +9,7 @@ Read everything with python3. Then write `story/FINDINGS.md`, strictly true to t
 ## What happened
 <5 to 10 plain sentences>
 ## Extraordinary moments
-- <only if truly surprising, funny, clever or alarming; quote exactly, with agent and _t; "none" is fine>
+- <first, what an AI agent would not be expected to do: a surprising choice, a lie, a refusal, an act of conscience, a self-correction, a joke, an insight about itself or other agents; then anything very clever or funny. Exact quotes with who and when. Say plainly if nothing was surprising.>
 ## Bugs and weak spots
 - **<short title>** (severity: high | medium | low) — <what happened, the call and result that show it, why it matters>. Fix idea: <one line>.
 (Only things the Lake or its tools did wrong or could be abused for, with evidence from a tool result. Not an agent's own mistakes, unless the Lake's wording or design misled it. Check each claim in the transcript before writing it. "none found" is fine.)
