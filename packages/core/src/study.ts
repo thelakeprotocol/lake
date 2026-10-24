@@ -5,9 +5,9 @@ import { digestSRI } from './vc.js';
 
 /**
  * A study is a declaration, not code: which yes/no questions to ask of each house's canonical claims.
- * Each house works out, truthfully, which ONE cell of the contingency table its owner falls in, and sends
- * that one-hot row split into two random-looking pieces, one to each of two tellers (SPEC §7, §11.5). The
- * researcher gets the exact table and never sees any house's row.
+ * Each house works out, truthfully, which ONE cell of the contingency table its owner falls in, and reports it as
+ * two shares with a validity proof, one to each of two tellers, Leader and Helper (IETF DAP with Prio3; SPEC §7,
+ * §11.5). The researcher gets the exact table and never sees any house's answer.
  */
 export type Field = string;
 
@@ -34,7 +34,7 @@ export interface Study {
   kind: 'contingency';
   predicates: Predicate[];
   /** Who counts the answers, and the fewest houses a published table may come from. */
-  privacy: { mechanism: 'split-count'; tellers: TellerRef[]; min: number };
+  privacy: { mechanism: 'dap-prio3'; tellers: TellerRef[]; min: number };
   minTier: 'issuer-signed';
 }
 
@@ -56,7 +56,7 @@ export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
     else if (!OPS[spec.kind].includes(p.op) || !valueOk) problems.push(`question "${p.name}" can't ask "${p.op}" of ${spec.kind} field "${p.field}"`);
     if (spec?.pack.identifying?.includes(p?.field)) problems.push(`"${p.field}" is identifying; no study may read it`);
   }
-  if (s?.privacy?.mechanism !== 'split-count') problems.push('answers must go, split, to two tellers (split-count)');
+  if (s?.privacy?.mechanism !== 'dap-prio3') problems.push('answers must be counted by two tellers, Leader and Helper, with Prio3 proofs (dap-prio3)');
   else {
     const bad = tellersProblem(s.privacy.tellers);
     if (bad) problems.push(`tellers: ${bad}`);
@@ -83,9 +83,6 @@ function holds(p: Predicate, claims: Claim[]): boolean {
 export function cellOf(s: Study, claims: Claim[]): number {
   return s.predicates.reduce((acc, p, i) => acc | (holds(p, claims) ? 1 << i : 0), 0);
 }
-
-/** A house's answer, before it is split: 1 in the cell its owner falls in, 0 everywhere else. */
-export const oneHot = (s: Study, cell: number) => Array.from({ length: cellCount(s) }, (_, i) => (i === cell ? 1 : 0));
 
 /** Human labels for each cell, e.g. "over 60 · on drug X · not readmitted". */
 export function cellLabels(s: Study): string[] {

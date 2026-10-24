@@ -1,0 +1,176 @@
+{
+  "lake": "0.1",
+  "card": {
+    "name": "House stan",
+    "description": "House stan (example)",
+    "supportedInterfaces": [
+      {
+        "url": "https://pods.example/t/stan/a2a",
+        "protocolBinding": "JSONRPC",
+        "tenant": "",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": {
+      "url": "https://pods.example",
+      "organization": "pods.example"
+    },
+    "version": "0.1.0",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "extensions": [
+        {
+          "uri": "https://lake.doneinfifty.com/ext/lake/v0",
+          "description": "Lake profile: identity, owner domain and tags",
+          "required": true,
+          "params": {
+            "role": "house",
+            "webId": "https://pods.example/stan/profile/card#me",
+            "ownerDomain": "pods.example",
+            "tags": [
+              "research-volunteers"
+            ],
+            "publicJwk": {
+              "crv": "Ed25519",
+              "x": "q6SmOMH7gLosnvRmIefr-TyNiyRf7_IQUC_-05k06p8",
+              "kty": "OKP",
+              "kid": "house-pods.example",
+              "alg": "EdDSA"
+            },
+            "lakeVersion": "0.1.0"
+          }
+        }
+      ]
+    },
+    "securitySchemes": {},
+    "securityRequirements": [],
+    "defaultInputModes": [
+      "application/json"
+    ],
+    "defaultOutputModes": [
+      "application/json"
+    ],
+    "skills": [
+      {
+        "id": "health-study",
+        "name": "Health study",
+        "description": "Considers research offers",
+        "tags": [],
+        "examples": [],
+        "inputModes": [],
+        "outputModes": [],
+        "securityRequirements": []
+      }
+    ],
+    "signatures": [
+      {
+        "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
+        "signature": "00uFC0JbVBWVPWzAPN5feuXWkutjqiWPflqPoHMJicXXUDVeSz-zHzQvZSbBKq5DIR9xONhp_NQT4Do7d_eABA"
+      }
+    ]
+  },
+  "envelope": {
+    "payload": {
+      "kind": "count.report",
+      "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
+      "reportId": "F2gX4Yr2PNqu0wOwvdK48Q==",
+      "publicShare": {
+        "jointRandParts": [
+          {
+            "$b": "CbdLcUf8xC/RgaLc8BYGPQ=="
+          },
+          {
+            "$b": "exJ6NM2UZkucensKjZpL9Q=="
+          }
+        ]
+      },
+      "share": {
+        "blind": {
+          "$b": "TBKAP1im3ksdpJAYRqZguw=="
+        },
+        "measurementShare": [
+          {
+            "$n": "167332430224324899737549711377288914287"
+          },
+          {
+            "$n": "212842892550879045113307672728234752968"
+          },
+          {
+            "$n": "219333052216975101951060226830569750330"
+          },
+          {
+            "$n": "40928798608037022295118074275446286544"
+          },
+          {
+            "$n": "132857047210467485877246914388589561511"
+          },
+          {
+            "$n": "46393096906744545342263045367522566762"
+          },
+          {
+            "$n": "18964267680910853366122155055986987635"
+          },
+          {
+            "$n": "247389143573537208229403690788729526876"
+          }
+        ],
+        "wireMeasurementShare": {
+          "$b": "b+UPw5E2dtAp1c8Sxg3jfcj7xZ3tjvATMWFiM84MIKA6v6pSIr+tDGWrSt5hAgKl0GgSWOehN5QPkqfpkZnKHqdGhP/V0l2q/QJlcChW82NqojbF2YVjPSzt8L9G/OYic1K3uRtvSDzebPPplWJEDlwaxoxhbQzF8mo/3HtqHbo="
+        },
+        "wireProofShare": {
+          "$b": "QNDDxf2Rk/8j0SsuheB0mW+POQG8HvHMX69Z0Iu+n1ZwW1GnQRvioNg2dv2Ju6BGvAuV8rObqs0RSgownyD8GpXgobxHKyXikYGirdJHaGjvfEtHquU9iyOGdlajAJ+DR1/nzKJSwsJ6tqZqU9nsmBQgMCTJrqiwUPhvXYHy24QOqfx8sEYxW6AHlhC2MRd9ucY7O9i1fV/d56dD/7XmOEBLBhnas1S6MExdXJvGL5FkFkLSw7c2ho6STKBdJsL9wZXmr0GxUSBmNVhDU72UiQ=="
+        },
+        "proofsShare": [
+          {
+            "$n": "203978743602068282831196370294630764608"
+          },
+          {
+            "$n": "115143047573030390584915515508379979631"
+          },
+          {
+            "$n": "93880530945606450575809383955499670384"
+          },
+          {
+            "$n": "35869048348011465392526832246113766332"
+          },
+          {
+            "$n": "138781167177652224677694026888090083477"
+          },
+          {
+            "$n": "174954455589280504312550478890329144559"
+          },
+          {
+            "$n": "203272445309749867560489022357823250247"
+          },
+          {
+            "$n": "176600127048102539833012064779341144084"
+          },
+          {
+            "$n": "166273930563590076721091557802909673742"
+          },
+          {
+            "$n": "75634687381676482547102631938204878521"
+          },
+          {
+            "$n": "192986125567216062014820100228614867776"
+          },
+          {
+            "$n": "337302766673533697022978808283631064676"
+          },
+          {
+            "$n": "182876535329791341225970758969287153089"
+          }
+        ]
+      },
+      "nonce": "434258bf-c3de-479c-bb20-739d03a00180",
+      "iat": 1792805790,
+      "exp": 1792806090,
+      "iss": "https://pods.example/stan/profile/card#me"
+    },
+    "jws": {
+      "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
+      "signature": "pg6f5g6a7DvOBM5R5qvkDKhsjQs1HEAPolpTWKF6BRThN96O7Vs0xKr6htmGUjN2pX3uDjqC4djlrMQ0xFLaBQ"
+    }
+  }
+}

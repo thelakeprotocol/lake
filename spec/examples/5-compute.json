@@ -31,7 +31,7 @@
             "tags": [],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "HVxWmgQGHJ8FxFiVPfQooZRlfK54jWR-kTjUhPubtK8",
+              "x": "9F1EOal8ZJTNyCZY2I4TglyrZcKoZprcs6jcPuj9oyY",
               "kty": "OKP",
               "kid": "visitor-uni.example",
               "alg": "EdDSA"
@@ -53,14 +53,14 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "Acrky8qFLN4exAfI34Ar09srgokE1rjfKac0wJeAf8hdIcJhptR67-9HswwKu7f1q-1K1FMuszMkrtG925N2Dw"
+        "signature": "V6aiyBS6dtcrg70jYjvT75vzh7JLnzbgVrHHcViSQt3OIApplyU1nYpS1df2LYL128j8IbZsAqZ5-CyptI3zCw"
       }
     ]
   },
   "envelope": {
     "payload": {
       "kind": "compute",
-      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VBY2Nlc3NHcmFudCJdLCJpc3N1ZXIiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjRUMDA6MDc6MjUuNTI5WiIsInZhbGlkVW50aWwiOiIyMDI2LTEwLTI2VDAwOjA3OjI1LjUyOFoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50Iiwib2ZmZXIiOiIwYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjIiLCJzdHVkeSI6InVybjpsYWtlOnN0dWR5OnNoYTI1Ni1JWExXYldBMmFQbnZlLy9qblBsRE9EWDhUcHVyemM5VTY1QUhnYlA5WVY0PSIsImZpZWxkcyI6WyJhZ2VfYmFuZCIsIm1lZGljYXRpb25zIiwicmVhZG1pc3Npb25zIl0sInB1cnBvc2UiOiJyZXNlYXJjaCIsImF1dGhvcml6ZWRCeSI6InN0YW5kaW5nIHJ1bGUgMSIsInJ1bGVzIjoic2hhMjU2LTh3bmZ0QzErdkd0RThMQnI4TjR4RXh3QnV2bVNkamVXT3gvdHNDV1ArNUk9IiwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAifX0.oF83Cv-p954jczSz0SqWM5fs0htWzI-hmYftE8DMYCB76UhI6qASKP3SN6JtLBaqHNOz5XRMH4lXhvzMaKckBg",
+      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VBY2Nlc3NHcmFudCJdLCJpc3N1ZXIiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjRUMDE6MzY6MzAuMTcyWiIsInZhbGlkVW50aWwiOiIyMDI2LTEwLTI2VDAxOjM2OjMwLjE3MVoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50Iiwib2ZmZXIiOiIwYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjIiLCJzdHVkeSI6InVybjpsYWtlOnN0dWR5OnNoYTI1Ni1zbGhyZHM0Z3R1MjZNdTFZbktDeUwyaE1BS0pUek1Dd1hlK3N3cUhqM0ZFPSIsImZpZWxkcyI6WyJhZ2VfYmFuZCIsIm1lZGljYXRpb25zIiwicmVhZG1pc3Npb25zIl0sInB1cnBvc2UiOiJyZXNlYXJjaCIsImF1dGhvcml6ZWRCeSI6InN0YW5kaW5nIHJ1bGUgMSIsInJ1bGVzIjoic2hhMjU2LTh3bmZ0QzErdkd0RThMQnI4TjR4RXh3QnV2bVNkamVXT3gvdHNDV1ArNUk9IiwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAifX0.6Kf4zcMmZf45m2U3Uuim8jc1r9sK8AwLLSanfjeu84rTaE5_wr0TsRDBh7oMmhqaAqp1UvZGM5p1kV5AromdBw",
       "study": {
         "v": 1,
         "question": "Do over-60s on drug X get readmitted less?",
@@ -85,7 +85,7 @@
           }
         ],
         "privacy": {
-          "mechanism": "split-count",
+          "mechanism": "dap-prio3",
           "tellers": [
             {
               "url": "https://teller-a.example/a2a",
@@ -100,16 +100,16 @@
         },
         "minTier": "issuer-signed"
       },
-      "countersignature": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJvZHJsK2p3cyJ9..o140i08Ecbs43CwhjMjBQ0iTkxrSzwdYhVZ8t1jT-hJST4FhKkbhJbZKhXidqZ0yg2ZfwmXznPDZy54ZGhqpDA",
+      "countersignature": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJvZHJsK2p3cyJ9..aNlUZgC53W16QbAPeHvQczoqMNw-LcVU0gHmANMH8qW7DF7fzb80NnUlmEsOzyID-8sM-4L2o8c6jeGfBN-QCA",
       "count": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
-      "nonce": "956c376c-1a10-403f-a2e6-160746f51126",
-      "iat": 1792800445,
-      "exp": 1792800745,
+      "nonce": "9f29ec47-baeb-4921-b6f7-64defa22234c",
+      "iat": 1792805790,
+      "exp": 1792806090,
       "iss": "https://uni.example/#agent"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
-      "signature": "euQJfq6LUCmOpBzoYU8ZTj1w7Cobcb7ckcr_NpSceggYO3NJKe4sOguiCvjVu21qAf1ud7MeWnli1nPNV9mQAw"
+      "signature": "EaglClkapPthjP1GfcI5HRTTq0YWwLw9E59Pq04vZEYREdgWV5vAjQP4Se2InabtwGy_qKP-zKeFHAhmaLHXBw"
     }
   }
 }

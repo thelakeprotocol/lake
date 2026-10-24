@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, cardUrlFor, cellCount, cellLabels, combineCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  buildCard, cardUrlFor, cellCount, cellLabels, unshardCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
   pickTellers, type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type TellerRef, type Study,
 } from '@thelakeprotocol/core';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -209,16 +209,15 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   });
   if (affordable.length < joined.size) log('compute', `${joined.size - affordable.length} house(s) agreed, but the $${budget} budget can't pay them; not countersigning those`);
   log('compute', `countersigning ${affordable.length} agreement(s) and running the certified study inside each house`);
-  // One count per run, opened at both tellers: each house sends one piece to each, and each teller publishes once.
+  // One count per run, opened at the Leader, which sets it up with the Helper (DAP): each house sends each one a share.
   const tellers = study.privacy.tellers;
+  const [leader, helper] = tellers as [TellerRef, TellerRef];
   const count = `run-${randomUUID()}`;
   if (affordable.length) {
-    for (const c of tellers) {
-      const { reply, from } = await askPatiently(c.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString() });
-      if (from.ownerDomain !== c.domain) throw new Error(`the teller at ${c.domain} answered as ${from.ownerDomain}`);
-      if (reply.kind !== 'count.opened') throw new Error(`${c.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
-    }
-    log('count', `opened a count at ${tellers.map((c) => c.domain).join(' and ')}: each house's answer goes to them as two unreadable pieces`);
+    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper });
+    if (from.ownerDomain !== leader.domain) throw new Error(`the teller at ${leader.domain} answered as ${from.ownerDomain}`);
+    if (reply.kind !== 'count.opened') throw new Error(`${leader.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
+    log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof`);
   }
   const answered: (Joined & { webId: string })[] = [];
   await pool(affordable, o.concurrency ?? 32, async (j) => {
@@ -279,17 +278,19 @@ export async function dispatch(o: DispatchOptions): Promise<MissionResult> {
   let cells = Array<number>(cellCount(study)).fill(0);
   let tooFew = '';
   if (answered.length) {
-    const lists = await Promise.all(tellers.map(async (c) => new Set(((await askPatiently(c.url, o.visitor, { kind: 'count.members', id: count })).reply.members as string[] | undefined) ?? [])));
-    const members = answered.map((j) => j.webId).filter((w) => lists.every((l) => l.has(w))).sort();
+    const reported = new Set(((await askPatiently(leader.url, o.visitor, { kind: 'count.members', id: count })).reply.members as string[] | undefined) ?? []);
+    const members = answered.map((j) => j.webId).filter((w) => reported.has(w)).sort();
     took = members.length;
     if (members.length < study.privacy.min) tooFew = `${members.length} answered, and no table is published from fewer than ${study.privacy.min} houses`;
     else {
-      const sums = await Promise.all(tellers.map(async (c) => (await askPatiently(c.url, o.visitor, { kind: 'count.close', id: count, members })).reply));
-      const bad = sums.find((r) => r.kind !== 'count.sum');
-      if (bad) tooFew = `a teller would not publish: ${(bad.problems ?? [bad.kind]).join('; ')}`;
+      // The Leader and Helper check every answer's proof together and each publish one aggregate share; added, the table.
+      const lead = (await askPatiently(leader.url, o.visitor, { kind: 'count.close', id: count, members })).reply;
+      const help = lead.kind === 'count.share' ? (await askPatiently(helper.url, o.visitor, { kind: 'count.collect', id: count })).reply : lead;
+      if (lead.kind !== 'count.share' || help.kind !== 'count.share') tooFew = `the tellers would not publish: ${((lead.kind !== 'count.share' ? lead : help).problems ?? ['no share']).join('; ')}`;
       else {
-        cells = combineCounts(sums[0]!.sum, sums[1]!.sum);
-        n = members.length;
+        cells = unshardCounts(cellCount(study), [lead.share, help.share], lead.count);
+        n = lead.count;
+        if (lead.rejected) log('count', `${lead.rejected} answer(s) failed their proof and were left out`);
       }
     }
   }

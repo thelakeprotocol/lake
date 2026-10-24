@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "nezuqUPWJmiE2M_mRI_3M0szMgHSN02_2XsdVnc7pyw",
+              "x": "q6SmOMH7gLosnvRmIefr-TyNiyRf7_IQUC_-05k06p8",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,27 +66,27 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "BPO4l3-JTJujdTfOvVS1cr_Wh4g8p0vqtTZObCJQIyp7lOGKHmsiUOYSpwax1G8-DoJTecQRRB9c2BOK14jlBQ"
+        "signature": "00uFC0JbVBWVPWzAPN5feuXWkutjqiWPflqPoHMJicXXUDVeSz-zHzQvZSbBKq5DIR9xONhp_NQT4Do7d_eABA"
       }
     ]
   },
   "envelope": {
     "payload": {
       "kind": "counted",
-      "study": "urn:lake:study:sha256-IXLWbWA2aPnve//jnPlDODX8Tpurzc9U65AHgbP9YV4=",
+      "study": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
       "count": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
       "tellers": [
         "teller-a.example",
         "teller-b.example"
       ],
-      "nonce": "7cc85ac3-ca20-4384-8134-a379aa79ada4",
-      "iat": 1792800445,
-      "exp": 1792800745,
+      "nonce": "9389ff4b-eb1d-4612-843a-409c69b12909",
+      "iat": 1792805790,
+      "exp": 1792806090,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "AiTS3HcSLYyX9mzPK65LQKq1qQFvgLNgLdhZ6lhoZ3Vz1vtuUQ6TXt99OFFN5VC_CsclRtzmNhzlQbKeCMtwBQ"
+      "signature": "JyRceLy6x6QQHaBq2EFE50NNzbejeFVo-d5uOzPNbskNOwYMwyUbpXTiKQ1MMRNSXhqNpqFiPY8EOKMCHfHJAQ"
     }
   }
 }

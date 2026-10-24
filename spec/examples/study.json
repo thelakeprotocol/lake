@@ -1,5 +1,5 @@
 {
-  "id": "urn:lake:study:sha256-IXLWbWA2aPnve//jnPlDODX8Tpurzc9U65AHgbP9YV4=",
+  "id": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
   "study": {
     "v": 1,
     "question": "Do over-60s on drug X get readmitted less?",
@@ -24,7 +24,7 @@
       }
     ],
     "privacy": {
-      "mechanism": "split-count",
+      "mechanism": "dap-prio3",
       "tellers": [
         {
           "url": "https://teller-a.example/a2a",

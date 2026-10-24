@@ -101,7 +101,7 @@ docker compose run --rm lake dispatch --extra-fields postcode
 # DECIDE    2 counter · 1 ask
 # BARGAIN   2 housekeepers countered together: $5, not $2, and drop postcode
 # BARGAIN   accepted: everyone who joined or countered gets the bloc's terms
-# COUNT     opened a count at teller-a.lake.local and teller-b.lake.local: each house's answer goes to them as two unreadable pieces
+# COUNT     opened a count at teller-a.lake.local (Leader) with teller-b.lake.local (Helper): each house's answer goes to them as two shares with a proof
 # COMPUTE   countersigning 2 agreement(s) and running the certified study inside each house
 # PAY       Payments settled $10 with 2 participants; 2 receipts filed in their pods. $4990 of the mandate left
 # ANSWER    No table: 2 answered, and no table is published from fewer than 3 houses.

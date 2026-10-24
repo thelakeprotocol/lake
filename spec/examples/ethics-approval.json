@@ -1,5 +1,5 @@
 {
-  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VFdGhpY3NBcHByb3ZhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V0aGljcy5leGFtcGxlLyNldGhpY3MtcmV2aWV3IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMDowNzoyNS41MjVaIiwidmFsaWRVbnRpbCI6IjIwMjctMDEtMjJUMDA6MDc6MjUuNTI1WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LUlYTFdiV0EyYVBudmUvL2puUGxET0RYOFRwdXJ6YzlVNjVBSGdiUDlZVjQ9IiwicXVlc3Rpb24iOiJEbyBvdmVyLTYwcyBvbiBkcnVnIFggZ2V0IHJlYWRtaXR0ZWQgbGVzcz8iLCJwdXJwb3NlIjoicmVzZWFyY2giLCJmaWVsZHMiOlsiYWdlX2JhbmQiLCJtZWRpY2F0aW9ucyIsInJlYWRtaXNzaW9ucyIsInBvc3Rjb2RlIl0sInNwb25zb3IiOiJodHRwczovL3VuaS5leGFtcGxlLyNhZ2VudCIsInJldmlld2VkQnkiOiJleGFtcGxlIn19.nzPIvMumEpSYi03bTTVNem1ynZxOVoBWsgSIBD5Bs2dV7pEPC4aU5DuTcMlQ9cqTYBoCzRirqFIShwmolr5-Bg",
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VFdGhpY3NBcHByb3ZhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V0aGljcy5leGFtcGxlLyNldGhpY3MtcmV2aWV3IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMTozNjozMC4xNjhaIiwidmFsaWRVbnRpbCI6IjIwMjctMDEtMjJUMDE6MzY6MzAuMTY4WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNsaHJkczRndHUyNk11MVluS0N5TDJoTUFLSlR6TUN3WGUrc3dxSGozRkU9IiwicXVlc3Rpb24iOiJEbyBvdmVyLTYwcyBvbiBkcnVnIFggZ2V0IHJlYWRtaXR0ZWQgbGVzcz8iLCJwdXJwb3NlIjoicmVzZWFyY2giLCJmaWVsZHMiOlsiYWdlX2JhbmQiLCJtZWRpY2F0aW9ucyIsInJlYWRtaXNzaW9ucyIsInBvc3Rjb2RlIl0sInNwb25zb3IiOiJodHRwczovL3VuaS5leGFtcGxlLyNhZ2VudCIsInJldmlld2VkQnkiOiJleGFtcGxlIn19.8XpWJd-kiQxQNcp1uInccCZOULdahxmxcNhScnPflqHnqxoSraFRpRDTkk5pyDYO85KkVVVN_wWziQ7-dKlrCA",
   "card": {
     "name": "Ethics",
     "description": "Ethics (example)",
@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "moWr2VjrUYx7uHoZb0gAjDC7Dc2ZMOj1fujYqPyX7-4",
+              "x": "nBIHGM8f7ewcJvu4pmy_nwvkby7bT9XfRUonlr3DVD8",
               "kty": "OKP",
               "kid": "specialist-ethics.example",
               "alg": "EdDSA"
@@ -55,7 +55,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "4INjkjJRHPqFNUiE1DT4etMSoSEe-DeCDavIHNycML-xyqqnZFLIygigYFsl0ea3QWEhe6BGUvyKGMecaLbWDA"
+        "signature": "DGegxmorLe9Uum-4oqb35fw41XADw2xWqy9uJCtlLI3rKiQEmgaEj8NrkEQwu7Epj8YyyQCDp1lKve1wBaGvDQ"
       }
     ]
   },
@@ -68,10 +68,10 @@
       "LakeEthicsApproval"
     ],
     "issuer": "https://ethics.example/#ethics-review",
-    "validFrom": "2026-10-24T00:07:25.525Z",
-    "validUntil": "2027-01-22T00:07:25.525Z",
+    "validFrom": "2026-10-24T01:36:30.168Z",
+    "validUntil": "2027-01-22T01:36:30.168Z",
     "credentialSubject": {
-      "id": "urn:lake:study:sha256-IXLWbWA2aPnve//jnPlDODX8Tpurzc9U65AHgbP9YV4=",
+      "id": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
       "question": "Do over-60s on drug X get readmitted less?",
       "purpose": "research",
       "fields": [

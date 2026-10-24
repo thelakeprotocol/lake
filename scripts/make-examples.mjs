@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  agreementFor, addCounts, buildCard, collectiveCounter, combineCounts, generateIdentity, issueCredential, digestSRI, makeEvent, oneHot, signAgreement, signCard, splitCount,
+  agreementFor, aggregateReports, buildCard, collectiveCounter, generateIdentity, issueCredential, digestSRI, makeEvent, newVerifyKey, prepareReport, settleReport, shardAnswer, signAgreement, signCard,
   signIntentMandate, signMessage, signPaymentMandate, studyId,
 } from '../packages/core/dist/index.js';
 
@@ -43,7 +43,7 @@ const study = {
     { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
     { name: 'readmitted', field: 'readmissions', op: 'present' },
   ],
-  privacy: { mechanism: 'split-count', tellers: [{ url: 'https://teller-a.example/a2a', domain: 'teller-a.example' }, { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }], min: 20 }, minTier: 'issuer-signed',
+  privacy: { mechanism: 'dap-prio3', tellers: [{ url: 'https://teller-a.example/a2a', domain: 'teller-a.example' }, { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }], min: 20 }, minTier: 'issuer-signed',
 };
 const sid = studyId(study);
 write('study.json', { id: sid, study }, 'A declarative study. Its id is urn:lake:study: + the digest of its canonical JSON.');
@@ -72,18 +72,22 @@ write('grant.json', { credential: grant, decoded: decode(grant) }, 'The grant, d
 
 const countersignature = await signAgreement(agreement, visitor.id);
 const count = 'run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13';
-write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, length: 8, min: 20, deadline: new Date(Date.now() + 36e5).toISOString() }), 'Before any house answers, the visitor opens one count at each of the study\'s two tellers (SPEC §11.5).');
+write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, length: 8, min: 20, deadline: new Date(Date.now() + 36e5).toISOString(), helper: { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' } }), 'Before any house answers, the visitor opens one count at the Leader teller, naming the Helper; the Leader sets it up with the Helper and a key only the two of them hold (IETF DAP; SPEC §11.5).');
 write('5-compute.json', await envelope(visitor, { kind: 'compute', grant, study, countersignature, count }), 'Step 5. The visitor countersigns the agreement and asks the house to run the study inside its pod, naming the count.');
-// The house's true answer (over 60, on drug X, not readmitted: cell 0b011), split into two pieces that each look random.
-let s = 42; const rand = (max) => ((s = (s * 1103515245 + 12345) % 2 ** 31) % max);
-const [pieceA, pieceB] = splitCount(oneHot(study, 0b011), rand);
-write('count-piece.json', await envelope(house, { kind: 'count.piece', id: count, piece: pieceA }), 'Step 6a. What teller A gets from the house: eight numbers that look random. Teller B gets the other piece; only the two together, summed over many houses, give anything.');
-write('6-counted.json', await envelope(house, { kind: 'counted', study: sid, count, tellers: ['teller-a.example', 'teller-b.example'] }), 'Step 6. The house tells the visitor it sent its two pieces. Nothing about its owner is in this message.');
-// Two more houses, so the sums below are a real (tiny) table.
-const others = [splitCount(oneHot(study, 0b111), rand), splitCount(oneHot(study, 0b011), rand)];
-const members = [house.webId, 'https://pods.example/ana/profile/card#me', 'https://pods.example/ben/profile/card#me'];
-const sumA = addCounts(pieceA, ...others.map((p) => p[0])), sumB = addCounts(pieceB, ...others.map((p) => p[1]));
-write('count-sum.json', await envelope(tellerA, { kind: 'count.sum', id: count, members: members.length, sum: sumA }), `Each teller closes the count once, over the members the visitor names, and publishes one sum. Teller A's sum alone is random; added to teller B's it gives the exact table: ${JSON.stringify(combineCounts(sumA, sumB))}.`);
+// The house's true answer (over 60, on drug X, not readmitted: cell 0b011) as one Prio3 report: two shares and a proof.
+const report = await shardAnswer(8, 0b011);
+write('count-report.json', await envelope(house, { kind: 'count.report', id: count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[0] }), 'Step 6a. What the Leader gets from the house: one share of its answer and the public part of its proof. The Helper gets the other share. Neither share says anything on its own.');
+write('6-counted.json', await envelope(house, { kind: 'counted', study: sid, count, tellers: ['teller-a.example', 'teller-b.example'] }), 'Step 6. The house tells the visitor it sent its two shares. Nothing about its owner is in this message.');
+// Two more houses, so the aggregate below is a real (tiny) table; the tellers check each proof together, then aggregate.
+const key = newVerifyKey(8);
+const reports = [report, await shardAnswer(8, 0b111), await shardAnswer(8, 0b011)];
+const leaderPrepared = [];
+for (const r of reports) {
+  const a = await prepareReport(8, key, 0, { ...r, share: r.shares[0] });
+  const b = await prepareReport(8, key, 1, { ...r, share: r.shares[1] });
+  leaderPrepared.push({ state: a.state, message: await settleReport(8, [a.share, b.share]) });
+}
+write('count-share.json', await envelope(tellerA, { kind: 'count.share', id: count, count: 3, rejected: 0, share: aggregateReports(8, leaderPrepared) }), "Each teller publishes one aggregate share, once, after both have checked every answer's proof. The Leader's share alone says nothing; added to the Helper's it gives the exact table.");
 
 const intent = await signIntentMandate(human.id, human.webId, { id: visitor.webId, natural_language_description: study.question, study: sid, budget: { currency: 'USD', amount: 5000 }, intent_expiry: new Date(Date.now() + 7 * 864e5).toISOString(), user_cart_confirmation_required: false });
 write('intent-mandate.json', { credential: intent, card: human.card, decoded: decode(intent) }, 'AP2 Intent Mandate, signed by a human at the visitor\'s organisation: this study, $5,000 at most.');

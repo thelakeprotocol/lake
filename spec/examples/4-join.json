@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "nezuqUPWJmiE2M_mRI_3M0szMgHSN02_2XsdVnc7pyw",
+              "x": "q6SmOMH7gLosnvRmIefr-TyNiyRf7_IQUC_-05k06p8",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,7 +66,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "BPO4l3-JTJujdTfOvVS1cr_Wh4g8p0vqtTZObCJQIyp7lOGKHmsiUOYSpwax1G8-DoJTecQRRB9c2BOK14jlBQ"
+        "signature": "00uFC0JbVBWVPWzAPN5feuXWkutjqiWPflqPoHMJicXXUDVeSz-zHzQvZSbBKq5DIR9xONhp_NQT4Do7d_eABA"
       }
     ]
   },
@@ -77,7 +77,7 @@
       "decision": "join",
       "reason": "matches your rule 1",
       "grantHours": 48,
-      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VBY2Nlc3NHcmFudCJdLCJpc3N1ZXIiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjRUMDA6MDc6MjUuNTI5WiIsInZhbGlkVW50aWwiOiIyMDI2LTEwLTI2VDAwOjA3OjI1LjUyOFoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50Iiwib2ZmZXIiOiIwYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjIiLCJzdHVkeSI6InVybjpsYWtlOnN0dWR5OnNoYTI1Ni1JWExXYldBMmFQbnZlLy9qblBsRE9EWDhUcHVyemM5VTY1QUhnYlA5WVY0PSIsImZpZWxkcyI6WyJhZ2VfYmFuZCIsIm1lZGljYXRpb25zIiwicmVhZG1pc3Npb25zIl0sInB1cnBvc2UiOiJyZXNlYXJjaCIsImF1dGhvcml6ZWRCeSI6InN0YW5kaW5nIHJ1bGUgMSIsInJ1bGVzIjoic2hhMjU2LTh3bmZ0QzErdkd0RThMQnI4TjR4RXh3QnV2bVNkamVXT3gvdHNDV1ArNUk9IiwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAifX0.oF83Cv-p954jczSz0SqWM5fs0htWzI-hmYftE8DMYCB76UhI6qASKP3SN6JtLBaqHNOz5XRMH4lXhvzMaKckBg",
+      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VBY2Nlc3NHcmFudCJdLCJpc3N1ZXIiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjRUMDE6MzY6MzAuMTcyWiIsInZhbGlkVW50aWwiOiIyMDI2LTEwLTI2VDAxOjM2OjMwLjE3MVoiLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50Iiwib2ZmZXIiOiIwYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjIiLCJzdHVkeSI6InVybjpsYWtlOnN0dWR5OnNoYTI1Ni1zbGhyZHM0Z3R1MjZNdTFZbktDeUwyaE1BS0pUek1Dd1hlK3N3cUhqM0ZFPSIsImZpZWxkcyI6WyJhZ2VfYmFuZCIsIm1lZGljYXRpb25zIiwicmVhZG1pc3Npb25zIl0sInB1cnBvc2UiOiJyZXNlYXJjaCIsImF1dGhvcml6ZWRCeSI6InN0YW5kaW5nIHJ1bGUgMSIsInJ1bGVzIjoic2hhMjU2LTh3bmZ0QzErdkd0RThMQnI4TjR4RXh3QnV2bVNkamVXT3gvdHNDV1ArNUk9IiwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAifX0.6Kf4zcMmZf45m2U3Uuim8jc1r9sK8AwLLSanfjeu84rTaE5_wr0TsRDBh7oMmhqaAqp1UvZGM5p1kV5AromdBw",
       "agreement": {
         "agreement": {
           "@context": [
@@ -107,7 +107,7 @@
                   "leftOperand": "dateTime",
                   "operator": "lt",
                   "rightOperand": {
-                    "@value": "2026-10-26T00:07:25.528Z",
+                    "@value": "2026-10-26T01:36:30.171Z",
                     "@type": "xsd:dateTime"
                   }
                 }
@@ -147,7 +147,7 @@
         "signatures": [
           {
             "by": "https://pods.example/stan/profile/card#me",
-            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Im9kcmwrandzIn0..yJL8k4rDGDa05wIuyWv0iAP_JfN3_aWRBsxZqDjNvPD-gcP2wTgu6GYf0XinuTDL9tgQ2FUR0a5gwxxAzQ6eCQ"
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Im9kcmwrandzIn0..8ZzF5AInCl4r--QWDWI4OldurTlEJbkhceqrYEGksQgeNX5lTKs5Qf5CL9tOitaUD9MTe1ILeVaJWCMktZ_4BQ"
           }
         ]
       },
@@ -156,14 +156,14 @@
         "medications"
       ],
       "notes": [],
-      "nonce": "48605748-3bd6-49fc-a3a4-9612f471741d",
-      "iat": 1792800445,
-      "exp": 1792800745,
+      "nonce": "c050c6b0-b7ae-4527-8ea9-25d9c99e56a8",
+      "iat": 1792805790,
+      "exp": 1792806090,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "2LB91S0AY4QIuYaXfwHN33TSXQwFnb1dnlQrfWo0nkm2LyEO_PAxidFDxFuCTruNxx6gTN2HFQn4ZRPCNwUzAg"
+      "signature": "ZT2ZA5AmrY6IKEFYoDWITeMSPGmV5eSgwvEJFgVMCJXcBbFLvO4sfTHOkf7aLbm4rZJgD4s-4CBG7IMKONVyDg"
     }
   }
 }

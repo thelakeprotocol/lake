@@ -41,7 +41,7 @@ Run `pnpm build` before `pnpm test:e2e`: it runs the built `dist/` files.
 - **Synthetic data only.** No real personal or health data anywhere, fixtures included.
 - **Agents never mint, widen or extend a key.** Live grants are signed on the owner's device; standing-rule grants name the rule and the rules digest.
 - **Free text never decides.** The rules engine never reads `offer.note`. Don't add a model to the decision path.
-- **Records never leave a pod.** A study's answer leaves only as two unreadable pieces for two tellers; the researcher gets totals. Houses never blur or fake an answer. `recordsOut` in the audit log stays 0.
+- **Records never leave a pod.** A study's answer leaves only as two unreadable shares with a proof (IETF DAP, Prio3) for two tellers; the researcher gets totals. Houses never blur or fake an answer. `recordsOut` in the audit log stays 0.
 - **Verify before reading.** Every incoming message: card signature, domain proof, envelope signature, expiry, replay, then the payload.
 - **Blame keys, not names.** Blocklists and quarantine use key ids; reputation only for verified identities.
 

@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, cardUrlFor, offerableFields, oneHot, proveDomain, verifyLakeCard, sendLake, splitCount, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -297,14 +297,15 @@ export class Housekeeper {
     if (typeof p.count !== 'string' || !p.count) return excluded('name the count the tellers opened for this run (count)');
 
     // Inside the house: read only the granted fields, through the pod's MCP door, and answer truthfully. The answer
-    // leaves only as two pieces, one per teller; each piece alone is a random number (SPEC §7, §11.5).
+    // leaves only as two shares, one per teller; each share alone says nothing (SPEC §7, §11.5).
     const fields = studyFields(p.study).filter((f) => g.fields.includes(f));
     const claims = await this.claims(fields);
-    const pieces = splitCount(oneHot(p.study, cellOf(p.study, claims)));
-    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.piece', id: p.count, piece: pieces[i] }, checked.kids[i]!)));
+    // One report, two shares and a proof that it is one cell (Prio3): each teller gets its share, neither can read it.
+    const report = await shardAnswer(cellCount(p.study), cellOf(p.study, claims));
+    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
     const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
-    const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable pieces to ${tellers.map((c) => c.domain).join(' and ')}` };
+    const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
     if (g.uses === 1) await this.o.desk.spend(g.offer);

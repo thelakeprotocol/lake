@@ -31,7 +31,7 @@
             "tags": [],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "HVxWmgQGHJ8FxFiVPfQooZRlfK54jWR-kTjUhPubtK8",
+              "x": "9F1EOal8ZJTNyCZY2I4TglyrZcKoZprcs6jcPuj9oyY",
               "kty": "OKP",
               "kid": "visitor-uni.example",
               "alg": "EdDSA"
@@ -53,7 +53,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "Acrky8qFLN4exAfI34Ar09srgokE1rjfKac0wJeAf8hdIcJhptR67-9HswwKu7f1q-1K1FMuszMkrtG925N2Dw"
+        "signature": "V6aiyBS6dtcrg70jYjvT75vzh7JLnzbgVrHHcViSQt3OIApplyU1nYpS1df2LYL128j8IbZsAqZ5-CyptI3zCw"
       }
     ]
   },
@@ -72,7 +72,7 @@
         ],
         "retention": "none",
         "priceUsd": 2,
-        "study": "urn:lake:study:sha256-IXLWbWA2aPnve//jnPlDODX8Tpurzc9U65AHgbP9YV4=",
+        "study": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
         "credentials": {
           "ethicsApproved": true,
           "sponsorVerified": true,
@@ -103,7 +103,7 @@
           }
         ],
         "privacy": {
-          "mechanism": "split-count",
+          "mechanism": "dap-prio3",
           "tellers": [
             {
               "url": "https://teller-a.example/a2a",
@@ -120,7 +120,7 @@
       },
       "attachments": {
         "ethics": {
-          "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VFdGhpY3NBcHByb3ZhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V0aGljcy5leGFtcGxlLyNldGhpY3MtcmV2aWV3IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMDowNzoyNS41MjVaIiwidmFsaWRVbnRpbCI6IjIwMjctMDEtMjJUMDA6MDc6MjUuNTI1WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LUlYTFdiV0EyYVBudmUvL2puUGxET0RYOFRwdXJ6YzlVNjVBSGdiUDlZVjQ9IiwicXVlc3Rpb24iOiJEbyBvdmVyLTYwcyBvbiBkcnVnIFggZ2V0IHJlYWRtaXR0ZWQgbGVzcz8iLCJwdXJwb3NlIjoicmVzZWFyY2giLCJmaWVsZHMiOlsiYWdlX2JhbmQiLCJtZWRpY2F0aW9ucyIsInJlYWRtaXNzaW9ucyIsInBvc3Rjb2RlIl0sInNwb25zb3IiOiJodHRwczovL3VuaS5leGFtcGxlLyNhZ2VudCIsInJldmlld2VkQnkiOiJleGFtcGxlIn19.nzPIvMumEpSYi03bTTVNem1ynZxOVoBWsgSIBD5Bs2dV7pEPC4aU5DuTcMlQ9cqTYBoCzRirqFIShwmolr5-Bg",
+          "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VFdGhpY3NBcHByb3ZhbCJdLCJpc3N1ZXIiOiJodHRwczovL2V0aGljcy5leGFtcGxlLyNldGhpY3MtcmV2aWV3IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMTozNjozMC4xNjhaIiwidmFsaWRVbnRpbCI6IjIwMjctMDEtMjJUMDE6MzY6MzAuMTY4WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNsaHJkczRndHUyNk11MVluS0N5TDJoTUFLSlR6TUN3WGUrc3dxSGozRkU9IiwicXVlc3Rpb24iOiJEbyBvdmVyLTYwcyBvbiBkcnVnIFggZ2V0IHJlYWRtaXR0ZWQgbGVzcz8iLCJwdXJwb3NlIjoicmVzZWFyY2giLCJmaWVsZHMiOlsiYWdlX2JhbmQiLCJtZWRpY2F0aW9ucyIsInJlYWRtaXNzaW9ucyIsInBvc3Rjb2RlIl0sInNwb25zb3IiOiJodHRwczovL3VuaS5leGFtcGxlLyNhZ2VudCIsInJldmlld2VkQnkiOiJleGFtcGxlIn19.8XpWJd-kiQxQNcp1uInccCZOULdahxmxcNhScnPflqHnqxoSraFRpRDTkk5pyDYO85KkVVVN_wWziQ7-dKlrCA",
           "card": {
             "name": "Ethics",
             "description": "Ethics (example)",
@@ -154,7 +154,7 @@
                     ],
                     "publicJwk": {
                       "crv": "Ed25519",
-                      "x": "moWr2VjrUYx7uHoZb0gAjDC7Dc2ZMOj1fujYqPyX7-4",
+                      "x": "nBIHGM8f7ewcJvu4pmy_nwvkby7bT9XfRUonlr3DVD8",
                       "kty": "OKP",
                       "kid": "specialist-ethics.example",
                       "alg": "EdDSA"
@@ -176,13 +176,13 @@
             "signatures": [
               {
                 "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtZXRoaWNzLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-                "signature": "4INjkjJRHPqFNUiE1DT4etMSoSEe-DeCDavIHNycML-xyqqnZFLIygigYFsl0ea3QWEhe6BGUvyKGMecaLbWDA"
+                "signature": "DGegxmorLe9Uum-4oqb35fw41XADw2xWqy9uJCtlLI3rKiQEmgaEj8NrkEQwu7Epj8YyyQCDp1lKve1wBaGvDQ"
               }
             ]
           }
         },
         "audit": {
-          "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAwOjA3OjI1LjUyNloiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0yMlQwMDowNzoyNS41MjZaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtSVhMV2JXQTJhUG52ZS8vam5QbERPRFg4VHB1cnpjOVU2NUFIZ2JQOVlWND0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHNwbGl0IGJldHdlZW4gdHdvIHRlbGxlcnMgcnVuIGJ5IGRpZmZlcmVudCBwYXJ0aWVzIiwidG90YWxzIG9ubHkiLCJubyB0YWJsZSBmcm9tIGZld2VyIHRoYW4gMjAgaG91c2VzIl19fQ.BFhottFwxPO0n4Ho7j-O3aMFWhYQ9n615iDg-eRy8gkkBhiw0_twqdQoBonGP5N7N0QRnkyrv4IwCC54QNiAAA",
+          "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAxOjM2OjMwLjE2OFoiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0yMlQwMTozNjozMC4xNjhaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc2xocmRzNGd0dTI2TXUxWW5LQ3lMMmhNQUtKVHpNQ3dYZStzd3FIajNGRT0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHNwbGl0IGJldHdlZW4gdHdvIHRlbGxlcnMgcnVuIGJ5IGRpZmZlcmVudCBwYXJ0aWVzIiwidG90YWxzIG9ubHkiLCJubyB0YWJsZSBmcm9tIGZld2VyIHRoYW4gMjAgaG91c2VzIl19fQ.Krh3aOXX79qe0beXEp2h1gMqa_d-h7HmXU1onXcEzhAyxa6QUF-bAYOakDHl2soktai5Wu11TaNZYetJF6xGDw",
           "card": {
             "name": "Auditor",
             "description": "Auditor (example)",
@@ -216,7 +216,7 @@
                     ],
                     "publicJwk": {
                       "crv": "Ed25519",
-                      "x": "KbJk8B32GNPH-HG2Am5QJ59MyBQGLssUry5Bngi5qyk",
+                      "x": "eSAS21wa1Qxj9tyW0xLTJ-NrMZsN8FAFdApteYR2TC4",
                       "kty": "OKP",
                       "kid": "specialist-audit.example",
                       "alg": "EdDSA"
@@ -238,20 +238,20 @@
             "signatures": [
               {
                 "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-                "signature": "1_x71o2mIeApZzv_6WFQXwGBvqqwN8MMjAK0zKHiWM9kWXdTfSPdVVdta1ueYsGStpje_ezkejM4I5EhiWKcCQ"
+                "signature": "SuPHmmpdEEFHlvBI16XWxW5Tg9N62YsRLgkxt7jIcjdjiRZksu5IVXlSDnCjwJiIts36H5OcX6TzZwHt-I_LBw"
               }
             ]
           }
         }
       },
-      "nonce": "3a4b6ad0-7c28-4e28-8e5c-5727d9434930",
-      "iat": 1792800445,
-      "exp": 1792800745,
+      "nonce": "3f3a92ae-6be3-4de4-8025-b4f1baea06d0",
+      "iat": 1792805790,
+      "exp": 1792806090,
       "iss": "https://uni.example/#agent"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
-      "signature": "AA5n4Umhu1_ZWBYJVx7r1xotVw59LN-ttIfQ97v-tifMKcDUnydd_J8rQXPOdglepaiah3CKqpLXnmEXXcpDCg"
+      "signature": "KjnOK66KMi0eL6uCG5JEag-ddv-ttnQdKyNDFIqma_MQNPM-6xP7fsRjflthjvVnm4N0f9vABU-9pVLXqMKkDw"
     }
   }
 }

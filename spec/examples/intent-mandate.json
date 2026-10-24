@@ -1,5 +1,5 @@
 {
-  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50LXVuaS5leGFtcGxlIiwidHlwIjoidmMrand0IiwiY3R5IjoidmMifQ.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkludGVudE1hbmRhdGUiXSwiaXNzdWVyIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS9wZW9wbGUvbGVhZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjRUMDA6MDc6MjUuNTMzWiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQiLCJuYXR1cmFsX2xhbmd1YWdlX2Rlc2NyaXB0aW9uIjoiRG8gb3Zlci02MHMgb24gZHJ1ZyBYIGdldCByZWFkbWl0dGVkIGxlc3M_Iiwic3R1ZHkiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtSVhMV2JXQTJhUG52ZS8vam5QbERPRFg4VHB1cnpjOVU2NUFIZ2JQOVlWND0iLCJidWRnZXQiOnsiY3VycmVuY3kiOiJVU0QiLCJhbW91bnQiOjUwMDB9LCJpbnRlbnRfZXhwaXJ5IjoiMjAyNi0xMC0zMVQwMDowNzoyNS41MzNaIiwidXNlcl9jYXJ0X2NvbmZpcm1hdGlvbl9yZXF1aXJlZCI6ZmFsc2V9fQ.I3KdDKpVacKJfBIvkuOA1IqElKUBMCCyI781wAG9xIo1LAgRgBIi5NNAxx2B7k_8MNvpqtHuNk6smBElpfRqAw",
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50LXVuaS5leGFtcGxlIiwidHlwIjoidmMrand0IiwiY3R5IjoidmMifQ.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkludGVudE1hbmRhdGUiXSwiaXNzdWVyIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS9wZW9wbGUvbGVhZCNtZSIsInZhbGlkRnJvbSI6IjIwMjYtMTAtMjRUMDE6MzY6MzAuMTk5WiIsImNyZWRlbnRpYWxTdWJqZWN0Ijp7ImlkIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQiLCJuYXR1cmFsX2xhbmd1YWdlX2Rlc2NyaXB0aW9uIjoiRG8gb3Zlci02MHMgb24gZHJ1ZyBYIGdldCByZWFkbWl0dGVkIGxlc3M_Iiwic3R1ZHkiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc2xocmRzNGd0dTI2TXUxWW5LQ3lMMmhNQUtKVHpNQ3dYZStzd3FIajNGRT0iLCJidWRnZXQiOnsiY3VycmVuY3kiOiJVU0QiLCJhbW91bnQiOjUwMDB9LCJpbnRlbnRfZXhwaXJ5IjoiMjAyNi0xMC0zMVQwMTozNjozMC4xOTlaIiwidXNlcl9jYXJ0X2NvbmZpcm1hdGlvbl9yZXF1aXJlZCI6ZmFsc2V9fQ.hY2HX-VD53ZQOD2Cq1aRNnKFSRaHx54gyWxAwdtsltNCDXLTsIP_Uepu3qH1hIZFAjLShrZP8JV-MaiBFXhdBg",
   "card": {
     "name": "Research lead (uni.example)",
     "description": "Research lead (uni.example) (example)",
@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "2oMTIbYV1I1qvwS1DRyxnlgrWcIrStPWsBdzke1rlbM",
+              "x": "qSvS-ChW7KwW8GJ5192VNsIun33GsaTap8w3e2GJNMs",
               "kty": "OKP",
               "kid": "agent-uni.example",
               "alg": "EdDSA"
@@ -55,7 +55,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50LXVuaS5leGFtcGxlIiwidHlwIjoiSk9TRSJ9",
-        "signature": "SD5T2b8nAiBO3YugEO-ltQ5KYARz8OU6Gs4HcAbdCK5W2owiD4MnCtiNKNzUB2ERZjM-BO-SElQVWEkDfI4zDw"
+        "signature": "APaYzbT4ZHJhT1XjmSw0-B64SkkDwg6CXgqlGyaCjMVZjuXwCLaC-FxtXVoxKvuZ307anErtn65x5cKxQtrWAA"
       }
     ]
   },
@@ -68,16 +68,16 @@
       "IntentMandate"
     ],
     "issuer": "https://uni.example/people/lead#me",
-    "validFrom": "2026-10-24T00:07:25.533Z",
+    "validFrom": "2026-10-24T01:36:30.199Z",
     "credentialSubject": {
       "id": "https://uni.example/#agent",
       "natural_language_description": "Do over-60s on drug X get readmitted less?",
-      "study": "urn:lake:study:sha256-IXLWbWA2aPnve//jnPlDODX8Tpurzc9U65AHgbP9YV4=",
+      "study": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
       "budget": {
         "currency": "USD",
         "amount": 5000
       },
-      "intent_expiry": "2026-10-31T00:07:25.533Z",
+      "intent_expiry": "2026-10-31T01:36:30.199Z",
       "user_cart_confirmation_required": false
     }
   }

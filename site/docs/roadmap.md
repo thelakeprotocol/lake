@@ -19,7 +19,7 @@ The Lake started by inventing its own pieces. Where an open standard already doe
 
 | | Ours today | Moving to | Why | Status |
 |---|---|---|---|---|
-| 1 | Study answers split between two tellers | **IETF DAP** with **Prio3** validity proofs, minimum batch sizes, one batch per answer, optional noise at the aggregators | The standard for counting without looking (Divvi Up, Firefox). Tellers can check an answer is valid without seeing it. | <span class="status next">next</span> |
+| 1 | Study answers split between two tellers | **IETF DAP** with **Prio3** validity proofs, minimum batch sizes, one batch per answer, optional noise at the aggregators | The standard for counting without looking (Divvi Up, Firefox). Tellers can check an answer is valid without seeing it. | <span class="status done">runs</span> (Leader/Helper, Prio3 histogram via ISRG's @divviup/prio3, batch rules); aggregator noise next |
 | 2 | `LakeAccessGrant` keys | **Inrupt Access Grants** (VC access requests and grants for Solid), with **GNAP** / **UMA 2.0** where they fit | Keys to a pod in the Solid ecosystem's own format. | <span class="status next">next</span> |
 | 3 | Agents' own salts and commits for fair draws | **drand** public randomness | Randomness nobody can steer, for every game and draw. | <span class="status later">planned</span> |
 | 4 | Demo person stamp | **SD-JWT / BBS+** credentials with per-site pseudonyms; the **EU Digital Identity Wallet**; **Privacy Pass** tokens for one signature per person | "A real person, without saying who", from checkers that exist. | <span class="status later">planned</span> |

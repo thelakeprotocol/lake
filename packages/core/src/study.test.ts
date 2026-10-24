@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCounts, auditStudy, buildCard, cellOf, combineCounts, generateIdentity, issueCredential, oneHot, registerPack, signCard, splitCount, checkAttachment, studyId, COUNT_MODULUS, type Study } from './index.js';
+import { aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, studyId, toWire, unshardCounts, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -21,7 +21,7 @@ const study: Study = {
     { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
     { name: 'readmitted', field: 'readmissions', op: 'present' },
   ],
-  privacy: { mechanism: 'split-count', tellers: [{ url: 'https://teller-a.example/a2a', domain: 'teller-a.example' }, { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }], min: 20 },
+  privacy: { mechanism: 'dap-prio3', tellers: [{ url: 'https://teller-a.example/a2a', domain: 'teller-a.example' }, { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }], min: 20 },
   minTier: 'issuer-signed',
 };
 
@@ -36,19 +36,30 @@ describe('studies', () => {
     expect(cellOf(study, [{ field: 'age_band', value: '40-49' }, { field: 'readmissions', value: 'x' }])).toBe(0b100);
   });
 
-  it('give the exact table from two tellers, and neither teller alone learns anything', () => {
-    const rand = seeded(42);
+  it('give the exact table from two tellers (DAP with Prio3), and drop an answer whose proof fails', async () => {
     const truth = Array(8).fill(0);
-    const pieces: [number[], number[]][] = Array.from({ length: 500 }, () => {
-      const cell = Math.floor(rand() * 8);
+    const key = newVerifyKey(8);
+    const reports = [];
+    for (const cell of [3, 3, 7, 0, 5, 3]) {
       truth[cell]++;
-      return splitCount(oneHot(study, cell));
-    });
-    const a = addCounts(...pieces.map((p) => p[0])), b = addCounts(...pieces.map((p) => p[1]));
-    expect(combineCounts(a, b)).toEqual(truth);
-    // One house's piece is a uniformly random number, the same for a 0 as for a 1: it says nothing on its own.
-    expect(pieces[0]![0].every((x) => x >= 0 && x < COUNT_MODULUS)).toBe(true);
-    expect(pieces[0]![0].some((x) => x > 1)).toBe(true);
+      reports.push(await shardAnswer(8, cell));
+    }
+    // A dishonest house turns its Helper share into "1000 people in cell 0": the proof no longer holds.
+    const forged = fromWire(reports[1]!.shares[1]) as { measurementShare: bigint[] };
+    forged.measurementShare[0] = forged.measurementShare[0]! + 1000n;
+    reports[1]!.shares[1] = toWire(forged);
+    truth[3]--;
+    const leader: { state: unknown; message: unknown }[] = [], helper: { state: unknown; message: unknown }[] = [];
+    for (const r of reports) {
+      const a = await prepareReport(8, key, 0, { ...r, share: r.shares[0] });
+      const b = await prepareReport(8, key, 1, { ...r, share: r.shares[1] });
+      const message = await settleReport(8, [a.share, b.share]);
+      if (!message) continue;
+      leader.push({ state: a.state, message });
+      helper.push({ state: b.state, message });
+    }
+    expect(leader).toHaveLength(5);
+    expect(unshardCounts(8, [aggregateReports(8, leader), aggregateReports(8, helper)], 5)).toEqual(truth);
   });
 
   it('are refused when they ask for something the Lake cannot ask, or let anyone see a single answer', () => {
