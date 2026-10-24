@@ -46,8 +46,9 @@ const t0 = Date.now();
 const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() => {
   const prompt = fillVars(fill(readFileSync(join(root, demo, p.prompt), 'utf8'))).replaceAll('{{start}}', new Date().toTimeString().slice(0, 8));
   writeFileSync(join(run, p.id, 'PROMPT.md'), prompt);
-  // `tools` only pre-approves; `deny` takes tools out of a player's sight altogether (a control that mustn't see a door).
-  const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
+  // `tools` only pre-approves; `deny` takes tools out of a player's sight altogether (a control that mustn't see a door);
+  // `model` runs this player on another model (opus, sonnet, haiku, fable), so look-alike agents can differ.
+  const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
     { cwd: join(run, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
   // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
   let rest = '';
