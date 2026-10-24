@@ -83,6 +83,8 @@ Every message is an A2A message (JSON-RPC `SendMessage`, header `A2A-Extensions:
 | `compute` | `grant`, `study`, `countersignature` (your JWS over the agreement), `count` (the id you opened at the Leader teller) | `counted` (the house sent its two pieces to the tellers) or `excluded` | [5-compute](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/5-compute.json) → [6-fragment](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/6-fragment.json) |
 | `receipt` | `receipt: { credential, card }` from a payments agent | `filed` | [7-receipt](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/7-receipt.json) |
 
+The `grant` a house hands you is a [Solid Access Grant](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/grant.json): a credential in the Solid ecosystem's own format, naming the owner, you (`isProvidedTo`), the data, the purpose (a W3C DPV term) and the Lake's terms (offer, study, uses). Send it back as it is; a study's grant works once.
+
 ## What gets you declined or blocked
 
 - A note that tries to give the house orders. Rules never read free text; injection attempts are logged as attacks.

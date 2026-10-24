@@ -242,17 +242,19 @@ describe('the owner', () => {
   it("waits for the owner's tap, and the study includes the house once the owner allows it", async () => {
     const v = await visitor('uni.example');
     const running = dispatch({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, waitSeconds: 20, ...(await funded()) });
-    let req: { id: string; offerId: string; visitor: { webId: string }; fields: string[]; purpose: string; study: string } | undefined;
+    let req: { id: string; offerId: string; visitor: { webId: string }; fields: string[]; purpose: string; study: string; grantDraft: { credentialSubject: { lake: { fields: string[] } } } } | undefined;
     for (let i = 0; i < 40 && !req; i++) {
       await new Promise((r) => setTimeout(r, 250));
       req = (await ownerCall({ kind: 'list' })).requests[0];
     }
     expect(req).toBeDefined();
-    const vc = (fields: string[]) => ({
-      '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeAccessGrant'], issuer: webId,
-      validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString(),
-      credentialSubject: { id: req!.visitor.webId, offer: req!.offerId, study: req!.study, fields, purpose: req!.purpose, authorizedBy: 'owner, live' },
-    });
+    // The house drafts a Solid Access Grant for exactly what the owner was shown; the owner's device dates and signs it.
+    expect(req!.grantDraft).toMatchObject({ type: ['VerifiableCredential', 'SolidAccessGrant'], credentialSubject: { providedConsent: { isProvidedTo: req!.visitor.webId, hasStatus: 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven' } } });
+    const vc = (fields: string[]) => {
+      const d = structuredClone(req!.grantDraft);
+      d.credentialSubject.lake.fields = fields;
+      return { ...d, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString() };
+    };
     // A grant wider than what the owner was shown is refused.
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc([...req!.fields, 'dob']) as never, owner) })).toMatchObject({ error: expect.any(String) });
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc(req!.fields) as never, owner) })).toEqual({ ok: true });
@@ -263,16 +265,21 @@ describe('the owner', () => {
     expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
     expect(r.cells.every((c) => Number.isInteger(c.count))).toBe(true);
 
-    // Revoking cuts the agent off at once.
-    const strict = r.grants.find((g) => g.url.startsWith(houses.strict!))!;
+    // A study's key works once, whether the owner signed it or a standing rule cut it: the study has run, so asking again is refused.
+    for (const g of r.grants) expect((await ask(g.url, v, { kind: 'compute', grant: g.grant, study: readmissionStudy() })).reply).toMatchObject({ kind: 'excluded', why: 'this key was for one use, and it has been used' });
+
+    // Revoking cuts a key off at once, before it is used.
+    // (A second study run that doesn't wait for the owner leaves its request open.)
+    const later = await visitor('later.example');
+    await dispatch({ visitor: later, node, ethics, auditor, study: readmissionStudy(), priceUsd: 0, waitSeconds: 0 });
+    const pending = ((await ownerCall({ kind: 'list' })).requests as (typeof req)[]).find((q) => q!.visitor.webId === later.webId)!;
+    const key = await issueCredential({ ...pending.grantDraft, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString() } as never, owner);
+    expect(await ownerCall({ kind: 'answer', request: pending.id, answer: 'allow', grant: key })).toEqual({ ok: true });
     const t0 = Date.now();
-    expect((await ownerCall({ kind: 'revoke', revoke: 'all' })).revoked).toBeGreaterThan(0);
-    const { reply } = await ask(strict.url, v, { kind: 'compute', grant: strict.grant, study: readmissionStudy() });
+    expect((await ownerCall({ kind: 'revoke', revoke: 'all' })).revoked).toBe(1);
+    const { reply } = await ask(houses.strict!, later, { kind: 'compute', grant: key, study: readmissionStudy() });
     expect(reply).toMatchObject({ kind: 'excluded', why: 'the owner revoked this key' });
     expect(Date.now() - t0).toBeLessThan(1000);
-    // A key a standing rule cut for a study works once: the study has run, so asking again is refused.
-    const other = r.grants.find((g) => !g.url.startsWith(houses.strict!))!;
-    expect((await ask(other.url, v, { kind: 'compute', grant: other.grant, study: readmissionStudy() })).reply).toMatchObject({ kind: 'excluded', why: 'this key was for one use, and it has been used' });
   });
 
   it('runs the control panel: overview, rules edited and saved in the pod, everything exported', async () => {

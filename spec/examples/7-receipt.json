@@ -31,7 +31,7 @@
             "tags": [],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "9F1EOal8ZJTNyCZY2I4TglyrZcKoZprcs6jcPuj9oyY",
+              "x": "05fbypTCGbtMY03X7YWVqdsw3CFXZzPz5NgxKDVdPlc",
               "kty": "OKP",
               "kid": "visitor-uni.example",
               "alg": "EdDSA"
@@ -53,7 +53,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "V6aiyBS6dtcrg70jYjvT75vzh7JLnzbgVrHHcViSQt3OIApplyU1nYpS1df2LYL128j8IbZsAqZ5-CyptI3zCw"
+        "signature": "Ot-se2jT3YFYiMDMv-rYV30w_ocVViu0JLt6Xb4Pnj21bmdr4sDKrDjYqsTrRdWA-UQQLCepWScE4lZDRIQNCQ"
       }
     ]
   },
@@ -61,7 +61,7 @@
     "payload": {
       "kind": "receipt",
       "receipt": {
-        "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtcGF5bWVudHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VSZWNlaXB0Il0sImlzc3VlciI6Imh0dHBzOi8vcGF5bWVudHMuZXhhbXBsZS8jcGF5bWVudHMiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAxOjM2OjMwLjIwMFoiLCJ2YWxpZFVudGlsIjoiMjAzNi0xMC0yMVQwMTozNjozMC4yMDBaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsImFtb3VudCI6eyJjdXJyZW5jeSI6IlVTRCIsInZhbHVlIjo1fSwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAiLCJpbnRlbnRNYW5kYXRlIjoic2hhMjU2LW13anJJSU1EOUUwM2tvdHZ1V0t6TlBTYmhkUGVUaTF1YUJDRjdTb1FINXM9Iiwic2V0dGxlbWVudCI6InNpbXVsYXRlZCJ9fQ.d4Pb82qOriVaVrG1pYNQULmB0jTXMy9tOeSBR1nHpUIimugWfk1Yiy-2plZB8o51vW9kTO5GlVZT5ukCKlE5BA",
+        "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtcGF5bWVudHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VSZWNlaXB0Il0sImlzc3VlciI6Imh0dHBzOi8vcGF5bWVudHMuZXhhbXBsZS8jcGF5bWVudHMiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAyOjE5OjAzLjQ0M1oiLCJ2YWxpZFVudGlsIjoiMjAzNi0xMC0yMVQwMjoxOTowMy40NDNaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsImFtb3VudCI6eyJjdXJyZW5jeSI6IlVTRCIsInZhbHVlIjo1fSwiYWdyZWVtZW50IjoidXJuOmxha2U6YWdyZWVtZW50OjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMjpub0g4ZkxNblVuOVAiLCJpbnRlbnRNYW5kYXRlIjoic2hhMjU2LW5rdTIxVS8rYjlDdHFENTRMN2dEcVNtVTNkL0RNQ1dJTktBVGN2eGpLaDA9Iiwic2V0dGxlbWVudCI6InNpbXVsYXRlZCJ9fQ.2c3W59VBFyBvyxQuxKnLGepU_a_T6ZMCrEO3Vq0IkXfQituAYsuF5iYyZYfa_7wGEbKrNQczRPdbm168gO3hAA",
         "card": {
           "name": "Payments",
           "description": "Payments (example)",
@@ -95,7 +95,7 @@
                   ],
                   "publicJwk": {
                     "crv": "Ed25519",
-                    "x": "jkOaM8i9KOm-7ZbXlf9gzi2Y2kkFmf6mrQ3W1OLa4Ms",
+                    "x": "3zbmr9XNw9xv9PvZq9pQZ36xNBo58OxDMoEfetr8ctc",
                     "kty": "OKP",
                     "kid": "specialist-payments.example",
                     "alg": "EdDSA"
@@ -117,19 +117,19 @@
           "signatures": [
             {
               "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtcGF5bWVudHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-              "signature": "kw6_tUUtpIRtgIw-VYkNVCIP0vo5yYmdsCs3741rchh72GiqDBSEPD7CfM4w_g0scMYVT8sZgC2X5F58-WiUAA"
+              "signature": "96q5cngovxegzJOMCc3qpRodvLD14BJbfDeHGiaJ9mrV018MRa40JH35PEaxyc1q2oZosFIdZdAbZh0qQdHuBA"
             }
           ]
         }
       },
-      "nonce": "e8a340ae-d155-4281-a1de-77da86a38d68",
-      "iat": 1792805790,
-      "exp": 1792806090,
+      "nonce": "1c2bef34-d8ca-4f8d-81cd-1a4c66a9d6a9",
+      "iat": 1792808343,
+      "exp": 1792808643,
       "iss": "https://uni.example/#agent"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
-      "signature": "EitVli4udI7chP_BOvwtzKs1C7F6Fa1OKuqJuRxFXKEt-EpRXD8AOI6WH81VISksnfPXbNhuHyOB5PWYSKLkDg"
+      "signature": "CDvV9zMfu4vj6wHz5ISFDoHgeZbbSBQPe9xijOyGhGedRvAxNLi5Uruxvv6HhQc_GIZnimOwUrO6JDY3FI4WBQ"
     }
   }
 }

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  makeEvent, ReplayGuard, verifyCredential, verifyMessage,
+  makeEvent, readAccessGrant, ReplayGuard, verifyCredential, verifyMessage,
   type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -25,6 +25,8 @@ export interface PendingRequest {
   /** How many times the same agent has asked exactly this; one request, however many knocks. */
   asked?: number;
   recommendation: string;
+  /** The grant the owner's device signs to allow it: a Solid Access Grant drafted by the house, dated and signed on the device. */
+  grantDraft?: unknown;
   requestedAt: string;
   status: 'pending' | 'allowed' | 'denied';
   grant?: string;
@@ -371,15 +373,15 @@ export class OwnerDesk {
     } catch {
       return { error: 'grant is not signed by your key' };
     }
-    const s = vc.credentialSubject as { id: string; offer: string; study: string | null; fields: string[]; purpose: string };
+    const s = readAccessGrant(vc);
     const until = Date.parse((vc as { validUntil?: string }).validUntil ?? '');
-    const ok =
-      vc.type.includes('LakeAccessGrant') && vc.issuer === this.o.webId && s.id === req.visitor.webId && s.offer === req.offerId &&
+    const ok = !!s &&
+      vc.issuer === this.o.webId && s.owner === this.o.webId && s.grantee === req.visitor.webId && s.offer === req.offerId &&
       s.purpose === req.purpose && (s.study ?? null) === req.study && s.fields.every((f) => req.fields.includes(f)) &&
       until > Date.now() && until <= Date.now() + MAX_GRANT_MS + 60_000;
     if (!ok) return { error: 'grant does not match the request you were shown' };
     await this.o.writeGrant(req.offerId, grant);
-    this.record({ id: req.offerId, jws: grant, visitor: req.visitor.domain, fields: s.fields, purpose: s.purpose, until: new Date(until).toISOString(), authorizedBy: 'owner, live' });
+    this.record({ id: req.offerId, jws: grant, visitor: req.visitor.domain, fields: s!.fields, purpose: s!.purpose, until: new Date(until).toISOString(), authorizedBy: 'owner, live' });
     req.status = 'allowed';
     req.grant = grant;
     this.o.emit(makeEvent('approval.answered', this.o.actor, `agent:${req.visitor.domain}`, { answer: 'Allow' }));

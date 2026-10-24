@@ -36,7 +36,7 @@ LAKE_PUBLIC_HOST=192.168.1.20 docker compose up -d
 | **Data** | What your house holds, claim by claim, where it came from (issuer, converter, auditor), and what's in each folder of your pod. |
 | **Move house** | Download everything in your pod, wallet included, in one file. Your house is yours: take it to another host or your own machine whenever you like. |
 
-**Allow** signs a `LakeAccessGrant` credential on your device: this visitor, this study, these fields, this purpose, 48 hours. The house checks it is signed by your key and matches exactly what you were shown, stores it in your pod's `/agreements/`, and hands it to the visitor. A revoked key stops working at once: the next request with it is refused, and the map shows every line into your house snap.
+**Allow** signs a key on your device: a Solid Access Grant (the Solid ecosystem's own format for "this person lets that agent read this"), drafted by your house for exactly what you were shown: this visitor, this study, these fields, this purpose, 48 hours, one use for a study. The house checks it is signed by your key and matches exactly what you were shown, stores it in your pod's `/agreements/`, and hands it to the visitor. A revoked key stops working at once: the next request with it is refused, and the map shows every line into your house snap.
 
 ## From the command line
 

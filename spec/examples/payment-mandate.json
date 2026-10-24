@@ -1,5 +1,5 @@
 {
-  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIlBheW1lbnRNYW5kYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMTozNjozMC4yMDBaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsImFtb3VudCI6eyJjdXJyZW5jeSI6IlVTRCIsInZhbHVlIjo1fSwiaW50ZW50TWFuZGF0ZSI6InNoYTI1Ni1td2pySUlNRDlFMDNrb3R2dVdLek5QU2JoZFBlVGkxdWFCQ0Y3U29RSDVzPSIsImFncmVlbWVudCI6InVybjpsYWtlOmFncmVlbWVudDowYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjI6bm9IOGZMTW5VbjlQIn19.9ou8MieJH2Gx1-Xxd5MP7gph8B4fGeMXxwyWb-nT7_YXDJ3SyZY7RhoE-KMoonfHP6hx7NqlU_ekDwu3909uBA",
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJ2Yytqd3QiLCJjdHkiOiJ2YyJ9.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIlBheW1lbnRNYW5kYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vdW5pLmV4YW1wbGUvI2FnZW50IiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMjoxOTowMy40NDJaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS9zdGFuL3Byb2ZpbGUvY2FyZCNtZSIsImFtb3VudCI6eyJjdXJyZW5jeSI6IlVTRCIsInZhbHVlIjo1fSwiaW50ZW50TWFuZGF0ZSI6InNoYTI1Ni1ua3UyMVUvK2I5Q3RxRDU0TDdnRHFTbVUzZC9ETUNXSU5LQVRjdnhqS2gwPSIsImFncmVlbWVudCI6InVybjpsYWtlOmFncmVlbWVudDowYjNlOGM1NS02ZjBhLTRjNjEtOGQzZS01NWQxYzNmMGE5YjI6bm9IOGZMTW5VbjlQIn19.ygyhbD5ZAJhc4RQjaWquHFm0L1PRl1kGykrODaJL2RtWZdluV0AVtQqvYQzGPC1ximMvbWL7ZPIw0OkH9q6gAw",
   "decoded": {
     "@context": [
       "https://www.w3.org/ns/credentials/v2"
@@ -9,14 +9,14 @@
       "PaymentMandate"
     ],
     "issuer": "https://uni.example/#agent",
-    "validFrom": "2026-10-24T01:36:30.200Z",
+    "validFrom": "2026-10-24T02:19:03.442Z",
     "credentialSubject": {
       "id": "https://pods.example/stan/profile/card#me",
       "amount": {
         "currency": "USD",
         "value": 5
       },
-      "intentMandate": "sha256-mwjrIIMD9E03kotvuWKzNPSbhdPeTi1uaBCF7SoQH5s=",
+      "intentMandate": "sha256-nku21U/+b9CtqD54L7gDqSmU3d/DMCWINKATcvxjKh0=",
       "agreement": "urn:lake:agreement:0b3e8c55-6f0a-4c61-8d3e-55d1c3f0a9b2:noH8fLMnUn9P"
     }
   }

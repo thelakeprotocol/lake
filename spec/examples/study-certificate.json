@@ -1,5 +1,5 @@
 {
-  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAxOjM2OjMwLjE2OFoiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0yMlQwMTozNjozMC4xNjhaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc2xocmRzNGd0dTI2TXUxWW5LQ3lMMmhNQUtKVHpNQ3dYZStzd3FIajNGRT0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHNwbGl0IGJldHdlZW4gdHdvIHRlbGxlcnMgcnVuIGJ5IGRpZmZlcmVudCBwYXJ0aWVzIiwidG90YWxzIG9ubHkiLCJubyB0YWJsZSBmcm9tIGZld2VyIHRoYW4gMjAgaG91c2VzIl19fQ.Krh3aOXX79qe0beXEp2h1gMqa_d-h7HmXU1onXcEzhAyxa6QUF-bAYOakDHl2soktai5Wu11TaNZYetJF6xGDw",
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkxha2VTdHVkeUNlcnRpZmljYXRlIl0sImlzc3VlciI6Imh0dHBzOi8vYXVkaXQuZXhhbXBsZS8jc3R1ZHktYXVkaXQiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAyOjE5OjAzLjQxMFoiLCJ2YWxpZFVudGlsIjoiMjAyNy0wMS0yMlQwMjoxOTowMy40MTBaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJ1cm46bGFrZTpzdHVkeTpzaGEyNTYtc2xocmRzNGd0dTI2TXUxWW5LQ3lMMmhNQUtKVHpNQ3dYZStzd3FIajNGRT0iLCJjaGVja3MiOlsiZGVjbGFyYXRpdmUgc3R1ZHksIG5vIGNvZGUiLCJhbnN3ZXJzIHNwbGl0IGJldHdlZW4gdHdvIHRlbGxlcnMgcnVuIGJ5IGRpZmZlcmVudCBwYXJ0aWVzIiwidG90YWxzIG9ubHkiLCJubyB0YWJsZSBmcm9tIGZld2VyIHRoYW4gMjAgaG91c2VzIl19fQ.C6sgAJ37ognFfX7Dhe8gik01yJG4Xv1fZBpjU9h5f2PSet6yCLE8tvdXTVb6Rel0tBNMbrKgVXj0AmenmDP3Cw",
   "card": {
     "name": "Auditor",
     "description": "Auditor (example)",
@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "eSAS21wa1Qxj9tyW0xLTJ-NrMZsN8FAFdApteYR2TC4",
+              "x": "FzIIFg51-KTxoMeiFh8YgCdrr7antArcItmv1pmvnzw",
               "kty": "OKP",
               "kid": "specialist-audit.example",
               "alg": "EdDSA"
@@ -55,7 +55,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtYXVkaXQuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "SuPHmmpdEEFHlvBI16XWxW5Tg9N62YsRLgkxt7jIcjdjiRZksu5IVXlSDnCjwJiIts36H5OcX6TzZwHt-I_LBw"
+        "signature": "-Hfke6r9pb0rKC41ijjIp_OtysCd_SWUkoqIg7E3bU6k-kDRlJm9iqbCkEgpJ0RVjBNoZghhN6XFJbF8T7naDw"
       }
     ]
   },
@@ -68,8 +68,8 @@
       "LakeStudyCertificate"
     ],
     "issuer": "https://audit.example/#study-audit",
-    "validFrom": "2026-10-24T01:36:30.168Z",
-    "validUntil": "2027-01-22T01:36:30.168Z",
+    "validFrom": "2026-10-24T02:19:03.410Z",
+    "validUntil": "2027-01-22T02:19:03.410Z",
     "credentialSubject": {
       "id": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
       "checks": [

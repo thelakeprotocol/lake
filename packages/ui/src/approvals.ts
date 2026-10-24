@@ -5,7 +5,7 @@ import { loadKey, signCredential, signEnvelope } from './owner-crypto';
 // The control panel that comes with every house (open source). Served by the house at /owner/; every
 // call is signed on this device with the owner's key, which never leaves it.
 
-interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; warnings?: string[]; note?: string; asked?: number; recommendation: string }
+interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; warnings?: string[]; note?: string; asked?: number; recommendation: string; grantDraft?: unknown }
 interface Key { id: string; visitor: string; fields: string[]; purpose: string; until: string; authorizedBy: string }
 type Decision = 'join' | 'ask' | 'decline';
 interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
@@ -241,12 +241,9 @@ function requestCard(all: Request[]) {
   allow.onclick = async () => {
     allow.disabled = deny.disabled = true;
     for (const q of all) {
-      // The key is cut here, on this device, with your key. The house only checks it.
-      const grant = signCredential({
-        '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeAccessGrant'], issuer: webId,
-        validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString(),
-        credentialSubject: { id: q.visitor.webId, offer: q.offerId, study: q.study, fields: q.fields, purpose: q.purpose, authorizedBy: 'owner, live', ...(q.study ? { uses: 1 } : {}) },
-      }, key);
+      // The key is cut here, on this device, with your key: the house drafted the grant (a Solid Access Grant saying exactly
+      // what you were shown), this device dates and signs it, and the house only checks it.
+      const grant = signCredential({ ...(q.grantDraft as object), issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString() }, key);
       await call({ kind: 'answer', request: q.id, answer: 'allow', grant }).catch((e) => alert(e.message));
     }
     void refreshBadge(); void show();

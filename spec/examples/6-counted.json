@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "q6SmOMH7gLosnvRmIefr-TyNiyRf7_IQUC_-05k06p8",
+              "x": "lHW8_BkTSxZolsVNU_2Gj5_p4R9VB0eGC5ODyXR3mNk",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,7 +66,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "00uFC0JbVBWVPWzAPN5feuXWkutjqiWPflqPoHMJicXXUDVeSz-zHzQvZSbBKq5DIR9xONhp_NQT4Do7d_eABA"
+        "signature": "AS1ValycOoUmdlwO7Ms4nmlkCoXrw8d2entO3F4jYB3XOxgIp4G7ZNOVR1IEXIfFd_zXXM9kFNaqBdnovEfFCA"
       }
     ]
   },
@@ -79,14 +79,14 @@
         "teller-a.example",
         "teller-b.example"
       ],
-      "nonce": "9389ff4b-eb1d-4612-843a-409c69b12909",
-      "iat": 1792805790,
-      "exp": 1792806090,
+      "nonce": "a64b62f1-0d0f-407c-a99b-4c9acdaf0946",
+      "iat": 1792808343,
+      "exp": 1792808643,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "JyRceLy6x6QQHaBq2EFE50NNzbejeFVo-d5uOzPNbskNOwYMwyUbpXTiKQ1MMRNSXhqNpqFiPY8EOKMCHfHJAQ"
+      "signature": "5Tm7TnVF_1_2zIUvt3fPQXueBqjF9wOXdxx9Kv9ioGwJ1i4IFWb84LUvgT1p1J-Fw0Tufns46rziUuFUMebhBA"
     }
   }
 }

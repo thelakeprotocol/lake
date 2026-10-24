@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -221,6 +221,8 @@ export class Housekeeper {
       const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
       filed = this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
+        // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
+        grantDraft: accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }),
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
@@ -235,19 +237,18 @@ export class Housekeeper {
     // The terms and the key are cut from the same cloth: one ODRL agreement, one grant that names it.
     const until = new Date(Date.now() + d.grantHours * HOUR);
     const agreement = await this.agree({ ...offer, fields: d.fields }, visitorWebId, until, false);
+    // A Solid Access Grant, as Inrupt's tools read one, with the Lake's terms alongside (SPEC §6).
     const grant = await issueCredential(
       {
-        '@context': ['https://www.w3.org/ns/credentials/v2'],
-        type: ['VerifiableCredential', 'LakeAccessGrant'],
-        issuer: this.o.webId,
-        validFrom: new Date().toISOString(),
-        validUntil: until.toISOString(),
-        credentialSubject: {
-          id: visitorWebId, offer: offer.id, study: offer.study ?? null, fields: d.fields, purpose: offer.purpose, authorizedBy: `standing rule ${d.rule}`,
+        ...accessGrantDraft(this.o.webId, visitorWebId, {
+          offer: offer.id, study: offer.study ?? null, fields: d.fields, purpose: offer.purpose, authorizedBy: `standing rule ${d.rule}`,
           // A study runs once, so its key works once: spent after the computation, however long it had left (SPEC §7).
           ...(offer.study ? { uses: 1 } : {}),
           rules: digestSRI(this.o.rulesText), agreement: agreement.agreement.uid, agreementDigest: agreementDigest(agreement.agreement),
-        },
+        }),
+        issuer: this.o.webId,
+        validFrom: new Date().toISOString(),
+        validUntil: until.toISOString(),
       } as never,
       this.o.id,
     );
@@ -277,10 +278,11 @@ export class Housekeeper {
         return excluded('that is not a grant this house or its owner issued');
       }
     }
-    const g = grant.credentialSubject as { id: string; offer: string; study: string | null; fields: string[]; uses?: number };
+    const g = readAccessGrant(grant);
+    if (!g) return excluded('that is not an access grant');
     if (this.o.desk.isRevoked(g.offer)) return excluded(this.o.desk.grants.get(g.offer)?.spent ? 'this key was for one use, and it has been used' : 'the owner revoked this key');
     const until = (grant as { validUntil?: string }).validUntil;
-    if (!grant.type.includes('LakeAccessGrant') || g.id !== requester) return excluded('the grant belongs to someone else');
+    if (g.grantee !== requester || g.owner !== this.o.webId) return excluded('the grant belongs to someone else');
     if (until && Date.parse(until) < Date.now()) return excluded('the grant has expired');
     if (g.study !== id || !auditStudy(p.study).ok) return excluded('the grant does not cover this study');
     // No study runs before both parties have signed the same terms.
