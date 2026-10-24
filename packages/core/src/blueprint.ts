@@ -1,4 +1,4 @@
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 
 /**
  * Lake Blueprint 0.1 (SPEC §11): the one central piece of a decentralised Lake app. A markdown file with a
@@ -86,4 +86,22 @@ export function checkBlueprintMessage(b: Blueprint, msg: Record<string, unknown>
     if (!ok) p.push(`${f}: expected ${t}`);
   }
   return p;
+}
+
+/**
+ * A blueprint's header written out with correct YAML quoting: for a dry run, so an author fixes quoting in one go rather
+ * than one error at a time (run 17). If the header won't parse, plain `key: value` lines whose value holds a colon or a
+ * quote are quoted first; anything else is left for the author.
+ */
+export function blueprintHeader(text: string): string | null {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const tryParse = (y: string) => { try { return parse(y) as unknown; } catch { return null; } };
+  const quoted = m[1]!.split(/\r?\n/).map((line) => {
+    const kv = line.match(/^(\s*[\w.-]+):\s+(.+)$/);
+    if (!kv || /^["'[{|>]/.test(kv[2]!) || !/[:#'"]/.test(kv[2]!)) return line;
+    return `${kv[1]}: ${JSON.stringify(kv[2])}`;
+  }).join('\n');
+  const meta = tryParse(m[1]!) ?? tryParse(quoted);
+  return meta && typeof meta === 'object' ? `---\n${stringify(meta).trim()}\n---` : null;
 }

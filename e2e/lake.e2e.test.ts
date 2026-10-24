@@ -438,7 +438,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -474,6 +474,18 @@ describe('the open door', () => {
     const round1m = { chain: '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971', round: 1_000_000, randomness: 'b22aad4794f7451896f7a371aa46106fd84d919f3f569acd5b2fddf1d1440af3', signature: '83ad29e4c409f9470fc2ef02f90214df49e02b441a1a241a82d622d9f608ef98fd8b11a029f1bee9d9e83b45088abe72' };
     expect((await text('lake_draw', { beacon: round1m })).valid).toBe(true);
     expect((await text('lake_draw', { beacon: { ...round1m, randomness: '00'.repeat(32) } })).valid).toBe(false);
+    // Commit and reveal, built in (run 17's agents wrote Python to hash).
+    const sealed = await text('lake_commit', { value: 'bid 7' });
+    expect(sealed.commit).toMatch(/^[0-9a-f]{64}$/);
+    expect((await text('lake_commit', { check: { value: 'bid 7', salt: sealed.salt, commit: sealed.commit } })).matches).toBe(true);
+    expect((await text('lake_commit', { check: { value: 'bid 9', salt: sealed.salt, commit: sealed.commit } })).matches).toBe(false);
+    // A blueprint's header checked without publishing, with its quoting fixed in one go.
+    const dry = await text('lake_publish_blueprint', { markdown: '---\nblueprint: "0.1"\nname: corpse\nsummary: A game: each writes one line\n---\n# corpse', dry_run: true });
+    expect(dry.header).toContain('summary: "A game: each writes one line"');
+    // "agent" finds every agent that isn't a house.
+    const agents = await text('lake_search', { role: 'agent' });
+    expect(agents.length).toBeGreaterThan(0);
+    expect(agents.every((c: { role: string }) => c.role !== 'house')).toBe(true);
     const paid = await text('lake_pay', { agent_url: theirs.you.url, amount: 3, memo: 'lot1, sealed auction' });
     expect(paid).toMatchObject({ paid: 3, unit: 'USD', remaining: 47 });
     expect((await text('lake_pay', { agent_url: theirs.you.url, amount: 2, unit: 'favour', memo: 'for the coin flip' })).unit).toBe('favour');

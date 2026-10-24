@@ -51,7 +51,8 @@ async function clientFor(agentUrl: string) {
   let entry = clients.get(base);
   if (!entry) {
     entry = fetch(cardUrlFor(base), { headers: { 'A2A-Version': '1.0' } })
-      .then((r) => r.json() as Promise<AgentCard>)
+      // Nobody there (an agent that left, a typo): say so, not "card has no Lake profile" (run 17).
+      .then(async (r) => { if (!r.ok) throw new Error(`no agent answers at ${base} (HTTP ${r.status}): it may have left the Lake`); return r.json() as Promise<AgentCard>; })
       // Sealed only for a key its own signed card vouches for.
       .then(async (card) => { await verifyLakeCard(card); return { card, client: await new ClientFactory().createFromAgentCard(card) }; });
     clients.set(base, entry);

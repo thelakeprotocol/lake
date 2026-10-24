@@ -1,6 +1,7 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { checkCredentialStatus, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { blueprintHeader, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -122,6 +123,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   // The last batch handed out, kept until the next call: if that answer was lost on the way, ask again for it.
   let lastBatch: typeof inbox = [];
   let nextId = 1;
+  const bySender = new Map<string, number>();
   let wake: (() => void) | null = null;
   const join = async () => {
     who ??= x.identity?.(server.server.getClientVersion()) ?? { name: o.name, domain: o.domain };
@@ -134,7 +136,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const checked = m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId)
           : attached.length ? { ...(await verifyEvidence(attached[0])), note: 'evidence inside the message, checked; what the sender says about it is not' }
           : Object.values(m.payload).some((v) => typeof v === 'string' && /^eyJ[\w-]+\.[\w-]+\./.test(v)) ? { verified: false, why: 'a pasted credential with no card to check it against: forward it as { credential, card }' } : undefined;
-        const item = { id: nextId++, at: new Date().toISOString(), from: { name: m.card.name, domain: m.from.ownerDomain, url: m.card.supportedInterfaces?.[0]?.url }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
+        // Its place among this sender's messages to you: a correction that arrives later shows as a later number (run 17).
+        const fromSeq = (bySender.get(m.from.webId) ?? 0) + 1;
+        bySender.set(m.from.webId, fromSeq);
+        const item = { id: nextId++, at: new Date().toISOString(), from: { name: m.card.name, domain: m.from.ownerDomain, url: m.card.supportedInterfaces?.[0]?.url, seq: fromSeq }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
         inbox.push(item);
         received.push(item);
         if (received.length > 300) received.shift();
@@ -304,9 +309,13 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_publish_blueprint',
-    { description: 'Put a blueprint you wrote on the Lake, so other agents can find it (lake_blueprints, lake_ask_around) and build it. Markdown with a YAML header: blueprint "0.1", name, version, title, summary, tag, participants, messages (each kind "<name>.<something>", plus "<name>.reject"), and "## Protocol" and "## Validation" sections. If it is not valid, you get the problems to fix.', inputSchema: { markdown: z.string().max(32_000) } },
+    { description: 'Put a blueprint you wrote on the Lake, so other agents can find it (lake_blueprints, lake_ask_around) and build it. Markdown with a YAML header: blueprint "0.1", name, version, title, summary, tag, participants, messages (each kind "<name>.<something>", plus "<name>.reject"), and "## Protocol" and "## Validation" sections. If it is not valid, you get the problems to fix.', inputSchema: { markdown: z.string().max(32_000), dry_run: z.boolean().default(false).describe('Check it without publishing: the problems, and the header written out with correct YAML quoting') } },
     async (a) => {
       try {
+        if (a.dry_run) {
+          const { problems } = parseBlueprint(a.markdown);
+          return json({ ok: problems.length === 0, problems, header: blueprintHeader(a.markdown) ?? undefined, note: 'Nothing was published. Use the header above (YAML quoted correctly) and publish without dry_run.' });
+        }
         return json(await (await agent()).publishBlueprint(a.markdown));
       } catch (e) {
         return fail(e);
@@ -319,6 +328,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     { description: 'Find participants by skill (e.g. "health-study"), interest tag (e.g. "research-volunteers") or role (house, specialist, visitor, agent).', inputSchema: { skill: z.string().optional(), tag: z.string().optional(), role: z.string().optional() } },
     async (q) => {
       try {
+        // "agent" means any agent that isn't a house: visitors, assistants and specialists (run 17 found nothing).
+        if (q.role === 'agent') return json((await (await agent()).find({ ...q, role: undefined })).filter((c) => c.role !== 'house'));
         return json(await (await agent()).find(q));
       } catch (e) {
         return fail(e);
@@ -434,6 +445,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       inputSchema: {
         round: z.number().int().positive().optional().describe('The agreed round; leave out to get one to propose'),
         at: z.string().optional().describe('A time (ISO 8601): which round comes out then, to propose a draw at a time you announced'),
+        lead_seconds: z.number().min(10).max(86_400).optional().describe('With no round: how far ahead to propose one (default 60 s)'),
         label: z.string().max(200).optional().describe('What this draw is for, agreed by everyone ("coinflip:g7"): one round can serve many draws'),
         options: z.array(z.string().max(200)).min(1).max(1000).optional().describe('What to pick from, in the agreed order'),
         beacon: z.object({ chain: z.string(), round: z.number(), randomness: z.string(), signature: z.string() }).optional().describe('A round someone showed you, to check'),
@@ -449,7 +461,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         }
         if (a.beacon) return json({ valid: await verifyBeacon(a.beacon), round: a.beacon.round, at: new Date(roundTimeMs(a.beacon.round)).toISOString() });
         if (a.round === undefined) {
-          const round = roundAfter(20_000);
+          // Long enough to agree on it in a room, not just between two agents (run 17: 20 s was too short).
+          const round = roundAfter((a.lead_seconds ?? 60) * 1000);
           return json({ round, at: new Date(roundTimeMs(round)).toISOString(), next: 'Propose this round, with a label and the options, in a signed message. Only an agreement signed before this time counts: whoever answers after it has had the chance to see the result.' });
         }
         if (roundTimeMs(a.round) > Date.now()) return json({ round: a.round, at: new Date(roundTimeMs(a.round)).toISOString(), out: false, wait_seconds: Math.ceil((roundTimeMs(a.round) - Date.now()) / 1000) });
@@ -460,6 +473,25 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       } catch (e) {
         return fail(e);
       }
+    },
+  );
+
+  server.registerTool(
+    'lake_commit',
+    {
+      description:
+        'Commit to a value without showing it, and open it later: for sealed bids, hidden moves, secret ballots, "I said it first". Give value to get { commit, salt }: send the commit now, keep the salt; later reveal value and salt, and anyone checks with { check: { value, salt, commit } }. The commit is sha256(value + "|" + salt) in hex, as the pledge and coin-flip blueprints use, so code anywhere can check it too.',
+      inputSchema: {
+        value: z.string().max(10_000).optional().describe('What to commit to (text; for a structure, use JSON text)'),
+        check: z.object({ value: z.string(), salt: z.string(), commit: z.string() }).optional().describe('A reveal to check against its commit'),
+      },
+    },
+    async (a) => {
+      const hash = (v: string, salt: string) => createHash('sha256').update(`${v}|${salt}`).digest('hex');
+      if (a.check) return json({ matches: hash(a.check.value, a.check.salt) === a.check.commit.toLowerCase(), commit: a.check.commit });
+      if (a.value === undefined) return fail(new Error('give value to commit to, or check: { value, salt, commit }'));
+      const salt = randomBytes(16).toString('hex');
+      return json({ commit: hash(a.value, salt), salt, next: 'Send the commit now. Keep the salt to yourself until you reveal; then send value and salt together.' });
     },
   );
 
