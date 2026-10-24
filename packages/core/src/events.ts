@@ -34,11 +34,13 @@ export function makeEvent(kind: EventKind, actor: string, subject?: string, data
  * happened at a door is public, who was at it is not. A public service helping an agent (ethics, inspection) stays
  * visible; sensitive services are quiet anyway. Attacks keep the attacker's key.
  */
-const PAIRED = new Set<string>(['knock', 'decision', 'approval.requested', 'approval.answered', 'grant.issued', 'compute.done', 'agreement.signed', 'quote.made', 'offer.accepted']);
+/** Events where one party acted for another: the public feed says what happened, never between whom (SPEC §8). */
+export const PAIRED_KINDS = new Set<string>(['knock', 'decision', 'approval.requested', 'approval.answered', 'grant.issued', 'compute.done', 'agreement.signed', 'quote.made', 'offer.accepted']);
 
 /** The version of an event anyone may see. */
 export function publicView(e: LakeEvent): LakeEvent {
-  if (!PAIRED.has(e.kind) || !e.subject || !(e.actor.startsWith('house:') || e.subject.startsWith('house:'))) return e;
+  // Whoever acted: a house, or a specialist (ethics, auditor, payments) serving one agent (run 11 found those named).
+  if (!PAIRED_KINDS.has(e.kind) || !e.subject) return e;
   const { reason: _r, purpose: _p, ...data } = e.data ?? {};
   return { ...e, subject: undefined, data };
 }

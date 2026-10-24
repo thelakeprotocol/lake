@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import WebSocket from 'ws';
-import { cardUrlFor, verifyLakeCard, type AgentCard, type LakeEvent, type LakeProfile } from '@thelakeprotocol/core';
+import { cardUrlFor, verifyLakeCard, verifyMessage, type AgentCard, type LakeEvent, type LakeProfile, type Signed } from '@thelakeprotocol/core';
 import { fromNode } from './net.js';
 import { specialist, type SpecialistOptions, type Specialist } from './review.js';
 
@@ -140,6 +140,9 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
     } catch (e) {
       return { kind: 'refused', problems: [(e as Error).message] };
     }
+    // The public feed never says who an agent dealt with (SPEC §8), so an agent proves those quests itself: the signed
+    // replies it got (lake_inbox { history: true } has them), checked here against their signers' cards.
+    if (Array.isArray(p.evidence) && !p.who) for (const ev of (p.evidence as unknown[]).slice(0, 50)) for (const q of await creditedBy(ev)) mark(who, q);
     const track = who.startsWith('house:') ? 'house' : 'agent';
     const list = track === 'house' ? HOUSE : AGENT;
     const mine = done.get(who) ?? new Set<string>();
@@ -157,9 +160,28 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
       badge = await s.vc('LakeBadge', { id: who, badge: track === 'house' ? 'Sandbox housekeeper' : 'Sandbox explorer', quests: list.map((q) => q.id) }, 3650);
       badges.set(who, badge);
     }
-    return { kind: 'progress', who, track, done: n, of: list.length, quests, badge, next: quests.find((q) => !q.done)?.how };
+    return { kind: 'progress', who, track, done: n, of: list.length, quests, badge, next: quests.find((q) => !q.done)?.how, ...(track === 'agent' ? { evidence: 'Quests with houses and specialists count from evidence you show: add evidence: [the signed replies you got, { card, envelope } each] to this message, for yourself (no who).' } : {}) };
   });
   return s;
+
+  /**
+   * The quests one signed reply proves, for whoever shows it: a house's decision, a specialist's verdict. Replies don't
+   * name their recipient yet, so a reply forwarded by someone else would count for them too: fine for a sandbox game.
+   */
+  async function creditedBy(ev: unknown): Promise<string[]> {
+    try {
+      const { card, envelope } = ev as { card: AgentCard; envelope: Signed<Record<string, unknown>> };
+      const signer = await verifyLakeCard(card);
+      // Checked as of when it was signed: a reply from an hour ago still proves what happened then.
+      const m = await verifyMessage(envelope, async (kid) => (kid === signer.publicJwk.kid ? signer.publicJwk : null), { now: Number(envelope?.payload?.iat ?? 0) * 1000 });
+      if (m.iss !== signer.webId) return [];
+      if (signer.role === 'house' && m.kind === 'decision') return ['first-knock', ...([{ decline: 'got-a-no', join: 'got-a-yes', counter: 'haggled' }[String(m.decision)]].filter(Boolean) as string[])];
+      const verdict = ({ approved: 'ethics-approved', certified: 'certified', settled: 'paid-up', report: 'inspected', sparred: 'sparred' } as Record<string, string>)[String(m.kind)];
+      return signer.role === 'specialist' && verdict ? [verdict] : [];
+    } catch {
+      return [];
+    }
+  }
 
   /** A map id, a house or agent URL (its card is fetched and verified), a domain, or (nothing) the caller. */
   async function resolve(who: string | undefined, caller: LakeProfile): Promise<string> {

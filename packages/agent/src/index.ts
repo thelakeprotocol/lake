@@ -164,9 +164,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     },
     sent,
     async knock(houseUrl, terms) {
+      // The house reports the knock; the agent doesn't, or the two reports would pair it with the house (SPEC §8).
       const { reply } = await knock(houseUrl, visitor, terms);
-      // The agent's own half of a knock: that it knocked and what it was told, never on which house (SPEC §8).
-      link.report(makeEvent('knock', 'self', undefined, { decision: String(reply.decision ?? reply.kind ?? '').slice(0, 20) }));
       return reply;
     },
     async ask(agentUrl, payload) {

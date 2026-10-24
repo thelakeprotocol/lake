@@ -1,9 +1,10 @@
+import { randomInt } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  buildCard, describe, EVENT_KINDS, publicView, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
+  buildCard, describe, EVENT_KINDS, PAIRED_KINDS, publicView, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
   type AgentCard, type Identity, type LakeEvent, type Signed,
 } from '@thelakeprotocol/core';
 import { Registry, type Entry } from './registry.js';
@@ -20,6 +21,8 @@ export interface NodeOptions {
   approvalsUrl?: string;
   /** Blocks from different reports before an attacker's key is quarantined. Default 3. */
   quarantineAfter?: number;
+  /** Door events and agents' messages go public in shuffled batches about this often (ms; 0: at once). Default 7000. */
+  feedBatchMs?: number;
   /** Houses sharing an interest tag before they count as a guild. Default 3. */
   guildMin?: number;
   /** Intent groups smaller than this aren't published, so a lone household can't be singled out. Default 2. */
@@ -116,17 +119,32 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
   }
 
+  // Door events and agents' messages go public in shuffled batches, stamped with the batch's time, not the moment: a
+  // house's "someone knocked" and the knocker's own activity lined up to the millisecond (run 11). Counters move with the
+  // batch too. Batching hides a pair only among other traffic; on a quiet Lake a batch may hold just one.
+  const batchMs = o.feedBatchMs ?? 7000;
+  let batch: [LakeEvent, Participant | undefined][] = [];
+  const flush = () => {
+    const out = batch;
+    batch = [];
+    for (let i = out.length - 1; i > 0; i--) { const j = randomInt(0, i + 1); [out[i], out[j]] = [out[j]!, out[i]!]; }
+    const at = new Date().toISOString();
+    for (const [e, p] of out) publishNow({ ...e, at }, p);
+    setTimeout(flush, batchMs * (0.6 + Math.random() * 0.8)).unref();
+  };
+  if (batchMs > 0) setTimeout(flush, batchMs).unref();
   function publish(event: LakeEvent, p?: Participant) {
+    if (batchMs > 0 && (PAIRED_KINDS.has(event.kind) || event.kind === 'agent.message')) batch.push([event, p]);
+    else publishNow(event, p);
+  }
+
+  function publishNow(event: LakeEvent, p?: Participant) {
     switch (event.kind) {
       case 'knock': {
-        // A registered agent reports its own broadcast (with a count); a house reports each knock it gets.
-        // Count a house's report only when the knocker didn't already report its broadcast here.
-        const knocker = event.subject && registry.all().some((e) => `agent:${e.profile.ownerDomain}` === event.subject);
-        if (event.data?.count !== undefined) counters.conversations += Number(event.data.count);
-        else if (!knocker) {
-          counters.conversations++;
-          if (event.subject) seenVisitors.add(event.subject);
-        }
+        // A house reports each knock it gets; agents no longer report their own (it only paired them with the house).
+        counters.conversations++;
+        // Visitors that never registered here count as agents too; registered ones are counted already.
+        if (event.subject && !registry.all().some((e) => `agent:${e.profile.ownerDomain}` === event.subject)) seenVisitors.add(event.subject);
         break;
       }
       case 'attack.blocked': {

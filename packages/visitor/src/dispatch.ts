@@ -150,7 +150,6 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   });
   const offer = terms(o.priceUsd, fields);
   log('knock', `knocking on ${houses.length} houses: $${o.priceUsd} for ${fields.join(', ')}`);
-  report('knock', { count: houses.length, purpose: 'research' });
   report('offer', { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' });
   await knockAll(houses, offer, true);
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));

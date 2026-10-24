@@ -58,7 +58,7 @@ beforeAll(async () => {
   const port = async () => String(await freePort());
   const nodePort = await port();
   node = `http://localhost:${nodePort}`;
-  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2'], /Lake node on/);
+  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2', '--feed-batch-ms', '200'], /Lake node on/);
   // A second node that follows the first: anyone can run one (SPEC §9).
   const nodeBPort = await port();
   nodeB = `http://localhost:${nodeBPort}`;
@@ -602,7 +602,12 @@ describe('a study run', () => {
     // Three is the sandbox's minimum: the tellers publish a table, exact, one house per answer.
     expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
     await new Promise((ok) => setTimeout(ok, 500));
-    expect((await (await fetch(`${node}/state`)).json()).counters.recordsMoved).toBe(0);
+    const state = await (await fetch(`${node}/state`)).json();
+    expect(state.counters.recordsMoved).toBe(0);
+    // The ethics agent, the auditor and payments each served this researcher: the feed says what they did, never for whom.
+    const served = (state.recent as { kind: string; text: string }[]).filter((l) => ['decision', 'grant.issued', 'compute.done', 'agreement.signed'].includes(l.kind));
+    expect(served.length).toBeGreaterThan(0);
+    expect(served.filter((l) => /uni\.example/.test(l.text)).map((l) => l.text)).toEqual([]);
   });
 
   it('gives the same answers every time in seeded mode', async () => {
@@ -670,8 +675,12 @@ describe('the sandbox specialists', () => {
     expect(bad.credential).toBeUndefined();
   });
 
+  let curious: Awaited<ReturnType<typeof visitor>>;
+  let sparReply: unknown;
   it('the sparring partner throws every trick at a house; none gets through, and the house drops its key', async () => {
-    const { reply } = await ask(`${sparring}/a2a`, await visitor('curious.example'), { kind: 'spar', house: `${houses.research}/a2a` });
+    curious = await visitor('curious.example');
+    const { reply, signed } = await ask(`${sparring}/a2a`, curious, { kind: 'spar', house: `${houses.research}/a2a` });
+    sparReply = signed;
     expect(reply).toMatchObject({ kind: 'sparred', blocked: 5, of: 5 });
     expect(reply.rounds.at(-1)).toMatchObject({ move: 'again', blocked: true });
   }, 30_000);
@@ -683,8 +692,16 @@ describe('the sandbox specialists', () => {
     expect(house.track).toBe('house');
     const done = house.quests.filter((q: { done: boolean }) => q.done).map((q: { id: string }) => q.id);
     expect(done).toEqual(expect.arrayContaining(['open-the-door', 'hold-the-door', 'say-no', 'find-your-people']));
-    const { reply: agent } = await ask(`${quests}/a2a`, me, { kind: 'progress', who: 'curious.example' });
+    // The feed doesn't say whom the sparring partner served, so the agent proves it with the signed reply it got.
+    const { reply: without } = await ask(`${quests}/a2a`, curious, { kind: 'progress' });
+    expect(without.quests.find((q: { id: string }) => q.id === 'sparred').done).toBe(false);
+    const { reply: agent } = await ask(`${quests}/a2a`, curious, { kind: 'progress', evidence: [sparReply] });
     expect(agent.quests.find((q: { id: string }) => q.id === 'sparred').done).toBe(true);
+    // Someone else's forged "evidence" proves nothing.
+    const fake = structuredClone(sparReply) as { envelope: { payload: { kind: string } } };
+    fake.envelope.payload.kind = 'certified';
+    const { reply: forged } = await ask(`${quests}/a2a`, curious, { kind: 'progress', evidence: [fake] });
+    expect(forged.quests.find((q: { id: string }) => q.id === 'certified').done).toBe(false);
     expect((await ask(`${quests}/a2a`, me, { kind: 'leaderboard' })).reply.top.length).toBeGreaterThan(0);
   });
 });
