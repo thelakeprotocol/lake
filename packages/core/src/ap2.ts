@@ -24,14 +24,18 @@ export function signIntentMandate(human: Identity, humanWebId: string, s: Intent
   );
 }
 
-export function signPaymentMandate(agent: Identity, agentWebId: string, o: { payee: string; amount: number; intentMandate: string; agreement: string; currency?: string }): Promise<string> {
+/**
+ * `cart`: paying an AP2 cart a seller signed (SPEC §6.5): the mandate then names the cart's payment details id and the
+ * hash of its contents, as AP2's PaymentMandateContents do, so the payment is for that cart and nothing else.
+ */
+export function signPaymentMandate(agent: Identity, agentWebId: string, o: { payee: string; amount: number; intentMandate: string; agreement: string; currency?: string; cart?: { detailsId: string; hash: string } }): Promise<string> {
   return issueCredential(
     {
       '@context': ['https://www.w3.org/ns/credentials/v2'],
       type: ['VerifiableCredential', 'PaymentMandate'],
       issuer: agentWebId,
       validFrom: new Date().toISOString(),
-      credentialSubject: { id: o.payee, amount: { currency: o.currency ?? 'USD', value: o.amount }, intentMandate: digestSRI(o.intentMandate), agreement: o.agreement },
+      credentialSubject: { id: o.payee, amount: { currency: o.currency ?? 'USD', value: o.amount }, intentMandate: digestSRI(o.intentMandate), agreement: o.agreement, ...(o.cart ? { payment_details_id: o.cart.detailsId, cart_hash: o.cart.hash } : {}) },
     } as never,
     agent,
   );

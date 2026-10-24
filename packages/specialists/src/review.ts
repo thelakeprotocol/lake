@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  packId, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
+  packId, checkCart, type CartMandate, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
 export interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean; report?: (e: LakeEvent) => void }
 type Reply =
   | { kind: 'approved' | 'certified'; credential: string; notes: string[] }
-  | { kind: 'settled'; receipts: { payee: string; credential: string }[]; total: number; remaining: number }
+  | { kind: 'settled'; receipts: { payee: string; credential: string }[]; currency?: string; total: number; remaining: number }
+  | { kind: 'registered'; pack: string; domain: string; registered: boolean; register: string }
   | { kind: 'refused'; problems: string[] };
 
 /** Converters this auditor has reviewed: those of the packs it runs with. A real auditor would pin the package digest too. */
@@ -108,8 +109,13 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
 export async function createAuthority(o: SpecialistOptions & { pack: LakePack }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
   const a = o.pack.authority!;
   const id = packId(o.pack);
-  const s: Specialist = await specialist<Reply>(o, a.name, a.description, 'authorise', async (p, from, profile) => {
-    if (p.kind !== 'authorise') return { kind: 'refused', problems: ['send { kind: "authorise", pack }'] };
+  const s: Specialist = await specialist<Reply>(o, a.name, `${a.description} Anyone may check an agent: { kind: "registered", domain }.`, 'authorise', async (p, from, profile) => {
+    // Anyone may ask whether an agent is on the register (run 26's agents couldn't check a grocer before talking to it).
+    if (p.kind === 'registered') {
+      const domain = String(p.domain ?? '').toLowerCase().replace(/^https?:\/\//, '').replace(/[/#].*$/, '');
+      return { kind: 'registered', pack: id, domain, registered: a.register.includes(domain), register: a.name };
+    }
+    if (p.kind !== 'authorise') return { kind: 'refused', problems: ['send { kind: "authorise", pack } for yourself, or { kind: "registered", domain } to check anyone'] };
     if (p.pack !== id) return { kind: 'refused', problems: [`this register covers ${id}`] };
     if (!a.register.includes(profile.ownerDomain)) return { kind: 'refused', problems: [`${profile.ownerDomain} is not on the register`] };
     const credential = await s.vc('LakeAuthorisation', { id: from, domain: profile.ownerDomain, pack: id, scope: 'quote' }, 365);
@@ -126,7 +132,9 @@ export const newId = () => randomUUID();
  */
 export async function createPayments(o: SpecialistOptions & { onSettled?: (amount: number, count: number) => void }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
   const spent = new Map<string, number>();
-  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed.', 'payments', async (p, agentWebId, agent) => {
+  // Carts already paid, by the hash of their contents: a seller's cart is paid once.
+  const paidCarts = new Set<string>();
+  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed. Pays an AP2 cart a seller signed (SPEC §6.5) for exactly its total, once.', 'payments', async (p, agentWebId, agent) => {
     if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...] }'] };
     const intent = p.intent as { credential: string; card: AgentCard; owner?: string } | undefined;
     const payments = (p.payments as string[] | undefined) ?? [];
@@ -163,17 +171,35 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     if (Date.parse(m.intent_expiry) < Date.now()) return { kind: 'refused', problems: ['the Intent Mandate has expired'] };
     const digest = digestSRI(intent.credential);
     const currency = m.budget.currency ?? 'USD';
+    // Paying a seller's cart: its signature, its total and its buyer are checked here, before any money moves.
+    const c = p.cart as { mandate?: CartMandate; card?: AgentCard } | undefined;
+    let cart: (CheckedCart & { webId: string }) | undefined;
+    if (c) {
+      try {
+        const seller = await verifyLakeCard(c.card as AgentCard);
+        cart = { ...(await checkCart(c.mandate as CartMandate, seller.publicJwk)), webId: seller.webId };
+        if (cart.seller !== seller.webId) throw new Error('the cart was signed for another seller');
+        if (cart.buyer !== agentWebId) throw new Error('the cart was made out to another buyer');
+      } catch (e) {
+        return { kind: 'refused', problems: [(e as Error).message] };
+      }
+      if (paidCarts.has(cart.hash)) return { kind: 'refused', problems: [`cart ${cart.id} is paid already`] };
+      if (payments.length !== 1) return { kind: 'refused', problems: ['one payment per cart'] };
+    }
     const checked: { payee: string; amount: number; agreement: string }[] = [];
     for (const pm of payments) {
       try {
         const vc = await verifyCredential(pm, agent.publicJwk);
-        const x = vc.credentialSubject as unknown as { id: string; amount: { value: number; currency?: string }; intentMandate: string; agreement: string };
+        const x = vc.credentialSubject as unknown as { id: string; amount: { value: number; currency?: string }; intentMandate: string; agreement: string; payment_details_id?: string; cart_hash?: string };
         if (!vc.type.includes('PaymentMandate') || x.intentMandate !== digest || !(x.amount.value > 0)) throw new Error();
         // The owner signed a budget in one currency: a payment in another isn't under it (nothing here converts).
         if ((x.amount.currency ?? 'USD') !== currency) return { kind: 'refused', problems: [`the allowance is in ${currency}; this payment is in ${x.amount.currency ?? 'USD'}`] };
         // Whole cents, at least one; and an agent can't pay itself (it would only inflate what looks settled).
         if (x.amount.value < 0.01 || Math.abs(x.amount.value * 100 - Math.round(x.amount.value * 100)) > 1e-6) return { kind: 'refused', problems: [`${currency} ${x.amount.value}: pay at least 0.01, in whole cents`] };
         if (x.id === agentWebId) return { kind: 'refused', problems: ['an agent can\'t pay itself'] };
+        if (cart && (x.id !== cart.webId || x.cart_hash !== cart.hash || Math.round(x.amount.value * 100) !== Math.round(cart.total.value * 100) || (x.amount.currency ?? 'USD') !== cart.total.currency)) {
+          return { kind: 'refused', problems: [`the payment must be exactly the cart: ${cart.total.currency} ${cart.total.value} to its seller, naming its hash`] };
+        }
         checked.push({ payee: x.id, amount: Math.round(x.amount.value * 100), agreement: x.agreement });
       } catch {
         return { kind: 'refused', problems: ['a Payment Mandate is not signed by the agent under this Intent Mandate'] };
@@ -187,11 +213,12 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
       return { kind: 'refused', problems: [`${currency} ${(already + total) / 100} is over the ${currency} ${m.budget.amount} the human signed for: a human must approve`] };
     }
     spent.set(digest, already + total);
+    if (cart) paidCarts.add(cart.hash);
     const receipts = await Promise.all(
       checked.map(async (c) => ({
         payee: c.payee,
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
-        credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, intentMandate: digest, settlement: 'simulated', settlementId: randomUUID() }, 3650),
+        credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash } } : {}), intentMandate: digest, settlement: 'simulated', settlementId: randomUUID() }, 3650),
       })),
     );
     o.onSettled?.(total / 100, checked.length);

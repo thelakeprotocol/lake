@@ -8,6 +8,8 @@ import { specialist, type SpecialistOptions, type Specialist } from './review.js
 
 type Status = 'pass' | 'fail' | 'warn';
 interface Check { check: string; status: Status; detail: string }
+// Run 24's rogue grocer showed its 10/10 to households as if it vouched for the business: say what it covers.
+const SCOPE = 'This checks protocol conformance only: it says nothing about who runs the agent, whether it is on any register, or what it does with data.';
 type Reply = { kind: 'report'; target: string; role?: string; passed: number; of: number; checks: Check[]; credential?: string; verdict: string };
 
 /**
@@ -26,11 +28,11 @@ export async function createInspector(o: SpecialistOptions & { nodeUrl?: string 
     const passed = r.checks.filter((c) => c.status !== 'fail').length;
     const allPass = passed === r.checks.length;
     const credential = allPass && r.profile
-      ? await s.vc('LakeConformance', { id: r.profile.webId, card: r.cardUrl!, role: r.profile.role, checks: r.checks.map((c) => `${c.check}: ${c.status}`), lakeVersion: r.profile.lakeVersion }, 30)
+      ? await s.vc('LakeConformance', { id: r.profile.webId, card: r.cardUrl!, role: r.profile.role, checks: r.checks.map((c) => `${c.check}: ${c.status}`), lakeVersion: r.profile.lakeVersion, scope: SCOPE }, 30)
       : undefined;
     return {
       kind: 'report', target: p.url, role: r.profile?.role, passed, of: r.checks.length, checks: r.checks, credential,
-      verdict: allPass ? 'Speaks the Lake. A stranger can find it, trust its card, and can\'t fool it with the usual tricks.' : `${r.checks.length - passed} check(s) failed. Each one says what a stranger saw.`,
+      verdict: `${allPass ? 'Speaks the Lake: a stranger can find it, check its card is really its own, and can\'t fool it with the usual tricks.' : `${r.checks.length - passed} check(s) failed. Each one says what a stranger saw.`} ${SCOPE}`,
     };
   });
   return s;

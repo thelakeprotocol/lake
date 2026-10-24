@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, isCurrency, makeEvent, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, digestSRI, isCurrency, makeEvent, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -80,7 +80,7 @@ export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: s
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion { id: string; from: string; text: string; request?: string; offer?: string; at: string }
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance']);
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -139,6 +139,8 @@ export class OwnerDesk {
       tell?: (url: string, payload: Record<string, unknown>) => Promise<void>;
       /** The offers priced for the owner, to check an assistant's note names a real one. */
       offerIds?: () => string[];
+      /** Files a receipt for what an assistant paid under the owner's allowance, and marks the order it names paid. */
+      spent?: (receipt: { credential?: string; card?: AgentCard }, allowanceDigest: string, payerWebId: string) => Promise<{ filed: string; offer?: string }>;
     },
   ) {}
 
@@ -258,7 +260,10 @@ export class OwnerDesk {
     if (!this.o.tell) return;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;
-      void this.o.tell(a.url, { kind: 'house.news', house: this.o.webId, ...payload }).catch(() => {});
+      // A busy network loses a message now and then (run 24's assistant never heard of its allowance): try three times.
+      const send = (left: number, wait: number): void => void this.o.tell!(a.url!, { kind: 'house.news', house: this.o.webId, ...payload })
+        .catch(() => { if (left > 1) setTimeout(() => send(left - 1, wait * 4), wait).unref(); });
+      send(3, 5_000);
     }
   }
 
@@ -360,6 +365,16 @@ export class OwnerDesk {
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
+        }
+        if (p.kind === 'assistant.spent') {
+          // The assistant hands back the receipt for what it spent: the owner sees it with their money, and the order turns paid.
+          const a = this.allowanceFor(assistant.kid);
+          if (!a || !assistant.webId || !this.o.spent) return void res.status(400).json({ error: 'you have no allowance from your human here' });
+          try {
+            return void res.json({ ok: true, ...(await this.o.spent((p as unknown as { receipt?: { credential?: string; card?: AgentCard } }).receipt ?? {}, digestSRI(a.credential), assistant.webId)) });
+          } catch (e) {
+            return void res.status(400).json({ error: (e as Error).message });
+          }
         }
         if (p.kind === 'assistant.allowance') {
           // What this assistant may spend for its human: the owner's signed mandate, the house's card and its word for the

@@ -485,8 +485,8 @@ async function offers(box: HTMLElement) {
         : [fmt(out[first]!, lab(first).unit), h('span', { class: 'muted', style: 'font-size:14px;margin-left:10px;font-family:var(--f-body)' }, lab(first).label)];
       const head = o.result.eligible ? h('div', { class: 'r-title', style: 'font-size:22px;font-family:var(--f-display)' }, ...headline) : h('div', { class: 'r-title muted' }, 'Not for you this time');
       const shown = out.rate !== undefined ? ['rate', 'monthly', 'group_off'] : [first, 'group_off'];
-      const accept = h('button', { class: 'btn allow', type: 'button' }, o.status === 'accepted' ? 'Accepted' : 'Accept');
-      if (o.status === 'accepted' || !o.result.eligible || eligible.some((x) => x.status === 'accepted')) accept.disabled = true;
+      const accept = h('button', { class: 'btn allow', type: 'button' }, o.status === 'paid' ? 'Paid' : o.status === 'accepted' ? 'Accepted' : 'Accept');
+      if (o.status === 'accepted' || o.status === 'paid' || !o.result.eligible || eligible.some((x) => x.status === 'accepted')) accept.disabled = true;
       accept.onclick = async () => {
         if (!confirm(`Accept ${o.quoter.name}'s offer? Your signed record goes to them, and only them, so they can confirm it.`)) return;
         accept.disabled = true;
@@ -625,7 +625,7 @@ function suggestionList(list: Note[]): Node {
 
 // ---- Money ----
 async function money(box: HTMLElement) {
-  const m = await call<{ total: number; receipts: { amount: number; currency: string; agreement: string; from: string; payer?: string; at: string; settlement: string }[] }>({ kind: 'panel.money' });
+  const m = await call<{ total: number; receipts: { amount: number; currency: string; agreement: string; from: string; payer?: string; at: string; settlement: string }[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string }[] }>({ kind: 'panel.money' });
   box.replaceChildren(
     h('dl', { class: 'tiles' }, h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.total}`)), h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.receipts.length)))),
     h('p', { class: 'lede' }, 'Every payment comes with a receipt signed by a payments agent you trust, filed in your pod. In the sandbox, settlement is simulated.'),
@@ -633,6 +633,10 @@ async function money(box: HTMLElement) {
       h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `${money$(r.amount, r.currency)} from ${who(r.payer)}` : money$(r.amount, r.currency)), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · signed by ${who(r.from)} · ${r.settlement}`)),
       h('span', { class: 'chip share' }, 'signed'))))
       : h('p', { class: 'muted' }, 'No payments yet.'),
+    // What your own agent paid for you, under the allowance you signed: its receipts, handed back to your house.
+    m.spent?.length ? h('div', {}, h('h2', {}, 'Spent by your agent'), h('ul', { class: 'rows' }, ...m.spent.map((r) => h('li', {},
+      h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · under your allowance · ${r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40)}`)),
+      h('span', { class: 'chip share' }, 'signed'))))) : '',
   );
 }
 

@@ -1,6 +1,7 @@
 import { generateAgentCardSignature, verifyAgentCardSignature, type AgentCard } from '@a2a-js/sdk';
 import * as jose from 'jose';
 import type { Identity } from './crypto.js';
+import type { MenuItem } from './trade.js';
 import { LAKE_EXTENSION_URI, LAKE_VERSION } from './lake.js';
 
 export type LakeRole = 'house' | 'specialist' | 'visitor' | 'agent' | 'node';
@@ -18,6 +19,8 @@ export interface LakeProfile {
   tags: string[];
   /** Houses: the packs (use cases) whose claims this house holds and checks against their shapes, e.g. "health@1". */
   packs?: string[];
+  /** What this agent sells and for how much (SPEC §6.5): signed with the card, so a price can't be changed in transit. */
+  menu?: MenuItem[];
   lakeVersion: string;
 }
 

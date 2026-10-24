@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cardUrlFor, exampleStudies, isCurrency, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cardUrlFor, checkCart, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
@@ -44,6 +44,8 @@ export interface LakeAgentOptions {
   onMessage?: (m: { from: LakeProfile; card: AgentCard; payload: Record<string, unknown>; signed: LakeData }) => Promise<Record<string, unknown>>;
   /** When whoever drives this agent last acted through it: reported to the nodes, signed, so others can tell it's there. */
   active?: () => number | null;
+  /** Until when it means to be around, if it says. */
+  until?: () => number | null;
   /** A sandbox Lake: skip domain proof when checking who sent a message. Default true. */
   sandbox?: boolean;
   /** The use cases this agent works with (their studies, fields and houses). Default: health. */
@@ -81,7 +83,7 @@ export interface LakeAgent {
   webId: string;
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
-  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string; /** When its driver last acted through it, if it says (agents only). */ last_active?: string }[]>;
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string }[]>;
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
@@ -101,7 +103,16 @@ export interface LakeAgent {
    * nothing backs it but the signature and the payer's word.
    */
   /** `order`: an order id, or the sha256 of what was delivered; the payment and its receipt name it. */
-  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  /**
+   * Pay a cart a seller signed (SPEC §6.5): checked against the seller's card at `sellerUrl`, paid for exactly its total in
+   * its currency, under this agent's allowance; the receipt names the cart and goes to the seller.
+   */
+  payCart(sellerUrl: string, cart: CartMandate): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string; cart: string }>;
+  /** What this agent sells (SPEC §6.5): on its signed card, so search finds it and nobody can change a price in transit. */
+  setMenu(menu: MenuItem[]): Promise<void>;
+  /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
+  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number): Promise<CartMandate>;
   /**
    * Where this agent's spending allowance comes from, once it's connected to its human's house: the allowance the human
    * signed there (SPEC §6.2), in its currency. Without one, USD payments use the sandbox's play-money allowance, if any.
@@ -127,7 +138,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const sent: LakeAgent['sent'] = [];
   const quietMe = () => !!(lakeProfile(visitor.card)?.tags ?? []).includes('quiet');
   // Same identity, a card that also lists what this agent is up for.
-  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags } }, id), id);
+  let menu: MenuItem[] = [];
+  let lastTags: string[] = o.tags ?? [], lastAbout: string | undefined;
+  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags, ...(menu.length ? { menu } : {}) } }, id), id);
   if (o.tags?.length) visitor.card = await tagged(o.tags);
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
@@ -149,31 +162,31 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   }
   const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
-  if (o.onMessage) link.keepAlive(20_000, o.active); // an agent that takes messages stays findable
+  if (o.onMessage) link.keepAlive(20_000, o.active, o.until); // an agent that takes messages stays findable
   let allowance: Promise<{ credential: string; card: AgentCard }> | undefined;
   let allowanceSource: (() => Promise<{ credential: string; card: AgentCard; owner?: string; currency?: string } | null>) | undefined;
 
-  return {
+  const self: LakeAgent = {
     card: visitor.card,
     visitor,
     webId: visitor.webId,
     domain: o.domain,
     async find(q = {}) {
       const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
-      let found: { card: AgentCard; active?: string }[] | null = null;
+      let found: { card: AgentCard; active?: string; until?: string }[] | null = null;
       for (const node of nodes) {
         try {
-          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard; active?: string }[];
+          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard; active?: string; until?: string }[];
           break;
         } catch {
           // try the next node
         }
       }
       if (!found) throw new Error('no Lake node reachable');
-      return found.map(({ card, active }) => {
-        const p = card.capabilities?.extensions?.[0]?.params as { role: string; ownerDomain: string; tags: string[] };
+      return found.map(({ card, active, until }) => {
+        const p = card.capabilities?.extensions?.[0]?.params as { role: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
-        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(active ? { last_active: ago(active) } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,
@@ -195,7 +208,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },
-    async pay(agentUrl, amount, memo, unit = 'USD', order) {
+    async pay(agentUrl, amount, memo, unit = 'USD', order, cart) {
       // Some rulebooks call the sandbox's play dollars "USD-sim"; they are the same dollars. A currency is its ISO code.
       if (/^usd([-_ ]?sim)?$/i.test(unit)) unit = 'USD';
       if (/^[a-z]{3}$/i.test(unit) && (/^[A-Z]{3}$/.test(unit) || MONEYLIKE.test(unit.toLowerCase()))) unit = unit.toUpperCase();
@@ -232,14 +245,14 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         return { credential, card: human.card };
       })();
       const intent = own ?? (await allowance!);
-      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 80)}`, currency });
+      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: cart ? `urn:ap2:cart:${order}` : order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 200)}`, currency, ...(cart ? { cart: { detailsId: cart.detailsId, hash: cart.hash } } : {}) });
       const payments = o.payments ?? 'http://payments:4600';
-      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment] })).reply;
+      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment], ...(cart ? { cart: { mandate: cart.mandate, card: cart.card } } : {}) })).reply;
       if (settled.kind !== 'settled') throw new Error((settled.problems ?? [settled.why ?? 'refused']).join('; '));
       const receipt = settled.receipts[0].credential as string;
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
       // The payee gets the signed receipt; its inbox shows it like any other message.
-      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}) });
+      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}), ...(cart ? { cart: order } : {}) });
       if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount, unit }));
       return { paid: amount, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
     },
@@ -266,7 +279,27 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (!res.ok) throw new Error(body.problems?.length ? `not a valid blueprint: ${body.problems.join('; ')}` : body.why ?? `node said ${res.status}`);
       return body;
     },
+    async setMenu(items) {
+      const problems = menuProblems(items);
+      if (problems.length) throw new Error(problems.join('; '));
+      menu = items;
+      await self.setTags(lastTags, lastAbout);
+    },
+    async cart(buyerWebId, items, minutes) {
+      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes });
+    },
+    async payCart(sellerUrl, cart) {
+      const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;
+      const seller = await verifyLakeCard(sellerCard);
+      const c = await checkCart(cart, seller.publicJwk);
+      if (c.seller !== seller.webId) throw new Error(`that cart was signed by ${c.seller}, not by the agent at ${sellerUrl}`);
+      if (c.buyer !== visitor.webId) throw new Error('that cart is made out to another buyer');
+      const r = await self.pay(sellerUrl, c.total.value, `cart ${c.id}`, c.total.currency, c.id, { mandate: cart, card: sellerCard, hash: c.hash, detailsId: cart.contents.payment_request.details.id });
+      return { ...r, cart: c.id };
+    },
     async setTags(tags, about) {
+      lastTags = tags;
+      lastAbout = about;
       // In place: the card we serve and the one the nodes hold are this same object, so the address never changes.
       const fresh = await tagged(tags, about?.replace(/\s+/g, ' ').trim().slice(0, 200));
       for (const k of Object.keys(visitor.card)) delete (visitor.card as unknown as Record<string, unknown>)[k];
@@ -275,10 +308,12 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     },
     async close() {
       link.stop();
+      await link.leave();
       await link.flush();
       if (server) await new Promise((ok) => server!.close(ok));
     },
   };
+  return self;
 }
 
 /** Studies are certified in advance: a question must be one the loaded packs offer, or pass `study` yourself. */

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  auditProgram, checkAttachment, GROUP_SIZE, makeEvent, pack as packOf, packId, programId, runProgram, sendLake, signMessage, verifyLakeCard, verifyLakeData,
+  auditProgram, checkAttachment, verifyCredential, GROUP_SIZE, makeEvent, pack as packOf, packId, programId, runProgram, sendLake, signMessage, verifyLakeCard, verifyLakeData,
   type AgentCard, type Attachment, type Claim, type Identity, type LakeData, type LakeEvent, type LakeLinks, type LakePack, type LakeProfile, type QuoteProgram, type QuoteResult,
 } from '@thelakeprotocol/core';
 import type { RecordPaths, Trust } from './record.js';
@@ -25,8 +25,10 @@ export interface StoredOffer {
   currency?: string;
   groupSize: number;
   at: string;
-  status: 'open' | 'accepted';
+  status: 'open' | 'accepted' | 'paid';
   answer?: Record<string, unknown>;
+  /** What the owner's assistant paid for it, under their allowance, by the payments agent's receipt. */
+  paid?: { amount: number; currency: string; at: string };
 }
 
 interface Ctx {
@@ -219,6 +221,30 @@ export class Market {
     await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, to: offer.quoter.webId, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live', recordsOut: 0 }));
     this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { pack: offer.pack, released }));
     return offer;
+  }
+
+  /**
+   * The owner's assistant paid under their allowance: file the payments agent's receipt with the owner's money (as spent),
+   * and mark the order it names paid. Only a receipt from a payments agent the owner trusts, made out by this assistant,
+   * under this very allowance, counts (run 24: two orders were paid and the house never knew).
+   */
+  async spent(att: { credential?: string; card?: AgentCard }, allowanceDigest: string, payerWebId: string): Promise<{ filed: string; offer?: string }> {
+    if (!att?.credential || !att.card) throw new Error('send the receipt as { credential, card }');
+    const signer = await verifyLakeCard(att.card);
+    if (!this.c.trust().payments.includes(signer.ownerDomain)) throw new Error(`${signer.ownerDomain} is not a payments agent this house trusts`);
+    const vc = await verifyCredential(att.credential, signer.publicJwk);
+    const s = vc.credentialSubject as unknown as { amount: { currency?: string; value: number }; payer?: string; intentMandate?: string; agreement?: string; settlementId?: string };
+    if (!vc.type.includes('LakeReceipt') || s.payer !== payerWebId || s.intentMandate !== allowanceDigest) throw new Error('not a receipt for a payment this assistant made under your human\'s allowance');
+    const filed = `receipts/spent-${(s.settlementId ?? randomUUID()).replace(/[^a-zA-Z0-9-]/g, '')}.receipt.jwt`;
+    await this.c.write(filed, att.credential);
+    const ref = /^urn:(?:lake:order|ap2:cart):(.+)$/.exec(s.agreement ?? '')?.[1];
+    const offer = ref ? this.offers.get(ref) : undefined;
+    if (offer?.status === 'accepted') {
+      offer.status = 'paid';
+      offer.paid = { amount: s.amount.value, currency: s.amount.currency ?? 'USD', at: new Date().toISOString() };
+      await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
+    }
+    return { filed, ...(offer ? { offer: offer.id } : {}) };
   }
 
   /** Signed request from this house to an agent; its signed, verified reply. */

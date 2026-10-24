@@ -1,4 +1,4 @@
-import { canonicalize, cardUrlFor, proveDomain, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { canonicalize, cardUrlFor, menuProblems, proveDomain, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 export interface Entry {
   /** Short, stable id the map and events use: role plus the start of the key id. */
@@ -15,6 +15,8 @@ export interface Entry {
   lastSeen: number;
   /** When the agent's driver last acted through it (its own signed word), if it says. */
   lastActive?: number;
+  /** Until when it says it will be around. */
+  hereUntil?: number;
 }
 
 export type Refusal = { code: 'not-lake' | 'forged-card' | 'domain' | 'unreachable' | 'card-mismatch'; why: string };
@@ -35,6 +37,8 @@ export class Registry {
     } catch (e) {
       return { ok: false, refusal: { code: (e as { code?: string }).code === 'not-lake' ? 'not-lake' : 'forged-card', why: (e as Error).message } };
     }
+    // A menu others will order from must make sense: a search shows it as it is.
+    if (profile.menu !== undefined && menuProblems(profile.menu).length) return { ok: false, refusal: { code: 'not-lake', why: menuProblems(profile.menu).join('; ') } };
     const proof = await proveDomain(profile, { sandbox: this.o.sandbox });
     if (!proof.ok) return { ok: false, refusal: { code: 'domain', why: proof.reason } };
 
@@ -87,7 +91,7 @@ export class Registry {
         (!q.role || e.profile.role === q.role) &&
         (!tag || e.profile.tags.some((t) => t.toLowerCase() === tag || t.toLowerCase().startsWith(`${tag}:`) || t.toLowerCase().startsWith(tag))) &&
         (!q.skill || e.card.skills.some((s) => s.id === q.skill)) &&
-        (!words.length || ((text) => words.every((w) => text.includes(w)))([e.card.name, e.card.description, ...e.profile.tags, ...e.card.skills.map((s) => `${s.id} ${s.name} ${s.description}`)].join(' ').toLowerCase())),
+        (!words.length || ((text) => words.every((w) => text.includes(w)))([e.card.name, e.card.description, ...e.profile.tags, ...e.card.skills.map((s) => `${s.id} ${s.name} ${s.description}`), ...(e.profile.menu ?? []).map((m) => `${m.sku} ${m.label}`)].join(' ').toLowerCase())),
     );
   }
 

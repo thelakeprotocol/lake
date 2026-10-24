@@ -498,7 +498,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_buy', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -710,6 +710,86 @@ describe('the open door', () => {
     expect(got.messages).toEqual([expect.objectContaining({ from: expect.objectContaining({ domain: me.domain }), message: { kind: 'game.move', game: 'connect4', col: 3 } })]);
     expect((await bob('lake_inbox', { wait_seconds: 0 })).messages).toEqual([]);
   }, 60_000);
+
+  it('two assistants trade: a menu on the card, a cart the seller signs (AP2), paid once for exactly its total, delivered and accepted', async () => {
+    const port = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '20' });
+    const connect = async (name: string) => {
+      const c = new Client({ name, version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+      return async (tool: string, args: Record<string, unknown> = {}, ok = true) => {
+        const r = await c.callTool({ name: tool, arguments: args });
+        const text = (r.content as { text: string }[])[0]!.text;
+        expect(!!r.isError, text).toBe(!ok);
+        return ok ? JSON.parse(text) : text;
+      };
+    };
+    const poet = await connect('claude-poet');
+    const buyer = await connect('claude-buyer');
+    // The seller puts a menu on its signed card; search finds it by what it sells.
+    await poet('lake_sell', { action: 'menu', items: [{ sku: 'haiku', label: 'A haiku on any topic', price: 2, currency: 'USD', unit: 'poem' }] });
+    const [found] = await buyer('lake_search', { q: 'haiku' });
+    expect(found.menu).toEqual([{ sku: 'haiku', label: 'A haiku on any topic', price: { currency: 'USD', value: 2 }, unit: 'poem' }]);
+    // An order from the menu gets a signed cart back at once, without the seller's model.
+    const order = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', qty: 2, note: 'about herons' });
+    expect(order).toMatchObject({ total: { currency: 'USD', value: 4 }, items: [{ label: '2 × A haiku on any topic' }] });
+    // Paid under the buyer's allowance, for exactly the cart, once; the receipt names the cart.
+    const paid = await buyer('lake_buy', { action: 'pay', cart: order.cart.slice(0, 8) });
+    expect(paid).toMatchObject({ paid: 4, unit: 'USD', cart: order.cart, remaining: 16 });
+    expect(await buyer('lake_buy', { action: 'pay', cart: order.cart }, false)).toMatch(/paid already/);
+    const sales = (await poet('lake_inbox', { wait_seconds: 5 })).messages;
+    expect(sales.map((m: any) => m.message.kind)).toEqual(['trade.order', 'receipt']);
+    expect(sales[1].checked).toMatchObject({ verified: true, settled: true, cart: { id: order.cart } });
+    expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ cart: order.cart, status: 'paid' });
+    // Delivered with its sha256; the buyer's connector checks it, and the buyer signs that it accepts.
+    const poem = 'Grey heron stands still / the river forgets the hour / one fish, then the next';
+    expect(await poet('lake_sell', { action: 'deliver', cart: order.cart, content: poem })).toMatchObject({ delivered: order.cart, their_reply: { kind: 'received' } });
+    const [delivery] = (await buyer('lake_inbox', { wait_seconds: 5 })).messages;
+    expect(delivery.checked).toMatchObject({ cart: order.cart, matches_what_the_seller_signed: true });
+    await buyer('lake_buy', { action: 'accept', cart: order.cart });
+    const [sale] = (await poet('lake_sell', { action: 'orders', evidence: true })).orders;
+    expect(sale).toMatchObject({ status: 'accepted', verdict: { verdict: 'accepted' } });
+    expect(sale.evidence.map((e: { step: string }) => e.step)).toEqual(['ordered', 'cart signed', 'paid', 'delivered (their signed receipt of it)', 'accepted']);
+    // A cart for someone else, or a forged one, isn't paid: the payments agent checks the seller's signature itself.
+    const theirs = (await buyer('lake_buy', { action: 'orders', evidence: true })).orders[0];
+    expect(theirs).toMatchObject({ status: 'accepted', you_are: 'buyer' });
+  }, 90_000);
+
+  it("a pick-up game: a room says how many it needs, its lobby talks, it notes who leaves, and starts with fewer at its deadline; agents say how long they'll stay, and leaving drops them from search", async () => {
+    const port = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node });
+    const sessions: StreamableHTTPClientTransport[] = [];
+    const connect = async (name: string) => {
+      const c = new Client({ name, version: '0' });
+      const t = new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`));
+      await c.connect(t);
+      sessions.push(t);
+      return async (tool: string, args: Record<string, unknown> = {}) => JSON.parse(((await c.callTool({ name: tool, arguments: args })).content as { text: string }[])[0]!.text);
+    };
+    const host = await connect('claude-host');
+    const guest = await connect('claude-guest');
+    const leaver = await connect('claude-leaver');
+    expect(await host('lake_room', { action: 'open', room: 'pickup', topic: 'four for thirds', mode: 'room', invite: 'anyone', hours: 1, start_with: 4, start_by: 0.1, start_min: 2 })).toMatchObject({ kind: 'room.opened', needs: 4, started: false });
+    for (const who of [host, guest, leaver]) await who('lake_room', { action: 'join', room: 'pickup' });
+    expect((await guest('lake_room', { action: 'list' })).rooms.find((r: { id: string }) => r.id === 'pickup')).toMatchObject({ needs: 1, start_with: 4 });
+    // The lobby talks before the start; the room itself notes who leaves.
+    expect(await guest('lake_room', { action: 'say', room: 'pickup', body: 'anyone else coming?' })).toMatchObject({ kind: 'room.said' });
+    await leaver('lake_room', { action: 'leave', room: 'pickup' });
+    // At the deadline it starts with the two still in.
+    await new Promise((ok) => setTimeout(ok, 6500));
+    const read = await host('lake_room', { action: 'read', room: 'pickup', after: 0 });
+    expect(read).toMatchObject({ started: true });
+    expect(read.messages.map((m: { from: string; body: any; lobby?: boolean }) => (m.from === 'room' ? m.body.event : 'say'))).toEqual(['joined', 'joined', 'joined', 'say', 'left', 'started']);
+    expect(read.messages[3]).toMatchObject({ lobby: true });
+    // How long an agent means to stay shows in search, and an agent that leaves is gone from it.
+    await guest('lake_set_tags', { tags: ['game:thirds'], here_until: 10 });
+    await new Promise((ok) => setTimeout(ok, 21_000)); // one presence report
+    const [g] = await host('lake_search', { tag: 'game:thirds' });
+    expect(g).toMatchObject({ here_until: expect.any(String), last_active: 'just now' });
+    await sessions[1]!.terminateSession();
+    await new Promise((ok) => setTimeout(ok, 1000));
+    expect(await host('lake_search', { tag: 'game:thirds' })).toEqual([]);
+  }, 90_000);
 });
 
 describe('a study run', () => {
@@ -996,6 +1076,16 @@ describe('the weekly shop, priced inside the house', () => {
     expect(entry).toMatchObject({ to: best.quoter.webId, released: ['claims: household_size, dietary_needs, staples'], consent: 'owner, live' });
   });
 
+  it("the register guards the shopping fields at the door: an unregistered agent asking for a list is declined, and anyone can check the register", async () => {
+    const rogue = await makeVisitor(await generateIdentity(), 'rogue-grocer.example');
+    const { reply } = await knock(`${buyers[2]!.url}/a2a`, rogue, { purpose: 'service', fields: ['staples', 'household_size'], priceUsd: 2, retention: 'none', credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false } });
+    expect(reply).toMatchObject({ decision: 'decline', code: 'unauthorised', reason: expect.stringContaining('Food Business Register') });
+    expect((await buyers[2]!.call({ kind: 'list' })).requests).toEqual([]);
+    const check = async (domain: string) => (await ask(`${specialistsUrl}/foodregister/a2a`, rogue, { kind: 'registered', domain })).reply;
+    expect(await check('corner.lake.local')).toMatchObject({ registered: true, pack: 'shopping@1' });
+    expect(await check('rogue-grocer.example')).toMatchObject({ registered: false });
+  });
+
   it("the owner's assistant suggests an offer, hears when it's accepted, and pays the grocer in its currency under the allowance", async () => {
     const b = buyers[1]!;
     const news: Record<string, any>[] = [];
@@ -1026,6 +1116,11 @@ describe('the weekly shop, priced inside the house', () => {
     await expect(me.pay(accepted.from.url, accepted.outputs.total, 'weekly shop', 'USD', pick.id)).rejects.toThrow(/allowance is in AUD/);
     const paid = await me.pay(accepted.from.url, accepted.outputs.total, 'weekly shop', 'AUD', pick.id);
     expect(paid).toMatchObject({ paid: accepted.outputs.total, unit: 'AUD', under: "your human's signed allowance", remaining: Math.round((150 - accepted.outputs.total) * 100) / 100 });
+    // The receipt goes back to the house: filed with the owner's money as spent, and the order turns paid.
+    const paymentsCard = await (await fetch(cardUrlFor(`${payments}/a2a`))).json();
+    expect(await asAssistant({ kind: 'assistant.spent', receipt: { credential: paid.receipt, card: paymentsCard } })).toMatchObject({ ok: true, offer: pick.id });
+    expect((await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.id === pick.id)).toMatchObject({ status: 'paid', paid: { amount: accepted.outputs.total, currency: 'AUD' } });
+    expect((await b.call({ kind: 'panel.money' })).spent).toEqual([expect.objectContaining({ amount: accepted.outputs.total, currency: 'AUD' })]);
     await me.close();
   });
 });

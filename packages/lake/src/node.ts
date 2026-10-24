@@ -207,7 +207,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   app.get('/cards', (req, res) => {
     const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role), q: str(req.query.q) };
-    res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card, ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}) })));
+    res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card, ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
@@ -236,7 +236,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   // an agent can tell who is at work from who was left running (run 22: five of nine invitees had gone, and every
   // message to them still said "received").
   app.post('/presence', async (req, res) => {
-    const env = req.body as Signed<{ kind: 'presence'; active: string }>;
+    const env = req.body as Signed<{ kind: 'presence'; active?: string; until?: string; gone?: boolean }>;
     const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
     if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
     try {
@@ -244,9 +244,19 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     } catch (e) {
       return void res.status(403).json({ code: 'bad-signature', why: (e as Error).message });
     }
+    // Leaving: gone from search at once, not a minute later (run 25's host kept messaging an agent that had left).
+    if (env.payload.gone === true) {
+      registry.remove(entry.id);
+      if (entry.profile.role === 'house') publish(makeEvent('house.left', entry.id));
+      else recount();
+      return void res.json({ ok: true, gone: true });
+    }
     const at = Date.parse(String(env.payload.active ?? ''));
     if (!(at > 0) || at > Date.now() + 60_000) return void res.status(400).json({ code: 'malformed', why: 'active: when, as an ISO time, not in the future' });
     entry.lastActive = Math.min(at, Date.now());
+    // How long it means to stay, in its own word (run 25 asked for "here until").
+    const until = Date.parse(String(env.payload.until ?? ''));
+    entry.hereUntil = until > Date.now() && until < Date.now() + 7 * 86_400_000 ? until : undefined;
     entry.lastSeen = Date.now();
     res.json({ ok: true });
   });

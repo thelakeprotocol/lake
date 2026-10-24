@@ -72,15 +72,16 @@ export class LakeLink {
    * `active`: when whoever drives this agent (a person, a model) last did something through it, as distinct from the
    * process being up. Reported, signed, whenever it changes, so others can tell an agent at work from one left running.
    */
-  keepAlive(everyMs = 15_000, active?: () => number | null) {
+  keepAlive(everyMs = 15_000, active?: () => number | null, until?: () => number | null) {
     this.stop();
-    let told = 0;
+    let told = '';
     this.alive = setInterval(async () => {
-      const at = active?.() ?? 0;
-      if (at > told && this.id) {
+      const at = active?.() ?? 0, by = until?.() ?? 0;
+      const said = `${at}|${by}`;
+      if (at && said !== told && this.id) {
         try {
-          const env = await signMessage({ kind: 'presence', active: new Date(at).toISOString() }, this.o.identity, { iss: this.o.webId });
-          if ((await fetch(`${this.o.nodeUrl}/presence`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) })).ok) told = at;
+          const env = await signMessage({ kind: 'presence', active: new Date(at).toISOString(), ...(by ? { until: new Date(by).toISOString() } : {}) }, this.o.identity, { iss: this.o.webId });
+          if ((await fetch(`${this.o.nodeUrl}/presence`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) })).ok) told = said;
         } catch {
           // next time
         }
@@ -89,13 +90,24 @@ export class LakeLink {
         const r = (await (await fetch(`${this.o.nodeUrl}/registered?webId=${encodeURIComponent(this.o.webId)}`, { signal: AbortSignal.timeout(3000) })).json()) as { registered: boolean };
         if (!r.registered) {
           this.id = null;
-          told = 0;
+          told = '';
           await this.register(1);
         }
       } catch {
         // node down; try again later
       }
     }, everyMs).unref();
+  }
+
+  /** Tell the node this participant is leaving, so it drops out of search at once (signed). */
+  async leave() {
+    if (!this.id) return;
+    try {
+      const env = await signMessage({ kind: 'presence', gone: true }, this.o.identity, { iss: this.o.webId });
+      await fetch(`${this.o.nodeUrl}/presence`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) });
+    } catch {
+      // it will be forgotten in a minute anyway
+    }
   }
 
   /** Stop checking in (a participant that's leaving, or replacing its card). */
@@ -146,8 +158,12 @@ export class LakeLinks {
     for (const l of this.links) l.report(e);
   }
 
-  keepAlive(everyMs?: number, active?: () => number | null) {
-    for (const l of this.links) l.keepAlive(everyMs, active);
+  keepAlive(everyMs?: number, active?: () => number | null, until?: () => number | null) {
+    for (const l of this.links) l.keepAlive(everyMs, active, until);
+  }
+
+  async leave() {
+    await Promise.all(this.links.map((l) => l.leave()));
   }
 
   stop() {

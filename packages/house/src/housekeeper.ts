@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -46,7 +46,7 @@ export type Reply =
   | { kind: 'excluded'; study: string; why: string }
   | { kind: 'quoted'; ref: string };
 
-interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment } }
+interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment; authorisation?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string; count?: string }
 interface StatusPayload { kind: 'status'; offerId: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
@@ -230,6 +230,18 @@ export class Housekeeper {
       else ethicsApproved = true;
     }
     if (this.o.sandbox) notes.push('sandbox Lake: the visitor domain was not proved');
+    // A pack with a register guards its fields (SPEC §5.3): outside a certified study, only an agent showing that register's
+    // authorisation, from a regulator the owner trusts, may ask for them. Run 24's unregistered grocer put eight requests for
+    // shopping lists on owners' phones with no warning; the register only stood at the quote door.
+    if (!auditCertified) {
+      for (const pk of new Set(offer.fields.map((f) => fieldSpec(f)?.pack).filter((x): x is LakePack => !!x?.authority))) {
+        const auth = await checkAttachment(p.attachments?.authorisation, { trusted: this.o.trust.regulators, type: 'LakeAuthorisation', subject: visitorWebId, sandbox: this.o.sandbox });
+        if (auth.ok && auth.vc.credentialSubject.pack === packId(pk)) continue;
+        const why = `asks for ${packId(pk)} fields without ${pk.authority!.name}'s authorisation (${auth.ok ? 'it is for another pack' : auth.why})`;
+        this.declinedAt.set(`${visitorWebId}|${offer.purpose}`, Date.now());
+        return decide('decline', why, { code: 'unauthorised' }, `declined: ${offer.fields.filter((f) => fieldSpec(f)?.pack === pk).join(', ')} belong to ${packId(pk)}, and only agents on ${pk.authority!.name} may ask for them: attach its authorisation (attachments.authorisation), or ask through a certified study`);
+      }
+    }
 
     // House manners (run 21's agents asked): a visitor turned down for a purpose isn't heard again on it for a day, and one
     // visitor can't stack more than a few requests on the owner at once.

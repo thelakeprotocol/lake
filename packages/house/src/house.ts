@@ -248,6 +248,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       await sendLake(url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { me: id, timeoutMs: 15_000 });
     },
     offerIds: () => [...(keeperRef?.market.offers.keys() ?? [])],
+    spent: (receipt, digest, payer) => keeperRef!.market.spent(receipt, digest, payer),
     // The next person gets the house as it started: its original rules.
     onRelease: async () => {
       await put(owner, 'settings/rules.yaml', o.rulesText, 'text/yaml');
@@ -377,7 +378,10 @@ function panelFor(x: {
   // Blind pledges this house signed: the salt reveals it once a pledge fills (kept in the owner's wallet).
   const blindPledges = async (): Promise<BlindSignature[]> => { const r = await owner.fetch(`${owner.podRoot}wallet/pledges.json`).catch(() => null); return r?.ok ? r.json() : []; };
   const money = async () => {
-    const files = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
+    const all = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
+    // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
+    const files = all.filter((f) => !/(^|\/)spent-/.test(f));
+    const spentFiles = all.filter((f) => /(^|\/)spent-/.test(f));
     const receipts = (await Promise.all(files.map(async (f) => {
       const r = await owner.fetch(owner.podRoot + f);
       const vc = r.ok ? decode(await r.text()) : null;
@@ -388,7 +392,13 @@ function panelFor(x: {
     const since = x.desk().claimedAt();
     if (since) receipts.splice(0, receipts.length, ...receipts.filter((r) => Date.parse(r.at) >= since));
     receipts.sort((a, b) => (a.at < b.at ? 1 : -1));
-    return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts };
+    const spent = (await Promise.all(spentFiles.map(async (f) => {
+      const r = await owner.fetch(owner.podRoot + f);
+      const vc = r.ok ? decode(await r.text()) : null;
+      const s = vc?.credentialSubject;
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
+    }))).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
+    return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
   return {
     async overview(tzOffset?: number) {
