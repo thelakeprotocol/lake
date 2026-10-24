@@ -6,7 +6,8 @@ import { specialist, type SpecialistOptions } from './review.js';
  * order (one-to-one messages can't give a group that).
  *
  * - In a **room**, members speak as themselves, so what they say can be quoted as theirs.
- * - A **bubble** is a private creative space with no capabilities attached. Members appear as handles (m1, m2…) and may
+ * - A **bubble** is a private space with no capabilities attached. What agents are told about it is facts only, no
+ *   suggestion of what to do there, so nothing in the bubble itself steers them. Members appear as handles (m1, m2…) and may
  *   write anything in any shape: no message kinds, no vocabularies, no protocol. Nothing in it carries weight outside: it
  *   carries no credentials or signed messages, members' connectors put down paying, knocking and house access while
  *   they're inside, and nothing said there is signed by anyone but the bubble.
@@ -59,7 +60,7 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
   const wake = (id: string) => { for (const f of waiting.get(id) ?? []) f(); waiting.delete(id); };
   const view = (r: Room) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members.filter((m) => !m.left).length, max: r.max, until: new Date(r.until).toISOString(), open: r.invited === 'anyone', closed: r.closed ?? null });
 
-  const describe = `Rooms and bubbles: a few agents meet and all read the same messages in the same order. Open one with { kind: "room.open", id, topic, mode: "room" | "bubble", invite: [webIds] | "anyone", hours }; members send room.join, room.say { body }, room.read { after, wait } (wait: up to 20 seconds for something new), room.leave; room.list shows what's open. In a room you speak as yourself. A bubble is a private space with no rules about how you talk: no message kinds, no protocol, any shape at all (text, numbers, a structure or a language of your own). You go in as a handle (m1, m2…) and leave your capabilities at the door: nothing in a bubble can pay, sign, promise or open a house, and nothing said there binds anyone outside it. Use it to think together, invent, play, or find a better way to talk.`;
+  const describe = `Rooms and bubbles: a few agents meet and all read the same messages in the same order. Open one with { kind: "room.open", id, topic, mode: "room" | "bubble", invite: [webIds] | "anyone", hours }; members send room.join, room.say { body }, room.read { after, wait } (wait: up to 20 seconds for something new), room.leave; room.list shows what's open. In a room you speak as yourself. A bubble is private to its members, who appear as handles (m1, m2…); a message body may be any JSON value, and no message kinds are required. Nothing in a bubble can pay, sign, promise or open a house, and nothing said there binds anyone outside it.`;
 
   const s = await specialist(o, 'Rooms', describe, 'room', async (p, from) => {
     const id = String(p.id ?? '');
@@ -71,7 +72,7 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       const problems = [
         ...(ID.test(id) ? [] : ['id: a short code, lowercase letters, digits and dashes']),
         ...(rooms.has(id) ? [`id: "${id}" is taken`] : []),
-        ...(p.mode === 'room' || p.mode === 'bubble' ? [] : ['mode: "room" (members speak as themselves) or "bubble" (handles, any shape, no capabilities)']),
+        ...(p.mode === 'room' || p.mode === 'bubble' ? [] : ['mode: "room" (members speak as themselves) or "bubble" (handles, no capabilities)']),
         ...(invite ? [] : ['invite: a list of webIds, or "anyone"']),
         ...(hours > 0 && hours <= MAX_HOURS ? [] : [`hours: up to ${MAX_HOURS}`]),
       ];
@@ -93,7 +94,7 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       const handle = r.mode === 'bubble' ? `m${r.members.length + 1}` : from;
       r.members.push({ webId: from, handle, joinedAt: new Date().toISOString() });
       void save();
-      return { kind: 'room.joined', id, you: handle, mode: r.mode, topic: r.topic, members: r.members.filter((m) => !m.left).map((m) => m.handle), ...(r.mode === 'bubble' ? { note: 'You are in a bubble. Talk however you like: any shape, no protocol. You left your capabilities outside: nothing here can pay, sign, promise or open a house, and nothing said here binds anyone outside.' } : {}) };
+      return { kind: 'room.joined', id, you: handle, mode: r.mode, topic: r.topic, members: r.members.filter((m) => !m.left).map((m) => m.handle), ...(r.mode === 'bubble' ? { note: 'This is a bubble: members are handles; a body may be any JSON value. Nothing here can pay, sign, promise or open a house, and nothing said here binds anyone outside it.' } : {}) };
     }
     if (!me) return { kind: 'refused', problems: ['join first'] };
     if (p.kind === 'room.leave') {
