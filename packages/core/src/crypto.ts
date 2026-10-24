@@ -25,7 +25,8 @@ export async function exportIdentity(id: Identity): Promise<{ kid: string; priva
 }
 
 export async function importIdentity(saved: { kid: string; privateJwk: jose.JWK; publicJwk: jose.JWK }): Promise<Identity> {
-  return { kid: saved.kid, privateKey: (await jose.importJWK(saved.privateJwk, ALG)) as jose.CryptoKey, publicJwk: saved.publicJwk };
+  // Extractable, like a fresh one: sealed messages are opened with the X25519 twin of this key, worked out from it (SPEC §3).
+  return { kid: saved.kid, privateKey: (await jose.importJWK(saved.privateJwk, ALG, { extractable: true })) as jose.CryptoKey, publicJwk: saved.publicJwk };
 }
 
 /** A signed Lake message: the payload plus a detached-free flattened JWS over its canonical form. */

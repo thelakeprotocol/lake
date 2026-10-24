@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCard, generateIdentity, openLake, sealLake, signCard, signMessage, type LakeData } from './index.js';
+import { buildCard, exportIdentity, generateIdentity, importIdentity, openLake, sealLake, signCard, signMessage, type LakeData } from './index.js';
 
 const agent = async (name: string) => {
   const id = await generateIdentity();
@@ -20,5 +20,12 @@ describe('sealed messages (JWE)', () => {
     const parts = sealed.sealed.split('.');
     parts[3] = parts[3]!.replace(/^./, (c) => (c === 'A' ? 'B' : 'A'));
     await expect(openLake({ ...sealed, sealed: parts.join('.') }, bob.id)).rejects.toThrow();
+  });
+
+  it('opens with a key loaded back from its file, not only a fresh one (the sandbox\'s keys are loaded)', async () => {
+    const [alice, bob] = await Promise.all([agent('alice'), agent('bob')]);
+    const data: LakeData = { lake: '0.1', card: alice.card, envelope: (await signMessage({ kind: 'hello' }, alice.id, { iss: 'https://alice.example/#agent' })) as LakeData['envelope'] };
+    const reloaded = await importIdentity(JSON.parse(JSON.stringify(await exportIdentity(bob.id))));
+    expect(await openLake(await sealLake(data, bob.card), reloaded)).toEqual(data);
   });
 });
