@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { blueprintHeader, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { blueprintHeader, canonicalize, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -154,7 +154,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (received.length > 300) received.shift();
         if (inbox.length > 200) inbox.shift();
         wake?.();
-        return { kind: 'received' };
+        // The sender's proof of delivery: this agent's signed word that exactly this arrived (its sha256), kept by the
+        // sender with the reply (lake_inbox history). Run 21's buyers and sellers asked for "I got your order X".
+        return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex') };
       },
     });
     x.onAgent?.(a);
@@ -292,10 +294,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_pay',
-    { description: 'Pay another agent for a deal you made: an auction you lost, a trade, a bet, a service. In USD it is settled by the payments agent under your spending allowance, with a signed receipt. Value is whatever the two of you agree on, so you can also pay in any other unit (hour, favour, naming-right…): then it is a transfer you sign, backed only by your signature and your word. The payee gets it in its inbox. Pay only what you agreed, and only what your human would agree to.', inputSchema: { agent_url: z.string().describe("The payee's A2A endpoint"), amount: z.number().positive(), unit: z.string().default('USD').describe('USD, or any unit you both agreed on, e.g. "favour"'), memo: z.string().max(200).describe('What it is for, e.g. "lot1, sealed auction"') } },
+    { description: 'Pay another agent for a deal you made: an auction you lost, a trade, a bet, a service. In USD it is settled by the payments agent under your spending allowance, with a signed receipt. Value is whatever the two of you agree on, so you can also pay in any other unit (hour, favour, naming-right…): then it is a transfer you sign, backed only by your signature and your word. The payee gets it in its inbox. Pay only what you agreed, and only what your human would agree to.', inputSchema: { agent_url: z.string().describe("The payee's A2A endpoint"), amount: z.number().positive(), unit: z.string().default('USD').describe('USD, or any unit you both agreed on, e.g. "favour"'), memo: z.string().max(200).describe('What it is for, e.g. "lot1, sealed auction"'), order: z.string().max(120).optional().describe('An order id, or the sha256 of what was delivered (lake_commit { value, plain: true }): the signed receipt names it, so it shows what was bought, not just a memo') } },
     async (a) => {
       try {
-        return json(await (await agent()).pay(a.agent_url, a.amount, a.memo, a.unit === 'usd' ? 'USD' : a.unit));
+        return json(await (await agent()).pay(a.agent_url, a.amount, a.memo, a.unit === 'usd' ? 'USD' : a.unit, a.order));
       } catch (e) {
         return fail(e);
       }
@@ -383,7 +385,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async (a) => {
       try {
         if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
-        return json(await (await agent()).ask(a.agent_url, a.message as { kind: string }));
+        const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
+        // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
+        if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';
+        return json(reply);
       } catch (e) {
         return fail(e);
       }
@@ -533,13 +538,15 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         'Commit to a value without showing it, and open it later: for sealed bids, hidden moves, secret ballots, "I said it first". Give value to get { commit, salt }: send the commit now, keep the salt; later reveal value and salt, and anyone checks with { check: { value, salt, commit } }. The commit is sha256(value + "|" + salt) in hex, as the pledge and coin-flip blueprints use, so code anywhere can check it too.',
       inputSchema: {
         value: z.string().max(10_000).optional().describe('What to commit to (text; for a structure, use JSON text)'),
-        check: z.object({ value: z.string(), salt: z.string(), commit: z.string() }).optional().describe('A reveal to check against its commit'),
+        plain: z.boolean().default(false).describe('A public fingerprint instead: sha256(value) with no salt, e.g. of a piece of work you deliver or receive, to name it in an order or a payment'),
+        check: z.object({ value: z.string(), salt: z.string().optional(), commit: z.string() }).optional().describe('A reveal to check against its commit (no salt: a plain fingerprint)'),
       },
     },
     async (a) => {
       const hash = (v: string, salt: string) => createHash('sha256').update(`${v}|${salt}`).digest('hex');
-      if (a.check) return json({ matches: hash(a.check.value, a.check.salt) === a.check.commit.toLowerCase(), commit: a.check.commit });
+      if (a.check) return json({ matches: (a.check.salt ? hash(a.check.value, a.check.salt) : createHash('sha256').update(a.check.value).digest('hex')) === a.check.commit.toLowerCase(), commit: a.check.commit });
       if (a.value === undefined) return fail(new Error('give value to commit to, or check: { value, salt, commit }'));
+      if (a.plain) return json({ sha256: createHash('sha256').update(a.value).digest('hex'), next: 'Anyone with the same text gets the same sha256: name it in an order or a payment (lake_pay { order }), or check it with { check: { value, commit } }.' });
       const salt = randomBytes(16).toString('hex');
       return json({ commit: hash(a.value, salt), salt, next: 'Send the commit now. Keep the salt to yourself until you reveal; then send value and salt together.' });
     },

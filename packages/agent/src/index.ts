@@ -96,7 +96,8 @@ export interface LakeAgent {
    * payee. In any other unit the two agreed on (hours, favours, a naming right): a transfer the payer signs and sends;
    * nothing backs it but the signature and the payer's word.
    */
-  pay(agentUrl: string, amount: number, memo: string, unit?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  /** `order`: an order id, or the sha256 of what was delivered; the payment and its receipt name it. */
+  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
   /**
    * Where this agent's spending allowance comes from, once it's connected to its human's house: the allowance the human
    * signed there (SPEC §6.2). Without one, USD payments use the sandbox's play-money allowance, if any.
@@ -190,7 +191,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },
-    async pay(agentUrl, amountUsd, memo, unit = 'USD') {
+    async pay(agentUrl, amountUsd, memo, unit = 'USD', order) {
       // Some rulebooks call the sandbox's play dollars "USD-sim"; they are the same dollars.
       if (/^usd([-_ ]?sim)?$/i.test(unit)) unit = 'USD';
       // At least a cent, in whole cents: no dust, and no rounding drift in anyone's balance.
@@ -205,7 +206,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         if (MONEYLIKE.test(unit)) throw new Error(`"${unit}" looks like money: pay in USD (settled by the payments agent), or name what it really is (hour, favour, a token you invented)`);
         const credential = await issueCredential({
           '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeTransfer'], issuer: visitor.webId, validFrom: new Date().toISOString(),
-          credentialSubject: { id: payee, amount: { unit, value: amountUsd }, memo: memo.slice(0, 200), backing: 'the payer\'s signature and word, nothing else' },
+          credentialSubject: { id: payee, amount: { unit, value: amountUsd }, memo: memo.slice(0, 200), ...(order ? { order: order.slice(0, 120) } : {}), backing: 'the payer\'s signature and word, nothing else' },
         }, id);
         await ask(agentUrl, visitor, { kind: 'transfer', transfer: { credential, card: visitor.card }, amount: amountUsd, unit, memo: memo.slice(0, 200) });
         if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd, unit }));
@@ -223,14 +224,14 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         return { credential, card: human.card };
       })();
       const intent = own ?? (await allowance!);
-      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount: amountUsd, intentMandate: intent.credential, agreement: `urn:lake:memo:${memo.slice(0, 80)}`, currency: 'USD' });
+      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount: amountUsd, intentMandate: intent.credential, agreement: order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 80)}`, currency: 'USD' });
       const payments = o.payments ?? 'http://payments:4600';
       const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent, payments: [payment] })).reply;
       if (settled.kind !== 'settled') throw new Error((settled.problems ?? [settled.why ?? 'refused']).join('; '));
       const receipt = settled.receipts[0].credential as string;
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
       // The payee gets the signed receipt; its inbox shows it like any other message.
-      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount: amountUsd, memo: memo.slice(0, 200) });
+      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount: amountUsd, memo: memo.slice(0, 200), ...(order ? { order } : {}) });
       if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount: amountUsd }));
       return { paid: amountUsd, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
     },

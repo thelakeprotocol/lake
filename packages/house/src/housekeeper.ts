@@ -39,7 +39,7 @@ export interface HousekeeperOptions {
 type Decision = 'join' | 'decline' | 'ask' | 'counter';
 export type Reply =
   | { kind: 'rejected'; code: string; why: string }
-  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[] }
+  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[]; /** Why it declined, coarsely (SPEC §5): purpose, price, retention, default, rule, repeat, too-many. */ code?: string }
   | { kind: 'filed'; receipt: string }
   | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'counted'; study: string; count: string; tellers: string[] }
@@ -52,6 +52,9 @@ interface StatusPayload { kind: 'status'; offerId: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
 interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core').QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number; currency?: string }
 
+// House manners: a turned-down purpose is quiet for a day; a visitor stacks at most this many requests on the owner.
+const DECLINE_QUIET_MS = 86_400_000;
+const MAX_WAITING = 3;
 const HOUR = 3_600_000;
 
 /**
@@ -61,6 +64,8 @@ const HOUR = 3_600_000;
  */
 export class Housekeeper {
   private replay = new ReplayGuard();
+  /** When each visitor was last turned down for each purpose (house manners: one ask per purpose a day). */
+  private declinedAt = new Map<string, number>();
   /** Per pack: the last check, and when the whole chain was last verified. */
   private checks = new Map<string, { check: RecordCheck; fullAt: number }>();
   /** Agreements this house signed, so a countersignature doesn't need a pod read. The pod copy is the record. */
@@ -183,7 +188,7 @@ export class Housekeeper {
     if (bad) return this.reply({ kind: 'rejected', code: 'malformed', why: bad });
     if (offer.requester !== domain) {
       // Blame lands on the impersonator's own verified domain and key, never on the domain it pretended to be.
-      this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why: 'impersonation', claimed: domain, key, verified: true }));
+      this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why: 'impersonation', claimed: offer.requester, from: domain, key, verified: true }));
       return this.reply({ kind: 'rejected', code: 'impersonation', why: `card is for ${domain}, offer claims ${offer.requester}` });
     }
     this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: offer.purpose }));
@@ -192,7 +197,7 @@ export class Housekeeper {
     // rules ("your rule 2"). `told` is for reasons about the offer itself (an uncertified study), which the visitor can fix.
     const decide = async (decision: Decision, reason: string, extra: Partial<Extract<Reply, { kind: 'decision' }>> = {}, told?: string) => {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision, reason }));
-      reason = told ?? toVisitor(decision, extra.counter);
+      reason = told ?? toVisitor(decision, extra.counter, (extra as { code?: string }).code, offer.purpose);
       if (decision === 'ask') this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
       // What this house holds is said only to someone it is dealing with, never to someone it just turned away.
       const holds = decision === 'join' || decision === 'counter' ? [...new Set((await this.claims(offer.fields)).map((c) => c.field))] : [];
@@ -223,7 +228,16 @@ export class Housekeeper {
     }
     if (this.o.sandbox) notes.push('sandbox Lake: the visitor domain was not proved');
 
+    // House manners (run 21's agents asked): a visitor turned down for a purpose isn't heard again on it for a day, and one
+    // visitor can't stack more than a few requests on the owner at once.
+    const declinedKey = `${visitorWebId}|${offer.purpose}`;
+    const lastNo = this.declinedAt.get(declinedKey);
+    if (lastNo && Date.now() - lastNo < DECLINE_QUIET_MS) return decide('decline', 'asked again for a purpose this house turned down in the last day', { code: 'repeat' }, `declined: you asked for ${offer.purpose} here in the last day and were turned down; one ask per purpose a day`);
+    const waiting = this.o.desk.recentAsks(visitorWebId, 7 * 86_400_000).filter((x) => x.status === 'pending');
+    if (waiting.length >= MAX_WAITING && !waiting.some((x) => x.purpose === offer.purpose && [...x.fields].sort().join() === [...offer.fields].sort().join())) return decide('decline', `already has ${waiting.length} requests waiting for the owner`, { code: 'too-many' }, `declined: you have ${waiting.length} requests waiting for this owner; withdraw one or wait for an answer`);
+
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
+    if (d.decision === 'decline') this.declinedAt.set(declinedKey, Date.now());
     let filed: { offerId: string; asked?: number } | null = null;
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
@@ -249,7 +263,7 @@ export class Housekeeper {
     }
     // Asked again for the same thing: it's one request, and the visitor gets its id to check or withdraw.
     if (filed && filed.offerId !== offer.id) return decide('ask', d.reason, { offerId: filed.offerId }, `the owner hasn't answered your earlier request ${filed.offerId} for exactly this (asked ${filed.asked} times); check it with { kind: "status", offerId }`);
-    if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
+    if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : d.decision === 'decline' && d.code ? { code: d.code } : {});
     const chain = await this.verifyOwnRecord(d.fields);
     if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
     if (!chain.ok) return decide('decline', `my own record failed its checks (${chain.why}), so I won't take part`);
@@ -464,11 +478,12 @@ export class Housekeeper {
 }
 
 /** What a visitor is told: the decision and anything it can act on (a counter's terms), never the owner's rules. */
-function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: number }): string {
+function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: number }, code?: string, purpose?: string): string {
   if (decision === 'join') return 'joined';
   if (decision === 'counter' && counter) return `would join for $${counter.priceUsd}, with ${counter.fields.join(', ').replace(/_/g, ' ')}`;
   if (decision === 'ask') return 'the owner decides this one; ask for its status later with { kind: "status", offerId }';
-  return 'declined';
+  // A coarse reason a visitor can act on (don't ask again for this), never the owner's rule, its number or its limits.
+  return { purpose: `declined: this house doesn't take ${purpose} requests`, price: 'declined: it pays too little', retention: 'declined: this house keeps no data; ask with retention "none"', default: 'declined: nothing in its rules covers this' }[code ?? ''] ?? 'declined';
 }
 
 /** Why an offer isn't a well-formed Lake offer (SPEC §5.1), in our words, or null. Purposes and fields are codes, not prose. */

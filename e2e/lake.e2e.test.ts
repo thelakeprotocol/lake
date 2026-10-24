@@ -119,8 +119,13 @@ describe('one house', () => {
     const uni = await visitor('uni.example');
     const first = (await knock(houses.stan!, uni, presets().research!)).reply;
     expect(first.decision).toBe('ask');
-    const declined = (await knock(houses.stan!, await visitor('ads.example'), presets().marketing!)).reply;
-    expect(declined).toMatchObject({ decision: 'decline', reason: 'declined' });
+    const ads = await visitor('ads.example');
+    const declined = (await knock(houses.stan!, ads, presets().marketing!)).reply;
+    // A coarse reason the visitor can act on, never the owner's rule, its number or its limits.
+    expect(declined).toMatchObject({ decision: 'decline', code: 'purpose', reason: "declined: this house doesn't take marketing requests" });
+    expect(JSON.stringify(declined)).not.toMatch(/rule \d/);
+    // House manners: turned down for a purpose, it isn't heard again on that purpose for a day.
+    expect((await knock(houses.stan!, ads, presets().marketing!)).reply).toMatchObject({ decision: 'decline', code: 'repeat' });
     // Asking again for exactly the same thing is the same request; the visitor can check it, and take it back.
     const again = (await knock(houses.stan!, uni, presets().research!)).reply;
     expect(again).toMatchObject({ decision: 'ask', offerId: first.offerId });

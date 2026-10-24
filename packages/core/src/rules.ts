@@ -76,9 +76,12 @@ export function parseRules(text: string): Rules {
   return { ...raw, owner: raw.owner, default: def, rules } as Rules;
 }
 
+/** Why a house declined, as a visitor may be told it: coarse, never the owner's rule, its number or its limits (SPEC §5). */
+export type DeclineCode = 'purpose' | 'price' | 'retention' | 'default' | 'rule';
+
 export type Decision =
   | { decision: 'join'; rule: number | null; reason: string; grantHours: number; fields: string[] }
-  | { decision: 'decline'; rule: number | null; reason: string }
+  | { decision: 'decline'; rule: number | null; reason: string; code?: DeclineCode }
   | { decision: 'ask'; rule: number | null; reason: string }
   | { decision: 'counter'; rule: number; reason: string; counter: { fields: string[]; priceUsd: number } };
 
@@ -135,7 +138,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
   for (const [i, r] of rules.rules.entries()) {
     if (!matches(r.match, offer, ctx)) continue;
     const n = i + 1;
-    if (r.decision === 'decline') return { decision: 'decline', rule: n, reason: `your rule ${n} declines ${offer.purpose} requests` };
+    if (r.decision === 'decline') return { decision: 'decline', rule: n, reason: `your rule ${n} declines ${offer.purpose} requests`, code: r.match.price_below !== undefined ? 'price' : r.match.purpose !== undefined ? 'purpose' : 'rule' };
     if (r.decision === 'ask') return { decision: 'ask', rule: n, reason: `your rule ${n} says ask you first about ${offer.purpose} requests` };
 
     const denied = offer.fields.filter((f) => r.deny_fields?.includes(f));
@@ -143,7 +146,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
     const cheap = r.min_price_usd !== undefined && offer.priceUsd < r.min_price_usd;
     const keeps = r.retention === 'none' && offer.retention !== 'none';
 
-    if (keeps) return { decision: 'decline', rule: n, reason: `it wants to keep your data (${offer.retention}); your rule ${n} allows no retention` };
+    if (keeps) return { decision: 'decline', rule: n, reason: `it wants to keep your data (${offer.retention}); your rule ${n} allows no retention`, code: 'retention' };
     if (unlisted.length) return { decision: 'ask', rule: n, reason: `looks like a study you'd join, but it also wants ${list(unlisted)}` };
     if (denied.length || cheap) {
       const counter = { fields: offer.fields.filter((f) => !denied.includes(f)), priceUsd: Math.max(offer.priceUsd, r.min_price_usd ?? 0) };
@@ -157,7 +160,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
   const reason = `no rule covers ${offer.purpose} requests from ${offer.requester}; your default is ${d}`;
   // A default of "join" still needs fields to be bounded: with no rule, there is no allow list, so ask instead.
   if (d === 'join') return { decision: 'ask', rule: null, reason: `${reason}, but no rule limits the fields, so asking you` };
-  return { decision: d, rule: null, reason };
+  return d === 'decline' ? { decision: d, rule: null, reason, code: 'default' } : { decision: d, rule: null, reason };
 }
 
 /**

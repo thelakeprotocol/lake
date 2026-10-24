@@ -149,7 +149,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
       }
       case 'attack.blocked': {
         counters.attacksBlocked++;
-        if (event.data?.verified) tally(`agent:${event.data.claimed}`, 'blocked');
+        // Blame the verified sender (an impersonator's own domain), never the name it pretended to be.
+        if (event.data?.verified) tally(`agent:${event.data.from ?? event.data.claimed}`, 'blocked');
         const key = event.data?.key ? String(event.data.key) : '';
         if (key && !quarantined.has(key)) {
           const n = (blocks.get(key) ?? 0) + 1;

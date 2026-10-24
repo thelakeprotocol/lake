@@ -62,7 +62,11 @@ export function describe(e: LakeEvent): string {
     case 'approval.requested': return e.subject ? `${e.actor} asked its owner about ${e.subject}.` : `${e.actor} asked its owner.`;
     case 'approval.answered': return `The owner of ${e.actor} tapped ${d.answer}.`;
     case 'payment.settled': return `Payments settled $${d.amount} with ${d.count} participant(s).`;
-    case 'attack.blocked': return `${e.actor} blocked ${d.claimed ? `an agent claiming ${d.claimed}` : e.subject}: ${d.why}.`;
+    // Worded for what it is: a quarantined key is the agent's own key (run 21's assistant read "an agent claiming" as an
+    // impersonation of that agent); an impersonation names who pretended to be whom.
+    case 'attack.blocked': return d.why === 'quarantined' ? `${e.actor} turned away a quarantined key${d.claimed ? ` (its card says ${d.claimed})` : ''}.`
+      : d.why === 'impersonation' && d.from ? `${e.actor} blocked ${d.from}, whose offer claimed to come from ${d.claimed}.`
+      : `${e.actor} blocked ${d.claimed ? `a message claiming to be from ${d.claimed}` : e.subject}: ${d.why}.`;
     case 'agent.quarantined': return `Immune response: ${d.claimed ? `the key claiming ${d.claimed}` : e.subject} quarantined after ${d.blocks} blocked attempts. No human involved.`;
     case 'guild.formed': return `Guild formed: ${d.members} houses for ${d.tag} now bargain as one.`;
     case 'study.result': return `${e.actor} got its answer from ${d.participants} houses${d.summary ? `: ${d.summary}` : ''}.`;
