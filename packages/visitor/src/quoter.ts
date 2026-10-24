@@ -75,6 +75,8 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       return reply({ kind: 'received' });
     }
     if (m.kind === 'accept' && house) return reply(await accepted(m, v.profile.webId, house));
+    // Paid for an order: the payment's receipt arrives like any message; acknowledge it, naming the order.
+    if (m.kind === 'receipt') return reply({ kind: 'received', note: `payment received${m.order ? ` for order ${String(m.order)}` : ''}; thank you` });
     return reply({ kind: 'rejected', code: 'malformed', why: 'send an intent, an authorisation request, or an acceptance' });
   }, id);
 

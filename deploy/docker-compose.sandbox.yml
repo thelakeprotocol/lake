@@ -34,7 +34,7 @@ services:
     <<: *small
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: specialists
-    command: ["all", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--spar-every", "1800"]
+    command: ["all", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--spar-every", "1800", "--packs", "health,shopping"]
     environment: { NODE_OPTIONS: "--max-old-space-size=128", LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [specialists:/data]
     ports: ["127.0.0.1:4300:4300"]
@@ -53,6 +53,9 @@ services:
       NODE_OPTIONS: "--max-old-space-size=256"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
+      # Health and the weekly shop (shopping@1); never mortgage on the sandbox.
+      LAKE_PACKS: "health,shopping"
+      LAKE_ISSUERS: "health=http://specialists:4300/issuer,shopping=http://specialists:4300/receipts"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
       LAKE_PERSON_URL: "http://specialists:4300/person"
       # Houses trust tellers only at the addresses the operator vouches for (a sandbox proves no domains).
@@ -96,6 +99,17 @@ services:
     depends_on: [houses]
     mem_limit: 180m
     memswap_limit: 180m
+
+  # Three demo grocers (shopping@1): they price households' weekly shops inside their houses.
+  grocers:
+    <<: *small
+    image: ghcr.io/thelakeprotocol/lake:latest
+    hostname: grocers
+    command: ["quoters", "--packs", "shopping", "--port", "4810", "--public-url", "http://grocers:4810", "--node", "http://lake-node:7000", "--auditor", "http://specialists:4300/auditor", "--authority", "http://specialists:4300/foodregister", "--payments", "http://specialists:4300/payments"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=64" }
+    depends_on: [specialists]
+    mem_limit: 100m
+    memswap_limit: 100m
 
   # Background traders (mostly marketing, which rules decline) and an attacker now and then.
   # Off by default: on a 1 GB server the houses need the room. --profile lively turns it on.

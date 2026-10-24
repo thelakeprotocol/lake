@@ -1,13 +1,22 @@
-# A household that does its weekly shop through the Lake: grocers price the basket inside the house; only the owner sees the offers.
+# A household that does its weekly shop through the Lake (needs the shopping pack): grocers price the basket inside the
+# house, and only the owner sees the offers. Shares for good research too, like Stan.
 # weight: 2
 owner: shopper
 device: approvals-app
 default: ask
 tags: [weekly-shop]
 rules:
+  - match: { purpose: research, sponsor_verified: true, ethics_approved: true }
+    allow_fields: [age_band, medications, readmissions]
+    deny_fields: [name, postcode, dob]
+    min_price_usd: 4
+    retention: none
+    decision: join
   - match: { purpose: marketing }
     decision: decline
-# Standing intent: hosted houses fill each pick: list with one of its choices, the same one every time for the same house.
+negotiation:
+  join_collectives: true
+# Standing intent. Hosted houses fill each pick: list with one of its choices, the same one every time for the same house.
 intents:
   - pack: shopping
-    terms: { region: "{{pick:vic,vic,nsw,qld}}", budget: auto, delivery: "{{pick:this-week,this-week,tomorrow}}" }
+    terms: { region: "{{pick:vic,vic,vic,nsw}}", budget: auto, delivery: "this-week" }
