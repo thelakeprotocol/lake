@@ -52,10 +52,12 @@ interface Ctx {
 export class Market {
   readonly intents = new Map<string, Intent>();
   readonly offers = new Map<string, StoredOffer>();
-  private authorised = new Map<string, Promise<boolean>>();
+  /** Who carries an authorisation, as last checked: a yes is kept; a no is asked again later; a failed ask isn't kept at all. */
+  private authorised = new Map<string, { ok: Promise<boolean>; until: number }>();
   /** The certified programs behind open offers, so a growing group can be re-priced here without asking anyone. */
   private programs = new Map<string, QuoteProgram>();
   private refreshedAt = 0;
+  private announcedAt = 0;
 
   constructor(private c: Ctx) {
     // Groups grow. Every so often, check; a busy pod or an unreachable node just means next time.
@@ -74,6 +76,15 @@ export class Market {
       if (i.members === before.get(i.pack)) continue;
       await this.save();
       await this.reprice(i);
+    }
+    // An authorised agent that hasn't priced an open intent hears about it again, about once a minute: one lost message
+    // mustn't leave the owner without its offer. One that has an open offer here isn't asked again (it would replace it).
+    if (Date.now() - this.announcedAt > 60_000 && this.intents.size) {
+      this.announcedAt = Date.now();
+      for (const i of this.intents.values()) {
+        const p = packOf(i.pack);
+        if (p) void this.announce(p, i, new Set([...this.offers.values()].filter((o) => o.pack === i.pack && o.status === 'open').map((o) => o.quoter.url)));
+      }
     }
   }
 
@@ -128,8 +139,8 @@ export class Market {
   }
 
   /** Every authorised agent that quotes for this pack hears about the intent; an unauthorised one never does. */
-  private async announce(p: LakePack, intent: Intent) {
-    const seen = new Set<string>();
+  private async announce(p: LakePack, intent: Intent, skip = new Set<string>()) {
+    const seen = new Set<string>(skip);
     for (const node of this.c.nodes) {
       let found: { card: AgentCard }[] = [];
       try {
@@ -152,19 +163,28 @@ export class Market {
     }
   }
 
-  /** An agent must carry an authorisation for this pack from a regulator the owner trusts. Asked once per agent. */
+  /**
+   * An agent must carry an authorisation for this pack from a regulator the owner trusts. A yes is remembered for the day;
+   * a no for ten minutes; an ask that failed (the agent busy or down) not at all. Remembering a failed ask for good left
+   * every sandbox house deaf to every grocer after one overloaded start (run 28: no offers at all).
+   */
   private isAuthorised(url: string, profile: LakeProfile, pack: string): Promise<boolean> {
     const key = `${profile.webId}|${pack}`;
-    let ok = this.authorised.get(key);
-    if (!ok) {
-      ok = (async () => {
-        const r = await this.send(url, { kind: 'authorisation', pack }).catch(() => null);
-        if (!r?.authorisation) return false;
-        const check = await checkAttachment(r.authorisation as Attachment, { trusted: this.c.trust().regulators, type: 'LakeAuthorisation', subject: profile.webId, sandbox: this.c.sandbox });
-        return check.ok && check.vc.credentialSubject.pack === pack;
-      })();
-      this.authorised.set(key, ok);
-    }
+    const known = this.authorised.get(key);
+    if (known && known.until > Date.now()) return known.ok;
+    const ok = (async () => {
+      const r = await this.send(url, { kind: 'authorisation', pack }).catch((e: Error) => {
+        this.authorised.delete(key);
+        this.c.say(`market: couldn't ask ${profile.ownerDomain} for its authorisation (${e.message.slice(0, 80)}); will ask again`);
+        return null;
+      });
+      if (!r) return false;
+      const check = r.authorisation ? await checkAttachment(r.authorisation as Attachment, { trusted: this.c.trust().regulators, type: 'LakeAuthorisation', subject: profile.webId, sandbox: this.c.sandbox }) : null;
+      const yes = !!check?.ok && check.vc.credentialSubject.pack === pack;
+      this.authorised.set(key, { ok: Promise.resolve(yes), until: Date.now() + (yes ? 86_400_000 : 600_000) });
+      return yes;
+    })();
+    this.authorised.set(key, { ok, until: Date.now() + 60_000 });
     return ok;
   }
 
