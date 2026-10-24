@@ -106,8 +106,6 @@ function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
 export function nearMiss(rules: Rules, offer: Offer, ctx: Context = {}): string | null {
   for (const [i, r] of rules.rules.entries()) {
     if (r.decision !== 'join') continue;
-    if (r.match.purpose !== undefined && !purposeWithin(offer.purpose, String(r.match.purpose))) continue;
-    if (r.match.requester !== undefined && r.match.requester !== offer.requester) continue;
     const missing = [
       r.match.ethics_approved && !offer.credentials.ethicsApproved ? 'had an ethics approval you trust' : '',
       r.match.audit_certified && !offer.credentials.auditCertified ? 'had a certified study' : '',
@@ -116,7 +114,15 @@ export function nearMiss(rules: Rules, offer: Offer, ctx: Context = {}): string 
       r.min_price_usd !== undefined && offer.priceUsd < r.min_price_usd ? `paid at least $${r.min_price_usd}` : '',
       r.retention === 'none' && offer.retention !== 'none' ? 'kept nothing' : '',
     ].filter(Boolean);
-    if (missing.length) return `your rule ${i + 1} would join if it ${missing.join(' and ')}`;
+    // The whole truth: fields the rule wouldn't take are part of what's missing (run 18 told an owner a request for
+    // nhs_number was one ethics approval away from a rule that doesn't allow nhs_number).
+    const unwanted = offer.fields.filter((f) => r.deny_fields?.includes(f) || (r.allow_fields && !r.allow_fields.includes(f)));
+    if (unwanted.length) missing.push(`didn't ask for ${list(unwanted)}`);
+    if (!missing.length || unwanted.length === offer.fields.length) continue;
+    // And only a rule the real matcher would pick once those are supplied (purpose, requester and the rest still hold).
+    const supplied: Offer = { ...offer, fields: offer.fields.filter((f) => !unwanted.includes(f)), credentials: { ...offer.credentials, ethicsApproved: true, auditCertified: true, sponsorVerified: true }, priceUsd: Math.max(offer.priceUsd, r.min_price_usd ?? 0), retention: r.retention === 'none' ? 'none' : offer.retention };
+    if (!matches(r.match, supplied, { ...ctx, reputation: Math.max(ctx.reputation ?? 0.5, Number(r.match.reputation_at_least ?? 0)) })) continue;
+    return `your rule ${i + 1} would join if it ${missing.join(' and ')}`;
   }
   return null;
 }

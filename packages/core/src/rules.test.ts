@@ -78,8 +78,12 @@ describe('rules engine', () => {
 
   it('tells the owner what their own join rule is missing', () => {
     const cheap = { ...study, priceUsd: 2, credentials: { ...study.credentials, ethicsApproved: false } };
-    expect(nearMiss(persona('stan'), cheap)).toMatch(/^your rule 1 would join if it had an ethics approval you trust and paid at least \$\d/);
+    expect(nearMiss(persona('stan'), cheap)).toMatch(/^your rule 1 would join if it had an ethics approval you trust and paid at least \$\d and didn't ask for postcode$/);
     expect(nearMiss(persona('stan'), { ...study, purpose: 'marketing' })).toBeNull();
+    // Never a near miss when the rule wouldn't take a field asked for (run 18: nhs_number), whatever credentials came.
+    expect(nearMiss(persona('stan'), { ...cheap, fields: [...cheap.fields, 'nhs_number'] })).toMatch(/didn't ask for postcode and nhs_number$/);
+    // Nothing the rule would take at all: not a near miss.
+    expect(nearMiss(persona('stan'), { ...cheap, fields: ['postcode', 'nhs_number'] })).toBeNull();
   });
 
   it('rejects a rule about a purpose nobody uses, so a misspelt "decline" never lets things through', () => {
