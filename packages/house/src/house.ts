@@ -116,9 +116,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const paths = recordPaths(o.packs, folders);
   for (const p of o.packs) for (const f of [paths.get(p.id)!.folder, `${paths.get(p.id)!.folder}original/`]) await ensureContainer(owner, f);
 
-  // The owner's rules. Edits made in the control panel live in their pod and win over the file the house started with.
+  // The owner's rules. Edits made in the control panel live in their pod and win over the file the house started with,
+  // but only once someone owns the house: a hosted house nobody has claimed follows its operator's current persona, so
+  // an operator's fix reaches it (the sandbox's houses kept stale trust lists from their first boot).
   let rulesText = o.rulesText;
-  const saved = await owner.fetch(`${owner.podRoot}settings/rules.yaml`);
+  const ownerKey = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`).catch(() => null);
+  const saved = o.leaseHours && !ownerKey?.ok ? { ok: false, text: async () => '' } : await owner.fetch(`${owner.podRoot}settings/rules.yaml`);
   if (saved.ok) {
     const text = await saved.text();
     try {
