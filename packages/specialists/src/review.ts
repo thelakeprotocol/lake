@@ -35,7 +35,7 @@ export async function specialist<R extends { kind: string } = Reply>(o: Speciali
     // Tell the map who just came by, so it can show the visit. Ids and kinds only.
     if (out.kind !== 'refused' && !quiet) o.report?.(makeEvent('decision', 'self', `agent:${v.profile.ownerDomain}`, { decision: out.kind }));
     return reply(out);
-  });
+  }, o.id);
   const vc = (type: string, subject: Record<string, unknown> & { id: string }, days: number) =>
     issueCredential(
       { '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', type], issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + days * DAY).toISOString(), credentialSubject: subject } as never,

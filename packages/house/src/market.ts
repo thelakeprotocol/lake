@@ -222,7 +222,7 @@ export class Market {
   /** Signed request from this house to an agent; its signed, verified reply. */
   private async send(url: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const envelope = await signMessage(payload, this.c.id, { iss: this.c.webId });
-    const reply = await sendLake(url, { lake: '0.1', card: this.c.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 15_000 });
+    const reply = await sendLake(url, { lake: '0.1', card: this.c.card, envelope: envelope as LakeData['envelope'] }, { me: this.c.id, timeoutMs: 15_000 });
     const v = await verifyLakeData<Record<string, unknown>>(reply as LakeData<Record<string, unknown>>, { sandbox: this.c.sandbox });
     if (!v.ok) throw new Error(v.rejection.why);
     return v.payload;

@@ -363,7 +363,7 @@ export class Housekeeper {
   private async tell(c: { url: string; domain: string }, payload: Record<string, unknown>, kid: string): Promise<true | string> {
     try {
       const envelope = await signMessage(payload, this.o.id, { iss: this.o.webId });
-      const raw = await sendLake(c.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: this.o.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 15_000 });
+      const raw = await sendLake(c.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: this.o.card, envelope: envelope as LakeData['envelope'] }, { me: this.o.id, timeoutMs: 15_000 });
       const v = await verifyLakeData(raw, { sandbox: this.o.sandbox });
       if (!v.ok) return `its reply did not verify: ${v.rejection.why}`;
       if (v.profile.ownerDomain !== c.domain || v.profile.publicJwk.kid !== kid) return `answered as ${v.profile.ownerDomain} with another key than the one checked`;

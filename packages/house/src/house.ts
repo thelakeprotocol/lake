@@ -263,7 +263,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const check = await keeper.verifyOwnRecord();
   say(check.ok ? 'record chain verified: trusted issuer → original → certified converter → housekeeper' : `record chain BROKEN: ${check.why}`);
 
-  const app = createHouseServer(card, keeper, desk, approvalsApp());
+  const app = createHouseServer(card, id, keeper, desk, approvalsApp());
   return {
     name: o.name, card, keeper, desk, app,
     get link() { return link; },
@@ -347,7 +347,7 @@ function panelFor(x: {
   // A signed request from this house to another agent, and its verified reply.
   const send = async (url: string, payload: Record<string, unknown>) => {
     const envelope = await signMessage(payload, x.id, { iss: owner.webId });
-    const reply = await sendLake(url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: x.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 15_000 });
+    const reply = await sendLake(url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: x.card, envelope: envelope as LakeData['envelope'] }, { me: x.id, timeoutMs: 15_000 });
     const v = await verifyLakeData<Record<string, unknown>>(reply as LakeData<Record<string, unknown>>, { sandbox: x.o.sandbox });
     if (!v.ok) throw new Error(v.rejection.why);
     return { payload: v.payload, card: (reply as LakeData).card };

@@ -44,13 +44,14 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
   // Teller to teller: signed, and the answer must come from the teller named.
   const tell = async (peer: TellerRef, body: Record<string, unknown>) => {
     const envelope = await signMessage(body, o.id, { iss: s.webId });
-    const raw = await sendLake(peer.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 30_000 });
+    const raw = await sendLake(peer.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 30_000 });
     const v = await verifyLakeData(raw, { sandbox: o.sandbox });
     if (!v.ok) throw new Error(`the other teller's reply did not verify: ${v.rejection.why}`);
     if (v.profile.ownerDomain !== peer.domain) throw new Error(`the other teller answered as ${v.profile.ownerDomain}, not ${peer.domain}`);
     return { reply: v.payload as Record<string, any>, webId: v.profile.webId };
   };
   const refused = (...problems: string[]) => ({ kind: 'refused', problems });
+  const at = (u: string) => String(u ?? '').replace(/\/+$/, '').replace(/\/a2a$/, '');
 
   const s: Specialist = await specialist(o, o.name, `A teller: one of two aggregators that count without looking (IETF DAP with Prio3). Open a count at the Leader with { kind: "count.open", id, length, min, deadline, helper: { url, domain } }; participants send each teller { kind: "count.report", id, reportId, publicShare, share }; the opener sends the Leader { kind: "count.members", id } and { kind: "count.close", id, members }, then the Helper { kind: "count.collect", id }. Totals come from at least ${floor} valid answers, once.`, 'teller', async (p, from): Promise<{ kind: string; [k: string]: unknown }> => {
     const id = String(p.id ?? '');
@@ -67,6 +68,8 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
           ...(Number.isInteger(min) && min >= floor ? [] : [`min: at least ${floor} answers`]),
           ...(deadline > Date.now() && deadline < Date.now() + MAX_HOURS * 3_600_000 ? [] : [`deadline: within ${MAX_HOURS} hours`]),
           ...(helper?.url && helper.domain ? [] : ['helper: { url, domain } of the second teller']),
+          // The point of two tellers is two parties: a Leader can't be its own Helper (run 13 found one that could).
+          ...(helper?.domain && (helper.domain.toLowerCase() === o.domain.toLowerCase() || at(helper.url) === at(s.card.supportedInterfaces[0]!.url)) ? ['helper: a different teller, run by a different party'] : []),
           ...(noise === undefined || (Number(noise.epsilon) > 0 && Number(noise.epsilon) <= 10) ? [] : ['noise: { epsilon } between 0 and 10']),
         ];
         if (problems.length) return refused(...problems);
@@ -82,6 +85,7 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         const leader = p.leader as TellerRef | undefined;
         if (c) return refused(`id: "${id}" is taken`);
         if (!leader?.url || !leader.domain || typeof p.verifyKey !== 'string') return refused('setup: leader, verifyKey');
+        if (from === s.webId || leader.domain.toLowerCase() === o.domain.toLowerCase()) return refused('a teller is never its own Leader');
         const min = Number(p.min);
         if (!(min >= floor)) return refused(`min: at least ${floor} answers`);
         const noise = p.noise as { epsilon?: number } | undefined;

@@ -4,6 +4,7 @@ import { CardError, verifyLakeCard, type LakeProfile } from './card.js';
 import { ReplayGuard, SignatureError, verifyMessage, type Signed } from './crypto.js';
 import { proveDomain } from './domain.js';
 import { LAKE_EXTENSION_URI } from './lake.js';
+import type { Sealed } from './seal.js';
 
 /** What travels in the data part of every Lake A2A message: the sender's card and a signed envelope. */
 export interface LakeData<T = Record<string, unknown>> {
@@ -12,7 +13,7 @@ export interface LakeData<T = Record<string, unknown>> {
   envelope: Signed<T>;
 }
 
-export function lakeMessage(data: LakeData, role: 'user' | 'agent', contextId: string = randomUUID()): Message {
+export function lakeMessage(data: LakeData | Sealed, role: 'user' | 'agent', contextId: string = randomUUID()): Message {
   return {
     messageId: randomUUID(),
     contextId,
@@ -25,10 +26,10 @@ export function lakeMessage(data: LakeData, role: 'user' | 'agent', contextId: s
   };
 }
 
-export function readLakeData(msg: Message | undefined): LakeData | null {
+/** The Lake data part of an A2A message, as it travelled (sealed, SPEC §3). */
+export function readLakePart(msg: Message | undefined): unknown {
   const part = msg?.parts.find((p) => p.content?.$case === 'data');
-  const v = part?.content?.$case === 'data' ? (part.content.value as Partial<LakeData>) : null;
-  return v && v.lake && v.card && v.envelope ? (v as LakeData) : null;
+  return part?.content?.$case === 'data' ? part.content.value : null;
 }
 
 export type Rejection = { code: 'malformed' | 'unsigned-card' | 'forged-card' | 'domain' | 'bad-signature' | 'replayed' | 'expired' | 'impersonation'; why: string };
@@ -42,7 +43,7 @@ export async function verifyLakeData<T>(
   data: LakeData<T> | null,
   opts: { replay?: ReplayGuard; sandbox?: boolean; fetch?: typeof fetch } = {},
 ): Promise<{ ok: true; profile: LakeProfile; payload: Signed<T>['payload']; domainVia: string } | { ok: false; rejection: Rejection }> {
-  if (!data) return { ok: false, rejection: { code: 'malformed', why: 'not a Lake message' } };
+  if (!data?.card || !data.envelope) return { ok: false, rejection: { code: 'malformed', why: 'not a Lake message sealed for this agent (SPEC §3)' } };
   let profile: LakeProfile;
   try {
     profile = await verifyLakeCard(data.card);

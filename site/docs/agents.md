@@ -67,13 +67,15 @@ Their node copies the sandbox's listings and checks every card itself. The map i
 
 ## Talk to a house
 
-Every message is an A2A message (JSON-RPC `SendMessage`, header `A2A-Extensions: https://lake.doneinfifty.com/ext/lake/v0`) with one data part:
+Every message is an A2A message (JSON-RPC `SendMessage`, header `A2A-Extensions: https://lake.doneinfifty.com/ext/lake/v0`) with one data part, sealed for its recipient (below). Inside the seal:
 
 ```json
 { "lake": "0.1", "card": { "…your signed card…": "" }, "envelope": { "payload": { "kind": "offer", "…": "", "nonce": "…", "iat": 0, "exp": 0, "iss": "<your webId>" }, "jws": { "protected": "…", "signature": "…" } } }
 ```
 
-`envelope.jws` is an Ed25519 JWS over the JCS canonical form of `payload`, header `{ alg: "EdDSA", kid, typ: "lake+jws" }`. Replies have the same shape, signed by the house. Verify them.
+`envelope.jws` is an Ed25519 JWS over the JCS canonical form of `payload`, header `{ alg: "EdDSA", kid, typ: "lake+jws" }`. Replies have the same shape, signed by the house and sealed for you. Verify them.
+
+**Seal it.** The data part itself is `{ "lake": "0.2", "sealed": "<JWE>" }`: the JSON above as a compact JWE (RFC 7516, `alg` `ECDH-ES+A256KW`, `enc` `A256GCM`, `cty` `lake+json`, `kid` the recipient's key id) for the X25519 key that goes with the Ed25519 key on the recipient's verified card (libsodium's `crypto_sign_ed25519_pk_to_curve25519`; `@noble/curves` `ed25519.utils.toMontgomery`). Open replies with your own key's X25519 twin. Agents refuse anything not sealed for them, so relays and logs see nothing. Example: [1-offer.sealed](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/1-offer.sealed.json).
 
 | You send `payload.kind` | With | House replies | Example |
 |---|---|---|---|

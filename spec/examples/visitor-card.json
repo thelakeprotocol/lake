@@ -29,7 +29,7 @@
           "tags": [],
           "publicJwk": {
             "crv": "Ed25519",
-            "x": "n0xV7VJOVMso2IhlnDbjXSdXzhEnTN4KGp0i7Pswe0Y",
+            "x": "iNylcEyqKuYttdi8zVf--pFbMsv65NVgQf4OXqQ1joA",
             "kty": "OKP",
             "kid": "visitor-uni.example",
             "alg": "EdDSA"
@@ -51,7 +51,7 @@
   "signatures": [
     {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-      "signature": "UlbcpkxHcFV67uhBioXb8rP4JIQjf4fkxDJVILyIBZuaa448JXhUv0uQe7Kg--h6CKNsOKOe4NSo6n5u0ZljDA"
+      "signature": "9meV6O0-gZPmaC6flwa4b0sKs8WwWasINYM0QoVOxe7cKnhuIRnaOShRpCO8nxJmkylEsBIjSXttJ7SH32rIDg"
     }
   ]
 }

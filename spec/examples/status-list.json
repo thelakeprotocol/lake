@@ -1,5 +1,5 @@
 {
-  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkJpdHN0cmluZ1N0YXR1c0xpc3RDcmVkZW50aWFsIl0sImlzc3VlciI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwMzo0NzowNy43MDNaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS90L3N0YW4vc3RhdHVzL3Jldm9jYXRpb24jbGlzdCIsInR5cGUiOiJCaXRzdHJpbmdTdGF0dXNMaXN0Iiwic3RhdHVzUHVycG9zZSI6InJldm9jYXRpb24iLCJlbmNvZGVkTGlzdCI6InVINHNJQUFBQUFBQUFBLTNhQVEwQUFBakRzT1BmTkRMZ1NhdGdBcFo4Tk5jQkFBQUFBQUFBQUFBQUFGREZnUXNBQUFBQV9SYWhzNzdrQUVBQUFBIn19.G1lTtlZXag3ptuYQmc9pfdWKWxibrOc_QkxyclXIi-QDNC1ou4acT-KXf1meiH2gPw5PkRT8kbZn1G7p32fEAA",
+  "credential": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiXSwidHlwZSI6WyJWZXJpZmlhYmxlQ3JlZGVudGlhbCIsIkJpdHN0cmluZ1N0YXR1c0xpc3RDcmVkZW50aWFsIl0sImlzc3VlciI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwidmFsaWRGcm9tIjoiMjAyNi0xMC0yNFQwNDoyMToyMS41NDRaIiwiY3JlZGVudGlhbFN1YmplY3QiOnsiaWQiOiJodHRwczovL3BvZHMuZXhhbXBsZS90L3N0YW4vc3RhdHVzL3Jldm9jYXRpb24jbGlzdCIsInR5cGUiOiJCaXRzdHJpbmdTdGF0dXNMaXN0Iiwic3RhdHVzUHVycG9zZSI6InJldm9jYXRpb24iLCJlbmNvZGVkTGlzdCI6InVINHNJQUFBQUFBQUFBLTNhQVEwQUFBakRzT1BmTkRMZ1NhdGdBcFo4Tk5jQkFBQUFBQUFBQUFBQUFGREZnUXNBQUFBQV9SYWhzNzdrQUVBQUFBIn19.K4_z_GnQiDu8QoH0mtqbDKcwu3pPDFKu_n4ALH6gvw5kFFPUiqVyuwPuKmTLVWhF9sFBT2iuHc7VBcEExf9ICQ",
   "decoded": {
     "@context": [
       "https://www.w3.org/ns/credentials/v2"
@@ -9,7 +9,7 @@
       "BitstringStatusListCredential"
     ],
     "issuer": "https://pods.example/stan/profile/card#me",
-    "validFrom": "2026-10-24T03:47:07.703Z",
+    "validFrom": "2026-10-24T04:21:21.544Z",
     "credentialSubject": {
       "id": "https://pods.example/t/stan/status/revocation#list",
       "type": "BitstringStatusList",

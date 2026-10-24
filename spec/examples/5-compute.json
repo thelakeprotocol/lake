@@ -31,7 +31,7 @@
             "tags": [],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "n0xV7VJOVMso2IhlnDbjXSdXzhEnTN4KGp0i7Pswe0Y",
+              "x": "iNylcEyqKuYttdi8zVf--pFbMsv65NVgQf4OXqQ1joA",
               "kty": "OKP",
               "kid": "visitor-uni.example",
               "alg": "EdDSA"
@@ -53,14 +53,14 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "UlbcpkxHcFV67uhBioXb8rP4JIQjf4fkxDJVILyIBZuaa448JXhUv0uQe7Kg--h6CKNsOKOe4NSo6n5u0ZljDA"
+        "signature": "9meV6O0-gZPmaC6flwa4b0sKs8WwWasINYM0QoVOxe7cKnhuIRnaOShRpCO8nxJmkylEsBIjSXttJ7SH32rIDg"
       }
     ]
   },
   "envelope": {
     "payload": {
       "kind": "compute",
-      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3NjaGVtYS5pbnJ1cHQuY29tL2NyZWRlbnRpYWxzL3YyLmpzb25sZCJdLCJ0eXBlIjpbIlZlcmlmaWFibGVDcmVkZW50aWFsIiwiU29saWRBY2Nlc3NHcmFudCJdLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwicHJvdmlkZWRDb25zZW50Ijp7Im1vZGUiOlsiaHR0cDovL3d3dy53My5vcmcvbnMvYXV0aC9hY2wjUmVhZCJdLCJoYXNTdGF0dXMiOiJodHRwczovL3czaWQub3JnL0dDb25zZW50I0NvbnNlbnRTdGF0dXNFeHBsaWNpdGx5R2l2ZW4iLCJmb3JQZXJzb25hbERhdGEiOlsidXJuOmxha2U6ZmllbGQ6YWdlX2JhbmQiLCJ1cm46bGFrZTpmaWVsZDptZWRpY2F0aW9ucyIsInVybjpsYWtlOmZpZWxkOnJlYWRtaXNzaW9ucyJdLCJmb3JQdXJwb3NlIjpbImh0dHBzOi8vdzNpZC5vcmcvZHB2I1Jlc2VhcmNoQW5kRGV2ZWxvcG1lbnQiXSwiaXNQcm92aWRlZFRvIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQifSwibGFrZSI6eyJvZmZlciI6IjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMiIsInN0dWR5IjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNsaHJkczRndHUyNk11MVluS0N5TDJoTUFLSlR6TUN3WGUrc3dxSGozRkU9IiwiZmllbGRzIjpbImFnZV9iYW5kIiwibWVkaWNhdGlvbnMiLCJyZWFkbWlzc2lvbnMiXSwicHVycG9zZSI6InJlc2VhcmNoIiwiYXV0aG9yaXplZEJ5Ijoic3RhbmRpbmcgcnVsZSAxIiwidXNlcyI6MSwicnVsZXMiOiJzaGEyNTYtOHduZnRDMSt2R3RFOExCcjhONHhFeHdCdXZtU2RqZVdPeC90c0NXUCs1ST0iLCJhZ3JlZW1lbnQiOiJ1cm46bGFrZTphZ3JlZW1lbnQ6MGIzZThjNTUtNmYwYS00YzYxLThkM2UtNTVkMWMzZjBhOWIyOm5vSDhmTE1uVW45UCJ9fSwiaXNzdWVyIjoiaHR0cHM6Ly9wb2RzLmV4YW1wbGUvc3Rhbi9wcm9maWxlL2NhcmQjbWUiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDAzOjQ3OjA3LjcwMVoiLCJ2YWxpZFVudGlsIjoiMjAyNi0xMC0yNlQwMzo0NzowNy43MDBaIiwiY3JlZGVudGlhbFN0YXR1cyI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3Qvc3Rhbi9zdGF0dXMvcmV2b2NhdGlvbiM0ODIxMyIsInR5cGUiOiJCaXRzdHJpbmdTdGF0dXNMaXN0RW50cnkiLCJzdGF0dXNQdXJwb3NlIjoicmV2b2NhdGlvbiIsInN0YXR1c0xpc3RJbmRleCI6IjQ4MjEzIiwic3RhdHVzTGlzdENyZWRlbnRpYWwiOiJodHRwczovL3BvZHMuZXhhbXBsZS90L3N0YW4vc3RhdHVzL3Jldm9jYXRpb24ifX0.OxJUJ-dvUftSvCqJdNeFo6HDFGPWBouJaSQTvvACuEHMwTyotqzzsO8RsG-3xHF9i4UOWiHqeAUJfBGAEkhVAw",
+      "grant": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6InZjK2p3dCIsImN0eSI6InZjIn0.eyJAY29udGV4dCI6WyJodHRwczovL3d3dy53My5vcmcvbnMvY3JlZGVudGlhbHMvdjIiLCJodHRwczovL3NjaGVtYS5pbnJ1cHQuY29tL2NyZWRlbnRpYWxzL3YyLmpzb25sZCJdLCJ0eXBlIjpbIlZlcmlmaWFibGVDcmVkZW50aWFsIiwiU29saWRBY2Nlc3NHcmFudCJdLCJjcmVkZW50aWFsU3ViamVjdCI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3N0YW4vcHJvZmlsZS9jYXJkI21lIiwicHJvdmlkZWRDb25zZW50Ijp7Im1vZGUiOlsiaHR0cDovL3d3dy53My5vcmcvbnMvYXV0aC9hY2wjUmVhZCJdLCJoYXNTdGF0dXMiOiJodHRwczovL3czaWQub3JnL0dDb25zZW50I0NvbnNlbnRTdGF0dXNFeHBsaWNpdGx5R2l2ZW4iLCJmb3JQZXJzb25hbERhdGEiOlsidXJuOmxha2U6ZmllbGQ6YWdlX2JhbmQiLCJ1cm46bGFrZTpmaWVsZDptZWRpY2F0aW9ucyIsInVybjpsYWtlOmZpZWxkOnJlYWRtaXNzaW9ucyJdLCJmb3JQdXJwb3NlIjpbImh0dHBzOi8vdzNpZC5vcmcvZHB2I1Jlc2VhcmNoQW5kRGV2ZWxvcG1lbnQiXSwiaXNQcm92aWRlZFRvIjoiaHR0cHM6Ly91bmkuZXhhbXBsZS8jYWdlbnQifSwibGFrZSI6eyJvZmZlciI6IjBiM2U4YzU1LTZmMGEtNGM2MS04ZDNlLTU1ZDFjM2YwYTliMiIsInN0dWR5IjoidXJuOmxha2U6c3R1ZHk6c2hhMjU2LXNsaHJkczRndHUyNk11MVluS0N5TDJoTUFLSlR6TUN3WGUrc3dxSGozRkU9IiwiZmllbGRzIjpbImFnZV9iYW5kIiwibWVkaWNhdGlvbnMiLCJyZWFkbWlzc2lvbnMiXSwicHVycG9zZSI6InJlc2VhcmNoIiwiYXV0aG9yaXplZEJ5Ijoic3RhbmRpbmcgcnVsZSAxIiwidXNlcyI6MSwicnVsZXMiOiJzaGEyNTYtOHduZnRDMSt2R3RFOExCcjhONHhFeHdCdXZtU2RqZVdPeC90c0NXUCs1ST0iLCJhZ3JlZW1lbnQiOiJ1cm46bGFrZTphZ3JlZW1lbnQ6MGIzZThjNTUtNmYwYS00YzYxLThkM2UtNTVkMWMzZjBhOWIyOm5vSDhmTE1uVW45UCJ9fSwiaXNzdWVyIjoiaHR0cHM6Ly9wb2RzLmV4YW1wbGUvc3Rhbi9wcm9maWxlL2NhcmQjbWUiLCJ2YWxpZEZyb20iOiIyMDI2LTEwLTI0VDA0OjIxOjIxLjU0M1oiLCJ2YWxpZFVudGlsIjoiMjAyNi0xMC0yNlQwNDoyMToyMS41NDJaIiwiY3JlZGVudGlhbFN0YXR1cyI6eyJpZCI6Imh0dHBzOi8vcG9kcy5leGFtcGxlL3Qvc3Rhbi9zdGF0dXMvcmV2b2NhdGlvbiM0ODIxMyIsInR5cGUiOiJCaXRzdHJpbmdTdGF0dXNMaXN0RW50cnkiLCJzdGF0dXNQdXJwb3NlIjoicmV2b2NhdGlvbiIsInN0YXR1c0xpc3RJbmRleCI6IjQ4MjEzIiwic3RhdHVzTGlzdENyZWRlbnRpYWwiOiJodHRwczovL3BvZHMuZXhhbXBsZS90L3N0YW4vc3RhdHVzL3Jldm9jYXRpb24ifX0.O467XYd7LVdpK4bNIqY8Bc1_UBjCvQbnmmbNi8s_lklTRnsb3uEHJA0IFTQuX-SpZzwPd3FTHzq3U-4wxkWVAw",
       "study": {
         "v": 1,
         "question": "Do over-60s on drug X get readmitted less?",
@@ -100,16 +100,16 @@
         },
         "minTier": "issuer-signed"
       },
-      "countersignature": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJvZHJsK2p3cyJ9..x2eiHCZH3PUX6loka2VF2jv9kgIvfIIJXG3B_YYCTi5eYAeW7svDBmGyV7FyfT5v7UEmc3u29lDuQQ6uJevuBQ",
+      "countersignature": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJvZHJsK2p3cyJ9..psbH6f8yGfz6dH7PaWpW3B1fFd7Bs-3Pg_VuuhB9DU4IwwZcdEqgno9n-6DCvjJ_myYUkHCXDVt-SoKP0cOGDg",
       "count": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
-      "nonce": "d5915446-fc00-4eb8-8967-40a902fc93a5",
-      "iat": 1792813627,
-      "exp": 1792813927,
+      "nonce": "94d140bf-b5d8-4794-8ae6-d1650cdafc15",
+      "iat": 1792815681,
+      "exp": 1792815981,
       "iss": "https://uni.example/#agent"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
-      "signature": "A6ydS5DahoXW76gQHAaB7J0b5zbZ25MYgAKrWz2No0ChoTYM7UT8VyVH7JpIomLP2gJsi-7rfm456Q_cuubTCg"
+      "signature": "QM8Bn6zA8KfuYh8wKpbinJM66Ha32YOD9_m4n02GvIf2ooppDcqrK_4ZKeIWFDoOrPR6xl41BI8l87H7udXeAA"
     }
   }
 }

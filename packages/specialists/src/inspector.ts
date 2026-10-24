@@ -89,7 +89,7 @@ export async function inspect(target: string, o: { publicOnly: boolean; sandbox:
   // A throwaway key per inspection, so the tricks below can't get anyone's real key quarantined.
   const probe = await makeVisitor(await generateIdentity(), `probe-${Math.floor(Math.random() * 1e6)}.inspector.example`, 'Inspector probe');
   const send = async (data: LakeData) => {
-    const reply = await sendLake(endpoint, data, { timeoutMs: 10_000 });
+    const reply = await sendLake(endpoint, data, { me: probe.id, timeoutMs: 10_000 });
     const v = await verifyLakeData<Record<string, unknown>>(reply as LakeData<Record<string, unknown>>, { sandbox: true });
     if (!v.ok) throw new Error(`its reply did not verify: ${v.rejection.why}`);
     if (v.profile.publicJwk.kid !== profile.publicJwk.kid) throw new Error('its reply was signed by a different key than its card');

@@ -69,6 +69,9 @@ importers:
       '@marcbachmann/cel-js':
         specifier: 8.0.0
         version: 8.0.0
+      '@noble/curves':
+        specifier: 2.4.0
+        version: 2.4.0
       '@sd-jwt/sd-jwt-vc':
         specifier: 0.22.0
         version: 0.22.0

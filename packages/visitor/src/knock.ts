@@ -48,15 +48,15 @@ export async function ask(agentUrl: string, v: Visitor, payload: Record<string, 
   }
   if (tamper === 'unsigned') card = { ...v.card, signatures: [] };
   const data: LakeData = { lake: '0.1', card, envelope: envelope as LakeData['envelope'] };
-  if (tamper === 'replay') await sendLake(agentUrl, data);
+  if (tamper === 'replay') await sendLake(agentUrl, data, { me: v.id });
   // A connection that drops mid-call leaves the sender not knowing if it arrived. Sending the same signed message again
   // is safe: the receiver refuses a nonce it has seen, and that refusal is the proof the first one got there.
   let retried = false;
-  const raw = await sendLake(agentUrl, data).catch(async (e: Error & { cause?: { code?: string } }) => {
+  const raw = await sendLake(agentUrl, data, { me: v.id }).catch(async (e: Error & { cause?: { code?: string } }) => {
     // Not to a house: a house counts a repeat as an attack on it, and the honest sender would take the blame.
     if (!DROPPED.test(`${e.cause?.code ?? ''} ${e.message}`) || HOUSE_KINDS.has(String(payload.kind))) throw e;
     retried = true;
-    return sendLake(agentUrl, data);
+    return sendLake(agentUrl, data, { me: v.id });
   });
   const verified = await verifyLakeData(raw, { sandbox: true });
   if (!verified.ok) throw new Error(`the reply from ${agentUrl} did not verify: ${verified.rejection.why}`);

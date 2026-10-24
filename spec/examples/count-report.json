@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "Jyj_bggGkTC1s4sxZzQ4tEbCeeNUYpovqOh0Rw0dxrA",
+              "x": "ACfL-79ovRim0PMS46MeeG6MhhTiuADzMErmLgWYyzM",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,7 +66,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "ItjRYAYuZu7zNiwz7sVBvIW29DWX24hLkcMwEAFUPsSoSYu5d4Znc1gmBUFqkXcECgsV9qnnZSlSHtMNafLjAQ"
+        "signature": "KKYFih3wmUlUt5paBM9E-OMC5Umu_yazf4pbGDdO3WXKG3Hc4DBFi5ReWiue9ZrrHcZQ3nMDe1QQo1oKKH0fCA"
       }
     ]
   },
@@ -74,103 +74,103 @@
     "payload": {
       "kind": "count.report",
       "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
-      "reportId": "pHC7bpM0EyEkJlPNWCh30g==",
+      "reportId": "pzCweiA2cZORxjrmH93Z9g==",
       "publicShare": {
         "jointRandParts": [
           {
-            "$b": "9Gegumg9QKCewL61OhmsSQ=="
+            "$b": "/0sfqgreqAyYS/VqTV+Tbw=="
           },
           {
-            "$b": "Co7XPCReZd2i7s0vUePBQg=="
+            "$b": "iZCl4ky+8MsYcP6s45MNjg=="
           }
         ]
       },
       "share": {
         "blind": {
-          "$b": "vsZbPFWmrxAESsn8hwfTeQ=="
+          "$b": "J8NoaIt97Bd+8jKvltstYw=="
         },
         "measurementShare": [
           {
-            "$n": "44021141800711554179521679544348305317"
+            "$n": "93042690941126730965454851604497659884"
           },
           {
-            "$n": "257251224215580372730316703013119218829"
+            "$n": "228648680343837786882808797553716593497"
           },
           {
-            "$n": "132917080604662431924060034150656415286"
+            "$n": "98664188001013163178436663698129872381"
           },
           {
-            "$n": "281246887461338004814483446606428054538"
+            "$n": "213109532962827009142827536209346419789"
           },
           {
-            "$n": "264712944126555475674441651309222753887"
+            "$n": "101790909621957935150782639639613248673"
           },
           {
-            "$n": "69668909529081605143550353537558415440"
+            "$n": "301534750037058779783664793521530278826"
           },
           {
-            "$n": "297435726445294578523419678972500447009"
+            "$n": "232326444820968744438380816145636588192"
           },
           {
-            "$n": "31943302378969158539443667710479048665"
+            "$n": "246311112864946298915241219063971319727"
           }
         ],
         "wireMeasurementShare": {
-          "$b": "peejT4Dt/Q9uRvxQ3CkeIY1U7NPmw7FD/gmkqZnIiME2lpSixz9MYxTT7GYI5v5jCiR7YLIc1vZnAsa7Iy6W01/29pvrc9vdPYxno8vbJcdQiAid0gUtiWEwB5dwvmk0IQ8jmDrOFNHNig2KhgnE39kftuhRdryQc0sC42YOCBg="
+          "$b": "7HfNLT1lBTKSP3dm1l7/RVmDQ3/nVYaLtigRQk8iBKz95b4dnqtei8MmzYwKCDpKTdz13E3iB8hf4zhZMWdToKGUQR6S3LFPIwvtuFE3lEyqE4dxYFIILKhdzur9etnioPp+m9bpQhksHIwXGXLIrq8PvE+Y5ORsBTfEXnfLTbk="
         },
         "wireProofShare": {
-          "$b": "RRlTcd9znr+78QKke7uCMhdckKflpHNsC/Uhn83LWMmvPinCpW14R4frfoV2duMtQo0+OsgPGdL8LzDoHfC4PPaR9XsMBQ1noFaA8euELwd6+06thDbHdtXxkV/UhT+jTPCV8ef2U5t+YsLwyesmQamYkKEJk8y7c3P3/GOIVuiCNSG9roijJXknlzg/JjdUQoc4lWK7btj6wqr+pk8+OUFtCpO568ArJi3QkRoqc7qWxfIHTVPQQadAy0pRQ1TEeKixp+uwVe30HNkcPhUFqQ=="
+          "$b": "oXn4sbSiEeW77NbNtniJOpt/gAlW/Aw+RRVhnldSZxBM3o18q8Thpr2yKODdvJEGcST0t0MWnr5HefaLgoyMwr09IeFRKEWmpmheL/imyF+nGSN8eIT7lSQMORyN/lUbaCjysbanQMK3FMy/w3GxNhCVpm76rX13y3w7Ti5COQTY6Yt2XKdOT/j8Z2QeJLSChkQtXvUmCQSqQV8Bu6O5GxOAdgfis4AE6+2z4+FNnynrOzPemoOepqtHe5XwvjjlcVGt9ntHKx5SQWjRiX+dww=="
         },
         "proofsShare": [
           {
-            "$n": "67140200987274294369793054487189068101"
+            "$n": "77809016797526662893400324946693487009"
           },
           {
-            "$n": "267635882896491180302419578410413087767"
+            "$n": "21804124608441377193439535612823633819"
           },
           {
-            "$n": "60996313911779970943743850659602579119"
+            "$n": "8732081691000290722477644596030332492"
           },
           {
-            "$n": "80713932516845727305282481062175214914"
+            "$n": "258600002622790578146146939140173997169"
           },
           {
-            "$n": "9551329894272459835759887861266354678"
+            "$n": "127318505514512411855315623202288385469"
           },
           {
-            "$n": "216993992401454232325033558514305268602"
+            "$n": "36335664031112977342390820367434455463"
           },
           {
-            "$n": "86601909372272777791838791726590718028"
+            "$n": "72699655737481380127518703290680485992"
           },
           {
-            "$n": "308830198881518035588561161116890208425"
+            "$n": "5614215211817212049014306988091675920"
           },
           {
-            "$n": "111941503713605420761436508124147168642"
+            "$n": "173734985461240154297111513183852161496"
           },
           {
-            "$n": "76089533706018660568664863715607742274"
+            "$n": "36853051653878100122134586227268863110"
           },
           {
-            "$n": "247834375320988432483615364196558597441"
+            "$n": "55325502670035253757413144480575815699"
           },
           {
-            "$n": "260966205472032652912237345822318183830"
+            "$n": "304687852377669685276603810362344815595"
           },
           {
-            "$n": "224665923623619263150576759837614516344"
+            "$n": "260017236569934895176809107506441572721"
           }
         ]
       },
-      "nonce": "2d2e379a-754b-40c3-9401-879adabb2cbe",
-      "iat": 1792813627,
-      "exp": 1792813927,
+      "nonce": "43d0ea41-d37d-404f-9243-e1555253b761",
+      "iat": 1792815681,
+      "exp": 1792815981,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "8IcMvmDWuTmgfC9X9LEzoQRDT6ZGrcHK8S3xBrVs2a_UjU0rVBSLGab-B2GV3hiKcu1nStqGxr38qw4wpSFTDw"
+      "signature": "7BmukPEXerPwU5q317xEmyyuG5q3LLkzSXOT3pyP-JK-uwzrC8adatgvOHFUl2-c42NGSEDg3Pz1XbCJjU0PAw"
     }
   }
 }

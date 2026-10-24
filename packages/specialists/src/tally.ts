@@ -47,7 +47,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const tell = async (url: string, body: Record<string, unknown>) => {
     try {
       const envelope = await signMessage(body, o.id, { iss: s.webId });
-      await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 10_000 });
+      await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 });
     } catch {
       // A signer that has gone can still ask for the result with tally.count.
     }

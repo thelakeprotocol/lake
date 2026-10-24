@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   accessGrantDraft, agreementFor, aggregateReports, buildCard, collectiveCounter, generateIdentity, issueCredential, digestSRI, makeEvent, newVerifyKey, prepareReport, settleReport, shardAnswer, signAgreement, signCard,
-  signIntentMandate, signMessage, signPaymentMandate, statusEntry, statusListCredential, studyId,
+  sealLake, signIntentMandate, signMessage, signPaymentMandate, statusEntry, statusListCredential, studyId,
 } from '../packages/core/dist/index.js';
 
 const out = join(import.meta.dirname, '..', 'spec', 'examples');
@@ -55,7 +55,9 @@ write('ethics-approval.json', { credential: ethicsVc, card: ethics.card, decoded
 write('study-certificate.json', { credential: auditVc, card: auditor.card, decoded: decode(auditVc) }, 'An auditor\'s certificate for the study. Without one from a trusted auditor, no house runs it.');
 
 const offer = { id: '7f1c0a52-1d1e-4a5e-9c41-2b7d2d0f4e10', requester: visitor.domain, purpose: 'research', fields, retention: 'none', priceUsd: 2, study: sid, credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true } };
-write('1-offer.json', await envelope(visitor, { kind: 'offer', offer, study, attachments: { ethics: { credential: ethicsVc, card: ethics.card }, audit: { credential: auditVc, card: auditor.card } } }), 'Step 1. The visitor knocks: an A2A data part with its card and a signed envelope carrying the offer, the study and both credentials.');
+const knockMsg = await envelope(visitor, { kind: 'offer', offer, study, attachments: { ethics: { credential: ethicsVc, card: ethics.card }, audit: { credential: auditVc, card: auditor.card } } });
+write('1-offer.json', knockMsg, 'Step 1. The visitor knocks: its card and a signed envelope carrying the offer, the study and both credentials. This (and every step below) is shown opened.');
+write('1-offer.sealed.json', await sealLake(knockMsg, house.card), 'Step 1 as it travels in the A2A data part: the same message sealed for the house (a JWE for the X25519 twin of the key on its card). Whatever carries it sees neither the offer nor who sent it.');
 
 const counter = { fields: ['age_band', 'medications', 'readmissions'], priceUsd: 4 };
 write('2-counter.json', await envelope(house, { kind: 'decision', offerId: offer.id, decision: 'counter', reason: "you'd join if they drop postcode and pay at least $4", counter, bloc: true, holds: ['age_band', 'medications'], notes: [] }), 'Step 2. A house counters, signed, and says it bargains as a bloc.');

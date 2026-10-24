@@ -43,7 +43,7 @@ export async function fetchConverterCert(auditorUrl: string, me: { id: Identity;
   for (let i = 0; i < tries; i++) {
     try {
       const envelope = await signMessage({ kind: 'audit-converter', package: p.source!.converter }, me.id, { iss: me.webId });
-      const reply = await sendLake(auditorUrl, { lake: '0.1', card: me.card, envelope: envelope as LakeData['envelope'] });
+      const reply = await sendLake(auditorUrl, { lake: '0.1', card: me.card, envelope: envelope as LakeData['envelope'] }, { me: me.id });
       const v = await verifyLakeData<{ kind: string; credential?: string; problems?: string[] }>(reply as never, { sandbox: true });
       if (!v.ok) throw new Error(v.rejection.why);
       if (v.payload.kind !== 'certified') throw new Error((v.payload.problems ?? []).join('; '));

@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, checkCredentialStatus, generateIdentity, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, checkCredentialStatus, generateIdentity, postLakePart, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -105,6 +105,13 @@ describe('one house', () => {
     const vc = JSON.parse(Buffer.from(String(reply.grant).split('.')[1]!, 'base64url').toString());
     expect(vc.credentialStatus).toMatchObject({ type: 'BitstringStatusListEntry', statusListCredential: `${houses.stan}/status/revocation` });
     expect(await checkCredentialStatus(vc)).toMatchObject({ checked: true, revoked: false });
+  });
+
+  it('takes only messages sealed for it: one sent in the clear is refused, and says nothing back', async () => {
+    const v = await visitor('clear.example');
+    const plain = { lake: '0.1', card: v.card, envelope: await signMessage(presets().gp as never, v.id, { iss: v.webId }) };
+    const reply = (await postLakePart(`${houses.stan}/a2a`, plain)) as { envelope?: { payload?: { kind?: string; code?: string } } };
+    expect(reply.envelope?.payload).toMatchObject({ kind: 'rejected', code: 'malformed' });
   });
 
   it('asks the owner when no rule covers it, declines what a rule refuses, and never tells the visitor the owner\'s rules', async () => {
@@ -609,6 +616,9 @@ describe('a study run', () => {
     const one = { url: `${specialistsUrl}/teller-a/a2a`, domain: 'teller-a.lake.local' };
     const sneaky = readmissionStudy(undefined, [one, one]);
     await expect(run({ study: sneaky })).rejects.toThrow(/refused/);
+    // Nor will a teller open a count with itself as the Helper (run 13 found one that did).
+    const { reply } = await ask(one.url, await visitor('kite.example'), { kind: 'count.open', id: 'self-helper', length: 8, min: 20, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper: one });
+    expect(reply).toMatchObject({ kind: 'refused', problems: expect.arrayContaining(['helper: a different teller, run by a different party']) });
   });
 
   it('drops a house whose record was tampered with', async () => {
