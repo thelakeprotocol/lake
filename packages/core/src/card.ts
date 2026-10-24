@@ -10,7 +10,7 @@ export interface LakeProfile {
   role: LakeRole;
   /** The owner's WebID: who answers for this agent. */
   webId: string;
-  /** The domain the owner proves control of (DNS TXT or /.well-known/lake.json). */
+  /** The domain the owner proves control of: its did:web document, or its DID Configuration, lists this key (SPEC §2.3). */
   ownerDomain: string;
   /** Public signing key (JWK) used for cards and messages. */
   publicJwk: jose.JWK;

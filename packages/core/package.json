@@ -24,10 +24,12 @@
     "@divviup/prio3": "0.8.0",
     "@marcbachmann/cel-js": "8.0.0",
     "@sd-jwt/sd-jwt-vc": "0.22.0",
+    "did-resolver": "6.0.0",
     "drand-client": "1.4.2",
     "express": "5",
     "jose": "6",
     "n3": "1",
+    "web-did-resolver": "3.1.0",
     "yaml": "2"
   },
   "devDependencies": {

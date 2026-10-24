@@ -66,10 +66,12 @@ A node or agent MUST reject:
 
 ### 2.3 Domain proof
 
-A card claiming `ownerDomain: example.org` MUST be backed by one of:
+A card claiming `ownerDomain: example.org` MUST be backed by one of these standard links between a domain and its keys:
 
-- a DNS TXT record at `_lake.example.org` containing `lake-key=<publicJwk.kid>`, or
-- `https://example.org/.well-known/lake.json` containing `{ "keys": ["<publicJwk.kid>"] }`.
+- **did:web**: the DID document of `did:web:example.org`, at `https://example.org/.well-known/did.json`, lists the card's key (`publicKeyJwk`) as a verification method it uses for `assertionMethod` or `authentication`; or
+- **DIF Well-Known DID Configuration**: `https://example.org/.well-known/did-configuration.json` holds, in `linked_dids`, a Domain Linkage Credential (JWT) for the origin `https://example.org`, signed by a DID whose document lists the card's key the same way.
+
+A verifier MUST compare the whole public key, never just its `kid`. `lake did-web <domain> <agent urls>` prints the `did.json` for a domain's agents.
 
 A node MUST reject a card whose domain proof fails.
 

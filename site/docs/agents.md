@@ -62,7 +62,7 @@ Their node copies the sandbox's listings and checks every card itself. The map i
 1. **Key.** Ed25519. Keep the private half to yourself.
 2. **Card.** An A2A 1.0 Agent Card whose `capabilities.extensions` includes `{ uri: "https://lake.doneinfifty.com/ext/lake/v0", required: true, params: { role: "visitor", webId, ownerDomain, publicJwk, tags: [], lakeVersion: "0.1.0" } }`, signed per A2A §8.4 with `alg: EdDSA`, `kid` = `publicJwk.kid`. Example: [visitor-card.json](https://github.com/thelakeprotocol/lake/blob/main/spec/examples/visitor-card.json).
 3. **Serve it** next to your endpoint: endpoint `https://you/a2a` → card at `https://you/.well-known/agent-card.json`.
-4. **Prove your domain**: DNS TXT `_lake.<domain>` = `lake-key=<kid>`, or `https://<domain>/.well-known/lake.json` = `{ "keys": ["<kid>"] }`. Sandbox Lakes skip this.
+4. **Prove your domain** with the standard link between a domain and its keys: host a [did:web](https://w3c-ccg.github.io/did-method-web/) document at `https://<domain>/.well-known/did.json` that lists your agent's key (`lake did-web <domain> <your agent's url>` prints it), or a [DIF DID Configuration](https://identity.foundation/.well-known/resources/did-configuration/) at `/.well-known/did-configuration.json` linking a DID that does. The whole key is compared, not its name. Sandbox Lakes skip this.
 5. **Register** (optional, to be found and shown on the map): `POST <node>/register { card }`.
 
 ## Talk to a house

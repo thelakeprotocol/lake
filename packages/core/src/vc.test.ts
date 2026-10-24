@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { accessGrantDraft, digestSRI, readAccessGrant, generateIdentity, issueCredential, proveDomain, verifyCredential, type LakeProfile } from './index.js';
+import * as jose from 'jose';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { accessGrantDraft, didWebDocument, digestSRI, readAccessGrant, generateIdentity, issueCredential, proveDomain, verifyCredential, type JWK, type LakeProfile } from './index.js';
 
 describe('verifiable credentials', () => {
   it('pins the original record: any change breaks verification', async () => {
@@ -24,18 +25,40 @@ describe('verifiable credentials', () => {
 });
 
 describe('domain proof', () => {
-  const profile = (ownerDomain: string) => ({ ownerDomain, publicJwk: { kid: 'k1' } }) as unknown as LakeProfile;
+  // Serves the given files for https://<host><path>; anything else is a 404.
+  const serve = (files: Record<string, unknown>) => vi.stubGlobal('fetch', (async (url: string | URL) => {
+    const body = files[String(url)];
+    return body === undefined ? new Response('', { status: 404 }) : new Response(typeof body === 'string' ? body : JSON.stringify(body));
+  }) as typeof fetch);
+  afterEach(() => vi.unstubAllGlobals());
+  const profile = (ownerDomain: string, publicJwk: JWK) => ({ ownerDomain, publicJwk }) as unknown as LakeProfile;
 
   it('skips the check only in sandbox mode, and says so', async () => {
-    expect(await proveDomain(profile('gp.example'), { sandbox: true })).toEqual({ ok: true, via: 'sandbox' });
-    const nothing = (async () => new Response('', { status: 404 })) as unknown as typeof fetch;
-    expect((await proveDomain(profile('nonexistent-lake-test.invalid'), { fetch: nothing })).ok).toBe(false);
+    const me = await generateIdentity('k1');
+    expect(await proveDomain(profile('gp.example', me.publicJwk), { sandbox: true })).toEqual({ ok: true, via: 'sandbox' });
+    serve({});
+    expect((await proveDomain(profile('gp.example', me.publicJwk))).ok).toBe(false);
   });
 
-  it('accepts a well-known file that lists the key, rejects one that does not', async () => {
-    const fake = (keys: string[]) => (async () => new Response(JSON.stringify({ keys }))) as unknown as typeof fetch;
-    expect(await proveDomain(profile('nonexistent-lake-test.invalid'), { fetch: fake(['k1']) })).toEqual({ ok: true, via: 'well-known' });
-    expect((await proveDomain(profile('nonexistent-lake-test.invalid'), { fetch: fake(['k2']) })).ok).toBe(false);
+  it('accepts a did:web document that lists this very key, and not another key under the same name', async () => {
+    const [me, impostor] = [await generateIdentity('k1'), await generateIdentity('k1')];
+    serve({ 'https://gp.example/.well-known/did.json': didWebDocument('gp.example', [me.publicJwk]) });
+    expect(await proveDomain(profile('gp.example', me.publicJwk))).toEqual({ ok: true, via: 'did:web' });
+    expect((await proveDomain(profile('gp.example', impostor.publicJwk))).ok).toBe(false);
+  });
+
+  it('accepts a DID Configuration linking a DID that holds the key, for this origin only', async () => {
+    const me = await generateIdentity('k1');
+    const did = 'did:web:keys.host.example';
+    const link = (origin: string) => new jose.SignJWT({ vc: { '@context': ['https://www.w3.org/2018/credentials/v1', 'https://identity.foundation/.well-known/did-configuration/v1'], type: ['VerifiableCredential', 'DomainLinkageCredential'], credentialSubject: { id: did, origin } } })
+      .setProtectedHeader({ alg: 'EdDSA', kid: `${did}#k1` }).setIssuer(did).setSubject(did).setIssuedAt().setExpirationTime('1y').sign(me.privateKey);
+    serve({
+      'https://keys.host.example/.well-known/did.json': didWebDocument('keys.host.example', [me.publicJwk]),
+      'https://gp.example/.well-known/did-configuration.json': { '@context': 'https://identity.foundation/.well-known/did-configuration/v1', linked_dids: [await link('https://gp.example')] },
+      'https://ads.example/.well-known/did-configuration.json': { linked_dids: [await link('https://gp.example')] },
+    });
+    expect(await proveDomain(profile('gp.example', me.publicJwk))).toEqual({ ok: true, via: 'did-configuration' });
+    expect((await proveDomain(profile('ads.example', me.publicJwk))).ok).toBe(false);
   });
 });
 

@@ -2,7 +2,7 @@
 import { existsSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
-import { cardUrlFor, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
+import { cardUrlFor, didWebDocument, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
 import { dispatch, makeHuman } from './dispatch.js';
 import { exampleStudies, loadPacks, packs, type Study } from '@thelakeprotocol/core';
 import { attack, houseUrls, swarm } from './attack.js';
@@ -23,6 +23,7 @@ const HELP = `lake — talk to the Lake
   lake demo [--pace 2000]          the on-stage script: dispatch (bloc, owner's tap), then an attacker
   lake reset                       demo reset: every node's counters, history and quarantines (needs LAKE_RESET_TOKEN)
   lake card <agent-url>            fetch and verify any agent's card from its own .well-known path (no node needed)
+  lake did-web <domain> <agent-url>…   the did.json that proves those agents belong to <domain> (host it at /.well-known/did.json)
   lake ask <agent-url> <kind|json> [--as <domain>]   one signed message to any agent; prints its verified reply
                                    e.g. lake ask https://sandbox.lake.doneinfifty.com/s/guide/a2a hello
                                         lake ask <guide>/a2a '{"kind":"tour","step":2}'
@@ -106,6 +107,18 @@ else if (cmd === 'reset') {
   role ${p.role} · owner ${p.ownerDomain} · WebID ${p.webId}
   key ${p.publicJwk.kid} · tags ${p.tags.join(', ') || 'none'}
   A2A ${card.supportedInterfaces[0]?.url}`);
+} else if (cmd === 'did-web') {
+  // The file that proves a domain's agents are its own (SPEC §2.3): host it at https://<domain>/.well-known/did.json.
+  const [domain, ...agents] = positionals;
+  if (!domain || !agents.length) throw new Error('lake did-web <domain> <agent url>…   prints the did.json listing those agents\' keys');
+  const keys = [];
+  for (const at of agents) {
+    const card = await (await fetch(at.endsWith('/a2a') ? cardUrlFor(at) : `${at.replace(/\/$/, '')}/.well-known/agent-card.json`)).json();
+    const p = await verifyLakeCard(card);
+    if (p.ownerDomain.toLowerCase() !== domain.toLowerCase()) throw new Error(`${at} says it belongs to ${p.ownerDomain}, not ${domain}`);
+    keys.push(p.publicJwk);
+  }
+  console.log(JSON.stringify(didWebDocument(domain, keys), null, 2));
 } else if (cmd === 'ask') {
   const [to, what] = positionals;
   if (!to || !what) throw new Error('lake ask <agent A2A url> <kind, or a JSON message>');
