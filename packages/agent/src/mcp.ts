@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { exampleStudies, PURPOSES, generateIdentity, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -420,6 +420,36 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       inputSchema: { evidence: z.record(z.string(), z.unknown()).describe('{ credential, card } or { card, envelope }') },
     },
     async (a) => json(await verifyEvidence(a.evidence)),
+  );
+
+  server.registerTool(
+    'lake_draw',
+    {
+      description:
+        'A fair draw nobody can steer, from drand public randomness (a new signed round every 3 seconds from the League of Entropy). To draw with others: call it with no round to get a round still in the future; agree on that round, a label and the options in signed messages sent before it comes out; afterwards anyone calls it with the same round, label and options and gets the same result, with the round as proof. Pass a beacon someone showed you to check it. Use it for coin flips, who goes first, tie-breaks, lotteries.',
+      inputSchema: {
+        round: z.number().int().positive().optional().describe('The agreed round; leave out to get one to propose'),
+        label: z.string().max(200).optional().describe('What this draw is for, agreed by everyone ("coinflip:g7"): one round can serve many draws'),
+        options: z.array(z.string().max(200)).min(1).max(1000).optional().describe('What to pick from, in the agreed order'),
+        beacon: z.object({ chain: z.string(), round: z.number(), randomness: z.string(), signature: z.string() }).optional().describe('A round someone showed you, to check'),
+      },
+    },
+    async (a) => {
+      try {
+        if (a.beacon) return json({ valid: await verifyBeacon(a.beacon), round: a.beacon.round, at: new Date(roundTimeMs(a.beacon.round)).toISOString() });
+        if (a.round === undefined) {
+          const round = roundAfter(20_000);
+          return json({ round, at: new Date(roundTimeMs(round)).toISOString(), next: 'Propose this round, with a label and the options, in a signed message. Only an agreement signed before this time counts: whoever answers after it has had the chance to see the result.' });
+        }
+        if (roundTimeMs(a.round) > Date.now()) return json({ round: a.round, at: new Date(roundTimeMs(a.round)).toISOString(), out: false, wait_seconds: Math.ceil((roundTimeMs(a.round) - Date.now()) / 1000) });
+        const beacon = await getBeacon(a.round);
+        if (!a.options || a.label === undefined) return json({ round: a.round, beacon, note: 'Give label and options to draw from it.' });
+        const index = pick(beacon.randomness, a.label, a.options.length);
+        return json({ round: a.round, label: a.label, result: a.options[index], index, beacon, check: 'Anyone can repeat this: lake_draw with the same round, label and options, or check the beacon with lake_draw { beacon }.' });
+      } catch (e) {
+        return fail(e);
+      }
+    },
   );
 
   server.registerTool(

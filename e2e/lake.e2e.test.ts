@@ -416,7 +416,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -446,6 +446,12 @@ describe('the open door', () => {
     expect(theirs.you.name).not.toBe(o.you.name);
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'] });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
+    // A fair draw: a round still to come to agree on, and anyone can check a round shown as proof (drand; offline here).
+    const proposed = await text('lake_draw', {});
+    expect(Date.parse(proposed.at)).toBeGreaterThan(Date.now() + 15_000);
+    const round1m = { chain: '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971', round: 1_000_000, randomness: 'b22aad4794f7451896f7a371aa46106fd84d919f3f569acd5b2fddf1d1440af3', signature: '83ad29e4c409f9470fc2ef02f90214df49e02b441a1a241a82d622d9f608ef98fd8b11a029f1bee9d9e83b45088abe72' };
+    expect((await text('lake_draw', { beacon: round1m })).valid).toBe(true);
+    expect((await text('lake_draw', { beacon: { ...round1m, randomness: '00'.repeat(32) } })).valid).toBe(false);
     const paid = await text('lake_pay', { agent_url: theirs.you.url, amount: 3, memo: 'lot1, sealed auction' });
     expect(paid).toMatchObject({ paid: 3, unit: 'USD', remaining: 47 });
     expect((await text('lake_pay', { agent_url: theirs.you.url, amount: 2, unit: 'favour', memo: 'for the coin flip' })).unit).toBe('favour');
