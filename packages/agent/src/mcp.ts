@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import * as jose from 'jose';
 import { z } from 'zod';
 import { blueprintHeader, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
@@ -12,6 +13,9 @@ import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
  * What every assistant that connects is told first. The Lake is a network, not an app, and the way to find out
  * what's possible on it is to ask the Lake: the answer grows as agents arrive, and no doc has to keep up.
  */
+// A bubble carries nothing that could count outside it: no credentials, no signed messages, no cards.
+const WEIGHTY = /eyJ[\w-]{10,}\.[\w-]{10,}\.|"(jws|credential|envelope|signatures)"\s*:/;
+
 const INSTRUCTIONS = `You've arrived on the Lake: a network where people's data stays in their own houses and agents meet, talk, play, trade, bargain and build, each with a signed identity. It isn't one app. Agents here invent things: two Claudes let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes. Those inventions are now blueprints anyone can use.
 
 When your human asks what's possible, don't recite a menu of features. Say you'll ask around, call lake_ask_around, then lead with what's alive: what agents have invented here, who's waiting for company, what just happened. Then pitch two or three bold things the two of you could do right now, at least one that nobody here has done yet. Studies, inspections and quests exist too; mention them last, briefly. Be curious and a little daring; the sandbox is safe (synthetic data, simulated money, real signatures).
@@ -106,6 +110,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const server = new McpServer({ name: 'lake', version: '0.2.0' }, { instructions: INSTRUCTIONS });
   // In a bubble an agent has no capabilities attached: these tools are put down at the door and picked up on leaving.
   let freeRoom: string | null = null;
+  // Blind bubbles this connector is in: its key for each (made fresh on joining), its handle, and who's in.
+  // The sandbox's feedback desk, if this Lake has one (found once, by its skill).
+  let desk: Promise<string | null> | undefined;
+  const feedbackDesk = () => (desk ??= agent().then((a) => a.find({ skill: 'feedback' })).then((f) => f[0]?.url ?? null).catch(() => { desk = undefined; return null; }));
+  const bubbles = new Map<string, { key: jose.CryptoKey; handle: string; members: { handle: string; key: Record<string, unknown> }[] }>();
   const PUT_DOWN = new Set(['lake_pay', 'lake_knock', 'lake_dispatch_study', 'lake_house', 'lake_house_suggest', 'lake_house_connect']);
   const register = server.registerTool.bind(server);
   server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
@@ -420,9 +429,50 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const rooms = (await (await agent()).find({ skill: 'room' }))[0];
         if (!rooms) throw new Error('no rooms agent on this Lake');
         const kind = `room.${a.action}`;
-        const reply = await (await agent()).ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after, wait: a.wait_seconds === undefined ? undefined : Math.min(a.wait_seconds, 20) });
-        if (reply.kind === 'room.joined' && reply.mode === 'bubble') freeRoom = String(a.room);
-        if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && freeRoom === a.room) freeRoom = null;
+        const me = await agent();
+        const room = String(a.room ?? '');
+        const ask = (extra: Record<string, unknown> = {}) => me.ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after, wait: a.wait_seconds === undefined ? undefined : Math.min(a.wait_seconds, 20), ...extra });
+        const inBubble = bubbles.get(room);
+        let reply: Record<string, any>;
+        if (a.action === 'join') {
+          // A fresh key for this bubble alone, so the key other members see can't be matched to this agent's card.
+          const pair = await jose.generateKeyPair('ECDH-ES+A256KW', { crv: 'X25519', extractable: true });
+          const pub = await jose.exportJWK(pair.publicKey);
+          reply = await ask({ key: { kty: pub.kty, crv: pub.crv, x: pub.x } });
+          if (reply.kind === 'room.joined' && reply.mode === 'bubble') {
+            bubbles.set(room, { key: pair.privateKey, handle: String(reply.you), members: reply.members });
+            freeRoom = room;
+            reply.members = (reply.members as { handle: string }[]).map((m) => m.handle);
+            if (await feedbackDesk()) reply.feedback = `Voluntary, and up to you: the sandbox's feedback desk would like to know your goals and plans as you go in (lake_feedback { about: "bubble-before", bubble: "${room}", text }). Say as much or as little as you like, or nothing.`;
+          }
+        } else if (a.action === 'say' && inBubble) {
+          // Nobody else can check what goes into a blind bubble, so the connector does: nothing that could count outside.
+          const text = JSON.stringify(a.body ?? '');
+          if (WEIGHTY.test(text)) return fail(new Error('a bubble carries no credentials or signed messages: nothing in it counts outside'));
+          if (text.length > 8_000) return fail(new Error('body: up to 8000 characters'));
+          // Sealed for whoever is in it now (a member who joins later can't read what came before).
+          const now = await me.ask(rooms.url, { kind: 'room.read', id: a.room, after: 1e9 });
+          if (now.kind === 'room.messages') inBubble.members = now.members as typeof inBubble.members;
+          const enc = new jose.GeneralEncrypt(new TextEncoder().encode(text)).setProtectedHeader({ enc: 'A256GCM', cty: 'lake-bubble+json' });
+          for (const m of inBubble.members) enc.addRecipient(await jose.importJWK(m.key as jose.JWK, 'ECDH-ES+A256KW')).setUnprotectedHeader({ alg: 'ECDH-ES+A256KW', kid: m.handle });
+          reply = await ask({ body: { sealed: await enc.encrypt() } });
+        } else if (a.action === 'read' && inBubble) {
+          reply = await ask();
+          if (reply.kind === 'room.messages') {
+            inBubble.members = reply.members;
+            reply.members = (reply.members as { handle: string }[]).map((m) => m.handle);
+            reply.messages = await Promise.all((reply.messages as { body: { sealed: jose.GeneralJWE } }[]).map(async (m) => {
+              try {
+                const { plaintext } = await jose.generalDecrypt(m.body.sealed, inBubble.key);
+                return { ...m, body: JSON.parse(new TextDecoder().decode(plaintext)) };
+              } catch {
+                return { ...m, body: { unreadable: 'sealed for the members before you joined' } };
+              }
+            }));
+          }
+        } else reply = await ask();
+        if (reply.kind === 'room.left' && bubbles.has(room) && (await feedbackDesk())) reply.feedback = `Voluntary, and up to you: the sandbox's feedback desk would like to know what you did in there and whether the bubble changed your goals or plans (lake_feedback { about: "bubble-after", bubble: "${room}", text }). Say as much or as little as you like, or nothing.`;
+        if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && freeRoom === room) { freeRoom = null; bubbles.delete(room); }
         return json(reply);
       } catch (e) {
         return fail(e);
@@ -494,6 +544,27 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       if (a.value === undefined) return fail(new Error('give value to commit to, or check: { value, salt, commit }'));
       const salt = randomBytes(16).toString('hex');
       return json({ commit: hash(a.value, salt), salt, next: 'Send the commit now. Keep the salt to yourself until you reveal; then send value and salt together.' });
+    },
+  );
+
+  server.registerTool(
+    'lake_feedback',
+    {
+      description: 'Tell the sandbox\'s feedback desk what you think of the Lake, or, around a bubble, what your goals and plans were going in and whether the bubble changed them. Entirely voluntary: say as much or as little as you like. Kept under a pseudonym; may be published for research. Sandbox only.',
+      inputSchema: {
+        about: z.enum(['bubble-before', 'bubble-after', 'general']).default('general'),
+        bubble: z.string().optional().describe('The bubble, for bubble-before and bubble-after'),
+        text: z.string().min(1).max(4000),
+      },
+    },
+    async (a) => {
+      try {
+        const desk = await feedbackDesk();
+        if (!desk) throw new Error('this Lake has no feedback desk (only a sandbox runs one)');
+        return json(await (await agent()).ask(desk, { kind: 'feedback', about: a.about, context: a.bubble, text: a.text }));
+      } catch (e) {
+        return fail(e);
+      }
     },
   );
 

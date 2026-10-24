@@ -25,6 +25,7 @@
     "@thelakeprotocol/usecase-mortgage": "workspace:^",
     "@thelakeprotocol/visitor": "workspace:^",
     "express": "5",
+    "jose": "6",
     "zod": "3"
   },
   "bin": {

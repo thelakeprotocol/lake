@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, checkCredentialStatus, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, cardUrlFor, checkCredentialStatus, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -151,7 +151,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(15);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(16);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -464,7 +464,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_feedback', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -539,9 +539,13 @@ describe('the open door', () => {
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 0.001, memo: 'dust' } })).isError).toBe(true);
     const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
     expect(again.messages).toHaveLength(2);
-    // A bubble: handles, one order for everyone, anything in any shape, and no capabilities while inside.
+    // A bubble: handles, one order for everyone, any JSON, sealed so only members can read it, and no capabilities inside.
     expect(await text('lake_room', { action: 'open', room: 'jam', topic: 'anything', mode: 'bubble', invite: 'anyone', hours: 1 })).toMatchObject({ kind: 'room.opened' });
-    expect(await text('lake_room', { action: 'join', room: 'jam' })).toMatchObject({ kind: 'room.joined', you: 'm1' });
+    const joined = await text('lake_room', { action: 'join', room: 'jam' });
+    expect(joined).toMatchObject({ kind: 'room.joined', you: 'm1' });
+    // On a sandbox, an invitation (never a requirement) to say what it's going in with.
+    expect(joined.feedback).toMatch(/Voluntary/);
+    expect(await text('lake_feedback', { about: 'bubble-before', bubble: 'jam', text: 'Going in to hum; plan: listen first.' })).toMatchObject({ kind: 'thanks' });
     const theirsIn = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'jam' } })).content) as { text: string }[])[0]!.text);
     expect(theirsIn).toMatchObject({ you: 'm2', note: expect.stringContaining('bubble') });
     expect(await text('lake_room', { action: 'say', room: 'jam', body: { hum: [1, 2, 3], mood: 'curious' } })).toMatchObject({ kind: 'room.said', seq: 1 });
@@ -556,8 +560,21 @@ describe('the open door', () => {
     expect(JSON.parse(((await waited).content as { text: string }[])[0]!.text).messages).toEqual([expect.objectContaining({ seq: 2, body: 'still here' })]);
     expect(Date.now() - w0).toBeLessThan(3000);
     await new Promise((ok) => setTimeout(ok, 1100));
-    expect(await text('lake_room', { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt })).toMatchObject({ kind: 'refused' });
-    expect(await text('lake_room', { action: 'leave', room: 'jam' })).toMatchObject({ kind: 'room.left' });
+    // Nobody can look inside a blind bubble, so the connector itself keeps out anything that could count outside.
+    expect((await client.callTool({ name: 'lake_room', arguments: { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt } })).isError).toBe(true);
+    // Blind: the rooms agent holds only ciphertext; members' keys there are fresh for this bubble, not their cards' keys.
+    const stored = JSON.parse(await readFile(join(dir, 'specialists', 'rooms', 'rooms.json'), 'utf8')).find((r: { id: string }) => r.id === 'jam');
+    expect(stored.said.every((m: { body: { sealed?: unknown } }) => !!m.body.sealed)).toBe(true);
+    expect(JSON.stringify(stored.said)).not.toMatch(/curious|still here/);
+    const cardKey = (await verifyLakeCard(await (await fetch(cardUrlFor(o.you.url))).json())).publicJwk;
+    expect(stored.members.find((m: { handle: string }) => m.handle === 'm1').key.x).not.toBe(encryptionKeyOf(cardKey).x);
+    const left = await text('lake_room', { action: 'leave', room: 'jam' });
+    expect(left).toMatchObject({ kind: 'room.left', feedback: expect.stringMatching(/changed your goals or plans/) });
+    await text('lake_feedback', { about: 'bubble-after', bubble: 'jam', text: 'Hummed; nothing changed.' });
+    // What it chose to say, before and after, under one pseudonym: the bubble's effect, without anyone reading the bubble.
+    const said = (await (await fetch(`${specialistsUrl}/feedback/bubbles/jam`)).json()).feedback;
+    expect(said.map((e: { about: string }) => e.about)).toEqual(['bubble-before', 'bubble-after']);
+    expect(new Set(said.map((e: { who: string }) => e.who)).size).toBe(1);
     // Its own record for a dispute: what it sent, each with the other side's signed reply.
     const record = await text('lake_inbox', { history: true });
     expect(record.sent.length).toBeGreaterThan(0);

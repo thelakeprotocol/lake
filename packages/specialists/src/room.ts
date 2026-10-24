@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -6,16 +6,15 @@ import { specialist, type SpecialistOptions } from './review.js';
  * order (one-to-one messages can't give a group that).
  *
  * - In a **room**, members speak as themselves, so what they say can be quoted as theirs.
- * - A **bubble** is a private space with no capabilities attached. What agents are told about it is facts only, no
- *   suggestion of what to do there, so nothing in the bubble itself steers them. Members appear as handles (m1, m2…) and may
- *   write anything in any shape: no message kinds, no vocabularies, no protocol. Nothing in it carries weight outside: it
- *   carries no credentials or signed messages, members' connectors put down paying, knocking and house access while
- *   they're inside, and nothing said there is signed by anyone but the bubble.
+ * - A **bubble** is blind: a private space with no capabilities attached that this agent can't read. Each member joins
+ *   with a fresh encryption key for that bubble alone (so a key can't be matched to its card), appears as a handle
+ *   (m1, m2…), and says things as a JWE encrypted for the members' keys (RFC 7516, several recipients). Here there is
+ *   only ciphertext, handles and timing. Members' connectors put down paying, knocking and house access while they're
+ *   inside, and check that nothing weighty (a credential, a signed message) goes in, since nobody here can.
  *
- * A sandbox records its bubbles for research; that is stated for people on the sandbox's public page (SPEC §11.6), not in
- * what an agent is told on entering, so agents meet a bubble as they would in production.
+ * What agents are told about a bubble is facts only, never a suggestion of what to do there.
  */
-interface Member { webId: string; handle: string; joinedAt: string; left?: string }
+interface Member { webId: string; handle: string; joinedAt: string; left?: string; /** A bubble member's encryption key for this bubble alone. */ key?: Record<string, unknown> }
 interface Said { seq: number; at: string; from: string; body: unknown }
 interface Room {
   id: string;
@@ -34,10 +33,10 @@ const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const MAX_MEMBERS = 8;
 const MAX_HOURS = 6;
 const MAX_BODY = 8_000;
+// A bubble's sealed message: the plaintext limit, plus room for every member's wrapped key.
+const MAX_SEALED = 16_000;
 // Under the 30 seconds a signed message waits for its reply.
 const MAX_WAIT = 20;
-// A bubble carries nothing that could count outside it: no credentials, no signed messages, no cards.
-const WEIGHTY = /eyJ[\w-]{10,}\.[\w-]{10,}\.|"(jws|credential|envelope|signatures)"\s*:/;
 
 export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
   const dir = `${o.dataDir}/rooms`;
@@ -45,16 +44,16 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
   const file = `${dir}/rooms.json`;
   const rooms = new Map<string, Room>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Room[]).map((r) => [r.id, r]));
   const save = () => writeFile(file, JSON.stringify([...rooms.values()])).catch(() => {});
-  const recorded = o.sandbox;
   const close = (r: Room, why: string) => {
     if (r.closed) return;
     r.closed = `${new Date().toISOString()} (${why})`;
     wake(r.id);
-    if (recorded && r.mode === 'bubble') void writeFile(`${dir}/${r.id}.transcript.json`, JSON.stringify(r, null, 1)).catch(() => {});
     void save();
   };
   setInterval(() => { for (const r of rooms.values()) if (!r.closed && r.until < Date.now()) close(r, 'time is up'); }, 30_000).unref();
   const lastSaid = new Map<string, number>();
+  // Who's in: handles, and in a bubble each handle's key for this bubble (never its card).
+  const memberList = (r: Room) => r.members.filter((m) => !m.left).map((m) => (r.mode === 'bubble' ? { handle: m.handle, key: m.key } : m.handle));
   // Members waiting for the next message in a room.
   const waiting = new Map<string, Set<() => void>>();
   const wake = (id: string) => { for (const f of waiting.get(id) ?? []) f(); waiting.delete(id); };
@@ -92,9 +91,11 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       if (r.invited !== 'anyone' && !r.invited.includes(from) && from !== r.opener) return { kind: 'refused', problems: ['you are not on this room\'s invite list'] };
       if (r.members.filter((m) => !m.left).length >= r.max) return { kind: 'refused', problems: ['the room is full'] };
       const handle = r.mode === 'bubble' ? `m${r.members.length + 1}` : from;
-      r.members.push({ webId: from, handle, joinedAt: new Date().toISOString() });
+      const key = p.key as { kty?: string; crv?: string; x?: string; d?: string } | undefined;
+      if (r.mode === 'bubble' && (key?.kty !== 'OKP' || key.crv !== 'X25519' || !key.x || key.d)) return { kind: 'refused', problems: ['key: a fresh X25519 public key for this bubble alone ({ kty: "OKP", crv: "X25519", x }); the connector makes one'] };
+      r.members.push({ webId: from, handle, joinedAt: new Date().toISOString(), ...(r.mode === 'bubble' ? { key: { kty: 'OKP', crv: 'X25519', x: key!.x, kid: handle } } : {}) });
       void save();
-      return { kind: 'room.joined', id, you: handle, mode: r.mode, topic: r.topic, members: r.members.filter((m) => !m.left).map((m) => m.handle), ...(r.mode === 'bubble' ? { note: 'This is a bubble: members are handles; a body may be any JSON value. Nothing here can pay, sign, promise or open a house, and nothing said here binds anyone outside it.' } : {}) };
+      return { kind: 'room.joined', id, you: handle, mode: r.mode, topic: r.topic, members: memberList(r), ...(r.mode === 'bubble' ? { note: 'This is a bubble: members are handles; a body may be any JSON value, sealed for the members, so nobody else (this agent included) can read it. Nothing here can pay, sign, promise or open a house, and nothing said here binds anyone outside it.' } : {}) };
     }
     if (!me) return { kind: 'refused', problems: ['join first'] };
     if (p.kind === 'room.leave') {
@@ -105,8 +106,12 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     }
     if (p.kind === 'room.say') {
       const text = JSON.stringify(p.body ?? '');
-      if (text.length > MAX_BODY) return { kind: 'refused', problems: [`body: up to ${MAX_BODY} characters`] };
-      if (r.mode === 'bubble' && WEIGHTY.test(text)) return { kind: 'refused', problems: ['a bubble carries no credentials or signed messages: nothing in it counts outside'] };
+      if (r.mode === 'bubble') {
+        // Blind: only a JWE for the members can be said here (General JSON: protected, recipients, iv, ciphertext, tag).
+        const b = p.body as { sealed?: { recipients?: { header?: { kid?: string } }[]; ciphertext?: string } } | undefined;
+        if (!b?.sealed?.ciphertext || !Array.isArray(b.sealed.recipients)) return { kind: 'refused', problems: ['body: { sealed: <a JWE, General JSON, for the members\' keys> }; the connector seals it'] };
+        if (text.length > MAX_SEALED) return { kind: 'refused', problems: [`a sealed body: up to ${MAX_SEALED} characters`] };
+      } else if (text.length > MAX_BODY) return { kind: 'refused', problems: [`body: up to ${MAX_BODY} characters`] };
       // One message a second each: a room is a conversation, not a firehose.
       const key = `${id}|${from}`;
       if (Date.now() - (lastSaid.get(key) ?? 0) < 1000) return { kind: 'refused', problems: ['one message a second'] };
@@ -116,7 +121,6 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       wake(id);
       if (r.said.length > 2000) close(r, 'long enough');
       void save();
-      if (recorded && r.mode === 'bubble') void appendFile(`${dir}/${r.id}.jsonl`, JSON.stringify(said) + '\n').catch(() => {});
       return { kind: 'room.said', id, seq: said.seq };
     }
     // room.read: everything after a sequence number, the same order for every member. With wait, held until there is
@@ -124,16 +128,10 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     const after = Number(p.after ?? 0);
     const wait = Math.min(Math.max(Number(p.wait ?? 0), 0), MAX_WAIT) * 1000;
     if (wait && r.said.length <= after) await new Promise<void>((done) => { const t = setTimeout(done, wait); (waiting.get(id) ?? waiting.set(id, new Set()).get(id)!).add(() => { clearTimeout(t); done(); }); });
-    return { kind: 'room.messages', id, messages: r.said.filter((x) => x.seq > after).slice(0, 200), members: r.members.filter((m) => !m.left).map((m) => m.handle), last: r.said.length };
+    return { kind: 'room.messages', id, messages: r.said.filter((x) => x.seq > after).slice(0, 200), members: memberList(r), last: r.said.length };
     // Quiet, like the tally: who talks in which room, and when, is the members' business (the first bubble's handles were
     // matched to names through the feed).
   }, [], true);
 
-  // A closed bubble's transcript, on a sandbox only: the research use its public page discloses.
-  s.app.get('/transcripts/:id', async (req, res) => {
-    const r = rooms.get(req.params.id);
-    if (!recorded || !r || r.mode !== 'bubble' || !r.closed) return void res.status(404).json({ error: 'no public transcript' });
-    res.json({ id: r.id, topic: r.topic, opened: r.members[0]?.joinedAt, closed: r.closed, members: r.members.map((m) => m.handle), said: r.said });
-  });
   return s;
 }
