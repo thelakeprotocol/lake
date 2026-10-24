@@ -29,6 +29,8 @@ const { values: a } = parseArgs({
     'auditor-url': { type: 'string', default: process.env.LAKE_AUDITOR_URL },
     // The person checker this house asks for its stamp (one person, one house); none by default.
     'person-url': { type: 'string', default: process.env.LAKE_PERSON_URL },
+    // The tellers this operator vouches for, by address: where domains aren't proven (a sandbox), houses trust tellers only here.
+    tellers: { type: 'string', default: process.env.LAKE_TELLERS },
     join: { type: 'string', default: process.env.LAKE_JOIN },
     // Bring your own pod (any Solid server): your WebID and client credentials registered with its identity provider.
     webid: { type: 'string', default: process.env.LAKE_WEBID },
@@ -59,6 +61,7 @@ if (a.join) {
   a.lake ??= lake;
   a['auditor-url'] ??= `${lake}/s/auditor`;
   a['person-url'] ??= `${lake}/s/person`;
+  a.tellers ??= `${lake}/s/teller-a/a2a,${lake}/s/teller-b/a2a`;
   a.relay = true;
 }
 const port = Number(a.port);
@@ -80,7 +83,7 @@ const packs = await loadPacks(a.packs!.split(','), (n) => import(n));
 const named = Object.fromEntries((a.issuers ?? '').split(',').filter((x) => x.includes('=')).map((x) => x.split('=').map((y) => y.trim()) as [string, string]));
 const issuerUrls = Object.fromEntries(packs.filter((p) => p.source).map((p, i) => [p.id,
   (named[p.id] ?? (i === 0 ? a['issuer-url'] : undefined) ?? (a.join ? `${a.join.replace(/\/$/, '')}/s/${p.source!.issuer.path}` : `http://${p.source!.issuer.path}:4300`)).replace(/\/$/, '')]));
-const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
+const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], tellerUrls: (a.tellers ?? '').split(',').map((u) => u.trim()).filter(Boolean), lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
 
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();

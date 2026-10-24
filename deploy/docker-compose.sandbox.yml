@@ -55,6 +55,8 @@ services:
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
       LAKE_PERSON_URL: "http://specialists:4300/person"
+      # Houses trust tellers only at the addresses the operator vouches for (a sandbox proves no domains).
+      LAKE_TELLERS: "https://${LAKE_DOMAIN}/s/teller-a/a2a,https://${LAKE_DOMAIN}/s/teller-b/a2a"
     volumes: [houses:/data]
     ports: ["127.0.0.1:4000:4000", "127.0.0.1:4310:3000"]
     depends_on: [specialists]

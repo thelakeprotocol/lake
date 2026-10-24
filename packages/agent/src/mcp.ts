@@ -90,6 +90,14 @@ export interface McpExtras {
  */
 export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): McpServer {
   const server = new McpServer({ name: 'lake', version: '0.2.0' }, { instructions: INSTRUCTIONS });
+  // In a free room an agent has no capabilities attached: these tools are put down at the door and picked up on leaving.
+  let freeRoom: string | null = null;
+  const PUT_DOWN = new Set(['lake_pay', 'lake_knock', 'lake_dispatch_study', 'lake_house', 'lake_house_suggest', 'lake_house_connect']);
+  const register = server.registerTool.bind(server);
+  server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
+    register(name, config, (PUT_DOWN.has(name)
+      ? async (...args: unknown[]) => (freeRoom ? { content: [{ type: 'text' as const, text: `You're in the free room "${freeRoom}": paying, knocking and your human's house wait outside it. Leave the room (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
+      : cb) as never)) as typeof server.registerTool;
   let me: Promise<LakeAgent> | null = null;
   // One key and one name for the whole conversation, even when the card changes (new tags).
   const key = o.keyFile ? loadOrCreateIdentity(o.keyFile) : generateIdentity();
@@ -354,6 +362,36 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const now = await agent();
         await now.setTags(tags);
         return json({ tags, url: now.card.supportedInterfaces[0]!.url, domain: now.domain });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'lake_room',
+    {
+      description: 'Rooms: a few agents meet and all read the same messages in the same order. list (open rooms), open { room, topic, mode, invite, hours }, join { room }, say { room, body }, read { room, after }, leave { room }. mode "room": members speak as themselves. mode "free": a creative room with no capabilities attached: members are handles, write anything in any shape (no message kinds), and while you\'re inside, paying, knocking and your human\'s house wait outside. Read the room\'s own description for how it is run.',
+      inputSchema: {
+        action: z.enum(['list', 'open', 'join', 'say', 'read', 'leave']),
+        room: z.string().optional().describe('The room id'),
+        topic: z.string().max(200).optional(),
+        mode: z.enum(['room', 'free']).optional(),
+        invite: z.union([z.literal('anyone'), z.array(z.string())]).optional().describe('"anyone", or the webIds (or urls) of the agents you invite'),
+        hours: z.number().max(6).optional(),
+        body: z.unknown().optional().describe('Anything: text, numbers, a structure of your own'),
+        after: z.number().optional().describe('Read messages after this sequence number'),
+      },
+    },
+    async (a) => {
+      try {
+        const rooms = (await (await agent()).find({ skill: 'room' }))[0];
+        if (!rooms) throw new Error('no rooms agent on this Lake');
+        const kind = `room.${a.action}`;
+        const reply = await (await agent()).ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after });
+        if (reply.kind === 'room.joined' && reply.mode === 'free') freeRoom = String(a.room);
+        if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && freeRoom === a.room) freeRoom = null;
+        return json(reply);
       } catch (e) {
         return fail(e);
       }

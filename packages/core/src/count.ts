@@ -53,5 +53,7 @@ export function tellersProblem(c: unknown): string | null {
   if (!Array.isArray(list) || list.length !== 2) return 'name exactly two tellers';
   if (!list.every((x) => x && typeof x.url === 'string' && /^https?:\/\//.test(x.url) && typeof x.domain === 'string' && x.domain)) return 'each teller needs a url and a domain';
   if (list[0]!.domain === list[1]!.domain) return 'the two tellers must be different parties';
+  const at = (u: string) => u.replace(/\/+$/, '').replace(/\/a2a$/, '');
+  if (at(list[0]!.url) === at(list[1]!.url)) return 'the two tellers must be at different addresses';
   return null;
 }

@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, offerableFields, oneHot, sendLake, splitCount, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, cardUrlFor, offerableFields, oneHot, proveDomain, verifyLakeCard, sendLake, splitCount, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -198,9 +198,9 @@ export class Housekeeper {
       const local = auditStudy(p.study);
       // Code without a valid certificate never runs here, whatever the rules say (SPEC §7).
       if (!audit.ok || !local.ok) { const why = `uncertified studies never run here (${audit.ok ? local.problems.join('; ') : audit.why})`; return decide('decline', why, {}, why); }
-      // The owner's answer will go, split, to these two tellers: both must be ones the owner trusts.
-      const strangers = p.study.privacy.tellers.filter((c) => !this.o.trust.tellers.includes(c.domain)).map((c) => c.domain);
-      if (strangers.length) return decide('decline', `its answers would go to tellers your owner doesn't trust: ${strangers.join(', ')}`, {}, 'this house does not trust the tellers this study names');
+      // The owner's answer will go, split, to these two tellers: both must be ones the owner trusts, checked at their addresses.
+      const tellers = await this.checkTellers(p.study.privacy.tellers);
+      if (!tellers.ok) return decide('decline', `its answers would go to tellers your owner doesn't trust: ${tellers.why}`, {}, 'this house does not trust the tellers this study names');
       auditCertified = true;
       const ethics = await checkAttachment(p.attachments?.ethics, { trusted: this.o.trust.ethics, type: 'LakeEthicsApproval', subject: id, sandbox: this.o.sandbox });
       const approvedFields = ethics.ok ? ((ethics.vc.credentialSubject.fields as string[] | undefined) ?? []) : [];
@@ -291,8 +291,9 @@ export class Housekeeper {
     if (!chain.ok) return excluded(`my record failed its checks: ${chain.why}`);
 
     const tellers = p.study.privacy.tellers;
-    const strangers = tellers.filter((c) => !this.o.trust.tellers.includes(c.domain)).map((c) => c.domain);
-    if (strangers.length) return excluded(`its answers would go to tellers your owner doesn't trust: ${strangers.join(', ')}`);
+    // Checked again here, before a piece goes anywhere: the address must hold the trusted teller's signed card, and its key is pinned.
+    const checked = await this.checkTellers(tellers);
+    if (!checked.ok) return excluded(`its answers would go to tellers your owner doesn't trust: ${checked.why}`);
     if (typeof p.count !== 'string' || !p.count) return excluded('name the count the tellers opened for this run (count)');
 
     // Inside the house: read only the granted fields, through the pod's MCP door, and answer truthfully. The answer
@@ -300,7 +301,7 @@ export class Housekeeper {
     const fields = studyFields(p.study).filter((f) => g.fields.includes(f));
     const claims = await this.claims(fields);
     const pieces = splitCount(oneHot(p.study, cellOf(p.study, claims)));
-    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.piece', id: p.count, piece: pieces[i] })));
+    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.piece', id: p.count, piece: pieces[i] }, checked.kids[i]!)));
     const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
     const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable pieces to ${tellers.map((c) => c.domain).join(' and ')}` };
@@ -310,14 +311,44 @@ export class Housekeeper {
     return this.reply({ kind: 'counted', study: id, count: p.count, tellers: tellers.map((c) => c.domain) });
   }
 
-  /** Sends a signed message to a teller and checks the answer comes from the teller it should: true, or why not. */
-  private async tell(c: { url: string; domain: string }, payload: Record<string, unknown>): Promise<true | string> {
+  /**
+   * Whether the owner trusts both tellers a study names, checked before anything is sent: a teller is trusted by the address
+   * the operator gave (on a sandbox, where nobody proves a domain, the only way), or elsewhere by a domain that proves its
+   * key. Either way the house fetches the teller's signed card from that address, which must carry the same name, and
+   * pins its key: two different keys, or no study.
+   */
+  private async checkTellers(tellers: { url: string; domain: string }[]): Promise<{ ok: true; kids: string[] } | { ok: false; why: string }> {
+    const norm = (u: string) => u.replace(/\/+$/, '').replace(/(\/a2a)?$/, '/a2a');
+    const kids: string[] = [];
+    for (const c of tellers) {
+      const url = norm(c.url);
+      const byUrl = this.o.trust.tellers.some((t) => /^https?:\/\//.test(t) && norm(t) === url);
+      const byDomain = !this.o.sandbox && this.o.trust.tellers.includes(c.domain);
+      if (!byUrl && !byDomain) return { ok: false, why: `${c.domain} at ${url} is not a teller this house trusts` };
+      try {
+        const card = (await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard;
+        const profile = await verifyLakeCard(card);
+        if (profile.ownerDomain !== c.domain) return { ok: false, why: `the card at ${url} is ${profile.ownerDomain}, not ${c.domain}` };
+        if (norm(card.supportedInterfaces[0]?.url ?? '') !== url) return { ok: false, why: `the card at ${url} names another address` };
+        const proof = await proveDomain(profile, { sandbox: this.o.sandbox });
+        if (!proof.ok) return { ok: false, why: proof.reason };
+        kids.push(String(profile.publicJwk.kid));
+      } catch (e) {
+        return { ok: false, why: `couldn't check the teller at ${url}: ${(e as Error).message.slice(0, 80)}` };
+      }
+    }
+    if (new Set(kids).size !== kids.length) return { ok: false, why: 'both tellers are the same key' };
+    return { ok: true, kids };
+  }
+
+  /** Sends a signed message to a teller and checks the answer comes from the key that was checked: true, or why not. */
+  private async tell(c: { url: string; domain: string }, payload: Record<string, unknown>, kid: string): Promise<true | string> {
     try {
       const envelope = await signMessage(payload, this.o.id, { iss: this.o.webId });
       const raw = await sendLake(c.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: this.o.card, envelope: envelope as LakeData['envelope'] }, { timeoutMs: 15_000 });
       const v = await verifyLakeData(raw, { sandbox: this.o.sandbox });
       if (!v.ok) return `its reply did not verify: ${v.rejection.why}`;
-      if (v.profile.ownerDomain !== c.domain) return `answered as ${v.profile.ownerDomain}, not ${c.domain}`;
+      if (v.profile.ownerDomain !== c.domain || v.profile.publicJwk.kid !== kid) return `answered as ${v.profile.ownerDomain} with another key than the one checked`;
       const r = v.payload as { kind?: string; problems?: string[] };
       return r.kind === 'count.received' ? true : (r.problems ?? [String(r.kind)]).join('; ');
     } catch (e) {

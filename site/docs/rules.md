@@ -73,7 +73,7 @@ trust:
   ethics: [ethics.lake.local]      # whose ethics approvals count
   payments: [payments.lake.local]  # whose receipts you file
   regulators: [register.lake.local] # whose authorisation an agent needs before it hears your intents
-  tellers: [teller-a.lake.local, teller-b.lake.local] # who may count your study answers (two, different parties)
+  tellers: [https://lake.example/s/teller-a/a2a, teller-b.example] # who may count your study answers: an address, or a domain that proves its key
 ```
 
 `ethics_approved: true` in a rule means *approved by an ethics body you list here*. An approval from anyone else counts as none. Nobody appoints these for the Lake; you choose. A sandbox house with no `trust` section trusts the demo specialists and says so in its log; outside the sandbox, an empty list trusts nobody.

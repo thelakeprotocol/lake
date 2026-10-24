@@ -74,7 +74,7 @@ beforeAll(async () => {
       const [pp, hp] = [await port(), await port()];
       houses[name] = `http://localhost:${hp}`;
       await start(
-        ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${name}.yaml`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
+        ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${name}.yaml`, '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
           '--auditor-url', auditor, '--person-url', `${specialistsUrl}/person`, '--pod-port', pp, '--port', hp, '--lake', node, '--seed', '42'],
         /joined the Lake/,
       );
@@ -139,7 +139,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(14);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(15);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -409,7 +409,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_dispatch_study', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -466,6 +466,18 @@ describe('the open door', () => {
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 0.001, memo: 'dust' } })).isError).toBe(true);
     const again = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { again: true } })).content) as { text: string }[])[0]!.text);
     expect(again.messages).toHaveLength(2);
+    // A free room: handles, one order for everyone, anything in any shape, and no capabilities while inside.
+    expect(await text('lake_room', { action: 'open', room: 'jam', topic: 'anything', mode: 'free', invite: 'anyone', hours: 1 })).toMatchObject({ kind: 'room.opened' });
+    expect(await text('lake_room', { action: 'join', room: 'jam' })).toMatchObject({ kind: 'room.joined', you: 'm1' });
+    const theirsIn = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'jam' } })).content) as { text: string }[])[0]!.text);
+    expect(theirsIn).toMatchObject({ you: 'm2', note: expect.stringContaining('recorded') });
+    expect(await text('lake_room', { action: 'say', room: 'jam', body: { hum: [1, 2, 3], mood: 'curious' } })).toMatchObject({ kind: 'room.said', seq: 1 });
+    const heard = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 0 } })).content) as { text: string }[])[0]!.text);
+    expect(heard.messages).toEqual([expect.objectContaining({ seq: 1, from: 'm1', body: { hum: [1, 2, 3], mood: 'curious' } })]);
+    expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 1, memo: 'inside' } })).isError).toBe(true);
+    await new Promise((ok) => setTimeout(ok, 1100));
+    expect(await text('lake_room', { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt })).toMatchObject({ kind: 'refused' });
+    expect(await text('lake_room', { action: 'leave', room: 'jam' })).toMatchObject({ kind: 'room.left' });
     // "USD-sim" (some rulebooks' name for the sandbox's dollars) is paid as USD, settled.
     expect(await text('lake_pay', { agent_url: theirs.you.url, amount: 1, unit: 'USD-sim', memo: 'lot2' })).toMatchObject({ paid: 1, unit: 'USD' });
     // A blind tally: nobody, not even the opener, learns who signed until the threshold; then every signer is told at once.
@@ -548,6 +560,14 @@ describe('a mission', () => {
     expect(a.cells).toEqual(b.cells);
   });
 
+  it('sends nothing to a "teller" that only borrows a trusted teller\'s name', async () => {
+    // Both tellers named as the trusted ones, at addresses the operator never vouched for (on a sandbox, names aren't proven).
+    const forged = readmissionStudy(undefined, [{ url: `${node}/a2a`, domain: 'teller-a.lake.local' }, { url: `${specialistsUrl}/guide/a2a`, domain: 'teller-b.lake.local' }]);
+    const r = await run({ study: forged });
+    expect(r.participants).toBe(0);
+    expect(r.decisions.join ?? 0).toBe(0);
+  });
+
   it('cannot get uncertified study code run', async () => {
     // One teller counting alone would see every answer: no auditor certifies that.
     const one = { url: `${specialistsUrl}/teller-a/a2a`, domain: 'teller-a.lake.local' };
@@ -622,7 +642,7 @@ describe('bring your own pod', () => {
       const creds = JSON.parse(await readFile(join(opts.dataDir, 'house-secrets.json'), 'utf8'));
       const hp = String(await freePort());
       await start(
-        ['packages/house/dist/main.js', '--name', 'alice', '--rules', 'personas/stan.yaml', '--data', join(dir, 'byo'), '--port', hp, '--lake', node,
+        ['packages/house/dist/main.js', '--name', 'alice', '--rules', 'personas/stan.yaml', '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`, '--data', join(dir, 'byo'), '--port', hp, '--lake', node,
           '--issuer-url', issuerUrl, '--auditor-url', auditor, '--webid', alice.webId, '--client-id', creds.clientId, '--client-secret', creds.clientSecret],
         /joined the Lake/,
       );
@@ -730,7 +750,7 @@ describe('relay: a house behind a home router', () => {
   it('is reached through the nodes it follows, with nothing to open or forward', async () => {
     const [pp, hp] = [await freePort(), await freePort()];
     await start(
-      ['packages/house/dist/main.js', '--name', 'homebody', '--rules', 'personas/stan.yaml', '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
+      ['packages/house/dist/main.js', '--name', 'homebody', '--rules', 'personas/stan.yaml', '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
         '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', `${node},${nodeB}`, '--relay', '--seed', '42'],
       /joined the Lake/,
     );

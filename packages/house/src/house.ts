@@ -35,6 +35,8 @@ export interface HouseOptions {
   auditorUrl: string;
   /** The person checker this house asks for its stamp (SPEC §6.4), if any. */
   personUrl?: string;
+  /** Teller addresses the operator vouches for. On a sandbox (no domain proof) these are the only tellers a house trusts. */
+  tellerUrls?: string[];
   /** One or more Lake nodes, comma-separated. The house registers with and reports to each. */
   lakeUrl?: string;
   seed?: string;
@@ -67,7 +69,7 @@ export interface House {
 }
 
 // Whose signatures count. A sandbox house with no trust section trusts the demo specialists and its packs' demo issuers, and says so.
-const DEMO_TRUST: Omit<Trust, 'issuers' | 'regulators'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'], tellers: ['teller-a.lake.local', 'teller-b.lake.local'] };
+const DEMO_TRUST: Omit<Trust, 'issuers' | 'regulators' | 'tellers'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
 
 let appDir: string | undefined | null = null;
 function approvalsApp() {
@@ -93,7 +95,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       issuers: t?.issuers ?? (o.sandbox ? demoIssuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
       ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
       regulators: t?.regulators ?? (o.sandbox ? demoRegulators : []),
-      tellers: t?.tellers ?? (o.sandbox ? DEMO_TRUST.tellers : []),
+      // On a sandbox nobody proves a domain, so a teller is trusted by the address its operator gave, never by the name it claims.
+      tellers: t?.tellers ?? (o.sandbox ? o.tellerUrls ?? [] : []),
     };
   };
   let link: LakeLinks | null = null;
