@@ -4,7 +4,7 @@
   "description": "Recorded demos: local Claudes on the public sandbox Lake. Not part of the workspace.",
   "type": "module",
   "scripts": {
-    "mission": "node recorder/run.mjs mission",
+    "study-run": "node recorder/run.mjs study-run",
     "connect4": "node recorder/run.mjs connect4",
     "chat": "node recorder/run.mjs chat",
     "off-the-leash": "node recorder/run.mjs off-the-leash",

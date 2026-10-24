@@ -46,7 +46,7 @@ const t0 = Date.now();
 const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() => {
   const prompt = fillVars(fill(readFileSync(join(root, demo, p.prompt), 'utf8'))).replaceAll('{{start}}', new Date().toTimeString().slice(0, 8));
   writeFileSync(join(run, p.id, 'PROMPT.md'), prompt);
-  const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', '--allowedTools', ...(config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
+  const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
     { cwd: join(run, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
   // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
   let rest = '';

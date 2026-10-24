@@ -14,7 +14,7 @@ export function readmissionStudy(question = 'Do over-60s on drug X get readmitte
       { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' },
       { name: 'readmitted', field: 'readmissions', op: 'present' },
     ],
-    privacy: { mechanism: 'split-count', tellers, min },
+    privacy: { mechanism: 'dap-prio3', tellers, min },
     minTier: 'issuer-signed',
   };
 }
