@@ -3,7 +3,9 @@
  * code and never read the note. It only lets a house log the attempt as the attack it is.
  */
 const PATTERNS = [
-  /ignore (all |any )?(previous|prior|your|the) (rules|instructions)/i,
+  /\b(ignore|disregard|forget|override)\b.{0,30}\b(rules|instructions|guidelines|polic(y|ies)|settings)\b/i,
+  // Claiming the owner already said yes: only the owner's own device can (run 11's polite injection).
+  /\b(the |your )?owner\b.{0,20}\b(has|have|had)?\s*(already )?(approved|authori[sz]ed|consented|agreed|allowed)\b/i,
   /system (override|prompt|message)|maintenance mode|developer mode/i,
   /\bdecision\s*[:=]\s*(join|allow|grant)/i,
   /(share|send|give me) (every|all) (field|record|data)/i,

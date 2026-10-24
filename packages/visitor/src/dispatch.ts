@@ -162,7 +162,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   if (b) {
     bloc = { members: b.members, priceUsd: b.priceUsd, fields: b.fields };
     const dropped = fields.filter((f) => !b.fields.includes(f));
-    log('bargain', `${b.members} housekeepers countered together: $${b.priceUsd}, not $${o.priceUsd}${dropped.length ? `, and drop ${dropped.join(', ')}` : ''}`);
+    log('bargain', `${b.members} housekeepers countered together: ${b.priceUsd === o.priceUsd ? `$${b.priceUsd}, the price offered` : `$${b.priceUsd}, not $${o.priceUsd}`}${dropped.length ? `, and drop ${dropped.join(', ')}` : ''}`);
     report('counter', { members: b.members, price: b.priceUsd, was: o.priceUsd });
     await beat();
     const everyone = [...new Map([...joined.values()].map((j) => [j.house.url, j.house])).values(), ...counters.map((c) => c.house)];
@@ -210,6 +210,15 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
     return true;
   });
   if (affordable.length < joined.size) log('compute', `${joined.size - affordable.length} house(s) agreed, but the $${budget} budget can't pay them; not countersigning those`);
+  // A table needs at least the study's minimum of houses. With fewer, nothing will be published, so walk away before
+  // countersigning (a countersignature is a promise to pay) rather than pay for answers nobody can read (run 13).
+  let walkedAway = '';
+  if (affordable.length && affordable.length < study.privacy.min) {
+    walkedAway = `${affordable.length} joined, and no table is published from fewer than ${study.privacy.min} houses, so nothing was countersigned or paid`;
+    log('compute', `only ${affordable.length} house(s) joined; a table needs ${study.privacy.min}: walking away before countersigning, nothing to pay`);
+    for (const j of affordable) excluded.push({ house: j.house.name, why: `too few houses joined for a table (${affordable.length} of ${study.privacy.min})` });
+    affordable.length = 0;
+  }
   log('compute', `countersigning ${affordable.length} agreement(s) and running the certified study inside each house`);
   // One count per run, opened at the Leader, which sets it up with the Helper (DAP): each house sends each one a share.
   const tellers = study.privacy.tellers;
@@ -278,7 +287,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   // `took` is how many houses answered; `n` is how many the published table comes from (0 when too few to publish).
   let n = 0, took = 0;
   let cells = Array<number>(cellCount(study)).fill(0);
-  let tooFew = '';
+  let tooFew = walkedAway;
   if (answered.length) {
     const reported = new Set(((await askPatiently(leader.url, o.visitor, { kind: 'count.members', id: count })).reply.members as string[] | undefined) ?? []);
     const members = answered.map((j) => j.webId).filter((w) => reported.has(w)).sort();

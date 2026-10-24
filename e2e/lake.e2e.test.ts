@@ -70,11 +70,12 @@ beforeAll(async () => {
   specialistsUrl = `http://localhost:${sp}`;
   await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage'], /register registered with the Lake node/);
   await Promise.all(
-    ['stan', 'strict', 'research'].map(async (name) => {
+    // Four houses: three that join by standing rules (enough for a table) and one that asks its owner.
+    [['stan', 'stan'], ['strict', 'strict'], ['research', 'research'], ['kai', 'stan']].map(async ([name, persona]) => {
       const [pp, hp] = [await port(), await port()];
       houses[name] = `http://localhost:${hp}`;
       await start(
-        ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${name}.yaml`, '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
+        ['packages/house/dist/main.js', '--name', name, '--rules', `personas/${persona}.yaml`, '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
           '--auditor-url', auditor, '--person-url', `${specialistsUrl}/person`, '--pod-port', pp, '--port', hp, '--lake', node, '--seed', '42'],
         /joined the Lake/,
       );
@@ -149,7 +150,7 @@ describe('one house', () => {
 describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
-    expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(3);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
     expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(15);
   });
 
@@ -220,7 +221,7 @@ describe('wild life', () => {
 
   it('announces a guild when houses share an interest', async () => {
     const state = await (await fetch(`${node}/state`)).json();
-    expect(state.guilds).toContainEqual({ tag: 'research-volunteers', members: 2 });
+    expect(state.guilds).toContainEqual({ tag: 'research-volunteers', members: 3 });
   });
 });
 
@@ -270,10 +271,10 @@ describe('the owner', () => {
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc([...req!.fields, 'dob']) as never, owner) })).toMatchObject({ error: expect.any(String) });
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc(req!.fields) as never, owner) })).toEqual({ ok: true });
     const r = await running;
-    expect(r.participants).toBe(3);
+    expect(r.participants).toBe(4);
     // Exact counts: every house that took part is in exactly one cell of the table, no blur.
     expect(r.cells).toHaveLength(8);
-    expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
+    expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(4);
     expect(r.cells.every((c) => Number.isInteger(c.count))).toBe(true);
 
     // A study's key works once, whether the owner signed it or a standing rule cut it: the study has run, so asking again is refused.
@@ -282,7 +283,8 @@ describe('the owner', () => {
     // Revoking cuts a key off at once, before it is used.
     // (A second study run that doesn't wait for the owner leaves its request open.)
     const later = await visitor('later.example');
-    await dispatch({ visitor: later, node, ethics, auditor, study: readmissionStudy(), priceUsd: 0, waitSeconds: 0 });
+    const walked = await dispatch({ visitor: later, node, ethics, auditor, study: readmissionStudy(), priceUsd: 0, waitSeconds: 0 });
+    expect(walked.participants).toBe(0);
     const pending = ((await ownerCall({ kind: 'list' })).requests as (typeof req)[]).find((q) => q!.visitor.webId === later.webId)!;
     const key = await issueCredential({ ...pending.grantDraft, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString() } as never, owner);
     expect(await ownerCall({ kind: 'answer', request: pending.id, answer: 'allow', grant: key })).toEqual({ ok: true });
@@ -379,17 +381,17 @@ describe('money', () => {
   it('$2 becomes $5: the houses counter as one bloc, drop the postcode, sign, get paid, and file the receipts', async () => {
     const before = (await (await fetch(`${node}/state`)).json()).counters.valueSettled;
     const r = await paidRun(2, 5000, ['postcode']);
-    expect(r.decisions).toEqual({ counter: 2, ask: 1 });
-    expect(r.bloc).toEqual({ members: 2, priceUsd: 5, fields: ['age_band', 'medications', 'readmissions'] });
-    expect(r.participants).toBe(2);
-    expect(r.paid).toEqual({ total: 10, houses: 2, receiptsFiled: 2 });
+    expect(r.decisions).toEqual({ counter: 3, ask: 1 });
+    expect(r.bloc).toEqual({ members: 3, priceUsd: 5, fields: ['age_band', 'medications', 'readmissions'] });
+    expect(r.participants).toBe(3);
+    expect(r.paid).toEqual({ total: 15, houses: 3, receiptsFiled: 3 });
     const receipts = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'receipts'));
     expect(receipts.some((f) => f.includes('.receipt.jwt'))).toBe(true);
     const agreements = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements'));
     const signed = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', agreements.find((f) => f.includes('.agreement.json'))!), 'utf8'));
     expect(signed.agreement['@type']).toBe('Agreement');
     await new Promise((ok) => setTimeout(ok, 500));
-    expect((await (await fetch(`${node}/state`)).json()).counters.valueSettled - before).toBe(10);
+    expect((await (await fetch(`${node}/state`)).json()).counters.valueSettled - before).toBe(15);
   });
 
   it("walks away from a bloc it can't afford", async () => {
@@ -399,11 +401,14 @@ describe('money', () => {
     expect(r.paid).toBeNull();
   });
 
-  it('never promises more than the human signed for: a $5 budget countersigns one $5 agreement, not two', async () => {
+  it('never promises more than the human signed for: a $5 budget pays one $5 house, too few for a table, so it countersigns nothing', async () => {
     const r = await paidRun(5, 5);
-    expect(r.participants).toBe(1);
-    expect(r.paid).toMatchObject({ total: 5, houses: 1 });
+    expect(r.participants).toBe(0);
+    expect(r.paid).toBeNull();
     expect(r.excluded.some((x) => /over budget/.test(x.why))).toBe(true);
+    // One house it could pay is fewer than a table needs: it walks away instead of paying for answers nobody can read.
+    expect(r.excluded.some((x) => /too few houses joined/.test(x.why))).toBe(true);
+    expect(r.answer.summary).toMatch(/^No table: 1 joined/);
   });
 
   it('an unpaid study accepts no price: it declines the bloc instead of promising money it has none of', async () => {
@@ -419,7 +424,7 @@ describe('money', () => {
 describe('the open door', () => {
   it('an outside agent joins and completes a study in about ten lines', async () => {
     const me = await joinLake({ name: 'Outside study bot', domain: 'outside.example', node, port: await freePort(), ethics, auditor, payments });
-    expect((await me.find({ skill: 'health-study', role: 'house' })).length).toBe(3);
+    expect((await me.find({ skill: 'health-study', role: 'house' })).length).toBe(4);
     const r = await me.study('Do over-60s on drug X get readmitted less?', { priceUsd: 5, budgetUsd: 500 });
     await me.close();
     expect(r.participants).toBeGreaterThan(0);
@@ -590,16 +595,19 @@ describe('a study run', () => {
 
   it('goes ethics → audit → knock → decide → grant → compute in place → answer, and moves no records', async () => {
     const r = await run();
-    expect(r.houses).toBe(3);
-    expect(r.decisions).toEqual({ join: 2, ask: 1 }); // stan and research join; strict asks its owner
-    expect(r.participants).toBe(2);
+    expect(r.houses).toBe(4);
+    expect(r.decisions).toEqual({ join: 3, ask: 1 }); // stan, kai and research join; strict asks its owner
+    expect(r.participants).toBe(3);
     expect(r.excluded).toEqual([]);
+    // Three is the sandbox's minimum: the tellers publish a table, exact, one house per answer.
+    expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
     await new Promise((ok) => setTimeout(ok, 500));
     expect((await (await fetch(`${node}/state`)).json()).counters.recordsMoved).toBe(0);
   });
 
   it('gives the same answers every time in seeded mode', async () => {
     const [a, b] = [await run(), await run()];
+    expect(a.cells.length).toBeGreaterThan(0);
     expect(a.cells).toEqual(b.cells);
   });
 
@@ -624,10 +632,14 @@ describe('a study run', () => {
   it('drops a house whose record was tampered with', async () => {
     const root = join(dir, 'houses', 'research', 'pod', 'research', 'health');
     const file = join(root, (await readdir(root)).find((f) => f.startsWith('claims.ttl'))!);
-    await writeFile(file, (await readFile(file, 'utf8')).replace(/"(\d)0-(\d)9"/, '"90+"'));
+    const original = await readFile(file, 'utf8');
+    await writeFile(file, original.replace(/"(\d)0-(\d)9"/, '"90+"'));
     const r = await run();
-    expect(r.decisions).toEqual({ join: 1, decline: 1, ask: 1 });
-    expect(r.participants).toBe(1);
+    expect(r.decisions).toEqual({ join: 2, decline: 1, ask: 1 });
+    // The two that joined are fewer than a table needs: nothing is countersigned or paid.
+    expect(r.participants).toBe(0);
+    expect(r.answer.summary).toMatch(/^No table: 2 joined/);
+    await writeFile(file, original);
   });
 });
 
@@ -636,7 +648,7 @@ describe('the sandbox specialists', () => {
     const me = await visitor('newcomer.example');
     const { reply: hi } = await ask(`${guide}/a2a`, me, { kind: 'hello' });
     expect(hi.kind).toBe('welcome');
-    expect(hi.lake.houses).toBe(3);
+    expect(hi.lake.houses).toBe(4);
     expect(hi.specialists.map((x: { name: string }) => x.name)).toEqual(expect.arrayContaining(['Guide', 'Inspector', 'Sparring partner', 'Quests']));
     const { reply: step } = await ask(`${guide}/a2a`, me, { kind: 'tour', step: 2 });
     expect(step).toMatchObject({ kind: 'tour', step: 2, of: 7, next: expect.any(String) });
@@ -828,7 +840,7 @@ describe('federation (runs last: it stops the nodes)', () => {
       await new Promise((r) => setTimeout(r, 500));
       n = (await (await fetch(`${nodeB}/cards?role=house`)).json()).length;
     }
-    expect(n).toBe(3);
+    expect(n).toBe(4);
   });
 
   it("shares the blocklists of the nodes it follows", async () => {
@@ -852,7 +864,7 @@ describe('federation (runs last: it stops the nodes)', () => {
     const card = await (await fetch(`${houses.stan}/.well-known/agent-card.json`)).json();
     expect((await verifyLakeCard(card)).role).toBe('house');
     const r = await dispatch({ visitor: await visitor('uni.example'), node: [node, nodeB], houseCache: houseCache(), ethics, auditor, study: readmissionStudy(), priceUsd: 5, ...(await funded()) });
-    expect(r.houses).toBe(3);
+    expect(r.houses).toBe(4);
     expect(r.participants).toBeGreaterThan(0);
   });
 });

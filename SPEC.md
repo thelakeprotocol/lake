@@ -292,7 +292,7 @@ A participant that cannot accept incoming connections (a house behind a home rou
 - It opens a WebSocket to `<node>/relay` and sends `{ type: "hello", card, envelope }`, where `envelope` is a signed envelope (§3) with payload `{ kind: "relay-hello" }` issued by the card's WebID. The node MUST verify both before opening the channel.
 - Its card lists `<node>/relay/<key id>/a2a` as an A2A endpoint, one per node it relays through. Its card is served at `<node>/relay/<key id>/.well-known/agent-card.json`, through the same channel, so registration still proves control (§2).
 - The node forwards requests on those paths down the channel as `{ type: "req", id, method, path, headers, body }` and returns `{ type: "res", id, status, headers, body }`.
-- Messages stay signed end to end: a relaying node can't forge or alter them. It can read them (offers, decisions, a study's unreadable shares; never records, which don't leave the house). Encrypting A2A payloads end to end is future work.
+- Messages stay signed end to end, and sealed for their recipient (§3): a relaying node can't forge, alter or read them, or see who sent them.
 
 ## 10. Canonical data model and packs
 
