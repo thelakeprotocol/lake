@@ -23,6 +23,8 @@ export interface LakePack {
   fields: Record<string, PackField>;
   /** Fields a pack mentions but no program may ever read: identifying ones. */
   identifying?: string[];
+  /** Fields an offer may name but no program reads, and that don't identify anyone alone (a postcode): the owner's rules decide. */
+  quasiIdentifying?: string[];
   /** SHACL shapes (Turtle) every converted claims document must pass. */
   shapes?: string;
   source?: PackSource;
@@ -149,6 +151,8 @@ export const exampleOffers = () => Object.assign({}, ...packs().map((p) => p.exa
 export const exampleStudies = () => packs().flatMap((p) => p.examples?.studies ?? (p.examples?.study ? [p.examples.study] : []));
 export const allFields = () => packs().flatMap((p) => Object.keys(p.fields));
 export const identifyingFields = () => packs().flatMap((p) => p.identifying ?? []);
+/** Every field name an offer may use: what programs read, plus the identifying and quasi-identifying ones packs name. */
+export const offerableFields = () => [...new Set(packs().flatMap((p) => [...Object.keys(p.fields), ...(p.identifying ?? []), ...(p.quasiIdentifying ?? [])]))];
 
 /** Where a pack's files live in a pod, relative to the pod root (or to the folder the Type Index names). */
 export function packPaths(p: LakePack, folder = p.folder) {

@@ -72,7 +72,13 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
       case 'approval.answered': mark(house, 'owner-in-the-loop'); break;
       case 'compute.done': mark(house, 'answer-a-study'); break;
       case 'grant.revoked': mark(house, 'take-it-back'); break;
-      case 'knock': mark(visitor, 'first-knock'); break;
+      case 'knock': {
+        // A house's report doesn't say who knocked; the agent's own report says it knocked, and what it was told.
+        const from = domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : visitor;
+        mark(from, 'first-knock');
+        if (domains.has(e.actor)) mark(from, { decline: 'got-a-no', join: 'got-a-yes', counter: 'haggled' }[String(d.decision ?? '')] ?? '');
+        break;
+      }
       case 'study.result': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'answered'); break;
       case 'blueprint.published': mark(domains.has(e.actor) ? `agent:${domains.get(e.actor)}` : undefined, 'inventor'); break;
       case 'agent.message': {

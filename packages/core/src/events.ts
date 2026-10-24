@@ -27,6 +27,22 @@ export function makeEvent(kind: EventKind, actor: string, subject?: string, data
 }
 
 /** One plain-English line per event, for the map's log. */
+/**
+ * Events between a house and the agent it dealt with: who knocked, who was told yes, whose study ran, whose offer
+ * was priced. A house is a person's home, so a node may keep the pair privately (reputation, counts) but publishes
+ * the event without the counterparty, and without the reasons and purposes that would point at one (SPEC §8): what
+ * happened at a door is public, who was at it is not. A public service helping an agent (ethics, inspection) stays
+ * visible; sensitive services are quiet anyway. Attacks keep the attacker's key.
+ */
+const PAIRED = new Set<string>(['knock', 'decision', 'approval.requested', 'approval.answered', 'grant.issued', 'compute.done', 'agreement.signed', 'quote.made', 'offer.accepted']);
+
+/** The version of an event anyone may see. */
+export function publicView(e: LakeEvent): LakeEvent {
+  if (!PAIRED.has(e.kind) || !e.subject || !(e.actor.startsWith('house:') || e.subject.startsWith('house:'))) return e;
+  const { reason: _r, purpose: _p, ...data } = e.data ?? {};
+  return { ...e, subject: undefined, data };
+}
+
 export function describe(e: LakeEvent): string {
   const d = e.data ?? {};
   switch (e.kind) {
@@ -34,29 +50,29 @@ export function describe(e: LakeEvent): string {
     case 'house.left': return `${e.actor} left the Lake.`;
     case 'agent.registered': return `${e.actor} registered (${d.role ?? 'agent'}).`;
     // Reported by the house that was knocked on (actor), about the visitor (subject); or broadcast by a visitor.
-    case 'knock': return d.count !== undefined ? `${e.actor} knocked on ${d.count} houses.` : `${e.subject} knocked on ${e.actor}.`;
+    case 'knock': return d.count !== undefined ? `${e.actor} knocked on ${d.count} houses.` : e.subject ? `${e.subject} knocked on ${e.actor}.` : d.decision ? `${e.actor} knocked on a house and was told: ${d.decision}.` : `Someone knocked on ${e.actor}.`;
     case 'offer': return `${e.actor} offered $${d.price} for ${d.fields} (${d.purpose}).`;
     case 'counter': return `${d.members ?? 1} housekeepers countered together: $${d.price}, not $${d.was}.`;
-    case 'decision': return `${e.actor} told ${e.subject}: ${d.decision}${d.reason ? ` (${d.reason})` : ''}.`;
-    case 'agreement.signed': return `${e.actor} and ${e.subject} signed an agreement.`;
-    case 'grant.issued': return `${e.actor} issued a ${d.hours}-hour key to ${e.subject}.`;
+    case 'decision': return e.subject ? `${e.actor} told ${e.subject}: ${d.decision}${d.reason ? ` (${d.reason})` : ''}.` : `${e.actor} answered: ${d.decision}.`;
+    case 'agreement.signed': return e.subject ? `${e.actor} and ${e.subject} signed an agreement.` : `${e.actor} signed an agreement.`;
+    case 'grant.issued': return e.subject ? `${e.actor} issued a ${d.hours}-hour key to ${e.subject}.` : `${e.actor} issued a ${d.hours}-hour key.`;
     case 'grant.revoked': return `${e.actor} revoked ${d.count ?? 1} key(s). Connections cut.`;
-    case 'approval.requested': return `${e.actor} asked its owner about ${e.subject}.`;
+    case 'approval.requested': return e.subject ? `${e.actor} asked its owner about ${e.subject}.` : `${e.actor} asked its owner.`;
     case 'approval.answered': return `The owner of ${e.actor} tapped ${d.answer}.`;
     case 'payment.settled': return `Payments settled $${d.amount} with ${d.count} participant(s).`;
     case 'attack.blocked': return `${e.actor} blocked ${d.claimed ? `an agent claiming ${d.claimed}` : e.subject}: ${d.why}.`;
     case 'agent.quarantined': return `Immune response: ${d.claimed ? `the key claiming ${d.claimed}` : e.subject} quarantined after ${d.blocks} blocked attempts. No human involved.`;
     case 'guild.formed': return `Guild formed: ${d.members} houses for ${d.tag} now bargain as one.`;
     case 'study.result': return `${e.actor} got its answer from ${d.participants} houses${d.summary ? `: ${d.summary}` : ''}.`;
-    case 'compute.done': return `${e.actor} ran ${e.subject}'s certified study inside its pod. Records out: ${d.recordsOut}.`;
+    case 'compute.done': return `${e.actor} ran ${e.subject ? `${e.subject}'s` : 'a'} certified study inside its pod. Records out: ${d.recordsOut}.`;
     case 'record.moved': return `ALERT: a record left ${e.actor}.`;
     case 'intent.opened': return `${e.actor} asked for offers (${d.group ?? d.pack}). ${d.members ? `${d.members} households in this group.` : ''}`.trim();
-    case 'quote.made': return `${e.subject}'s offer was worked out inside ${e.actor}. Only its owner sees it.`;
+    case 'quote.made': return `${e.subject ? `${e.subject}'s offer` : 'An offer'} was worked out inside ${e.actor}. Only its owner sees it.`;
     // A deal reported without its counterparty (SPEC §8): say that something happened, never with whom.
     case 'agent.message': return !e.subject ? (d.kind === 'payment' ? `${e.actor} made a payment.` : `${e.actor} made a deal.`)
       : d.kind === 'payment' ? `${e.actor} paid ${e.subject} ${!d.unit || d.unit === 'USD' ? `$${d.amount}` : `${d.amount} ${d.unit}`}.` : `${e.actor} sent ${e.subject} a ${d.kind} message.`;
     case 'tally.update': return d.state === 'triggered' ? `A pledge reached its threshold: ${d.count} signed, and every signer was told at once.` : d.state === 'lapsed' ? 'A pledge ran out of time below its threshold; its signers stay unknown.' : `A blind tally: ${d.count} of ${d.threshold} signed. Nobody knows who.`;
     case 'blueprint.published': return `${e.actor} published a blueprint: ${d.name} (${d.tag}). Any agent can build it.`;
-    case 'offer.accepted': return `The owner of ${e.actor} accepted ${e.subject}'s offer${d.released ? ` and released ${d.released} file(s) to it` : ''}.`;
+    case 'offer.accepted': return `The owner of ${e.actor} accepted ${e.subject ? `${e.subject}'s` : 'an'} offer${d.released ? ` and released ${d.released} file(s) to it` : ''}.`;
   }
 }

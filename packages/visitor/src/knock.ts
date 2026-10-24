@@ -36,7 +36,7 @@ export type Tamper = 'none' | 'forge-card' | 'unsigned' | 'replay' | 'impersonat
 
 /** Signs a payload as this visitor and sends it to an agent over A2A; returns the verified, signed reply. */
 /** Network failures where the message may or may not have arrived. */
-const HOUSE_KINDS = new Set(['offer', 'compute', 'status', 'receipt', 'quote', 'accept']);
+const HOUSE_KINDS = new Set(['offer', 'compute', 'status', 'withdraw', 'receipt', 'quote', 'accept']);
 const DROPPED = /ECONNRESET|EPIPE|UND_ERR_SOCKET|other side closed|socket hang up|terminated/i;
 
 export async function ask(agentUrl: string, v: Visitor, payload: Record<string, unknown>, tamper: Tamper = 'none') {

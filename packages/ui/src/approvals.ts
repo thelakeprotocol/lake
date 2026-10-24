@@ -5,7 +5,7 @@ import { loadKey, signCredential, signEnvelope } from './owner-crypto';
 // The control panel that comes with every house (open source). Served by the house at /owner/; every
 // call is signed on this device with the owner's key, which never leaves it.
 
-interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; warnings?: string[]; recommendation: string }
+interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; warnings?: string[]; note?: string; asked?: number; recommendation: string }
 interface Key { id: string; visitor: string; fields: string[]; purpose: string; until: string; authorizedBy: string }
 type Decision = 'join' | 'ask' | 'decline';
 interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
@@ -126,7 +126,7 @@ async function show() {
 // ---- Home ----
 async function home(box: HTMLElement) {
   const [o, feed, { suggestions, assistants }] = await Promise.all([
-    call({ kind: 'panel.overview' }),
+    call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
     call<{ suggestions: { id: string; from: string; text: string; at: string }[]; assistants: { label: string }[] }>({ kind: 'list' }),
   ]);
@@ -232,7 +232,8 @@ function sameAsks(list: Request[]): Request[][] {
 }
 
 function requestCard(all: Request[]) {
-  const r = all[0]!, n = all.length;
+  // The house folds repeats into one request (asked); older houses may still send several identical ones.
+  const r = all[0]!, n = all.length, times = all.reduce((t, x) => t + (x.asked ?? 1), 0);
   // On a risky ask the safe answer is the easy one to hit.
   const risky = !!r.warnings?.length;
   const allow = h('button', { class: risky ? 'btn deny' : 'btn allow', type: 'button' }, n > 1 ? `Allow all ${n}` : 'Allow');
@@ -256,9 +257,10 @@ function requestCard(all: Request[]) {
     void refreshBadge(); void show();
   };
   return h('article', { class: r.warnings?.length ? 'req risky' : 'req' },
-    h('div', { class: 'who' }, r.visitor.domain, n > 1 ? h('span', { class: 'count' }, `asked ${n} times`) : null),
+    h('div', { class: 'who' }, r.visitor.domain, times > 1 ? h('span', { class: 'count' }, `asked ${times} times`) : null),
     r.question ? h('p', { class: 'q' }, `“${r.question}”`) : null,
     r.warnings?.length ? h('ul', { class: 'warn' }, ...r.warnings.map((w) => h('li', {}, `It ${w}`))) : null,
+    r.note ? h('p', { class: 'note' }, h('b', {}, 'Their note, in their words (not checked): '), `“${r.note}”`) : null,
     h('dl', { class: 'facts' },
       ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : `yes, for ${duration(r.retention)}`], ['Pays', `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
         .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))),

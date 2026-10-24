@@ -129,3 +129,5 @@ body.fetching::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .fold { margin-top: 14px; } .fold summary { cursor: pointer; padding: 6px 0; }
 .req .warn { list-style: none; margin: 10px 0 4px; padding: 10px 12px; border-left: 3px solid var(--threat); background: rgba(255,77,106,0.08); color: var(--fg); display: grid; gap: 4px; line-height: 1.4; }
 .req.risky { border-color: var(--threat); background: linear-gradient(180deg, rgba(255,77,106,0.08), transparent); }
+.req .note { margin: 10px 0 0; padding: 8px 12px; border-left: 3px solid var(--line); color: var(--muted); font-size: 14px; line-height: 1.45; }
+.req .note b { color: var(--fg); font-weight: 500; }

@@ -235,6 +235,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       await owner.fetch(`${owner.podRoot}wallet/personhood.json`, { method: 'DELETE' }).catch(() => {});
       const fresh = parseRules(o.rulesText);
       keeperRef?.setRules(fresh, o.rulesText, trustFrom(fresh));
+      // The next owner starts with an empty door: the last owner's visitors and decisions were theirs.
+      activity.length = 0;
       say('the lease ended: keys revoked, owner forgotten, rules reset. Anyone can claim this house now.');
     },
   });
@@ -357,12 +359,17 @@ function panelFor(x: {
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
     }))).filter(Boolean) as { amount: number; at: string }[];
+    // On a leased house, money is counted from this owner's claim: the last owner's earnings were never theirs.
+    const since = x.desk().claimedAt();
+    if (since) receipts.splice(0, receipts.length, ...receipts.filter((r) => Date.parse(r.at) >= since));
     receipts.sort((a, b) => (a.at < b.at ? 1 : -1));
     return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts };
   };
   return {
-    async overview() {
-      const today = new Date().toISOString().slice(0, 10);
+    async overview(tzOffset?: number) {
+      // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
+      const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;
+      const midnight = (() => { const d = new Date(Date.now() - offset * 60_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() + offset * 60_000; })();
       const claims = await x.keeper().allClaims();
       const chain = await x.keeper().verifyOwnRecord();
       const view = x.desk().view();
@@ -371,8 +378,8 @@ function panelFor(x: {
         reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes,
         holds: [...new Set(claims.map((c) => c.field))], claims: claims.length,
         record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
-        knocksToday: x.activity.filter((a) => a.kind === 'knock' && a.at.startsWith(today)).length,
-        blockedToday: x.activity.filter((a) => a.kind === 'attack.blocked' && a.at.startsWith(today)).length,
+        knocksToday: x.activity.filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
+        blockedToday: x.activity.filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
         pending: view.requests.length, keys: view.keys.length,
         earned: (await money()).total,
         rulesOwner: x.keeper().rules.owner,

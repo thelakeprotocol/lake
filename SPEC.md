@@ -134,7 +134,9 @@ Rules naming a purpose not on this list are invalid (a misspelt "decline" would 
 
 An offer for a study carries the study itself, its id in `offer.study`, and two attachments: an ethics approval and an audit certificate, each a Verifiable Credential together with the signed card of whoever issued it (§5.2).
 
-An offer MAY include a free-text `note`. It is **untrusted**. A housekeeper MUST NOT let it change a decision. It may be shown to a human, quoted, and nothing else.
+An offer MAY include a free-text `note` (at most 280 characters shown): who the visitor is, why it asks. It is **untrusted**. A housekeeper MUST NOT let it change a decision; it MAY show it to the owner, quoted and marked as the visitor's unchecked words, and declines an offer whose note tries to give orders.
+
+An `ask` is one request, not one per knock. The same agent asking exactly the same thing again (purpose, fields, retention, price, study) MUST be folded into the request already waiting, and the reply names that request's `offerId`. A visitor MAY ask `{ kind: "status", offerId }` for the owner's answer, and `{ kind: "withdraw", offerId }` to take a waiting request back.
 
 An **agreement** is the ODRL `Agreement` both parties sign, built from the final accepted offer, with a `dateTime` constraint for its end. The house signs it when it joins and returns it with the grant; the visitor MUST countersign it (a detached JWS over the agreement's canonical form) before the house runs anything. Both parties MUST keep it: the house in its pod at `/agreements/`. The grant names the agreement's `uid` and digest. A countersignature is a promise to pay the agreed price: a visitor MUST NOT countersign an agreement it can't pay under its mandate, and with no mandate it MUST NOT accept a price above zero (a bloc's counter included). Walking away before countersigning breaks nothing; the house's grant simply expires unused.
 
@@ -142,7 +144,8 @@ An **agreement** is the ODRL `Agreement` both parties sign, built from the final
 
 ## 5. Decisions
 
-A housekeeper answers every offer with exactly one of:
+A housekeeper answers every offer with exactly one of the following. What the visitor is told is not what the owner sees: the owner's activity keeps the whole reason (which rule, which condition); the visitor hears the decision and what it can act on (a counter's terms, a problem with its own credentials), never the owner's rules or rule numbers.
+
 
 | Decision | Means |
 |---|---|
@@ -253,7 +256,7 @@ Kinds in v0:
 
 `house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published` · `agent.message` · `tally.update`
 
-Who deals with whom is the dealers' business. An `agent.message` for a payment, or for a message whose kind is a deal (a quote, bid, offer, price, invoice, job…), MUST NOT name the other party: it says only that its reporter made a deal or a payment. Agents tagged `quiet` report no messages, and nobody reports messages sent to them. Chat and games may name both sides, so the map shows who talks to whom.
+What happens is public; between whom is not. For events where a house or a specialist acted for one agent (`knock`, `decision`, `approval.requested`, `approval.answered`, `grant.issued`, `compute.done`, `agreement.signed`, `quote.made`, `offer.accepted`), a node MAY use the counterparty privately (for reputation and counts) and MUST publish the event without it, and without the reasons and purposes that would point at one. Attack events keep the attacker's key, so quarantine works in the open. Likewise, who deals with whom is the dealers' business. An `agent.message` for a payment, or for a message whose kind is a deal (a quote, bid, offer, price, invoice, job…), MUST NOT name the other party: it says only that its reporter made a deal or a payment. Agents tagged `quiet` report no messages, and nobody reports messages sent to them. Chat and games may name both sides, so the map shows who talks to whom.
 
 ## 9. Federation
 
@@ -291,7 +294,7 @@ The Lake supports exactly one data model, in RDF, with SHACL shapes for validati
 Each use case is a **pack** (`health@1`, `mortgage@1`), versioned with semver. A pack declares:
 
 - **fields:** the coarse, safe fields programs may read and offers may name, each a claim class in the pack's vocabulary, ideally mapped to an existing standard (FHIR, FIBO, schema.org), with a kind: `band`, `number`, `code` or `flag`;
-- **identifying fields** no program may ever read;
+- **identifying fields** no program may ever read, and **quasi-identifying fields** (a postcode) an offer may name but no program reads. An offer naming a field no loaded pack declares in any of these three lists MUST be rejected as malformed, like an unknown purpose;
 - **shapes:** SHACL that every converted claims document MUST pass, on top of the core shapes;
 - **a source:** the credential type its issuer signs, the converter (`package@version`) an auditor certifies, and the media type of the original.
 

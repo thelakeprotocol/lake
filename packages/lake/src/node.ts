@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  buildCard, describe, EVENT_KINDS, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
+  buildCard, describe, EVENT_KINDS, publicView, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
   type AgentCard, type Identity, type LakeEvent, type Signed,
 } from '@thelakeprotocol/core';
 import { Registry, type Entry } from './registry.js';
@@ -153,7 +153,9 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
     recount();
     const name = (id?: string) => (id ? (registry.get(id)?.label ?? id) : id);
-    const line = { event, text: describe({ ...event, actor: name(event.actor)!, subject: name(event.subject) }) };
+    // Counters and reputation above used the whole event; the world gets only what happened, never between whom (SPEC §8).
+    const shown = publicView(event);
+    const line = { event: shown, text: describe({ ...shown, actor: name(shown.actor)!, subject: name(shown.subject) }) };
     recent.push(line);
     if (recent.length > 50) recent.shift();
     if (o.record) appendFileSync(o.record, JSON.stringify({ t: Date.now(), ...line, counters, participant: p }) + '\n');

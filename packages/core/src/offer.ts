@@ -1,4 +1,4 @@
-import { allFields, identifyingFields } from './pack.js';
+import { identifyingFields, offerableFields } from './pack.js';
 /**
  * An offer is what a visitor puts on the table: purpose, fields, retention, price.
  * On the wire it is a W3C ODRL Offer (see toOdrl); housekeepers evaluate this flat view.
@@ -59,7 +59,7 @@ export function toOdrl(o: Offer, assigner: string) {
  */
 export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'>): string[] {
   const identifying = new Set(identifyingFields());
-  const known = new Set(allFields());
+  const known = new Set(offerableFields());
   const ids = o.fields.filter((f) => identifying.has(f));
   const unknown = o.fields.filter((f) => !identifying.has(f) && !known.has(f));
   const years = retentionYears(o.retention);

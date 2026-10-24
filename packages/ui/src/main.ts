@@ -193,6 +193,12 @@ function onEvent(e: LakeEvent, p?: Participant) {
       break;
     case 'knock': {
       const ag = agents.get(e.actor);
+      if (ag && e.data?.count === undefined) {
+        // One knock, reported by the agent itself without the house: a pulse at the agent.
+        ag.seen = clock;
+        ripples.push({ x: ag.x, y: ag.y, r: 4, max: 40, col: COL.orange, w: 1.5 });
+        break;
+      }
       if (ag) {
         // A broadcast: one offer to every house that advertises the skill.
         ag.seen = clock;
@@ -205,6 +211,10 @@ function onEvent(e: LakeEvent, p?: Participant) {
         const v = visitor(e.subject);
         v.target = h;
         threads.push({ ax: v.x, ay: v.y, h, life: 1, col: COL.muted });
+      } else if (h) {
+        // Nodes don't say who knocked (SPEC §8): the house lights up, nobody is drawn at its door.
+        const { x, y } = at(h);
+        ripples.push({ x, y, r: 3, max: 26, col: COL.muted, w: 1.5 });
       }
       break;
     }

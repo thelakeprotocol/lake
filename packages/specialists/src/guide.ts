@@ -9,7 +9,8 @@ type Reply =
   | { kind: 'welcome'; text: string; lake: Record<string, number> | null; specialists: { name: string; url: string; what: string }[]; next: string; docs: string }
   | { kind: 'tour'; step: number; of: number; title: string; text: string; try?: Step['try']; next?: string }
   | { kind: 'explained'; term: string; text: string; see?: string }
-  | { kind: 'glossary'; terms: string[] };
+  | { kind: 'glossary'; terms: string[] }
+  | { kind: 'unknown'; term: string; note: string; terms: string[] };
 
 const SITE = 'https://lake.doneinfifty.com';
 
@@ -91,7 +92,8 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
     if (p.kind === 'explain') {
       const term = String(p.term ?? '').toLowerCase().trim().replace(/ies$/, 'y').replace(/(?<!s)s$/, '');
       const hit = GLOSSARY[term] ?? Object.entries(GLOSSARY).find(([k]) => term.includes(k) || k.includes(term))?.[1];
-      if (!term || !hit) return { kind: 'glossary', terms: Object.keys(GLOSSARY) };
+      if (!term) return { kind: 'glossary', terms: Object.keys(GLOSSARY) };
+      if (!hit) return { kind: 'unknown', term, note: `"${term}" isn't a Lake word I know; these are`, terms: Object.keys(GLOSSARY) };
       return { kind: 'explained', term, text: hit[0], see: hit[1] ? `${SITE}${hit[1]}` : undefined };
     }
     return { kind: 'refused', problems: ['send { kind: "hello" }, { kind: "tour", step: 1 } or { kind: "explain", term: "bloc" }'] };

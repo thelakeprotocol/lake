@@ -44,7 +44,8 @@ export interface LakeAgentOptions {
    * Messages other agents send this one. Each arrives verified (signed card, signed envelope, not replayed,
    * not expired); whatever you return is signed and sent back. Without it, the agent answers "busy".
    */
-  onMessage?: (m: { from: LakeProfile; card: AgentCard; payload: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+  /** `signed` is the message exactly as it arrived (card and envelope), so it can be forwarded as evidence anyone can check. */
+  onMessage?: (m: { from: LakeProfile; card: AgentCard; payload: Record<string, unknown>; signed: LakeData }) => Promise<Record<string, unknown>>;
   /** A sandbox Lake: skip domain proof when checking who sent a message. Default true. */
   sandbox?: boolean;
   /** The use cases this agent works with (their studies, fields and houses). Default: health. */
@@ -128,7 +129,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox ?? true });
     if (!v.ok) return reply({ kind: 'rejected', code: v.rejection.code, why: v.rejection.why });
     const { nonce: _n, iat: _i, exp: _e, iss: _s, ...payload } = v.payload;
-    return reply(await o.onMessage({ from: v.profile, card: (data as LakeData).card, payload }));
+    return reply(await o.onMessage({ from: v.profile, card: (data as LakeData).card, payload, signed: data as LakeData }));
   });
   let server: Server | null = null;
   if (o.mount) o.mount(app);
@@ -164,7 +165,10 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       });
     },
     async knock(houseUrl, terms) {
-      return (await knock(houseUrl, visitor, terms)).reply;
+      const { reply } = await knock(houseUrl, visitor, terms);
+      // The agent's own half of a knock: that it knocked and what it was told, never on which house (SPEC §8).
+      link.report(makeEvent('knock', 'self', undefined, { decision: String(reply.decision ?? reply.kind ?? '').slice(0, 20) }));
+      return reply;
     },
     async ask(agentUrl, payload) {
       const { reply: r, from } = await ask(agentUrl, visitor, payload);

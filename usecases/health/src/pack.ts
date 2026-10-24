@@ -21,8 +21,10 @@ export const health: LakePack = {
     conditions: { class: L('Condition'), kind: 'code', label: 'conditions', standard: 'http://hl7.org/fhir/Condition' },
     readmissions: { class: L('Readmission'), kind: 'flag', label: 'hospital readmissions', standard: 'http://hl7.org/fhir/Encounter' },
   },
-  // Directly identifying: no study may read them. (A postcode is only quasi-identifying; owners' rules decide.)
+  // Directly identifying: no study may read them.
   identifying: ['name', 'dob', 'nhs_number', 'email', 'phone', 'address'],
+  // Quasi-identifying: an offer may ask, no study reads it, and owners' rules decide.
+  quasiIdentifying: ['postcode'],
   shapes: readFileSync(new URL('../shapes.ttl', import.meta.url), 'utf8'),
   source: {
     credentialType: 'LakeHealthRecordCredential',

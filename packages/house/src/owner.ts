@@ -20,6 +20,10 @@ export interface PendingRequest {
   question?: string;
   /** What to look at twice: identifying or unknown fields, keeping data for years (SPEC §5). */
   warnings?: string[];
+  /** The visitor's own note to the owner: their words, unchecked, shown quoted and never read by the rules. */
+  note?: string;
+  /** How many times the same agent has asked exactly this; one request, however many knocks. */
+  asked?: number;
   recommendation: string;
   requestedAt: string;
   status: 'pending' | 'allowed' | 'denied';
@@ -28,7 +32,7 @@ export interface PendingRequest {
 
 /** The control panel's view of a house. Every call is signed by the owner's key. */
 export interface PanelProvider {
-  overview(): Promise<unknown>;
+  overview(tzOffset?: number): Promise<unknown>;
   rules(): Promise<{ text: string; rules: unknown }>;
   setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
   activity(): unknown[];
@@ -115,6 +119,11 @@ export class OwnerDesk {
   ) {}
 
   /** When the current owner's lease ends, if this house is leased. */
+  /** When the current owner claimed a leased house: what they see starts there, not with the last owner's. */
+  claimedAt(): number | null {
+    return (this.ownerJwk as (JWK & { claimedAt?: number }) | null)?.claimedAt ?? null;
+  }
+
   leaseUntil(): Date | null {
     const at = (this.ownerJwk as (JWK & { claimedAt?: number }) | null)?.claimedAt;
     return this.o.leaseHours && at ? new Date(at + this.o.leaseHours * 3_600_000) : null;
@@ -156,10 +165,35 @@ export class OwnerDesk {
     this.grants.set(g.id, { ...g, revoked: this.revokedIds.has(g.id) });
   }
 
+  /**
+   * One request per ask: the same agent asking exactly the same thing again is the same request (asked twice), not a
+   * new card for the owner. Returns the request on file, so the visitor gets its id to check or withdraw.
+   */
   ask(r: Omit<PendingRequest, 'id' | 'status' | 'requestedAt'>): PendingRequest {
+    const same = (x: PendingRequest) => x.status === 'pending' && x.visitor.webId === r.visitor.webId && x.purpose === r.purpose && x.retention === r.retention
+      && x.priceUsd === r.priceUsd && x.study === r.study && [...x.fields].sort().join() === [...r.fields].sort().join();
+    const known = [...this.pending.values()].find(same);
+    if (known) {
+      known.asked = (known.asked ?? 1) + 1;
+      if (r.note) known.note = r.note;
+      return known;
+    }
     const req: PendingRequest = { ...r, id: r.offerId, status: 'pending', requestedAt: new Date().toISOString() };
     this.pending.set(req.id, req);
     return req;
+  }
+
+  /** A visitor takes back its own request before the owner answers it. */
+  withdraw(offerId: string, visitorWebId: string): boolean {
+    const req = this.pending.get(offerId);
+    if (!req || req.visitor.webId !== visitorWebId || req.status !== 'pending') return false;
+    this.pending.delete(offerId);
+    return true;
+  }
+
+  /** What one agent asked this house lately, any purpose: lets the owner see a visitor trying another label. */
+  recentAsks(visitorWebId: string, withinMs = 3_600_000): PendingRequest[] {
+    return [...this.pending.values()].filter((x) => x.visitor.webId === visitorWebId && Date.now() - Date.parse(x.requestedAt) < withinMs);
   }
 
   /** A single-use key has been used: it stops working like a revoked one, but nobody took it back. */
@@ -238,7 +272,14 @@ export class OwnerDesk {
           if (q.replaces && !old) return void res.status(404).json({ error: 'no note of yours with that id' });
           if (old) this.suggestions = this.suggestions.filter((x) => x !== old);
           if (!text) return void (old ? res.json({ ok: true, withdrawn: old.id }) : res.status(400).json({ error: 'suggest something: text' }));
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(q.request ? { request: String(q.request) } : {}), at: new Date().toISOString() };
+          // A note about a request must point at a real one: a unique prefix is enough, anything else is refused.
+          let request: string | undefined;
+          if (q.request) {
+            const hits = [...this.pending.keys()].filter((k) => k === q.request || k.startsWith(String(q.request)));
+            if (hits.length !== 1) return void res.status(404).json({ error: hits.length ? 'that matches several requests; give more of the id' : 'no waiting request with that id' });
+            request = hits[0];
+          }
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
@@ -273,7 +314,7 @@ export class OwnerDesk {
         const q = p as unknown as { text?: string; pack?: string; terms?: Record<string, string | number>; offer?: string };
         // A panel action that can't be done says why, instead of failing the request.
         const answer = await ({
-          'panel.overview': () => panel.overview(),
+          'panel.overview': () => panel.overview(Number((q as { tz_offset?: number }).tz_offset)),
           'panel.rules': () => panel.rules(),
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity(),

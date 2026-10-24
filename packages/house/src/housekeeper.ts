@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  agreementDigest, agreementFor, allFields, oneHot, sendLake, splitCount, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  agreementDigest, agreementFor, allFields, offerableFields, oneHot, sendLake, splitCount, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -154,9 +154,13 @@ export class Housekeeper {
     if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key);
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor);
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
+    if ((v.payload.kind as string) === 'withdraw') {
+      const id = String((v.payload as { offerId?: string }).offerId ?? '');
+      return this.reply(this.o.desk.withdraw(id, v.profile.webId) ? { kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] } : { kind: 'rejected', code: 'malformed', why: 'no waiting request of yours with that id' });
+    }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
-    return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer, a compute request or a quote' });
+    return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a compute request, a quote, or status / withdraw for a request you made' });
   }
 
   private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {
@@ -171,8 +175,11 @@ export class Housekeeper {
     }
     this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: offer.purpose }));
     const notes: string[] = [];
-    const decide = async (decision: Decision, reason: string, extra: Partial<Extract<Reply, { kind: 'decision' }>> = {}) => {
+    // Two audiences: the owner's activity gets the whole reason; the visitor hears what it can act on, never the owner's
+    // rules ("your rule 2"). `told` is for reasons about the offer itself (an uncertified study), which the visitor can fix.
+    const decide = async (decision: Decision, reason: string, extra: Partial<Extract<Reply, { kind: 'decision' }>> = {}, told?: string) => {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision, reason }));
+      reason = told ?? toVisitor(decision, extra.counter);
       if (decision === 'ask') this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
       // What this house holds is said only to someone it is dealing with, never to someone it just turned away.
       const holds = decision === 'join' || decision === 'counter' ? [...new Set((await this.claims(offer.fields)).map((c) => c.field))] : [];
@@ -190,10 +197,10 @@ export class Housekeeper {
       const audit = await checkAttachment(p.attachments?.audit, { trusted: this.o.trust.auditors, type: 'LakeStudyCertificate', subject: id, sandbox: this.o.sandbox });
       const local = auditStudy(p.study);
       // Code without a valid certificate never runs here, whatever the rules say (SPEC §7).
-      if (!audit.ok || !local.ok) return decide('decline', `uncertified studies never run here (${audit.ok ? local.problems.join('; ') : audit.why})`);
+      if (!audit.ok || !local.ok) { const why = `uncertified studies never run here (${audit.ok ? local.problems.join('; ') : audit.why})`; return decide('decline', why, {}, why); }
       // The owner's answer will go, split, to these two tellers: both must be ones the owner trusts.
       const strangers = p.study.privacy.tellers.filter((c) => !this.o.trust.tellers.includes(c.domain)).map((c) => c.domain);
-      if (strangers.length) return decide('decline', `its answers would go to tellers your owner doesn't trust: ${strangers.join(', ')}`);
+      if (strangers.length) return decide('decline', `its answers would go to tellers your owner doesn't trust: ${strangers.join(', ')}`, {}, 'this house does not trust the tellers this study names');
       auditCertified = true;
       const ethics = await checkAttachment(p.attachments?.ethics, { trusted: this.o.trust.ethics, type: 'LakeEthicsApproval', subject: id, sandbox: this.o.sandbox });
       const approvedFields = ethics.ok ? ((ethics.vc.credentialSubject.fields as string[] | undefined) ?? []) : [];
@@ -204,15 +211,22 @@ export class Housekeeper {
     if (this.o.sandbox) notes.push('sandbox Lake: the visitor domain was not proved');
 
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
+    let filed: { offerId: string; asked?: number } | null = null;
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
-      const warnings = offerWarnings(offer);
-      this.o.desk.ask({
+      // A visitor that already asked this house for the same fields under another purpose is trying labels: say so.
+      const shopped = [...new Set(this.o.desk.recentAsks(visitorWebId).filter((x) => x.purpose !== offer.purpose && x.fields.some((f) => offer.fields.includes(f))).map((x) => x.purpose))];
+      const warnings = [...offerWarnings(offer), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
+      // The note is the visitor's words: never read by the rules, shown to the owner quoted, and only if it isn't trying to give orders.
+      const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
+      filed = this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
-        priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings,
+        priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
     }
+    // Asked again for the same thing: it's one request, and the visitor gets its id to check or withdraw.
+    if (filed && filed.offerId !== offer.id) return decide('ask', d.reason, { offerId: filed.offerId }, `the owner hasn't answered your earlier request ${filed.offerId} for exactly this (asked ${filed.asked} times); check it with { kind: "status", offerId }`);
     if (d.decision !== 'join') return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : {});
     const chain = await this.verifyOwnRecord(d.fields);
     if (!chain.ok && chain.transient) return this.reply({ kind: 'busy', why: chain.why, retryAfterMs: 1000 + Math.floor(Math.random() * 2000) });
@@ -353,7 +367,7 @@ export class Housekeeper {
         { id: req.offerId, requester: req.visitor.domain, purpose: req.purpose, fields: req.fields, retention: req.retention, priceUsd: req.priceUsd, study: req.study ?? undefined, credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true } },
         req.visitor.webId, new Date(g.validUntil ?? Date.now() + 48 * HOUR),
       );
-      return this.reply({ ...base, decision: 'join', reason: 'your owner tapped Allow', grant: req.grant, grantHours: 48, agreement });
+      return this.reply({ ...base, decision: 'join', reason: 'the owner tapped Allow', grant: req.grant, grantHours: 48, agreement });
     }
     if (req.status === 'denied') return this.reply({ ...base, decision: 'decline', reason: 'the owner said no' });
     return this.reply({ ...base, decision: 'ask', reason: 'still waiting for the owner' });
@@ -393,6 +407,14 @@ export class Housekeeper {
   }
 }
 
+/** What a visitor is told: the decision and anything it can act on (a counter's terms), never the owner's rules. */
+function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: number }): string {
+  if (decision === 'join') return 'joined';
+  if (decision === 'counter' && counter) return `would join for $${counter.priceUsd}, with ${counter.fields.join(', ').replace(/_/g, ' ')}`;
+  if (decision === 'ask') return 'the owner decides this one; ask for its status later with { kind: "status", offerId }';
+  return 'declined';
+}
+
 /** Why an offer isn't a well-formed Lake offer (SPEC §5.1), in our words, or null. Purposes and fields are codes, not prose. */
 function offerProblem(o: unknown): string | null {
   const x = o as Offer;
@@ -401,6 +423,9 @@ function offerProblem(o: unknown): string | null {
   // A made-up purpose ("totally-not-marketing") would slip past every rule about a real one.
   if (!isPurpose(x.purpose)) return `purpose must be one of the Lake's purposes: ${Object.keys(PURPOSES).join(', ')}`;
   if (!Array.isArray(x.fields) || !x.fields.length || x.fields.length > 32 || !x.fields.every((f) => typeof f === 'string' && FIELD.test(f))) return 'fields must be 1 to 32 field names (lowercase letters, digits, underscores)';
+  // Like purposes, fields are a shared vocabulary: a made-up one ("fit_to_drive") would reach the owner as if it meant something.
+  const known = new Set(offerableFields());
+  if (!x.fields.every((f) => known.has(f))) return `fields must be ones the use cases here define: ${offerableFields().join(', ')}`;
   if (typeof x.retention !== 'string' || !RETENTION.test(x.retention)) return 'retention must be "none" or an ISO 8601 duration like "P30D"';
   if (typeof x.priceUsd !== 'number' || !Number.isFinite(x.priceUsd) || x.priceUsd < 0) return 'price must be zero or more';
   return null;
