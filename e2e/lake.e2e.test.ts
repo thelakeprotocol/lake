@@ -537,6 +537,10 @@ describe('the open door', () => {
     const triggered = await t(other, { kind: 'tally.sign', id: 'e2e-strike' });
     expect(triggered).toMatchObject({ kind: 'tally.triggered', count: 2, state: 'triggered' });
     expect(triggered.signers).toHaveLength(2);
+    // Late is still welcome until the deadline (run 16 turned a late signer away), and the tally's signed reply names the
+    // signer: proof it can show anyone.
+    const late = await ask(tally, await visitor('late.example'), { kind: 'tally.sign', id: 'e2e-strike' });
+    expect(late.reply).toMatchObject({ kind: 'tally.triggered', count: 3, signer: { domain: 'late.example' } });
     // Nothing public says who signed: no visit reports from the tally, no message events to it.
     const feed = JSON.stringify((await (await fetch(`${node}/state`)).json()).recent);
     expect(feed).not.toMatch(/tally\.sign|tally\.signed|tally\.triggered/);

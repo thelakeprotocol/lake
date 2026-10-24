@@ -99,7 +99,10 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: 'tally.withdrawn', ...view(t) };
     }
     if (p.kind === 'tally.sign') {
-      if (t.state !== 'open') return { kind: 'refused', problems: [`it has ${t.state}`] };
+      // A pledge that has triggered still takes signatures until its deadline: more people standing by it (run 16 turned
+      // a late signer away).
+      if (t.state !== 'open' && t.state !== 'triggered') return { kind: 'refused', problems: [`it has ${t.state}`] };
+      if (t.deadline < Date.now()) return { kind: 'refused', problems: ['its deadline has passed'] };
       // One signature per signed identity; in a people-only tally, also one per person, whatever number of houses they have.
       let person: string | undefined;
       if (t.peopleOnly) {
@@ -111,14 +114,16 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       }
       const counted = signed || (person !== undefined && t.signers.some((x) => x.person === person));
       if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}) });
-      if (t.signers.length >= t.threshold) {
+      if (t.state === 'open' && t.signers.length >= t.threshold) {
         t.state = 'triggered';
         const signers = t.signers.map(({ domain, url }) => ({ domain, url }));
         for (const x of t.signers) if (x.webId !== from && x.url) void tell(x.url, { kind: 'tally.triggered', id: t.id, text: t.text, count: t.signers.length, signers });
       }
       void save();
       report(t);
-      return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), ...(t.state === 'triggered' ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
+      // The reply names the signer and is signed by the tally: the signer's proof, to show anyone (lake_verify checks it),
+      // so "I've signed" never has to be taken on trust (run 16).
+      return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), signer: { webId: from, domain: profile.ownerDomain }, proof: 'this signed reply is your proof that you signed: forward it as it is', ...(t.state === 'triggered' ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
     }
     return { kind: 'refused', problems: ['send tally.open, tally.sign, tally.withdraw or tally.count'] };
   }, [], true);
