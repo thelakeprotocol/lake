@@ -225,7 +225,13 @@ Value is whatever two parties agree on, so an agent MAY pay in any other unit (a
 
 ### 6.4 One person, one house
 
-Anything that counts people (a pledge, a strike, a group) breaks if one person can run fifty houses. A **person checker** stamps a house as belonging to one real person without saying who: a `LakePersonhood` credential whose subject is the house's WebID and whose `person` is a pseudonymous number, the same for every house of the same person. The owner asks from their own device: the house forwards `{ kind: "personhood.request", owner, consent }`, where `consent` is `{ kind: "personhood.consent", house }` signed by the owner's key; a checker MUST NOT stamp a house without it. The house keeps the stamp in `/wallet/personhood.json` and attaches it where people are counted. A counter that counts people (a tally opened with `people_only: true`, §11.4) MUST accept only stamps from checkers it trusts, for the signer's own WebID, and MUST count each `person` once. Who may check people is a trust choice, like issuers and auditors: a bank, a government digital ID, people vouching for each other. The sandbox's demo checker checks nothing real and gives one number per owner key. The same `person` across contexts can link a person's houses; per-context numbers need selective disclosure (§13).
+Anything that counts people (a pledge, a strike, a group) breaks if one person can run fifty houses. A **person checker** stamps a house as belonging to one real person without saying who. Stamps are **SD-JWT VCs** (RFC 9901, in the IETF SD-JWT VC format the EU Digital Identity Wallet uses), signed EdDSA, bound to the house's card key (`cnf.jwk`), and presented with a Key Binding JWT (`aud`, `nonce`) so a presentation is good only for whom it was made, and only from that key.
+
+- **The stamp** (`vct` `https://lake.doneinfifty.com/vct/person`, `sub` the house's WebID) carries `person`, a pseudonymous number, the same for every house of the same person, as a **selectively disclosable** claim. The owner asks from their own device: the house forwards `{ kind: "personhood.request", owner, consent }`, where `consent` is `{ kind: "personhood.consent", house }` signed by the owner's key; a checker MUST NOT stamp a house without it. The house keeps the stamp in `/wallet/personhood.json`.
+- **A stamp for one count.** The house MUST NOT show its stamp's `person` to anyone but its checker. For each count (the **context**: `"<counter's WebID>|<count id>"`), it presents its stamp to the checker, disclosing `person`, with a Key Binding JWT whose `aud` is the checker and whose `nonce` is the context: `{ kind: "personhood.context", context, stamp }`. The checker answers with a stamp for that context (`vct` `https://lake.doneinfifty.com/vct/person-in-context`) whose `person` is a number derived for that context only, so two counts can't match a person's houses or follow a person from one to the next.
+- **Counting.** A counter that counts people (a tally opened with `people_only: true`, §11.4) MUST accept only a stamp for its own context from checkers it trusts, for the signer's own WebID, bound to the signer's key, presented with `aud` its own WebID and `nonce` the count's id; and MUST count each `person` once.
+
+Who may check people is a trust choice, like issuers and auditors: a bank, a government digital ID, people vouching for each other. The sandbox's demo checker checks nothing real and gives one number per owner key. A checker learns which contexts a person asks stamps for; BBS signatures with per-verifier pseudonyms (draft-irtf-cfrg-bbs-per-verifier-linkability) would hide that from the checker too, once they are standard and implemented (§13).
 
 ## 7. Data never moves
 
@@ -369,6 +375,6 @@ Message kinds: house → agent `authorisation`, `intent`, `accept`; agent → ho
 These are real decisions still open. Argue in an issue.
 
 - Domain proof for people without a domain: delegated subdomains from pod providers?
-- Personhood: which credential prevents one person running 50 houses?
+- Personhood: which checkers prevent one person running 50 houses for real; and per-context pseudonyms the checker can't link (BBS per-verifier linkability), when a stable standard and implementation exist.
 - Selective disclosure: SD-JWT now, BBS+ later?
 - Payment: which rail settles real money, if any, and who carries the mandate liability?

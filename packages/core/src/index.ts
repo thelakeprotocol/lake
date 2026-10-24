@@ -18,6 +18,7 @@ export * from './study.js';
 export * from './count.js';
 export * from './grant.js';
 export * from './draw.js';
+export * from './sdjwt.js';
 export * from './trust.js';
 export * from './deal.js';
 export * from './ap2.js';

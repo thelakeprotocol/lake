@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -457,12 +457,26 @@ function panelFor(x: {
       if (!x.o.personUrl) throw new Error('no person checker is set for this house');
       const { payload, card } = await send(x.o.personUrl, { kind: 'personhood.request', owner: ownerJwk, consent });
       if (payload.kind !== 'stamped') throw new Error(((payload.problems as string[]) ?? ['refused']).join('; '));
-      await put(owner, 'wallet/personhood.json', JSON.stringify({ credential: payload.credential, card, person: payload.person }), 'application/json');
+      // The stamp's person number is hidden; the owner's own wallet may read it.
+      const person = String((await readSdJwtVc(String(payload.credential))).person ?? '');
+      await put(owner, 'wallet/personhood.json', JSON.stringify({ credential: payload.credential, card, person }), 'application/json');
       return { stamped: true, by: card.name };
     },
     async signPledge(tally, id) {
       const s = await stamp();
-      const { payload } = await send(tally, { kind: 'tally.sign', id, ...(s ? { person: { credential: s.credential, card: s.card } } : {}) });
+      let person: { credential: string; card: AgentCard } | undefined;
+      const { payload: before, card: tallyCard } = await send(tally, { kind: 'tally.count', id });
+      // Only a count of people sees a stamp, and only one made for it: its own person number, so counts can't link this
+      // owner's houses. The checker, shown the stamp's hidden number, makes it; the tally is shown it, bound to this key.
+      if (s && before.people_only) {
+        const counter = lakeProfile(tallyCard)!.webId;
+        const context = countContext(counter, id);
+        const checker = lakeProfile(s.card)!.webId;
+        const { payload, card } = await send(s.card.supportedInterfaces[0]!.url, { kind: 'personhood.context', context, stamp: await presentSdJwtVc(s.credential, ['person'], x.id, { aud: checker, nonce: context }) });
+        if (payload.kind !== 'stamped') return { kind: 'refused', problems: [`the person checker: ${((payload.problems as string[]) ?? [String(payload.kind)]).join('; ')}`] };
+        person = { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud: counter, nonce: id }), card };
+      }
+      const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}) });
       return payload;
     },
     async closeIntent(pack) { await x.keeper().market.close(pack); return { ok: true }; },

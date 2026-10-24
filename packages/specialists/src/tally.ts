@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { checkAttachment, makeEvent, sendLake, signMessage, type AgentCard, type Attachment, type LakeData } from '@thelakeprotocol/core';
+import { checkSdJwtAttachment, countContext, makeEvent, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, type AgentCard, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -63,7 +63,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   };
   setInterval(() => { for (const t of tallies.values()) lapse(t); }, 30_000).unref();
 
-  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people (each signature needs a person stamp) instead of identities. Send { kind: "tally.open", id, text, threshold, deadline, people_only? }, { kind: "tally.sign", id }, { kind: "tally.withdraw", id } or { kind: "tally.count", id }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. Send { kind: "tally.open", id, text, threshold, deadline, people_only? }, { kind: "tally.sign", id }, { kind: "tally.withdraw", id } or { kind: "tally.count", id }.', 'tally', async (p, from, profile, card: AgentCard) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -103,9 +103,11 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       // One signature per signed identity; in a people-only tally, also one per person, whatever number of houses they have.
       let person: string | undefined;
       if (t.peopleOnly) {
-        const stamp = await checkAttachment(p.person as Attachment | undefined, { trusted: checkers, type: 'LakePersonhood', subject: from, sandbox: o.sandbox });
-        if (!stamp.ok) return { kind: 'refused', problems: [`this tally counts people: attach a person stamp from ${checkers.join(' or ')} (${stamp.why}). A house's owner gets one in their control panel (Home → One person, one house), then signs the pledge there; an assistant can't do either.`] };
-        person = String(stamp.vc.credentialSubject.person ?? '');
+        // A stamp for this tally only (its own person number), presented to this tally, by the signer's own key.
+        const context = countContext(s.webId, t.id);
+        const stamp = await checkSdJwtAttachment(p.person as { credential?: unknown; card?: AgentCard } | undefined, { trusted: checkers, vct: PERSON_IN_CONTEXT_VCT, subject: from, holder: profile.publicJwk, aud: s.webId, nonce: t.id, sandbox: o.sandbox });
+        if (!stamp.ok || stamp.claims.context !== context) return { kind: 'refused', problems: [`this tally counts people: attach a person stamp for "${context}" from ${checkers.join(' or ')}, presented to this tally (${stamp.ok ? 'it is for another count' : stamp.why}). A house's owner gets a stamp in their control panel (Home → One person, one house), then signs the pledge there; an assistant can't do either.`] };
+        person = String(stamp.claims.person ?? '');
       }
       const counted = signed || (person !== undefined && t.signers.some((x) => x.person === person));
       if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}) });

@@ -344,6 +344,10 @@ describe('the owner', () => {
     const tally = `${specialistsUrl}/tally`;
     expect(await ownerCall({ kind: 'panel.pledge.sign', tally, id: 'people-test' })).toMatchObject({ count: 1 });
     expect(await researchCall({ kind: 'panel.pledge.sign', tally, id: 'people-test' })).toMatchObject({ count: 1 });
+    // Each count gets its own stamp (its own person number) from the checker: another pledge works the same way.
+    await ask(`${specialistsUrl}/tally/a2a`, opener, { kind: 'tally.open', id: 'people-test-2', text: 'One each, again.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true });
+    expect(await researchCall({ kind: 'panel.pledge.sign', tally, id: 'people-test-2' })).toMatchObject({ count: 1 });
+    expect(await ownerCall({ kind: 'panel.pledge.sign', tally, id: 'people-test-2' })).toMatchObject({ count: 1 });
     // An agent without a stamp can't sign a people-only pledge.
     expect((await ask(`${tally}/a2a`, opener, { kind: 'tally.sign', id: 'people-test' })).reply.kind).toBe('refused');
   });
