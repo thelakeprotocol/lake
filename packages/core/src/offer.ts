@@ -1,4 +1,5 @@
-import { identifyingFields, offerableFields } from './pack.js';
+import { fieldSpec, identifyingFields, offerableFields } from './pack.js';
+import { PURPOSES } from './purpose.js';
 /**
  * An offer is what a visitor puts on the table: purpose, fields, retention, price.
  * On the wire it is a W3C ODRL Offer (see toOdrl); housekeepers evaluate this flat view.
@@ -57,13 +58,16 @@ export function toOdrl(o: Offer, assigner: string) {
  * What an owner should look at twice before allowing an offer, in plain words: fields that identify them, fields no
  * use case here defines, and keeping the data for a year or more. Codes only; nothing the sender wrote as prose.
  */
-export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'>): string[] {
+export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose?: string }): string[] {
   const identifying = new Set(identifyingFields());
   const known = new Set(offerableFields());
   const ids = o.fields.filter((f) => identifying.has(f));
   const unknown = o.fields.filter((f) => !identifying.has(f) && !known.has(f));
   const years = retentionYears(o.retention);
+  // Sensitive data asked for to decide something about you: an insurer pricing you on your health (run 19).
+  const special = o.purpose && PURPOSES[o.purpose]?.decides ? o.fields.filter((f) => fieldSpec(f)?.special) : [];
   return [
+    special.length ? `asks for sensitive data (${special.join(', ').replace(/_/g, ' ')}) to make decisions about you (${PURPOSES[o.purpose!]!.label})` : '',
     ids.length ? `asks for fields that identify you: ${ids.join(', ').replace(/_/g, ' ')}` : '',
     unknown.length ? `asks for fields no use case here defines: ${unknown.join(', ').replace(/_/g, ' ')}` : '',
     years >= 1 ? `wants to keep your data for ${years >= 2 ? `${Math.round(years)} years` : 'a year or more'}` : '',

@@ -243,7 +243,10 @@ function requestCard(all: Request[]) {
     for (const q of all) {
       // The key is cut here, on this device, with your key: the house drafted the grant (a Solid Access Grant saying exactly
       // what you were shown), this device dates and signs it, and the house only checks it.
-      const grant = signCredential({ ...(q.grantDraft as object), issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString() }, key);
+      const draft = structuredClone(q.grantDraft) as { credentialSubject: { providedConsent: { hasStatus: string } } };
+      // The draft asks; signing it here is the owner giving consent.
+      draft.credentialSubject.providedConsent.hasStatus = 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven';
+      const grant = signCredential({ ...draft, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString() }, key);
       await call({ kind: 'answer', request: q.id, answer: 'allow', grant }).catch((e) => alert(e.message));
     }
     void refreshBadge(); void show();

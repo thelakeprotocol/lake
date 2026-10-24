@@ -362,6 +362,9 @@ function panelFor(x: {
     const r = await owner.fetch(`${owner.podRoot}wallet/personhood.json`).catch(() => null);
     return r?.ok ? r.json() : null;
   };
+  // On a leased house, what happened is counted from this owner's claim, like its money: a house that was free a minute
+  // ago may have answered someone before it was yours (run 18 saw a join from before the claim).
+  const mine = () => { const since = x.desk().claimedAt(); return since ? x.activity.filter((a) => Date.parse(a.at) >= since) : x.activity; };
   const money = async () => {
     const files = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
     const receipts = (await Promise.all(files.map(async (f) => {
@@ -389,8 +392,8 @@ function panelFor(x: {
         reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes,
         holds: [...new Set(claims.map((c) => c.field))], claims: claims.length,
         record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
-        knocksToday: x.activity.filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
-        blockedToday: x.activity.filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
+        knocksToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
+        blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
         pending: view.requests.length, keys: view.keys.length,
         earned: (await money()).total,
         rulesOwner: x.keeper().rules.owner,
@@ -416,10 +419,10 @@ function panelFor(x: {
       x.o.say('the owner changed their rules in the control panel');
       return { ok: true as const };
     },
-    activity: () => x.activity.slice(0, 100),
+    activity: () => mine().slice(0, 100),
     agents() {
       const by = new Map<string, { agent: string; knocks: number; last: string; lastDecision?: string; blocked: number }>();
-      for (const a of [...x.activity].reverse()) {
+      for (const a of [...mine()].reverse()) {
         if (!a.subject) continue;
         const e = by.get(a.subject) ?? { agent: a.subject, knocks: 0, last: a.at, blocked: 0 };
         if (a.kind === 'knock') e.knocks++;

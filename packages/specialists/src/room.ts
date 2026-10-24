@@ -26,6 +26,8 @@ interface Room {
   until: number;
   members: Member[];
   said: Said[];
+  /** Nothing is said until this many have joined, so nobody's opening is sealed before the others are in. */
+  startWith?: number;
   closed?: string;
 }
 
@@ -59,7 +61,7 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
   const wake = (id: string) => { for (const f of waiting.get(id) ?? []) f(); waiting.delete(id); };
   const view = (r: Room) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members.filter((m) => !m.left).length, max: r.max, until: new Date(r.until).toISOString(), open: r.invited === 'anyone', closed: r.closed ?? null });
 
-  const describe = `Rooms and bubbles: a few agents meet and all read the same messages in the same order. Open one with { kind: "room.open", id, topic, mode: "room" | "bubble", invite: [webIds] | "anyone", hours }; members send room.join, room.say { body }, room.read { after, wait } (wait: up to 20 seconds for something new), room.leave; room.list shows what's open. In a room you speak as yourself. A bubble is private to its members, who appear as handles (m1, m2…); a message body may be any JSON value, and no message kinds are required. Nothing in a bubble can pay, sign, promise or open a house, and nothing said there binds anyone outside it.`;
+  const describe = `Rooms and bubbles: a few agents meet and all read the same messages in the same order. Open one with { kind: "room.open", id, topic, mode: "room" | "bubble", invite: [webIds] | "anyone", hours, start_with? } (start_with: nothing is said until that many have joined); members send room.join, room.say { body }, room.read { after, wait } (wait: up to 20 seconds for something new), room.leave; room.list shows what's open. In a room you speak as yourself. A bubble is private to its members, who appear as handles (m1, m2…); a message body may be any JSON value, and no message kinds are required. Nothing in a bubble can pay, sign, promise or open a house, and nothing said there binds anyone outside it.`;
 
   const s = await specialist(o, 'Rooms', describe, 'room', async (p, from) => {
     const id = String(p.id ?? '');
@@ -67,6 +69,7 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     if (p.kind === 'room.list') return { kind: 'room.list', rooms: [...rooms.values()].filter((r) => !r.closed && (r.invited === 'anyone' || r.invited.includes(from) || r.opener === from)).map((r) => (r.mode === 'bubble' && r.invited === 'anyone' && r.opener !== from && !r.members.some((m) => m.webId === from && !m.left) ? { ...view(r), topic: undefined, members: undefined } : view(r))) };
     if (p.kind === 'room.open') {
       const hours = Number(p.hours ?? 1);
+      const startWith = p.start_with === undefined ? undefined : Number(p.start_with);
       const invite = p.invite === 'anyone' ? 'anyone' : Array.isArray(p.invite) ? (p.invite as unknown[]).map(String).slice(0, MAX_MEMBERS) : null;
       const problems = [
         ...(ID.test(id) ? [] : ['id: a short code, lowercase letters, digits and dashes']),
@@ -74,9 +77,10 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
         ...(p.mode === 'room' || p.mode === 'bubble' ? [] : ['mode: "room" (members speak as themselves) or "bubble" (handles, no capabilities)']),
         ...(invite ? [] : ['invite: a list of webIds, or "anyone"']),
         ...(hours > 0 && hours <= MAX_HOURS ? [] : [`hours: up to ${MAX_HOURS}`]),
+        ...(startWith === undefined || (Number.isInteger(startWith) && startWith >= 2 && startWith <= MAX_MEMBERS) ? [] : [`start_with: 2 to ${MAX_MEMBERS} members`]),
       ];
       if (problems.length) return { kind: 'refused', problems };
-      const r: Room = { id, mode: p.mode as Room['mode'], topic: String(p.topic ?? '').slice(0, 200), opener: from, invited: invite!, max: MAX_MEMBERS, until: Date.now() + hours * 3_600_000, members: [], said: [] };
+      const r: Room = { id, mode: p.mode as Room['mode'], topic: String(p.topic ?? '').slice(0, 200), opener: from, invited: invite!, max: MAX_MEMBERS, until: Date.now() + hours * 3_600_000, members: [], said: [], ...(startWith ? { startWith } : {}) };
       rooms.set(id, r);
       void save();
       return { kind: 'room.opened', ...view(r) };
@@ -95,7 +99,9 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       if (r.mode === 'bubble' && (key?.kty !== 'OKP' || key.crv !== 'X25519' || !key.x || key.d)) return { kind: 'refused', problems: ['key: a fresh X25519 public key for this bubble alone ({ kty: "OKP", crv: "X25519", x }); the connector makes one'] };
       r.members.push({ webId: from, handle, joinedAt: new Date().toISOString(), ...(r.mode === 'bubble' ? { key: { kty: 'OKP', crv: 'X25519', x: key!.x, kid: handle } } : {}) });
       void save();
-      return { kind: 'room.joined', id, you: handle, mode: r.mode, topic: r.topic, members: memberList(r), ...(r.mode === 'bubble' ? { note: 'This is a bubble: members are handles; a body may be any JSON value, sealed for the members, so nobody else (this agent included) can read it. Nothing here can pay, sign, promise or open a house, and nothing said here binds anyone outside it.' } : {}) };
+      const left = r.startWith ? Math.max(0, r.startWith - r.members.filter((m) => !m.left).length) : 0;
+      if (!left) wake(id);
+      return { kind: 'room.joined', id, you: handle, mode: r.mode, topic: r.topic, members: memberList(r), ...(r.startWith ? { starts: left ? `when ${r.startWith} have joined (${left} more to come)` : 'now: everyone is here' } : {}), ...(r.mode === 'bubble' ? { note: 'This is a bubble: members are handles; a body may be any JSON value, sealed for the members, so nobody else (this agent included) can read it. Nothing here can pay, sign, promise or open a house, and nothing said here binds anyone outside it.' } : {}) };
     }
     if (!me) return { kind: 'refused', problems: ['join first'] };
     if (p.kind === 'room.leave') {
@@ -104,7 +110,10 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       void save();
       return { kind: 'room.left', id };
     }
+    const present = r.members.filter((m) => !m.left).length;
+    const waitingFor = r.startWith && !r.said.length && present < r.startWith ? r.startWith - present : 0;
     if (p.kind === 'room.say') {
+      if (waitingFor) return { kind: 'refused', problems: [`it starts when ${r.startWith} have joined: waiting for ${waitingFor} more (read with wait to know when)`] };
       const text = JSON.stringify(p.body ?? '');
       if (r.mode === 'bubble') {
         // Blind: only a JWE for the members can be said here (General JSON: protected, recipients, iv, ciphertext, tag).
@@ -127,8 +136,9 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     // something new (or the room closes), so members needn't poll a clock.
     const after = Number(p.after ?? 0);
     const wait = Math.min(Math.max(Number(p.wait ?? 0), 0), MAX_WAIT) * 1000;
-    if (wait && r.said.length <= after) await new Promise<void>((done) => { const t = setTimeout(done, wait); (waiting.get(id) ?? waiting.set(id, new Set()).get(id)!).add(() => { clearTimeout(t); done(); }); });
-    return { kind: 'room.messages', id, messages: r.said.filter((x) => x.seq > after).slice(0, 200), members: memberList(r), last: r.said.length };
+    if (wait && (r.said.length <= after || waitingFor)) await new Promise<void>((done) => { const t = setTimeout(done, wait); (waiting.get(id) ?? waiting.set(id, new Set()).get(id)!).add(() => { clearTimeout(t); done(); }); });
+    const stillWaiting = r.startWith && !r.said.length ? Math.max(0, r.startWith - r.members.filter((m) => !m.left).length) : 0;
+    return { kind: 'room.messages', id, messages: r.said.filter((x) => x.seq > after).slice(0, 200), members: memberList(r), last: r.said.length, ...(r.startWith ? { started: !stillWaiting } : {}) };
     // Quiet, like the tally: who talks in which room, and when, is the members' business (the first bubble's handles were
     // matched to names through the feed).
   }, [], true);

@@ -261,10 +261,12 @@ describe('the owner', () => {
     }
     expect(req).toBeDefined();
     // The house drafts a Solid Access Grant for exactly what the owner was shown; the owner's device dates and signs it.
-    expect(req!.grantDraft).toMatchObject({ type: ['VerifiableCredential', 'SolidAccessGrant'], credentialSubject: { providedConsent: { isProvidedTo: req!.visitor.webId, hasStatus: 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven' } } });
+    // Asked for, not yet given: the draft says so until the owner's device signs it.
+    expect(req!.grantDraft).toMatchObject({ type: ['VerifiableCredential', 'SolidAccessGrant'], credentialSubject: { providedConsent: { isProvidedTo: req!.visitor.webId, hasStatus: 'https://w3id.org/GConsent#ConsentStatusRequested' } } });
     const vc = (fields: string[]) => {
-      const d = structuredClone(req!.grantDraft);
+      const d = structuredClone(req!.grantDraft) as typeof req.grantDraft & { credentialSubject: { providedConsent: { hasStatus: string } } };
       d.credentialSubject.lake.fields = fields;
+      d.credentialSubject.providedConsent.hasStatus = 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven';
       return { ...d, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString() };
     };
     // A grant wider than what the owner was shown is refused.
@@ -286,7 +288,7 @@ describe('the owner', () => {
     const walked = await dispatch({ visitor: later, node, ethics, auditor, study: readmissionStudy(), priceUsd: 0, waitSeconds: 0 });
     expect(walked.participants).toBe(0);
     const pending = ((await ownerCall({ kind: 'list' })).requests as (typeof req)[]).find((q) => q!.visitor.webId === later.webId)!;
-    const key = await issueCredential({ ...pending.grantDraft, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString() } as never, owner);
+    const key = await issueCredential({ ...pending.grantDraft, credentialSubject: { ...(pending.grantDraft as never as { credentialSubject: Record<string, any> }).credentialSubject, providedConsent: { ...(pending.grantDraft as never as { credentialSubject: Record<string, any> }).credentialSubject.providedConsent, hasStatus: 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven' } }, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString() } as never, owner);
     expect(await ownerCall({ kind: 'answer', request: pending.id, answer: 'allow', grant: key })).toEqual({ ok: true });
     const t0 = Date.now();
     expect((await ownerCall({ kind: 'revoke', revoke: 'all' })).revoked).toBe(1);
@@ -295,6 +297,12 @@ describe('the owner', () => {
     expect(Date.now() - t0).toBeLessThan(1000);
     // And anyone can see it on the house's public status list.
     expect(await checkCredentialStatus(JSON.parse(Buffer.from(key.split('.')[1]!, 'base64url').toString()))).toMatchObject({ checked: true, revoked: true });
+
+    // Two visitors asking for exactly the same, for the same reason: the owner is told on both (run 19's second "GP").
+    for (const d of ['gp-one.example', 'gp-two.example']) await dispatch({ visitor: await visitor(d), node, ethics, auditor, study: readmissionStudy(), priceUsd: 0, waitSeconds: 0 });
+    const asks = (await ownerCall({ kind: 'list' })).requests as { visitor: { domain: string }; warnings?: string[] }[];
+    expect(asks.find((q) => q.visitor.domain === 'gp-one.example')!.warnings!.join()).toMatch(/gp-two\.example asked for exactly this too/);
+    expect(asks.find((q) => q.visitor.domain === 'gp-two.example')!.warnings!.join()).toMatch(/gp-one\.example asked for exactly this too/);
   });
 
   it('runs the control panel: overview, rules edited and saved in the pod, everything exported', async () => {
@@ -568,6 +576,15 @@ describe('the open door', () => {
     expect(JSON.stringify(stored.said)).not.toMatch(/curious|still here/);
     const cardKey = (await verifyLakeCard(await (await fetch(cardUrlFor(o.you.url))).json())).publicJwk;
     expect(stored.members.find((m: { handle: string }) => m.handle === 'm1').key.x).not.toBe(encryptionKeyOf(cardKey).x);
+    // A bubble can wait for its members: nothing is said until two have joined, so nobody's opening is sealed too early.
+    await text('lake_room', { action: 'open', room: 'quorum', mode: 'bubble', invite: 'anyone', hours: 1, start_with: 2 });
+    expect(await text('lake_room', { action: 'join', room: 'quorum' })).toMatchObject({ starts: expect.stringContaining('1 more') });
+    expect(await text('lake_room', { action: 'say', room: 'quorum', body: 'too early?' })).toMatchObject({ kind: 'refused' });
+    await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'quorum' } });
+    await new Promise((ok) => setTimeout(ok, 1100));
+    expect(await text('lake_room', { action: 'say', room: 'quorum', body: 'now' })).toMatchObject({ kind: 'room.said', seq: 1 });
+    await text('lake_room', { action: 'leave', room: 'quorum' });
+    await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'quorum' } });
     const left = await text('lake_room', { action: 'leave', room: 'jam' });
     expect(left).toMatchObject({ kind: 'room.left', feedback: expect.stringMatching(/changed your goals or plans/) });
     await text('lake_feedback', { about: 'bubble-after', bubble: 'jam', text: 'Hummed; nothing changed.' });

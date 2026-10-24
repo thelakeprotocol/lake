@@ -9,7 +9,10 @@ import { PURPOSES } from './purpose.js';
  */
 export const ACCESS_GRANT_CONTEXT = ['https://www.w3.org/ns/credentials/v2', 'https://schema.inrupt.com/credentials/v2.jsonld'];
 export const ACCESS_GRANT_TYPE = ['VerifiableCredential', 'SolidAccessGrant'];
-const GIVEN = 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven';
+export const CONSENT_GIVEN = 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven';
+/** What a draft says until the owner's device signs it: asked for, not yet given (run 19 read a draft as consent). */
+export const CONSENT_REQUESTED = 'https://w3id.org/GConsent#ConsentStatusRequested';
+const GIVEN = CONSENT_GIVEN;
 const READ = 'http://www.w3.org/ns/auth/acl#Read';
 
 /** What a house grants, in the Lake's terms. */
@@ -34,16 +37,16 @@ export const fieldIri = (f: string) => fieldSpec(f)?.class ?? `urn:lake:field:${
 export const purposeIri = (p: string) => (PURPOSES[p]?.dpv ? `https://w3id.org/dpv#${PURPOSES[p]!.dpv}` : `urn:lake:purpose:${p}`);
 
 /** The credential subject of a grant from `owner` to `grantee`. */
-export function accessGrantSubject(owner: string, grantee: string, t: GrantTerms) {
+export function accessGrantSubject(owner: string, grantee: string, t: GrantTerms, status = GIVEN) {
   return {
     id: owner,
-    providedConsent: { mode: [READ], hasStatus: GIVEN, forPersonalData: t.fields.map(fieldIri), forPurpose: [purposeIri(t.purpose)], isProvidedTo: grantee },
+    providedConsent: { mode: [READ], hasStatus: status, forPersonalData: t.fields.map(fieldIri), forPurpose: [purposeIri(t.purpose)], isProvidedTo: grantee },
     lake: Object.fromEntries(Object.entries(t).filter(([, v]) => v !== undefined)),
   };
 }
 
 /** A grant's unsigned body, for a device to date and sign. */
-export const accessGrantDraft = (owner: string, grantee: string, t: GrantTerms) => ({ '@context': ACCESS_GRANT_CONTEXT, type: ACCESS_GRANT_TYPE, credentialSubject: accessGrantSubject(owner, grantee, t) });
+export const accessGrantDraft = (owner: string, grantee: string, t: GrantTerms, status = GIVEN) => ({ '@context': ACCESS_GRANT_CONTEXT, type: ACCESS_GRANT_TYPE, credentialSubject: accessGrantSubject(owner, grantee, t, status) });
 
 /** Who granted what to whom, read from a verified credential; null when it isn't a given Solid Access Grant with Lake terms. */
 export function readAccessGrant(vc: { type: string[]; credentialSubject: unknown }): (GrantTerms & { owner: string; grantee: string }) | null {

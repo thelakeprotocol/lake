@@ -227,6 +227,12 @@ export class OwnerDesk {
     return req;
   }
 
+  /** Requests waiting for the owner that ask for exactly these fields for this purpose, from anyone. */
+  pendingLike(purpose: string, fields: string[]): PendingRequest[] {
+    const key = [...fields].sort().join();
+    return [...this.pending.values()].filter((x) => x.status === 'pending' && x.purpose === purpose && [...x.fields].sort().join() === key);
+  }
+
   /** A visitor takes back its own request before the owner answers it. */
   withdraw(offerId: string, visitorWebId: string): boolean {
     const req = this.pending.get(offerId);

@@ -62,6 +62,8 @@ export interface PackField {
   standard?: string;
   /** Unit for numbers, e.g. AUD, months. */
   unit?: string;
+  /** Special-category data (health, beliefs, biometrics… in data-protection law): a house warns its owner when it's asked for to make decisions about them. */
+  special?: boolean;
 }
 
 /** How a house gets its record for this pack: a trusted issuer signs the original, a certified converter turns it into claims. */

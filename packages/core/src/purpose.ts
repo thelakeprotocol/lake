@@ -11,16 +11,19 @@ export interface Purpose {
   within?: string;
   /** The DPV concept it corresponds to (https://w3id.org/dpv#…). */
   dpv?: string;
+  /** Used to make decisions about the person (a price, a yes or no): a house warns before sensitive data goes to it. */
+  decides?: boolean;
 }
 
 export const PURPOSES: Record<string, Purpose> = {
-  research: { label: 'research', dpv: 'ResearchAndDevelopment' },
+  // DPV puts commercial research inside research, so a rule about research covers both: the label says so (run 19).
+  research: { label: 'research (academic or commercial)', dpv: 'ResearchAndDevelopment' },
   'academic-research': { label: 'academic research', within: 'research', dpv: 'AcademicResearch' },
   'commercial-research': { label: 'commercial research', within: 'research', dpv: 'CommercialResearch' },
   care: { label: 'care (someone looking after you)', dpv: 'ServiceProvision' },
   service: { label: 'a service you asked for', dpv: 'ServiceProvision' },
-  insurance: { label: 'insurance' },
-  credit: { label: 'credit and loans', dpv: 'CreditChecking' },
+  insurance: { label: 'insurance', decides: true },
+  credit: { label: 'credit and loans', dpv: 'CreditChecking', decides: true },
   marketing: { label: 'marketing', dpv: 'Marketing' },
   advertising: { label: 'advertising', within: 'marketing', dpv: 'Advertising' },
   'personalised-advertising': { label: 'personalised advertising', within: 'advertising', dpv: 'PersonalisedAdvertising' },

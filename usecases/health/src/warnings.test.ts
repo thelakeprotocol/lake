@@ -14,4 +14,11 @@ describe('what an owner should look at twice', () => {
     expect(offerWarnings({ fields: ['age_band', 'medications'], retention: 'none' })).toEqual([]);
     expect(offerWarnings({ fields: ['age_band'], retention: 'P30D' })).toEqual([]);
   });
+
+  it('flags health data asked for to make decisions about you, like an insurer pricing you', () => {
+    expect(offerWarnings({ fields: ['age_band', 'medications'], retention: 'none', purpose: 'insurance' })).toEqual(['asks for sensitive data (medications) to make decisions about you (insurance)']);
+    // The same data for research, or non-sensitive data for insurance: no such warning.
+    expect(offerWarnings({ fields: ['medications'], retention: 'none', purpose: 'research' })).toEqual([]);
+    expect(offerWarnings({ fields: ['age_band'], retention: 'none', purpose: 'insurance' })).toEqual([]);
+  });
 });

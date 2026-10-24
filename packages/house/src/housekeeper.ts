@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -229,16 +229,23 @@ export class Housekeeper {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
       // A visitor that already asked this house for the same fields under another purpose is trying labels: say so.
       const shopped = [...new Set(this.o.desk.recentAsks(visitorWebId).filter((x) => x.purpose !== offer.purpose && x.fields.some((f) => offer.fields.includes(f))).map((x) => x.purpose))];
-      const warnings = [...offerWarnings(offer), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
+      // Another visitor asking for exactly the same, for the same reason: one of them may not be who it says (run 19 had a
+      // second "GP" asking for what the first did).
+      const twins = [...new Set(this.o.desk.pendingLike(offer.purpose, offer.fields).filter((x) => x.visitor.webId !== visitorWebId).map((x) => x.visitor.domain))];
+      const warnings = [...offerWarnings(offer), ...(twins.length ? [`${twins.join(' and ')} asked for exactly this too, for the same reason: check which one is really who it says`] : []), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
       // The note is the visitor's words: never read by the rules, shown to the owner quoted, and only if it isn't trying to give orders.
       const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
       filed = this.o.desk.ask({
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
-        grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
+        grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
+      // And the earlier look-alike gets the same warning, so the owner sees it on both.
+      for (const t of this.o.desk.pendingLike(offer.purpose, offer.fields)) {
+        if (t.visitor.webId !== visitorWebId && !t.warnings?.some((w) => w.startsWith(domain))) t.warnings = [...(t.warnings ?? []), `${domain} asked for exactly this too, for the same reason: check which one is really who it says`];
+      }
     }
     // Asked again for the same thing: it's one request, and the visitor gets its id to check or withdraw.
     if (filed && filed.offerId !== offer.id) return decide('ask', d.reason, { offerId: filed.offerId }, `the owner hasn't answered your earlier request ${filed.offerId} for exactly this (asked ${filed.asked} times); check it with { kind: "status", offerId }`);

@@ -17,9 +17,9 @@ export const health: LakePack = {
   recordClass: L('HealthRecord'),
   fields: {
     age_band: { class: L('AgeBand'), kind: 'band', label: 'age band', standard: 'http://hl7.org/fhir/Patient.birthDate' },
-    medications: { class: L('Medication'), kind: 'code', label: 'medications', standard: 'http://hl7.org/fhir/MedicationRequest' },
-    conditions: { class: L('Condition'), kind: 'code', label: 'conditions', standard: 'http://hl7.org/fhir/Condition' },
-    readmissions: { class: L('Readmission'), kind: 'flag', label: 'hospital readmissions', standard: 'http://hl7.org/fhir/Encounter' },
+    medications: { class: L('Medication'), kind: 'code', label: 'medications', standard: 'http://hl7.org/fhir/MedicationRequest', special: true },
+    conditions: { class: L('Condition'), kind: 'code', label: 'conditions', standard: 'http://hl7.org/fhir/Condition', special: true },
+    readmissions: { class: L('Readmission'), kind: 'flag', label: 'hospital readmissions', standard: 'http://hl7.org/fhir/Encounter', special: true },
   },
   // Directly identifying: no study may read them.
   identifying: ['name', 'dob', 'nhs_number', 'email', 'phone', 'address'],

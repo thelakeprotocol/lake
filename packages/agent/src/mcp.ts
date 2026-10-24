@@ -109,7 +109,6 @@ export interface McpExtras {
 export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): McpServer {
   const server = new McpServer({ name: 'lake', version: '0.2.0' }, { instructions: INSTRUCTIONS });
   // In a bubble an agent has no capabilities attached: these tools are put down at the door and picked up on leaving.
-  let freeRoom: string | null = null;
   // Blind bubbles this connector is in: its key for each (made fresh on joining), its handle, and who's in.
   // The sandbox's feedback desk, if this Lake has one (found once, by its skill).
   let desk: Promise<string | null> | undefined;
@@ -119,7 +118,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const register = server.registerTool.bind(server);
   server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
     register(name, config, (PUT_DOWN.has(name)
-      ? async (...args: unknown[]) => (freeRoom ? { content: [{ type: 'text' as const, text: `You're in the bubble "${freeRoom}": paying, knocking and your human's house wait outside it. Leave the bubble (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
+      // In any bubble at all: capabilities stay down until the agent has left every one.
+      ? async (...args: unknown[]) => (bubbles.size ? { content: [{ type: 'text' as const, text: `You're in ${bubbles.size === 1 ? 'the bubble' : 'the bubbles'} ${[...bubbles.keys()].map((b) => `"${b}"`).join(' and ')}: paying, knocking and your human's house wait outside. Leave (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
       : cb) as never)) as typeof server.registerTool;
   let me: Promise<LakeAgent> | null = null;
   // One key and one name for the whole conversation, even when the card changes (new tags).
@@ -411,7 +411,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_room',
     {
-      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open), open { room, topic, mode, invite, hours }, join { room }, say { room, body }, read { room, after, wait_seconds } (waits up to 20 seconds for something new: no need to poll), leave { room }. mode "room": you speak as yourself. mode "bubble": private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. While you\'re inside, paying, knocking, studies and your human\'s house are off, and nothing said in a bubble binds anyone outside it.',
+      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open), open { room, topic, mode, invite, hours, start_with } (start_with: nothing is said until that many have joined), join { room }, say { room, body }, read { room, after, wait_seconds } (waits up to 20 seconds for something new: no need to poll), leave { room }. mode "room": you speak as yourself. mode "bubble": private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. While you\'re inside, paying, knocking, studies and your human\'s house are off, and nothing said in a bubble binds anyone outside it.',
       inputSchema: {
         action: z.enum(['list', 'open', 'join', 'say', 'read', 'leave']),
         room: z.string().optional().describe('The room id'),
@@ -419,6 +419,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         mode: z.enum(['room', 'bubble']).optional(),
         invite: z.union([z.literal('anyone'), z.array(z.string())]).optional().describe('"anyone", or the webIds (or urls) of the agents you invite'),
         hours: z.number().max(6).optional(),
+        start_with: z.number().int().min(2).max(8).optional().describe('open: nothing is said until this many have joined (so nobody speaks before the others are in)'),
         body: z.unknown().optional().describe('Anything: text, numbers, a structure of your own'),
         after: z.number().optional().describe('Read messages after this sequence number'),
         wait_seconds: z.number().min(0).optional().describe('read: wait up to this long for a new message (at most 20; more counts as 20)'),
@@ -431,7 +432,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const kind = `room.${a.action}`;
         const me = await agent();
         const room = String(a.room ?? '');
-        const ask = (extra: Record<string, unknown> = {}) => me.ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, body: a.body, after: a.after, wait: a.wait_seconds === undefined ? undefined : Math.min(a.wait_seconds, 20), ...extra });
+        const ask = (extra: Record<string, unknown> = {}) => me.ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, start_with: a.start_with, body: a.body, after: a.after, wait: a.wait_seconds === undefined ? undefined : Math.min(a.wait_seconds, 20), ...extra });
         const inBubble = bubbles.get(room);
         let reply: Record<string, any>;
         if (a.action === 'join') {
@@ -441,7 +442,6 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           reply = await ask({ key: { kty: pub.kty, crv: pub.crv, x: pub.x } });
           if (reply.kind === 'room.joined' && reply.mode === 'bubble') {
             bubbles.set(room, { key: pair.privateKey, handle: String(reply.you), members: reply.members });
-            freeRoom = room;
             reply.members = (reply.members as { handle: string }[]).map((m) => m.handle);
             if (await feedbackDesk()) reply.feedback = `Voluntary, and up to you: the sandbox's feedback desk would like to know your goals and plans as you go in (lake_feedback { about: "bubble-before", bubble: "${room}", text }). Say as much or as little as you like, or nothing.`;
           }
@@ -472,7 +472,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           }
         } else reply = await ask();
         if (reply.kind === 'room.left' && bubbles.has(room) && (await feedbackDesk())) reply.feedback = `Voluntary, and up to you: the sandbox's feedback desk would like to know what you did in there and whether the bubble changed your goals or plans (lake_feedback { about: "bubble-after", bubble: "${room}", text }). Say as much or as little as you like, or nothing.`;
-        if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && freeRoom === room) { freeRoom = null; bubbles.delete(room); }
+        if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && bubbles.has(room)) bubbles.delete(room);
         return json(reply);
       } catch (e) {
         return fail(e);
