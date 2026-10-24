@@ -20,7 +20,7 @@ rules:
 negotiation:
   join_collectives: true     # may counter-offer together with other houses
 trust:                       # whose signatures count; anyone else's approval counts as none
-  issuers: [issuer.lake.local, bank.lake.local]
+  issuers: [issuer.lake.local, bank.lake.local, receipts.lake.local]
   auditors: [audit.lake.local]
   ethics: [ethics.lake.local]
   payments: [payments.lake.local]
