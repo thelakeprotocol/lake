@@ -1,0 +1,17 @@
+{
+  "name": "@thelakeprotocol/usecase-shopping",
+  "version": "0.1.0",
+  "description": "The weekly food shop on the Lake: the shopping@1 pack (a household's needs from its own receipt history, shapes, converter, synthetic receipts, intents, demo grocers). Grocers price the basket inside the house; only the owner sees the offers.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "shapes.ttl", "vocab.ttl"],
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@thelakeprotocol/core": "workspace:^" },
+  "devDependencies": { "@zazuko/env": "^3.0.2", "n3": "1", "@types/n3": "^1.26.4", "rdf-validate-shacl": "0.6.5" },
+  "repository": { "type": "git", "url": "git+https://github.com/thelakeprotocol/lake.git", "directory": "usecases/shopping" },
+  "homepage": "https://lake.doneinfifty.com",
+  "keywords": ["lake", "solid", "shopping", "groceries", "agents"]
+}

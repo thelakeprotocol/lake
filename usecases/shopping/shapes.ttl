@@ -1,0 +1,21 @@
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix s:    <https://lake.doneinfifty.com/usecases/shopping/v1#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+
+# shopping@1: what its claims must look like, on top of the core shapes (model/shapes.ttl).
+
+s:HouseholdSizeShape a sh:NodeShape ;
+  sh:targetClass s:HouseholdSize ;
+  sh:property [ sh:path lake:value ; sh:minCount 1 ; sh:maxCount 1 ; sh:pattern "^([1-9]|1[0-9])$" ] .
+
+s:SpendShape a sh:NodeShape ;
+  sh:targetClass s:WeeklySpend ;
+  sh:property [ sh:path lake:value ; sh:minCount 1 ; sh:maxCount 1 ; sh:pattern "^\\d{1,4}$" ] .
+
+s:DietShape a sh:NodeShape ;
+  sh:targetClass s:DietaryNeed ;
+  sh:property [ sh:path lake:code ; sh:minCount 1 ; sh:maxCount 1 ; sh:in ( "gluten-free" "vegetarian" "vegan" "nut-allergy" "lactose-free" "halal" ) ] .
+
+s:StapleShape a sh:NodeShape ;
+  sh:targetClass s:Staple ;
+  sh:property [ sh:path lake:code ; sh:minCount 1 ; sh:maxCount 1 ; sh:pattern "^[a-z]{2,20}$" ] .

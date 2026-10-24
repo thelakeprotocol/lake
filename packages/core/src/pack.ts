@@ -41,7 +41,9 @@ export interface LakePack {
   /** The authority whose authorisation an agent must carry before a house sends it an intent (a regulator). */
   authority?: { name: string; description: string; domain: string; path: string; register: string[] };
   /** What an owner hands over when they accept an offer: the issuer-signed original, so the asker can check it with the issuer. */
-  release?: ('original' | 'credential')[];
+  release?: ('original' | 'credential' | 'claims')[];
+  /** With release 'claims': which fields' claims go, and nothing else (a shopping list, not the receipts behind it). */
+  releaseFields?: string[];
   /** Something to try: what guides and examples show for this pack. */
   examples?: {
     study?: import('./study.js').Study;
@@ -102,6 +104,9 @@ export interface QuoterExample {
   feeOnAccept?: number;
   /** ISO 4217 currency of the fee (default USD). */
   currency?: string;
+  /** What an acceptance becomes, and what happens next, in the quoter's words (default: a lender's conditional approval). */
+  acceptedAs?: string;
+  next?: string;
 }
 
 export interface Claim {

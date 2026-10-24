@@ -43,6 +43,9 @@ importers:
       '@thelakeprotocol/usecase-mortgage':
         specifier: workspace:^
         version: link:../../usecases/mortgage
+      '@thelakeprotocol/usecase-shopping':
+        specifier: workspace:^
+        version: link:../../usecases/shopping
       '@thelakeprotocol/visitor':
         specifier: workspace:^
         version: link:../visitor
@@ -144,6 +147,9 @@ importers:
       '@thelakeprotocol/usecase-mortgage':
         specifier: workspace:^
         version: link:../../usecases/mortgage
+      '@thelakeprotocol/usecase-shopping':
+        specifier: workspace:^
+        version: link:../../usecases/shopping
       '@zazuko/env':
         specifier: ^3.0.2
         version: 3.0.2(@rdfjs/types@2.0.1)(@tpluscode/rdf-ns-builders@5.1.0)(@types/clownface@2.0.10)(@types/rdf-dataset-ext@1.0.8)(@types/rdfjs__data-model@2.0.9)(@types/rdfjs__dataset@2.0.7)(@types/rdfjs__environment@1.0.0)(@types/rdfjs__formats@4.0.1)(@types/rdfjs__namespace@2.0.10)(@types/rdfjs__term-map@2.0.10)(@types/rdfjs__term-set@2.0.9)(@types/rdfjs__traverser@0.1.5)
@@ -212,6 +218,9 @@ importers:
       '@thelakeprotocol/usecase-mortgage':
         specifier: workspace:^
         version: link:../../usecases/mortgage
+      '@thelakeprotocol/usecase-shopping':
+        specifier: workspace:^
+        version: link:../../usecases/shopping
       '@thelakeprotocol/visitor':
         specifier: workspace:^
         version: link:../visitor
@@ -265,6 +274,9 @@ importers:
       '@thelakeprotocol/usecase-mortgage':
         specifier: workspace:^
         version: link:../../usecases/mortgage
+      '@thelakeprotocol/usecase-shopping':
+        specifier: workspace:^
+        version: link:../../usecases/shopping
       express:
         specifier: '5'
         version: 5.3.0
@@ -309,6 +321,25 @@ importers:
         version: 0.6.5
 
   usecases/mortgage:
+    dependencies:
+      '@thelakeprotocol/core':
+        specifier: workspace:^
+        version: link:../../packages/core
+    devDependencies:
+      '@types/n3':
+        specifier: ^1.26.4
+        version: 1.26.4
+      '@zazuko/env':
+        specifier: ^3.0.2
+        version: 3.0.2(@rdfjs/types@2.0.1)(@tpluscode/rdf-ns-builders@5.1.0)(@types/clownface@2.0.10)(@types/rdf-dataset-ext@1.0.8)(@types/rdfjs__data-model@2.0.9)(@types/rdfjs__dataset@2.0.7)(@types/rdfjs__environment@1.0.0)(@types/rdfjs__formats@4.0.1)(@types/rdfjs__namespace@2.0.10)(@types/rdfjs__term-map@2.0.10)(@types/rdfjs__term-set@2.0.9)(@types/rdfjs__traverser@0.1.5)
+      n3:
+        specifier: '1'
+        version: 1.26.0
+      rdf-validate-shacl:
+        specifier: 0.6.5
+        version: 0.6.5
+
+  usecases/shopping:
     dependencies:
       '@thelakeprotocol/core':
         specifier: workspace:^

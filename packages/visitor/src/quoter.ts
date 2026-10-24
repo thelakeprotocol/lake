@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import {
   buildCard, generateIdentity, GROUP_SIZE, lakeAgentApp, LakeLinks, loadOrCreateIdentity, pack as packOf, ReplayGuard, runProgram, sendLake, signCard, signIntentMandate, signMessage,
   signPaymentMandate, verifyCredential, verifyLakeCard, verifyLakeData,
-  type AgentCard, type Attachment, type Identity, type LakeData, type QuoterExample,
+  type AgentCard, type Claim, type Attachment, type Identity, type LakeData, type QuoterExample,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
 import { makeHuman } from './dispatch.js';
@@ -104,7 +104,15 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
 
   /** The owner said yes: check the released original with its issuer, confirm conditionally, pay the fee. */
   async function accepted(m: Record<string, unknown>, houseWebId: string, house: string): Promise<Record<string, unknown>> {
-    const release = m.release as { original?: string; credential?: string; issuer?: { recordId: string; card: AgentCard } } | undefined;
+    const release = m.release as { original?: string; credential?: string; issuer?: { recordId: string; card: AgentCard }; claims?: Claim[] } | undefined;
+    const terms = { ...(m.terms as Record<string, string | number>), [GROUP_SIZE]: Number((m.terms as Record<string, unknown>)?.[GROUP_SIZE] ?? 1) };
+    const agreed = (outputs: Record<string, number>, paid = 0) => ({ kind: 'agreed', what: ex.acceptedAs ?? 'conditional approval', outputs, feePaid: paid, next: ex.next ?? 'a full application, with the documents you choose to send', order: String(m.ref) });
+    // A pack that sends only the facts it names (a shopping list): the owner's own word, priced again as offered.
+    if (p!.release?.includes('claims')) {
+      if (!Array.isArray(release?.claims)) return { kind: 'rejected', code: 'malformed', why: `expected the claims for ${(p!.releaseFields ?? []).join(', ')}` };
+      const result = runProgram(ex.program, release.claims.filter((c) => p!.releaseFields?.includes(c.field)), terms);
+      return result.eligible ? agreed(result.outputs) : { kind: 'declined', why: 'that list no longer fits our offer' };
+    }
     if (!release?.original || !release.credential || !release.issuer) return { kind: 'rejected', code: 'malformed', why: 'expected the original record, its credential and its issuer' };
     try {
       const issuer = await verifyLakeCard(release.issuer.card);
@@ -115,7 +123,6 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       return { kind: 'declined', why: `the record did not check out: ${(e as Error).message}` };
     }
     // Same rules, now on the verified original: the conditional approval stands, or it doesn't.
-    const terms = { ...(m.terms as Record<string, string | number>), [GROUP_SIZE]: Number((m.terms as Record<string, unknown>)?.[GROUP_SIZE] ?? 1) };
     const result = runProgram(ex.program, p!.source!.convert(release.original), terms);
     let paid: number | undefined;
     if (result.eligible && ex.feeOnAccept && o.payments) {
@@ -132,7 +139,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       }
     }
     return result.eligible
-      ? { kind: 'agreed', what: 'conditional approval', outputs: result.outputs, feePaid: paid ?? 0, next: 'a full application, with the documents you choose to send' }
+      ? agreed(result.outputs, paid ?? 0)
       : { kind: 'declined', why: 'the verified record does not meet our rules after all' };
   }
 

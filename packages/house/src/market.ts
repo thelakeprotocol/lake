@@ -205,8 +205,10 @@ export class Market {
     const rec = this.c.records.find((r) => packId(r.pack) === offer.pack);
     if (!rec) throw new Error(`no ${offer.pack} record here`);
     const release: Record<string, unknown> = {};
-    for (const f of rec.pack.release ?? []) release[f] = await this.c.read(rec.paths[f]);
-    release.issuer = JSON.parse(await this.c.read(rec.paths.issuer));
+    for (const f of rec.pack.release ?? []) if (f !== 'claims') release[f] = await this.c.read(rec.paths[f]);
+    // Only the named facts, when that's all the pack sends: a shopping list, not the receipts behind it.
+    if (rec.pack.release?.includes('claims')) release.claims = await this.c.claims(rec.pack.releaseFields ?? []);
+    else release.issuer = JSON.parse(await this.c.read(rec.paths.issuer));
     // The terms the offer was priced on, group size included, so the agent checks the same offer the owner saw.
     const terms = { ...(this.intents.get(offer.pack)?.terms ?? {}), [GROUP_SIZE]: offer.groupSize };
     const answer = await this.send(offer.quoter.url, { kind: 'accept', ref: offer.id, terms, release });
@@ -214,7 +216,7 @@ export class Market {
     offer.answer = answer;
     await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
     const released = (rec.pack.release ?? []).length;
-    await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, to: offer.quoter.webId, released: (rec.pack.release ?? []).map((f) => rec.paths[f]), consent: 'owner, live', recordsOut: 0 }));
+    await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, to: offer.quoter.webId, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live', recordsOut: 0 }));
     this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { pack: offer.pack, released }));
     return offer;
   }

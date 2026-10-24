@@ -63,3 +63,14 @@ docker compose up -d     # the local Lake runs the bank, the register and eight 
 ```
 
 Or in code: [`usecases/mortgage`](https://github.com/thelakeprotocol/lake/tree/main/usecases/mortgage) holds the pack and the lenders; `lake quoters --packs mortgage` runs them; a house joins with `--packs health,mortgage`. Any other market works the same way: write a pack with intent terms, and quoters with programs.
+
+## A second market: the weekly shop
+
+People already shop with AI by hand: ask it what to buy, photograph the shelf, ask again. On the Lake the shops come to your agent instead, and your details never leave home. [`usecases/shopping`](https://github.com/thelakeprotocol/lake/tree/main/usecases/shopping) is the `shopping@1` pack:
+
+- **Your data:** a receipt wallet signs your grocery receipts; inside your house they become a few facts: how many people, dietary needs (sensitive: they can say something about health or belief), the staples you buy most weeks, your usual spend.
+- **Your intent:** "this week's shop, up to $180, delivered this week", in your state. Households on the same street wanting the same get a group price.
+- **The offers:** three demo grocers price your basket *inside your house*: a cheap supermarket that can't serve every diet (and makes no offer if it can't serve yours), a local grocer, an organic shop that serves every diet. Only you see the totals, delivery fees, substitutions and whether it's within budget.
+- **Accept:** only your shopping list goes, to that one grocer, not your receipts. It confirms the order, and your agent pays it under the [spending allowance](/docs/approvals) you signed, naming the order on the receipt.
+
+`lake quoters --packs shopping` runs the grocers; a house joins with `--packs health,shopping`.

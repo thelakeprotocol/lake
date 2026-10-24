@@ -1,0 +1,13 @@
+# A household that does its weekly shop through the Lake: grocers price the basket inside the house; only the owner sees the offers.
+# weight: 2
+owner: shopper
+device: approvals-app
+default: ask
+tags: [weekly-shop]
+rules:
+  - match: { purpose: marketing }
+    decision: decline
+# Standing intent: hosted houses fill each pick: list with one of its choices, the same one every time for the same house.
+intents:
+  - pack: shopping
+    terms: { region: "{{pick:vic,vic,nsw,qld}}", budget: auto, delivery: "{{pick:this-week,this-week,tomorrow}}" }

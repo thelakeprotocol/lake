@@ -195,6 +195,7 @@ packages/
 usecases/        one package per use case ("pack"): fields, shapes, converter, demo data
   health/        health@1: FHIR → claims, synthetic patients, studies     ✅
   mortgage/      mortgage@1: Australian home loans, CDR-style bank data, 8 lenders ✅
+  shopping/      shopping@1: the weekly food shop, receipt history, 3 grocers ✅
 model/           the core ontology (RDF) + SHACL shapes every pack's claims pass
 spec/            JSON Schemas, node OpenAPI, signed examples
 personas/        example rules.yaml files

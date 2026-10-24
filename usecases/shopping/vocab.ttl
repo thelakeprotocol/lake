@@ -1,0 +1,18 @@
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix lake: <https://lake.doneinfifty.com/model/v0#> .
+@prefix s:    <https://lake.doneinfifty.com/usecases/shopping/v1#> .
+@prefix schema: <https://schema.org/> .
+
+# shopping@1: the claim classes of the weekly-shop pack. Each is a lake:Claim; values are coarse on purpose.
+
+s:HouseholdRecord a owl:Class ; rdfs:comment "Where a pod keeps its household claims (registered in the Solid Type Index)." .
+
+s:HouseholdSize a rdfs:Class ; rdfs:subClassOf lake:Claim ; rdfs:label "people in the household" ;
+  rdfs:seeAlso schema:numberOfPeople .
+s:DietaryNeed a rdfs:Class ; rdfs:subClassOf lake:Claim ; rdfs:label "dietary need" ;
+  rdfs:comment "Special-category data: it can say something about health or belief." ;
+  rdfs:seeAlso schema:RestrictedDiet .
+s:Staple a rdfs:Class ; rdfs:subClassOf lake:Claim ; rdfs:label "staple bought most weeks" ;
+  rdfs:seeAlso schema:Product .
+s:WeeklySpend a rdfs:Class ; rdfs:subClassOf lake:Claim ; rdfs:label "average weekly spend (AUD, rounded to $5)" .

@@ -13,6 +13,7 @@ import { buildCard, cardUrlFor, checkCredentialStatus, encryptionKeyOf, generate
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
+import shopping from '../usecases/shopping/src/index.js';
 import { attack } from '../packages/visitor/src/attack.js';
 import { ownerSession, startPod } from '../packages/house/src/pod.js';
 import { ask, knock, makeVisitor, presets } from '../packages/visitor/src/knock.js';
@@ -68,7 +69,7 @@ beforeAll(async () => {
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
   specialistsUrl = `http://localhost:${sp}`;
-  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage'], /register registered with the Lake node/);
+  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage,shopping'], /register registered with the Lake node/);
   await Promise.all(
     // Four houses: three that join by standing rules (enough for a table) and one that asks its owner.
     [['stan', 'stan'], ['strict', 'strict'], ['research', 'research'], ['kai', 'stan']].map(async ([name, persona]) => {
@@ -156,7 +157,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(16);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(18);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -922,6 +923,62 @@ describe('mortgage offers, priced inside the house', () => {
     const program = { ...LENDERS[0]!.program, title: 'Rogue: everything' };
     const { reply } = await ask(`${buyers[1]!.url}/a2a`, rogue, { kind: 'quote', program });
     expect(reply).toMatchObject({ kind: 'rejected', code: 'unauthorised' });
+  });
+});
+
+describe('the weekly shop, priced inside the house', () => {
+  // Three households in Victoria wanting this week's shop: a group of three; three authorised grocers.
+  const buyers: { name: string; call: (payload: Record<string, unknown>) => Promise<any> }[] = [];
+  let firstProc = 0;
+
+  beforeAll(async () => {
+    registerPack(shopping);
+    firstProc = procs.length;
+    const qp = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'quoters', '--packs', 'shopping', '--port', qp, '--public-url', `http://localhost:${qp}`, '--node', node,
+      '--auditor', auditor, '--authority', `${specialistsUrl}/foodregister`, '--payments', payments], /3 quoters on/);
+    for (const name of ['shop-a', 'shop-b', 'shop-c']) {
+      const rules = join(dir, `${name}.yaml`);
+      await writeFile(rules, `owner: ${name}\ndefault: decline\nrules: []\nintents:\n  - pack: shopping\n    terms: { region: vic, budget: 350, delivery: this-week }\n`);
+      const [pp, hp] = [await freePort(), await freePort()];
+      await start(['packages/house/dist/main.js', '--name', name, '--rules', rules, '--data', join(dir, 'houses'), '--packs', 'health,shopping',
+        '--issuers', `health=${issuerUrl},shopping=${specialistsUrl}/receipts`, '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--open-pairing'], /joined the Lake/);
+      const url = `http://localhost:${hp}`;
+      const phone = await generateIdentity('phone');
+      await fetch(`${url}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk }) });
+      buyers.push({ name, call: async (payload) => (await fetch(`${url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: 'owner' })) })).json() });
+    }
+  }, 240_000);
+
+  afterAll(async () => {
+    procs.splice(firstProc).forEach((p) => p.kill('SIGTERM'));
+    await new Promise((r) => setTimeout(r, 1500));
+  });
+
+  it("every grocer prices each household inside its house, at the street's group price, and only the owner sees it", async () => {
+    const ready = async (b: (typeof buyers)[number]) => {
+      const m = await b.call({ kind: 'panel.market' });
+      return m.intents[0]?.members === 3 && m.offers.length === 3 && m.offers.every((o: any) => o.groupSize === 3);
+    };
+    for (let i = 0; i < 80 && !(await Promise.all(buyers.map(ready))).every(Boolean); i++) await new Promise((r) => setTimeout(r, 500));
+    for (const b of buyers) {
+      const m = await b.call({ kind: 'panel.market' });
+      expect(m.intents[0]).toMatchObject({ pack: 'shopping@1', members: 3 });
+      expect(m.offers).toHaveLength(3);
+      // Green Basket serves every diet, so every household has at least its offer, with the street discount.
+      expect(m.offers.find((o: any) => o.quoter.name === 'Green Basket').result).toMatchObject({ eligible: true, outputs: { group_off: 10 } });
+    }
+  });
+
+  it('accepting sends only the shopping list to that one grocer, and it confirms the order', async () => {
+    const b = buyers[0]!;
+    const best = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible);
+    const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
+    expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'order confirmed', order: best.id, outputs: { total: best.result.outputs.total } } });
+    const audit = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit'));
+    const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
+    // Not eight weeks of receipts: the list.
+    expect(entry).toMatchObject({ to: best.quoter.webId, released: ['claims: household_size, dietary_needs, staples'], consent: 'owner, live' });
   });
 });
 
