@@ -13,6 +13,26 @@
 | 5 | **Selective disclosure** | Prove one fact from a credential without showing the rest: SD-JWT now, BBS+ later. ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
 | 6 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
 
+## Standards we're adopting
+
+The Lake started by inventing its own pieces. Where an open standard already does the job, we're replacing ours with it, one or two at a time: proper, reviewed technology, and a Lake other systems can talk to.
+
+| | Ours today | Moving to | Why | Status |
+|---|---|---|---|---|
+| 1 | Study answers split between two tellers | **IETF DAP** with **Prio3** validity proofs, minimum batch sizes, one batch per answer, optional noise at the aggregators | The standard for counting without looking (Divvi Up, Firefox). Tellers can check an answer is valid without seeing it. | <span class="status next">next</span> |
+| 2 | `LakeAccessGrant` keys | **Inrupt Access Grants** (VC access requests and grants for Solid), with **GNAP** / **UMA 2.0** where they fit | Keys to a pod in the Solid ecosystem's own format. | <span class="status next">next</span> |
+| 3 | Agents' own salts and commits for fair draws | **drand** public randomness | Randomness nobody can steer, for every game and draw. | <span class="status later">planned</span> |
+| 4 | Demo person stamp | **SD-JWT / BBS+** credentials with per-site pseudonyms; the **EU Digital Identity Wallet**; **Privacy Pass** tokens for one signature per person | "A real person, without saying who", from checkers that exist. | <span class="status later">planned</span> |
+| 5 | Our quote-program language and rule conditions | **CEL** (Common Expression Language) | A safe, audited expression language instead of a homemade one. | <span class="status later">planned</span> |
+| 6 | Revocation checked by the house only | **W3C Bitstring Status List** | Anyone can check whether a key was revoked. | <span class="status later">planned</span> |
+| 7 | Domain proof (DNS TXT, `lake.json`) | **DIF Well-Known DID Configuration**, **did:web** | The standard link between a domain and its keys. | <span class="status later">planned</span> |
+| 8 | Signed JSON envelopes between agents | **DIDComm v2** or **HTTP Message Signatures** (RFC 9421), **HPKE** for end-to-end encryption | Messages relays can't read. | <span class="status later">planned</span> |
+| 9 | Rooms and bubbles | **Matrix** rooms, **MLS** (RFC 9420) for group encryption | A mature, federated room protocol. | <span class="status later">planned</span> |
+| 10 | Blind tally for pledges | **DAP** (as for studies) + **Privacy Pass** | Signers invisible even to the tally. | <span class="status later">planned</span> |
+| 11 | Receipts, rulings, blueprint registry, the node's log | **IETF SCITT** / transparency logs | Records anyone can check were never rewritten. | <span class="status later">planned</span> |
+| 12 | Consent records in `/agreements/` | **ISO/IEC TS 27560** consent records | A format regulators recognise. | <span class="status later">planned</span> |
+| 13 | Simulated payments | **Interledger Open Payments** | A real rail with the same "a human signs a budget" model. | <span class="status later">planned</span> |
+
 Not planned yet, but worth building: [Ideas](/docs/ideas).
 
 ## Acceptance tests
