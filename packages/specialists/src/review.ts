@@ -19,7 +19,7 @@ export type Refused = { kind: 'refused'; problems: string[] };
 export interface Specialist { app: express.Express; card: AgentCard; webId: string; vc: (type: string, subject: Record<string, unknown> & { id: string }, days: number) => Promise<string> }
 
 /** A signed Lake agent with one skill: verifies every message before `decide` sees it, signs every reply. */
-export async function specialist<R extends { kind: string } = Reply>(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: LakeProfile, card: AgentCard) => Promise<R | Refused>, extraSkills: { id: string; name: string; description: string }[] = [], quiet = false): Promise<Specialist> {
+export async function specialist<R extends { kind: string } = Reply>(o: SpecialistOptions, name: string, description: string, skill: string, decide: (payload: Record<string, unknown>, from: string, profile: LakeProfile, card: AgentCard) => Promise<R | Refused>, extraSkills: { id: string; name: string; description: string }[] = [], quiet = false, anonymous?: (payload: Record<string, unknown>) => boolean): Promise<Specialist> {
   const webId = `${o.url}/#${skill}`;
   const card = await signCard(
     // A quiet agent's visitors are nobody's business: it says so on its card, and reports no visits.
@@ -29,7 +29,10 @@ export async function specialist<R extends { kind: string } = Reply>(o: Speciali
   const replay = new ReplayGuard();
   const reply = async (body: R | Refused): Promise<LakeData> => ({ lake: '0.1', card, envelope: (await signMessage(body, o.id, { iss: webId })) as LakeData['envelope'] });
   const app = lakeAgentApp(card, async (data) => {
-    const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox });
+    // A message whose authority is something it carries (a blind pledge's pass), not who sent it, may come from a
+    // throwaway identity whose domain proves nothing; its card and signature are still checked, and replays refused.
+    const anon = !!anonymous?.(((data as LakeData | null)?.envelope?.payload ?? {}) as Record<string, unknown>);
+    const v = await verifyLakeData<Record<string, unknown>>(data as LakeData<Record<string, unknown>>, { replay, sandbox: o.sandbox || anon });
     if (!v.ok) return reply({ kind: 'refused', problems: [`${v.rejection.code}: ${v.rejection.why}`] });
     const out = await decide(v.payload, v.profile.webId, v.profile, (data as LakeData).card);
     // Tell the map who just came by, so it can show the visit. Ids and kinds only.

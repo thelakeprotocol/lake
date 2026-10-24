@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, ownerKeyCredential, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, fetchPasses, ownerKeyCredential, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -365,6 +365,8 @@ function panelFor(x: {
   // On a leased house, what happened is counted from this owner's claim, like its money: a house that was free a minute
   // ago may have answered someone before it was yours (run 18 saw a join from before the claim).
   const mine = () => { const since = x.desk().claimedAt(); return since ? x.activity.filter((a) => Date.parse(a.at) >= since) : x.activity; };
+  // Blind pledges this house signed: the salt reveals it once a pledge fills (kept in the owner's wallet).
+  const blindPledges = async (): Promise<BlindSignature[]> => { const r = await owner.fetch(`${owner.podRoot}wallet/pledges.json`).catch(() => null); return r?.ok ? r.json() : []; };
   const money = async () => {
     const files = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
     const receipts = (await Promise.all(files.map(async (f) => {
@@ -475,20 +477,39 @@ function panelFor(x: {
     },
     async signPledge(tally, id) {
       const s = await stamp();
-      let person: { credential: string; card: AgentCard } | undefined;
       const { payload: before, card: tallyCard } = await send(tally, { kind: 'tally.count', id });
-      // Only a count of people sees a stamp, and only one made for it: its own person number, so counts can't link this
-      // owner's houses. The checker, shown the stamp's hidden number, makes it; the tally is shown it, bound to this key.
-      if (s && before.people_only) {
-        const counter = lakeProfile(tallyCard)!.webId;
-        const context = countContext(counter, id);
+      const counter = lakeProfile(tallyCard)!.webId;
+      // A person stamp for one context: its own person number, so counts can't link this owner's houses. The checker,
+      // shown the stamp's hidden number, makes it; whoever counts is shown it, bound to this house's key.
+      const stampFor = async (context: string, aud: string, nonce: string) => {
+        if (!s) return undefined;
         const checker = lakeProfile(s.card)!.webId;
         const { payload, card } = await send(s.card.supportedInterfaces[0]!.url, { kind: 'personhood.context', context, stamp: await presentSdJwtVc(s.credential, ['person'], x.id, { aud: checker, nonce: context }) });
-        if (payload.kind !== 'stamped') return { kind: 'refused', problems: [`the person checker: ${((payload.problems as string[]) ?? [String(payload.kind)]).join('; ')}`] };
-        person = { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud: counter, nonce: id }), card };
+        if (payload.kind !== 'stamped') throw new Error(`the person checker: ${((payload.problems as string[]) ?? [String(payload.kind)]).join('; ')}`);
+        return { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud, nonce }), card };
+      };
+      if (before.blind) {
+        // A blind pledge: passes for every open one at once, signed from a throwaway identity; the salt and secret stay
+        // in the owner's wallet, to reveal the house once it fills.
+        const issuer = (await Promise.all(x.nodes.map((n) => fetch(`${n}/cards?skill=passes`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ card: AgentCard }[]>).catch(() => [])))).flat()[0]?.card;
+        if (!issuer) return { kind: 'refused', problems: ['no pass issuer on this Lake'] };
+        const issuerWebId = lakeProfile(issuer)!.webId;
+        const ask = async (url: string, payload: Record<string, unknown>) => (await send(url, payload)).payload as Record<string, any>;
+        const person = before.people_only ? await stampFor(countContext(issuerWebId, 'passes'), issuerWebId, 'passes') : undefined;
+        const pass = (await fetchPasses(issuer.supportedInterfaces[0]!.url, ask, person)).find((p) => p.tally === counter && p.id === id);
+        if (!pass) return { kind: 'refused', problems: ['no pass for this pledge: this house may have one already, or it counts people and the house has no person stamp'] };
+        const signed = await signBlind(tally, pass, owner.webId, { sandbox: x.o.sandbox });
+        if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') await put(owner, 'wallet/pledges.json', JSON.stringify([...(await blindPledges()), { ...signed, tally, reply: undefined }]), 'application/json');
+        return signed.reply;
       }
+      const person = before.people_only ? await stampFor(countContext(counter, id), counter, id) : undefined;
       const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}) });
       return payload;
+    },
+    async revealPledge(tally, id) {
+      const s = (await blindPledges()).find((p) => p.tally === tally && p.id === id);
+      if (!s) return { kind: 'refused', problems: ['this house has no blind signature on that pledge'] };
+      return revealBlind(tally, async (url, payload) => (await send(url, payload)).payload as Record<string, any>, s);
     },
     async closeIntent(pack) { await x.keeper().market.close(pack); return { ok: true }; },
     acceptOffer: (id) => x.keeper().market.accept(id),

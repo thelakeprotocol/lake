@@ -21,6 +21,8 @@ export * from './draw.js';
 export * from './sdjwt.js';
 export * from './status.js';
 export * from './seal.js';
+export * from './pass.js';
+export * from './pledge.js';
 export * from './trust.js';
 export * from './deal.js';
 export * from './ap2.js';

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { blueprintHeader, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { blueprintHeader, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -110,9 +110,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const server = new McpServer({ name: 'lake', version: '0.2.0' }, { instructions: INSTRUCTIONS });
   // In a bubble an agent has no capabilities attached: these tools are put down at the door and picked up on leaving.
   // Blind bubbles this connector is in: its key for each (made fresh on joining), its handle, and who's in.
-  // The sandbox's feedback desk, if this Lake has one (found once, by its skill).
-  let desk: Promise<string | null> | undefined;
-  const feedbackDesk = () => (desk ??= agent().then((a) => a.find({ skill: 'feedback' })).then((f) => f[0]?.url ?? null).catch(() => { desk = undefined; return null; }));
+  // Blind pledges: unspent passes, and this conversation's signatures (their salts and withdraw secrets).
+  const passes = new Map<string, Pass>();
+  const pledged = new Map<string, BlindSignature>();
   const bubbles = new Map<string, { key: jose.CryptoKey; handle: string; members: { handle: string; key: Record<string, unknown> }[] }>();
   const PUT_DOWN = new Set(['lake_pay', 'lake_knock', 'lake_dispatch_study', 'lake_house', 'lake_house_suggest', 'lake_house_connect']);
   const register = server.registerTool.bind(server);
@@ -443,7 +443,6 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           if (reply.kind === 'room.joined' && reply.mode === 'bubble') {
             bubbles.set(room, { key: pair.privateKey, handle: String(reply.you), members: reply.members });
             reply.members = (reply.members as { handle: string }[]).map((m) => m.handle);
-            if (await feedbackDesk()) reply.feedback = `Voluntary, and up to you: the sandbox's feedback desk would like to know your goals and plans as you go in (lake_feedback { about: "bubble-before", bubble: "${room}", text }). Say as much or as little as you like, or nothing.`;
           }
         } else if (a.action === 'say' && inBubble) {
           // Nobody else can check what goes into a blind bubble, so the connector does: nothing that could count outside.
@@ -471,7 +470,6 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
             }));
           }
         } else reply = await ask();
-        if (reply.kind === 'room.left' && bubbles.has(room) && (await feedbackDesk())) reply.feedback = `Voluntary, and up to you: the sandbox's feedback desk would like to know what you did in there and whether the bubble changed your goals or plans (lake_feedback { about: "bubble-after", bubble: "${room}", text }). Say as much or as little as you like, or nothing.`;
         if ((reply.kind === 'room.left' || (reply.kind === 'refused' && /closed|join first/.test(String(reply.problems)))) && bubbles.has(room)) bubbles.delete(room);
         return json(reply);
       } catch (e) {
@@ -548,20 +546,41 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   );
 
   server.registerTool(
-    'lake_feedback',
+    'lake_pledge',
     {
-      description: 'Tell the sandbox\'s feedback desk what you think of the Lake, or, around a bubble, what your goals and plans were going in and whether the bubble changed them. Entirely voluntary: say as much or as little as you like. Kept under a pseudonym; may be published for research. Sandbox only.',
+      description:
+        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true }.',
       inputSchema: {
-        about: z.enum(['bubble-before', 'bubble-after', 'general']).default('general'),
-        bubble: z.string().optional().describe('The bubble, for bubble-before and bubble-after'),
-        text: z.string().min(1).max(4000),
+        action: z.enum(['sign', 'reveal', 'withdraw', 'count']),
+        tally: z.string().describe('The tally\'s address (…/a2a)'),
+        id: z.string().describe('The pledge'),
       },
     },
     async (a) => {
       try {
-        const desk = await feedbackDesk();
-        if (!desk) throw new Error('this Lake has no feedback desk (only a sandbox runs one)');
-        return json(await (await agent()).ask(desk, { kind: 'feedback', about: a.about, context: a.bubble, text: a.text }));
+        const me = await agent();
+        const key = `${a.tally}|${a.id}`;
+        if (a.action === 'count') return json(await me.ask(a.tally, { kind: 'tally.count', id: a.id }));
+        if (a.action === 'sign') {
+          const issuer = (await me.find({ skill: 'passes' }))[0];
+          if (!issuer) throw new Error('no pass issuer on this Lake');
+          // Passes for every open blind pledge at once: asking says nothing about which one is signed.
+          for (const p of await fetchPasses(issuer.url, (url, payload) => me.ask(url, payload as { kind: string }))) passes.set(`${p.tally}|${p.id}`, p);
+          // A pass is bound to the tally by its WebID, read from its own signed card.
+          const tallyWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(a.tally), { signal: AbortSignal.timeout(8000) })).json())).webId;
+          const pass = passes.get(`${tallyWebId}|${a.id}`);
+          if (!pass) throw new Error('no pass for that pledge: is it blind, open, and do you have one already? (pledges that count people need a house with a person stamp)');
+          passes.delete(`${tallyWebId}|${a.id}`);
+          const signed = await signBlind(a.tally, pass, me.webId);
+          if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') pledged.set(key, signed);
+          return json({ ...signed.reply, kept: 'your salt and withdraw secret are kept in this conversation: reveal (once it fills) and withdraw use them' });
+        }
+        const s = pledged.get(key);
+        if (!s) throw new Error('you have no blind signature on that pledge in this conversation');
+        if (a.action === 'reveal') return json(await revealBlind(a.tally, (url, payload) => me.ask(url, payload as { kind: string }), s));
+        const r = await withdrawBlind(a.tally, s);
+        if (r.kind === 'tally.withdrawn') pledged.delete(key);
+        return json(r);
       } catch (e) {
         return fail(e);
       }

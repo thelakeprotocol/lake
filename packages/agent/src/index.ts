@@ -73,6 +73,8 @@ export interface StudyOptions {
 
 export interface LakeAgent {
   card: AgentCard;
+  /** This agent as a signed visitor (its key and card), for helpers that sign their own messages. */
+  visitor: Visitor;
   webId: string;
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
@@ -148,6 +150,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
 
   return {
     card: visitor.card,
+    visitor,
     webId: visitor.webId,
     domain: o.domain,
     async find(q = {}) {

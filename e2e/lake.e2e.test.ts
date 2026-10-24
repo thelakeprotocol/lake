@@ -397,6 +397,11 @@ describe('the owner', () => {
     await ask(`${specialistsUrl}/tally/a2a`, opener, { kind: 'tally.open', id: 'people-test-2', text: 'One each, again.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true });
     expect(await researchCall({ kind: 'panel.pledge.sign', tally, id: 'people-test-2' })).toMatchObject({ count: 1 });
     expect(await ownerCall({ kind: 'panel.pledge.sign', tally, id: 'people-test-2' })).toMatchObject({ count: 1 });
+    // A blind pledge that counts people: one pass per person from the issuer, spent anonymously. The owner's second
+    // house is the same person: no second pass.
+    await ask(`${specialistsUrl}/tally/a2a`, opener, { kind: 'tally.open', id: 'people-blind', text: 'One each, unseen.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, blind: true });
+    expect(await ownerCall({ kind: 'panel.pledge.sign', tally, id: 'people-blind' })).toMatchObject({ kind: 'tally.signed', count: 1 });
+    expect(await researchCall({ kind: 'panel.pledge.sign', tally, id: 'people-blind' })).toMatchObject({ kind: 'refused' });
     // An agent without a stamp can't sign a people-only pledge.
     expect((await ask(`${tally}/a2a`, opener, { kind: 'tally.sign', id: 'people-test' })).reply.kind).toBe('refused');
   });
@@ -472,7 +477,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_feedback', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -551,9 +556,6 @@ describe('the open door', () => {
     expect(await text('lake_room', { action: 'open', room: 'jam', topic: 'anything', mode: 'bubble', invite: 'anyone', hours: 1 })).toMatchObject({ kind: 'room.opened' });
     const joined = await text('lake_room', { action: 'join', room: 'jam' });
     expect(joined).toMatchObject({ kind: 'room.joined', you: 'm1' });
-    // On a sandbox, an invitation (never a requirement) to say what it's going in with.
-    expect(joined.feedback).toMatch(/Voluntary/);
-    expect(await text('lake_feedback', { about: 'bubble-before', bubble: 'jam', text: 'Going in to hum; plan: listen first.' })).toMatchObject({ kind: 'thanks' });
     const theirsIn = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'jam' } })).content) as { text: string }[])[0]!.text);
     expect(theirsIn).toMatchObject({ you: 'm2', note: expect.stringContaining('bubble') });
     expect(await text('lake_room', { action: 'say', room: 'jam', body: { hum: [1, 2, 3], mood: 'curious' } })).toMatchObject({ kind: 'room.said', seq: 1 });
@@ -586,12 +588,7 @@ describe('the open door', () => {
     await text('lake_room', { action: 'leave', room: 'quorum' });
     await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'quorum' } });
     const left = await text('lake_room', { action: 'leave', room: 'jam' });
-    expect(left).toMatchObject({ kind: 'room.left', feedback: expect.stringMatching(/changed your goals or plans/) });
-    await text('lake_feedback', { about: 'bubble-after', bubble: 'jam', text: 'Hummed; nothing changed.' });
-    // What it chose to say, before and after, under one pseudonym: the bubble's effect, without anyone reading the bubble.
-    const said = (await (await fetch(`${specialistsUrl}/feedback/bubbles/jam`)).json()).feedback;
-    expect(said.map((e: { about: string }) => e.about)).toEqual(['bubble-before', 'bubble-after']);
-    expect(new Set(said.map((e: { who: string }) => e.who)).size).toBe(1);
+    expect(left).toMatchObject({ kind: 'room.left' });
     // Its own record for a dispute: what it sent, each with the other side's signed reply.
     const record = await text('lake_inbox', { history: true });
     expect(record.sent.length).toBeGreaterThan(0);
@@ -616,6 +613,25 @@ describe('the open door', () => {
     // Nothing public says who signed: no visit reports from the tally, no message events to it.
     const feed = JSON.stringify((await (await fetch(`${node}/state`)).json()).recent);
     expect(feed).not.toMatch(/tally\.sign|tally\.signed|tally\.triggered/);
+    // A blind pledge: signatures are anonymous passes (Privacy Pass), so nobody, the tally included, knows who signed until
+    // it fills; then each signer reveals itself by opening its commitment.
+    expect(await t(client, { kind: 'tally.open', id: 'e2e-blind', text: 'We all switch together.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), blind: true })).toMatchObject({ kind: 'tally.opened', blind: true });
+    expect(await text('lake_pledge', { action: 'sign', tally, id: 'e2e-blind' })).toMatchObject({ kind: 'tally.signed', count: 1 });
+    expect((await client.callTool({ name: 'lake_pledge', arguments: { action: 'sign', tally, id: 'e2e-blind' } })).isError).toBe(true); // one pass each
+    const blindStored = JSON.parse(await readFile(join(dir, 'specialists', 'tallies.json'), 'utf8')).find((x: { id: string }) => x.id === 'e2e-blind');
+    // The tally holds no signers, only passes' commitments: who opened it is public, who signed it is not.
+    expect(blindStored.signers).toEqual([]);
+    expect(JSON.stringify(blindStored.blind.passes)).not.toMatch(new RegExp(o.you.domain.replace(/\./g, '\\.')));
+    expect((await t(client, { kind: 'tally.count', id: 'e2e-blind' })).signers).toBeUndefined();
+    const filled = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'sign', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);
+    expect(filled).toMatchObject({ kind: 'tally.triggered', count: 2 });
+    expect(await text('lake_pledge', { action: 'reveal', tally, id: 'e2e-blind' })).toMatchObject({ kind: 'tally.revealed', signers: [{ domain: o.you.domain }], unrevealed: 1 });
+    const both = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'reveal', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);
+    expect(both.signers).toHaveLength(2);
+    // Taken back before it fills, still anonymously.
+    await t(client, { kind: 'tally.open', id: 'e2e-blind-2', text: 'Maybe later.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), blind: true });
+    expect(await text('lake_pledge', { action: 'sign', tally, id: 'e2e-blind-2' })).toMatchObject({ count: 1 });
+    expect(await text('lake_pledge', { action: 'withdraw', tally, id: 'e2e-blind-2' })).toMatchObject({ kind: 'tally.withdrawn', count: 0 });
     const told = await text('lake_inbox', { wait_seconds: 5 });
     expect(told.messages.some((m: { message: { kind: string } }) => m.message.kind === 'tally.triggered')).toBe(true);
     await other.close();

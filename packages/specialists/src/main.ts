@@ -11,7 +11,7 @@ import { createQuests } from './quests.js';
 import { createTally } from './tally.js';
 import { createPersonhood } from './person.js';
 import { createTeller } from './teller.js';
-import { createFeedback } from './feedback.js';
+import { createPasses } from './passes.js';
 import { createRooms } from './room.js';
 
 const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
@@ -28,8 +28,8 @@ const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; 
   'teller-a': { port: '4770', domain: 'teller-a.lake.local' },
   'teller-b': { port: '4780', domain: 'teller-b.lake.local' },
   rooms: { port: '4790', domain: 'rooms.lake.local' },
-  // A sandbox's voluntary feedback desk (around blind bubbles, and in general); never on a real Lake.
-  feedback: { port: '4795', domain: 'feedback.lake.local' },
+  // Anonymous passes for blind pledges (Privacy Pass): a separate party from the tally.
+  passes: { port: '4797', domain: 'passes.lake.local' },
 };
 
 const { positionals, values } = parseArgs({
@@ -43,6 +43,7 @@ const { positionals, values } = parseArgs({
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'public-node': { type: 'string', default: process.env.LAKE_PUBLIC_NODE_URL },
     'spar-every': { type: 'string', default: '1800' },
+    'passes-url': { type: 'string' },
     // The use cases whose demo issuers to run (and whose converters the auditor certifies).
     packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
     production: { type: 'boolean', default: false },
@@ -57,7 +58,7 @@ for (const p of await loadPacks(values.packs!.split(','), (n) => import(n))) {
   if (p.authority) DEFAULTS[p.authority.path] = { port: '4800', domain: p.authority.domain, pack: p, authority: true };
 }
 const kind = positionals[0] ?? 'issuer';
-const kinds = (kind === 'all' ? Object.keys(DEFAULTS) : kind.split(',')).filter((k) => !(k === 'feedback' && values.production));
+const kinds = kind === 'all' ? Object.keys(DEFAULTS) : kind.split(',');
 const unknown = kinds.filter((k) => !DEFAULTS[k]);
 if (unknown.length) {
   console.error(`lake-specialist: unknown agent "${unknown.join(', ')}". Available: ${Object.keys(DEFAULTS).join(', ')}, a comma-separated list, or all.`);
@@ -83,10 +84,10 @@ async function start(k: string, url: string) {
     : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
     : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })
     : k === 'quests' ? await createQuests({ ...o, nodeUrl: nodes[0] ?? 'http://localhost:7000', dataDir: values.data! })
-    : k === 'tally' ? await createTally({ ...o, dataDir: values.data! })
+    : k === 'tally' ? await createTally({ ...o, dataDir: values.data!, passesUrl: values['passes-url'] ?? (several && kinds.includes('passes') ? `${base}/passes/a2a` : undefined) })
+    : k === 'passes' ? await createPasses({ ...o, dataDir: values.data! })
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
     : k === 'rooms' ? await createRooms({ ...o, dataDir: values.data! })
-    : k === 'feedback' ? await createFeedback({ ...o, dataDir: values.data! })
     : k.startsWith('teller-') ? await createTeller({ ...o, dataDir: values.data!, name: `Teller ${k.slice(7).toUpperCase()}` })
     : await createAuditor(o);
   const join = async () => {
