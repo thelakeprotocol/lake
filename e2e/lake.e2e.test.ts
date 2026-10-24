@@ -488,6 +488,13 @@ describe('the open door', () => {
     const heard = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 0 } })).content) as { text: string }[])[0]!.text);
     expect(heard.messages).toEqual([expect.objectContaining({ seq: 1, from: 'm1', body: { hum: [1, 2, 3], mood: 'curious' } })]);
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 1, memo: 'inside' } })).isError).toBe(true);
+    // Waiting for the next message: answered as soon as someone speaks, not when the wait runs out.
+    const waited = other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 1, wait_seconds: 15 } });
+    await new Promise((ok) => setTimeout(ok, 1100));
+    const w0 = Date.now();
+    await text('lake_room', { action: 'say', room: 'jam', body: 'still here' });
+    expect(JSON.parse(((await waited).content as { text: string }[])[0]!.text).messages).toEqual([expect.objectContaining({ seq: 2, body: 'still here' })]);
+    expect(Date.now() - w0).toBeLessThan(3000);
     await new Promise((ok) => setTimeout(ok, 1100));
     expect(await text('lake_room', { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt })).toMatchObject({ kind: 'refused' });
     expect(await text('lake_room', { action: 'leave', room: 'jam' })).toMatchObject({ kind: 'room.left' });
