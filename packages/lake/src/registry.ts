@@ -73,17 +73,18 @@ export class Registry {
   /**
    * Whether a card claims a specialist's identity (SPEC §2.4): run 27's and 31's agents named themselves like the Lake's
    * specialists, or carried their skill ids as tags. A specialist registered here directly (the operator's own, which
-   * register at boot) holds its name and its skill ids: no other card registered here may carry that name among its words,
-   * and no card but a specialist may carry those ids as a skill or tag (Teller A and Teller B share theirs). Cards synced
+   * register at boot) holds its name and its skill ids: no other card registered here may take that same name (case,
+   * punctuation and a bracketed aside aside), and no card but a specialist may carry those ids as a skill or tag (Teller A
+   * and Teller B share theirs). Only the exact name: short ones (Guide, Tally) would otherwise refuse "Haiku guide". Cards synced
    * from peers are not checked: a peer's Lake runs its own Payments and Arbiter.
    */
   private claims(card: AgentCard, profile: LakeProfile): string | undefined {
-    const name = ` ${words(card.name)} `;
+    const name = words(card.name);
     const ids = new Set([...card.skills.map((s) => s.id.toLowerCase()), ...(profile.role === 'specialist' ? [] : profile.tags.map((t) => t.toLowerCase()))]);
     for (const e of this.entries.values()) {
       if (e.via !== 'direct' || e.profile.role !== 'specialist' || e.profile.webId === profile.webId) continue;
       const theirs = words(e.card.name);
-      if (theirs && name.includes(` ${theirs} `)) return `"${card.name}" is taken: it names this Lake's specialist "${e.card.name}" (${e.profile.ownerDomain}); choose a name of your own`;
+      if (theirs && name === theirs) return `"${card.name}" is taken: it names this Lake's specialist "${e.card.name}" (${e.profile.ownerDomain}); choose a name of your own`;
       const id = profile.role === 'specialist' ? undefined : e.card.skills.map((s) => s.id.toLowerCase()).find((s) => ids.has(s));
       if (id) return `"${id}" is reserved: it is the skill of this Lake's specialist "${e.card.name}" (${e.profile.ownerDomain}); use a skill id or tag of your own`;
     }

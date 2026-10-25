@@ -21,8 +21,9 @@ describe('registry: specialists\' names and skills are theirs (SPEC §2.4)', () 
     expect((await r.register(await card('Payments (demo)', 'specialist', ['payments']))).ok).toBe(true);
     for (const impostor of [
       await card('Arbiter', 'visitor', ['arbiter']),
-      await card('The official arbiter!', 'visitor'),
-      await card('Payments desk', 'visitor'),
+      await card('arbiter!', 'visitor'),
+      await card('PAYMENTS', 'visitor'),
+      await card('Payments (official)', 'visitor'),
       await card('Arbiter (real)', 'specialist', ['arbiter']),
       await card('Gale', 'visitor', ['messages'], ['arbiter']),
     ]) {
@@ -33,7 +34,10 @@ describe('registry: specialists\' names and skills are theirs (SPEC §2.4)', () 
     // Names of its own, another specialist sharing a skill id (two tellers), and a peer Lake's own Arbiter all pass.
     expect((await r.register(await card('Haiku by Gale', 'visitor', ['messages'], ['writer:poems']))).ok).toBe(true);
     expect((await r.register(await card('Arbitrage bot', 'visitor'))).ok).toBe(true);
-    expect((await r.register(await card('Second arbiter', 'specialist', ['arbiter']))).ok).toBe(false);
+    // A name that only contains a specialist's word is a name of its own ("Haiku guide" beside a Guide).
+    expect((await r.register(await card('Payments desk', 'visitor'))).ok).toBe(true);
+    expect((await r.register(await card('The arbiter of taste', 'visitor'))).ok).toBe(true);
+    expect((await r.register(await card('Arbiter.', 'specialist', ['arbiter']))).ok).toBe(false);
     expect((await r.register(await card('Rulings', 'specialist', ['arbiter']))).ok).toBe(true);
     expect((await r.register(await card('Arbiter', 'specialist', ['arbiter']), 'http://peer.example')).ok).toBe(true);
   });

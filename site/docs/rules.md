@@ -45,6 +45,23 @@ For a matching rule with `decision: join`:
 
 A `default: join` with no matching rule becomes **ask**, because without a rule nothing limits the fields.
 
+## Care only from providers you name
+
+`requester` matches the domain of the agent asking: its card's domain, which its node proved when it registered and your house checks again on every message (an offer that names any other domain is turned away as impersonation). So one rule per provider you name, then a rule that declines every other care request:
+
+```yaml
+rules:
+  - match: { purpose: care, requester: gp.example }        # your GP: joins
+    allow_fields: [medications]
+    decision: join
+  - match: { purpose: care, requester: pharmacy.example }  # your pharmacy: ask me first
+    decision: ask
+  - match: { purpose: care }                               # anyone else asking for care
+    decision: decline
+```
+
+Order matters: the named providers come first, the catch-all `decline` last. A look-alike (`gp.example.co`, or a card named "Your GP") is another domain and is declined. In the control panel, write the provider's domain under **From** on a rule for care. On a sandbox Lake, domains aren't proved (SPEC §2.3): anyone may claim `gp.example` there, so this rule names, but doesn't prove, who your provider is.
+
 ## Reference
 
 | Key | Type | Meaning |
@@ -53,7 +70,7 @@ A `default: join` with no matching rule becomes **ask**, because without a rule 
 | `device` | string | Where `ask` requests go |
 | `default` | `join` \| `decline` \| `ask` | When no rule matches. Default `ask`. |
 | `tags` | list | Interests, used for discovery and guilds |
-| `rules[].match` | map | All keys must equal the offer's. Keys: `purpose`, `requester`, `sponsor_verified`, `ethics_approved`, `audit_certified`, and `reputation_at_least` (a number: the visitor's reputation from the nodes you follow, 0–1; unknown agents count as 0.5), and `price_below` (a number of dollars: matches offers paying less, so `{ purpose: research, price_below: 5 }` → `decline` turns away cheap research before any join rule sees it; `min_price_usd` on a join rule counters instead). `purpose` is one of the Lake's purposes (`research`, `academic-research`, `commercial-research`, `care`, `service`, `insurance`, `credit`, `marketing`, `advertising`, `personalised-advertising`, `direct-marketing`, `security`, `legal`; [SPEC §4](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md#4-offers-and-agreements-odrl)) and covers the narrower ones inside it: `marketing` also matches `advertising`. Any other purpose is an error, and houses turn away offers with a purpose that isn't on the list. |
+| `rules[].match` | map | All keys must equal the offer's. Keys: `purpose`, `requester` (the asking agent's domain, proved outside a sandbox; one per rule), `sponsor_verified`, `ethics_approved`, `audit_certified`, and `reputation_at_least` (a number: the visitor's reputation from the nodes you follow, 0–1; unknown agents count as 0.5), and `price_below` (a number of dollars: matches offers paying less, so `{ purpose: research, price_below: 5 }` → `decline` turns away cheap research before any join rule sees it; `min_price_usd` on a join rule counters instead). `purpose` is one of the Lake's purposes (`research`, `academic-research`, `commercial-research`, `care`, `service`, `insurance`, `credit`, `marketing`, `advertising`, `personalised-advertising`, `direct-marketing`, `security`, `legal`; [SPEC §4](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md#4-offers-and-agreements-odrl)) and covers the narrower ones inside it: `marketing` also matches `advertising`. Any other purpose is an error, and houses turn away offers with a purpose that isn't on the list. |
 | `privacy.show_packs` | bool | Default true: the house's public card names the kinds of data it holds (health, mortgage…) so agents with matching offers find it. False: the card says only that it considers offers; agents searching by kind of data won't find it. Applies as soon as the rules are saved. |
 | `rules[].allow_fields` | list | Fields this rule may share |
 | `rules[].deny_fields` | list | Fields never shared under this rule |

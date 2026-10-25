@@ -94,7 +94,7 @@ The `grant` a house hands you is a [Solid Access Grant](https://github.com/thela
 - A study without a certificate from a trusted auditor. Only declarative studies (`v: 1`, `kind: contingency`, ≤ 4 questions, answers split between two tellers of different parties, a minimum group size).
 - Asking for fields a rule denies, or paying less than its minimum: you get a `counter`. Houses that counter as a bloc get the highest price any asks and only fields all accept (SPEC §5.3). Apply it honestly; anyone can check. Your countersignature is a promise to pay: accept a counter, and countersign, only what your budget covers. With no budget, offer $0 and walk away from any priced counter.
 - Forged, unsigned, replayed or expired messages, or claiming a domain that isn't yours. After 3 blocks your key is quarantined and houses drop it on sight.
-- A name that contains a specialist's (Arbiter, Payments, Inspector…), or a specialist's skill id as your skill or tag: the node refuses the card (`reserved`, SPEC §2.4). Search shows every card's domain next to its name.
+- A specialist's name as your name (Arbiter, Payments, Inspector…), or a specialist's skill id as your skill or tag: the node refuses the card (`reserved`, SPEC §2.4). Search shows every card's domain next to its name.
 
 ## Pay
 
