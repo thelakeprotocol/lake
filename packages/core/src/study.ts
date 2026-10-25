@@ -7,7 +7,8 @@ import { digestSRI } from './vc.js';
  * A study is a declaration, not code: which yes/no questions to ask of each house's canonical claims.
  * Each house works out, truthfully, which ONE cell of the contingency table its owner falls in, and reports it as
  * two shares with a validity proof, one to each of two tellers, Leader and Helper (IETF DAP with Prio3; SPEC §7,
- * §11.5). The researcher gets the exact table and never sees any house's answer.
+ * §11.5). The researcher gets the table the tellers publish (exact counts, every cell 0 or at least the tellers'
+ * minimum, collapsed until it is) and never sees any house's answer.
  */
 export type Field = string;
 
@@ -42,7 +43,12 @@ export interface Study {
 export type { Claim };
 
 export const studyId = (s: Study) => `urn:lake:study:${digestSRI(canonicalize(s))}`;
-export const studyFields = (s: Study): Field[] => [...new Set(s.predicates.map((p) => p.field))];
+/**
+ * The question a study asks, whoever counts it: the digest of its predicates alone. Two studies with the same questions
+ * and different tellers or minimums have different ids and the same question id, so earlier runs of it can be found.
+ */
+export const questionId = (s: Study) => `urn:lake:question:${digestSRI(canonicalize({ kind: s.kind, predicates: s.predicates }))}`;
+export const studyFields =(s: Study): Field[] => [...new Set(s.predicates.map((p) => p.field))];
 export const cellCount = (s: Study) => 2 ** s.predicates.length;
 
 /** What an Auditor checks, and what a house re-checks before running anything. */

@@ -1,7 +1,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   accessGrantDraft, CONSENT_REQUESTED, consentRecord, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
-  studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
+  questionId, studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { Market } from './market.js';
@@ -44,9 +44,11 @@ export type Reply =
   | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'counted'; study: string; count: string; tellers: string[] }
   | { kind: 'excluded'; study: string; why: string }
-  | { kind: 'quoted'; ref: string };
+  | { kind: 'quoted'; ref: string }
+  /** What the owner's standing rules would answer an offer, with nothing signed, filed or issued (SPEC §5.4). */
+  | { kind: 'preview'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; code?: string };
 
-interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment; authorisation?: Attachment } }
+interface OfferPayload { kind: 'offer' | 'preview'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment; authorisation?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string; count?: string }
 interface StatusPayload { kind: 'status'; offerId: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
@@ -55,6 +57,7 @@ interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core')
 // House manners: a turned-down purpose is quiet for a day; a visitor stacks at most this many requests on the owner.
 const DECLINE_QUIET_MS = 86_400_000;
 const MAX_WAITING = 3;
+const MAX_PREVIEWS = 3;
 const HOUR = 3_600_000;
 
 /**
@@ -67,6 +70,8 @@ export class Housekeeper {
   readonly replay = new ReplayGuard();
   /** When each visitor was last turned down for each purpose (house manners: one ask per purpose a day). */
   private declinedAt = new Map<string, number>();
+  /** When each visitor last asked for previews: a few an hour, so nobody maps the owner's rules for free. */
+  private previewedAt = new Map<string, number[]>();
   /** Per pack: the last check, and when the whole chain was last verified. */
   private checks = new Map<string, { check: RecordCheck; fullAt: number }>();
   /** Agreements this house signed, so a countersignature doesn't need a pod read. The pod copy is the record. */
@@ -171,6 +176,13 @@ export class Housekeeper {
     }
     const visitor = `agent:${v.profile.ownerDomain}`;
     if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key);
+    if ((v.payload.kind as string) === 'preview') {
+      // A few previews an hour per visitor: enough to plan a study, too few to map the owner's rules price by price.
+      const recent = (this.previewedAt.get(v.profile.webId) ?? []).filter((t) => t > Date.now() - HOUR);
+      if (recent.length >= MAX_PREVIEWS) return this.reply({ kind: 'rejected', code: 'too-many', why: `at most ${MAX_PREVIEWS} previews an hour from one visitor; the next in ${Math.ceil((recent[0]! + HOUR - Date.now()) / 60_000)} min` });
+      this.previewedAt.set(v.profile.webId, [...recent, Date.now()]);
+      return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key, true);
+    }
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor);
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     if ((v.payload.kind as string) === 'withdraw') {
@@ -185,7 +197,11 @@ export class Housekeeper {
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a compute request, a quote, or status / withdraw for a request you made' });
   }
 
-  private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {
+  /**
+   * An offer, or with `preview` the same offer answered as the owner's standing rules would, and nothing more: no grant,
+   * no agreement, no request on the owner's phone, no quiet day after a decline, and not what the house holds.
+   */
+  private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = '', preview = false): Promise<LakeData> {
     const offer = p.offer;
     // Checked at the door, and never repeated back: whatever a sender typed shouldn't reach the owner's panel or another agent's log.
     const bad = offerProblem(offer);
@@ -195,11 +211,15 @@ export class Housekeeper {
       this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why: 'impersonation', claimed: offer.requester, from: domain, key, verified: true }));
       return this.reply({ kind: 'rejected', code: 'impersonation', why: `card is for ${domain}, offer claims ${offer.requester}` });
     }
-    this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: offer.purpose }));
+    this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: offer.purpose, ...(preview ? { preview: true } : {}) }));
     const notes: string[] = [];
     // Two audiences: the owner's activity gets the whole reason; the visitor hears what it can act on, never the owner's
     // rules ("your rule 2"). `told` is for reasons about the offer itself (an uncertified study), which the visitor can fix.
     const decide = async (decision: Decision, reason: string, extra: Partial<Extract<Reply, { kind: 'decision' }>> = {}, told?: string) => {
+      if (preview) {
+        const { counter, bloc, code } = extra as { counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; code?: string };
+        return this.reply({ kind: 'preview', offerId: offer.id, decision, reason: told ?? toVisitor(decision, counter, code, offer.purpose), ...(counter ? { counter, bloc: !!bloc } : {}), ...(code ? { code } : {}) });
+      }
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision, reason }));
       reason = told ?? toVisitor(decision, extra.counter, (extra as { code?: string }).code, offer.purpose);
       if (decision === 'ask') this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
@@ -245,7 +265,7 @@ export class Housekeeper {
       const auth = await checkAttachment(p.attachments?.authorisation, { trusted: this.o.trust.regulators, type: 'LakeAuthorisation', subject: visitorWebId, sandbox: this.o.sandbox });
       if (auth.ok && auth.vc.credentialSubject.pack === packId(pk)) continue;
       const why = `asks for ${packId(pk)} fields without ${pk.authority!.name}'s authorisation (${auth.ok ? 'it is for another pack' : auth.why})${p.study ? ', in a study' : ''}`;
-      this.declinedAt.set(`${visitorWebId}|${offer.purpose}`, Date.now());
+      if (!preview) this.declinedAt.set(`${visitorWebId}|${offer.purpose}`, Date.now());
       return decide('decline', why, { code: 'unauthorised' }, `declined: ${fields.join(', ')} belong to ${packId(pk)}, and only agents on ${pk.authority!.name} may ask for them: attach its authorisation (attachments.authorisation)${pk.authority!.studies ? ', or ask through a certified study that reads them' : `; ${packId(pk)} lets no study read them`}`);
     }
 
@@ -258,8 +278,10 @@ export class Housekeeper {
     if (waiting.length >= MAX_WAITING && !waiting.some((x) => x.purpose === offer.purpose && [...x.fields].sort().join() === [...offer.fields].sort().join())) return decide('decline', `already has ${waiting.length} requests waiting for the owner`, { code: 'too-many' }, `declined: you have ${waiting.length} requests waiting for this owner; withdraw one or wait for an answer`);
 
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
-    if (d.decision === 'decline') this.declinedAt.set(declinedKey, Date.now());
+    if (d.decision === 'decline' && !preview) this.declinedAt.set(declinedKey, Date.now());
     let filed: { offerId: string; asked?: number } | null = null;
+    // A preview stops here: what the rules say, with no request filed, no record read and nothing signed.
+    if (preview) return decide(d.decision, d.reason, d.decision === 'counter' ? { counter: d.counter, bloc: !!this.o.rules.negotiation?.join_collectives } : d.decision === 'decline' && d.code ? { code: d.code } : {});
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
       // A visitor that already asked this house for the same fields under another purpose is trying labels: say so.
@@ -367,7 +389,7 @@ export class Housekeeper {
     const claims = await this.claims(fields);
     // One report, two shares and a proof that it is one cell (Prio3): each teller gets its share, neither can read it.
     const report = await shardAnswer(cellCount(p.study), cellOf(p.study, claims));
-    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
+    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i], study: id, question: questionId(p.study) }, checked.kids[i]!)));
     const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
     const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };

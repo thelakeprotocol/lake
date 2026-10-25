@@ -91,6 +91,52 @@ export const unshardCounts = (length: number, shares: [unknown, unknown], _count
   return a.map((x, i) => { const v = (x + b[i]!) % p; return Number(v > p / 2n ? v - p : v); });
 };
 
+/**
+ * What a count may publish (SPEC §11.5): statistical disclosure control by the threshold rule, as statistics offices
+ * apply it to frequency tables (Eurostat's SDC handbook: no cell may come from fewer than k contributors), with table
+ * redesign as the remedy: when a cell is unsafe, the table is collapsed until every cell it shows is 0 or at least k.
+ *
+ * Why redesign and not "<k" in a cell: whoever reads a table knows how many answers it came from, so one hidden cell
+ * is the total minus the rest, and several hidden cells can still be pinned by their sum; hiding cells safely needs
+ * secondary suppression checked by linear programming (what τ-ARGUS does). A collapsed table hides nothing: every
+ * number in it is an exact count of 0 or at least k, and the cells it merged are gone, not blanked.
+ *
+ * For a table of 2^p cells (p yes/no questions, bit i for question i), the questions are dropped from the first: all p
+ * questions, then every way of keeping p-1 (dropping question 0 first, then 1, …), down to one question. A study puts
+ * the question it can best do without first and its outcome last. The first table that passes is the one published;
+ * none passes: no table (the number of answers is still known). Any other length (a vote's options) is all or nothing.
+ * Deterministic, so both tellers reach the same table on their own. With noise, a cell at or below 0 counts as empty.
+ */
+export function discloseTable(cells: number[], k: number): { cells: number[]; kept: number[] } | null {
+  const safe = (t: number[]) => t.every((c) => c <= 0 || c >= k);
+  const p = Math.log2(cells.length);
+  if (!Number.isInteger(p) || p < 1) return safe(cells) ? { cells: [...cells], kept: [] } : null;
+  for (let size = p; size >= 1; size--) {
+    for (const kept of keeping(p, size)) {
+      const table = Array<number>(2 ** size).fill(0);
+      cells.forEach((c, i) => { table[kept.reduce((acc, bit, j) => acc | (((i >> bit) & 1) << j), 0)]! += c; });
+      if (safe(table)) return { cells: table, kept };
+    }
+  }
+  return null;
+}
+
+/** Which `size` of the questions 0..p-1 to keep, in the order a table is tried: drop the earliest questions first. */
+function keeping(p: number, size: number): number[][] {
+  const all: number[][] = [];
+  const pick = (from: number, chosen: number[]) => {
+    if (chosen.length === size) { all.push(chosen); return; }
+    for (let i = from; i < p; i++) pick(i + 1, [...chosen, i]);
+  };
+  pick(0, []);
+  // Sets that keep later questions come first: the dropped ones are the earliest.
+  const dropped = (s: number[]) => Array.from({ length: p }, (_, i) => i).filter((i) => !s.includes(i));
+  return all.sort((a, b) => { const x = dropped(a), y = dropped(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i]! - y[i]!; return 0; });
+}
+
+/** The smallest cell a teller lets a table show, whatever a count asks for: 3 on a sandbox, 10 for real (SPEC §11.5). */
+export const minCellFor = (sandbox: boolean) => (sandbox ? 3 : 10);
+
 /** Two tellers from a list of cards (those with the `teller` skill), under different names; fewer than two: none. */
 export function pickTellers(cards: AgentCard[]): TellerRef[] {
   const picked: TellerRef[] = [];

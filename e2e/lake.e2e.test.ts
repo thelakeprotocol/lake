@@ -11,7 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
 import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
-import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
+import { dispatch, makeHuman, preflight } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
 import shopping from '../usecases/shopping/src/index.js';
@@ -305,10 +305,12 @@ describe('the owner', () => {
     expect(await ownerCall({ kind: 'answer', request: req!.id, answer: 'allow', grant: await issueCredential(vc(req!.fields) as never, owner) })).toEqual({ ok: true });
     const r = await running;
     expect(r.participants).toBe(4);
-    // Exact counts: every house that took part is in exactly one cell of the table, no blur.
-    expect(r.cells).toHaveLength(8);
-    expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(4);
-    expect(r.cells.every((c) => Number.isInteger(c.count))).toBe(true);
+    // Exact counts, no blur, but no group of 1 or 2 (the threshold rule): four houses over eight cells is a table the
+    // tellers collapse (or publish none of); whatever they publish still counts all four.
+    expect(r.table).toMatchObject({ minCell: 3 });
+    expect(r.cells).toHaveLength(2 ** r.table!.kept.length * (r.cells.length ? 1 : 0));
+    expect(r.cells.every((c) => Number.isInteger(c.count) && (c.count === 0 || c.count >= 3))).toBe(true);
+    if (r.cells.length) expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(4);
 
     // A study's key works once, whether the owner signed it or a standing rule cut it: the study has run, so asking again is refused.
     for (const g of r.grants) expect((await ask(g.url, v, { kind: 'compute', grant: g.grant, study: readmissionStudy() })).reply).toMatchObject({ kind: 'excluded', why: 'this key was for one use, and it has been used' });
@@ -750,12 +752,29 @@ describe('the open door', () => {
     expect(done.paid.total).toBeGreaterThan(0);
     // Everything the study rests on, signed, in one bundle anyone can check (run 22 asked for it).
     expect(done.evidence).toMatchObject({ ethics: true, audit: true, mandate: true, tellers: 2, receipts: done.paid.houses, on_the_log: done.paid.houses });
+    // By default the bundle names no house (run 31): agreements as digests, receipts as their place on the log.
     const bundle = await text('lake_dispatch_study', { evidence_for: done.study });
-    expect(bundle.agreements.length).toBe(done.participants);
+    expect(bundle.agreements).toMatchObject({ count: done.participants, digests: expect.any(Array) });
+    expect(bundle.agreements.digests).toHaveLength(done.participants);
+    expect(bundle.receipts).toMatchObject({ count: done.paid.houses });
+    const shown = JSON.stringify(bundle);
+    for (const h of ['stan', 'strict', 'research', 'kai']) expect(shown).not.toMatch(new RegExp(`/${h}/profile|"House ${h}"|t/${h}/`));
     const leader = bundle.tellers.leader;
-    expect(await text('lake_verify', { evidence: { card: bundle.cards[leader.card], envelope: leader.envelope } })).toMatchObject({ verified: true, says: { kind: 'count.share' } });
-    const receipt = bundle.receipts[0];
-    expect(await text('lake_verify', { evidence: { credential: receipt.credential, card: bundle.cards[receipt.card] } })).toMatchObject({ verified: true, on_record: { logged: true } });
+    expect(await text('lake_verify', { evidence: { card: bundle.cards[leader.card], envelope: leader.envelope } })).toMatchObject({ verified: true, says: { kind: 'count.table', count: done.participants } });
+    // A receipt's leaf hash proves it was logged, without the receipt (and so without its payee).
+    const logged = bundle.receipts.logged[0];
+    const logUrl = (await (await fetch(`${node}/cards?skill=log`)).json())[0].card.supportedInterfaces[0].url;
+    expect((await ask(logUrl, await visitor('auditor.example'), { kind: 'log.find', leaf_hash: logged.leaf_hash })).reply).toMatchObject({ kind: 'log.found', index: logged.index });
+    // Asked for by name, the agreements and receipts themselves, with a warning that they name the houses.
+    const named = await text('lake_dispatch_study', { evidence_for: done.study, name_houses: true });
+    expect(named.warning).toMatch(/names every house/);
+    expect(named.agreements).toHaveLength(done.participants);
+    const receipt = named.receipts[0];
+    expect(await text('lake_verify', { evidence: { credential: receipt.credential, card: named.cards[receipt.card] } })).toMatchObject({ verified: true, on_record: { logged: true } });
+    // The pre-flight: free, and it says what a run would meet, with nothing signed.
+    const pre = await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', price_usd: 5, budget_usd: 200, preflight: true });
+    expect(pre).toMatchObject({ preflight: true, houses: 4, table: { cells: 8, minCell: 3 } });
+    expect(pre.earlier.length).toBeGreaterThan(0);
     await client.close();
   }, 60_000);
 
@@ -1002,8 +1021,14 @@ describe('a study run', () => {
     expect(r.decisions).toEqual({ join: 3, ask: 1 }); // stan, kai and research join; strict asks its owner
     expect(r.participants).toBe(3);
     expect(r.excluded).toEqual([]);
-    // Three is the sandbox's minimum: the tellers publish a table, exact, one house per answer.
-    expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
+    // Three is the sandbox's minimum. The tellers publish exact counts but no group of 1 or 2: three houses over eight
+    // cells, so the full table comes out only if all three share a cell; otherwise questions are dropped, or no table.
+    expect(r.table).toMatchObject({ minCell: 3 });
+    expect(r.cells.every((c) => c.count === 0 || c.count >= 3)).toBe(true);
+    if (r.cells.length) expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
+    if (r.cells.length === 8) expect(r.cells.filter((c) => c.count > 0)).toHaveLength(1);
+    if (!r.cells.length) expect(r.answer.summary).toMatch(/^No table: 3 houses answered/);
+    else if (r.table!.dropped.length) expect(r.cells).toHaveLength(2 ** r.table!.kept.length);
     await new Promise((ok) => setTimeout(ok, 500));
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.counters.recordsMoved).toBe(0);
@@ -1015,8 +1040,33 @@ describe('a study run', () => {
 
   it('gives the same answers every time in seeded mode', async () => {
     const [a, b] = [await run(), await run()];
-    expect(a.cells.length).toBeGreaterThan(0);
+    expect(a.table).not.toBeNull();
+    expect(a.table).toEqual(b.table);
     expect(a.cells).toEqual(b.cells);
+    expect(a.answer.summary).toBe(b.answer.summary);
+  });
+
+  it('a free pre-flight says what a run would meet (who would join, the bloc price, earlier runs, the table to expect), and signs nothing', async () => {
+    const agreements = async () => (await Promise.all(Object.keys(houses).map((h) => readdir(join(dir, 'houses', h, 'pod', h, 'agreements')).catch(() => [] as string[])))).flat().length;
+    const before = await agreements();
+    const v = await visitor('uni.example');
+    const p = await preflight({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, budgetUsd: 500 });
+    expect(p).toMatchObject({ preflight: true, houses: 4, would: { join: 3, ask: 1 }, expected: { houses: 3, priceUsd: 5, costUsd: 15, mayAlsoAsk: 1 }, table: { cells: 8, minCell: 3, min: 3 } });
+    // Three houses over eight cells: it warns that groups under 3 aren't published.
+    expect(p.table.warning).toMatch(/no group of 1 to 2/);
+    // The runs above counted this very question: the tellers remember when, and from how many (never a table).
+    expect(p.earlier.length).toBeGreaterThan(0);
+    expect(p.earlier[0]).toMatchObject({ houses: expect.any(Number), tellers: expect.arrayContaining(['teller-a.lake.local', 'teller-b.lake.local']) });
+    // The bloc's price, before anything is offered for real: $2 and the postcode becomes $5 without it.
+    const q = await preflight({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 2, extraFields: ['postcode'], budgetUsd: 5000 });
+    expect(q.would).toEqual({ counter: 3, ask: 1 });
+    expect(q.bloc).toEqual({ members: 3, priceUsd: 5, fields: ['age_band', 'medications', 'readmissions'] });
+    expect(q.expected).toMatchObject({ houses: 3, priceUsd: 5, costUsd: 15 });
+    // Nothing was signed, no key issued: no new agreement in any pod.
+    expect(await agreements()).toBe(before);
+    // A preview is never an offer, and a few an hour is all one visitor gets.
+    await preflight({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, budgetUsd: 500 });
+    expect((await preflight({ visitor: v, node, ethics, auditor, study: readmissionStudy(), priceUsd: 5, budgetUsd: 500 })).would).toEqual({ limited: 4 });
   });
 
   it('sends nothing to a "teller" that only borrows a trusted teller\'s name', async () => {

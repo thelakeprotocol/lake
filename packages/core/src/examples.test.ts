@@ -17,7 +17,7 @@ describe('spec/examples', () => {
   });
 
   it('every step is a verifiable signed envelope', async () => {
-    for (const f of ['count-open.json', '1-offer.json', '2-counter.json', '4-join.json', '5-compute.json', 'count-report.json', '6-counted.json', 'count-share.json', '7-receipt.json']) await expect(envelope(f)).resolves.toBeDefined();
+    for (const f of ['count-open.json', '1-offer.json', '2-counter.json', '4-join.json', '5-compute.json', 'count-report.json', '6-counted.json', 'count-table.json', '7-receipt.json']) await expect(envelope(f)).resolves.toBeDefined();
   });
 
   it('credentials verify against their issuers', async () => {

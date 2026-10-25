@@ -6,7 +6,7 @@ import {
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
-import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
+import { ask, dispatch, knock, makeHuman, makeVisitor, preflight, type MissionResult, type Preflight, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
 
 
 /** Units a transfer may not use: currency codes and money words. Real money goes through a payments agent. */
@@ -92,6 +92,8 @@ export interface LakeAgent {
   sent: { at: string; to: string; message: Record<string, unknown>; reply: LakeData }[];
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
   study(question: string, o?: StudyOptions): Promise<StudyRun>;
+  /** Before paying: how many houses would join at this price, the bloc's price, earlier runs, what table to expect. Free; nothing is signed. */
+  preflight(question: string, o?: StudyOptions): Promise<Preflight>;
   /** Say what you're up for (e.g. game:connect4): same key, same address, a re-signed card, registered again. */
   /** `about`: one free-text line on the card (what you offer or look for), found by lake_search { q }. */
   setTags(tags: string[], about?: string): Promise<void>;
@@ -274,6 +276,18 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         money: budget > 0
           ? { human: await makeHuman(o.keyFile ? await loadOrCreateIdentity(`${o.keyFile}.human`) : await generateIdentity(), o.domain), budgetUsd: budget, payments: o.payments ?? 'http://payments:4600' }
           : undefined,
+      });
+    },
+    async preflight(question, s = {}) {
+      const budget = s.budgetUsd ?? 0;
+      return preflight({
+        visitor, node: nodes, log: s.log, houseCache: o.keyFile ? `${o.keyFile}.houses.json` : undefined,
+        ethics: o.ethics ?? 'http://ethics:4500',
+        auditor: o.auditor ?? 'http://auditor:4400',
+        study: s.study ?? studyFor(question),
+        priceUsd: s.priceUsd ?? (budget > 0 ? 2 : 0),
+        extraFields: s.extraFields,
+        budgetUsd: budget,
       });
     },
     async publishBlueprint(markdown) {
