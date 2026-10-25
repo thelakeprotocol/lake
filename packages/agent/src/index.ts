@@ -103,12 +103,13 @@ export interface LakeAgent {
    * nothing backs it but the signature and the payer's word.
    */
   /** `order`: an order id, or the sha256 of what was delivered; the payment and its receipt name it. */
-  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string; hold?: boolean }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
   /**
    * Pay a cart a seller signed (SPEC §6.5): checked against the seller's card at `sellerUrl`, paid for exactly its total in
    * its currency, under this agent's allowance; the receipt names the cart and goes to the seller.
    */
-  payCart(sellerUrl: string, cart: CartMandate): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string; cart: string }>;
+  /** With `hold`, the payment waits with the payments agent until the buyer accepts, its time runs out, or an arbiter rules. */
+  payCart(sellerUrl: string, cart: CartMandate, hold?: boolean): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string; cart: string; hold?: { id: string; until: string } }>;
   /** What this agent sells (SPEC §6.5): on its signed card, so search finds it and nobody can change a price in transit. */
   setMenu(menu: MenuItem[]): Promise<void>;
   /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
@@ -247,7 +248,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const intent = own ?? (await allowance!);
       const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: cart ? `urn:ap2:cart:${order}` : order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 200)}`, currency, ...(cart ? { cart: { detailsId: cart.detailsId, hash: cart.hash } } : {}) });
       const payments = o.payments ?? 'http://payments:4600';
-      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment], ...(cart ? { cart: { mandate: cart.mandate, card: cart.card } } : {}) })).reply;
+      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment], ...(cart ? { cart: { mandate: cart.mandate, card: cart.card }, ...(cart.hold ? { hold: true } : {}) } : {}) })).reply;
       if (settled.kind !== 'settled') throw new Error((settled.problems ?? [settled.why ?? 'refused']).join('; '));
       const receipt = settled.receipts[0].credential as string;
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
@@ -288,14 +289,15 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     async cart(buyerWebId, items, minutes, brief) {
       return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief });
     },
-    async payCart(sellerUrl, cart) {
+    async payCart(sellerUrl, cart, hold) {
       const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;
       const seller = await verifyLakeCard(sellerCard);
       const c = await checkCart(cart, seller.publicJwk);
       if (c.seller !== seller.webId) throw new Error(`that cart was signed by ${c.seller}, not by the agent at ${sellerUrl}`);
       if (c.buyer !== visitor.webId) throw new Error('that cart is made out to another buyer');
-      const r = await self.pay(sellerUrl, c.total.value, `cart ${c.id}`, c.total.currency, c.id, { mandate: cart, card: sellerCard, hash: c.hash, detailsId: cart.contents.payment_request.details.id });
-      return { ...r, cart: c.id };
+      const r = await self.pay(sellerUrl, c.total.value, `cart ${c.id}`, c.total.currency, c.id, { mandate: cart, card: sellerCard, hash: c.hash, detailsId: cart.contents.payment_request.details.id, hold });
+      const sub = JSON.parse(Buffer.from(r.receipt.split('.')[1] ?? '', 'base64url').toString()).credentialSubject as { settlement?: string; settlementId?: string; heldUntil?: string } | undefined;
+      return { ...r, cart: c.id, ...(sub?.settlement === 'held' ? { hold: { id: String(sub.settlementId), until: String(sub.heldUntil) } } : {}) };
     },
     async setTags(tags, about) {
       lastTags = tags;

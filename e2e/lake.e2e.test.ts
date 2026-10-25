@@ -753,7 +753,8 @@ describe('the open door', () => {
     expect((await buyer('lake_verify', { evidence: { credential: paid.receipt, card: `${payments}/a2a` } })).on_record).toMatchObject({ logged: true, index: expect.any(Number), origin: 'log.lake.local/log' });
     const sales = (await poet('lake_inbox', { wait_seconds: 5 })).messages;
     expect(sales.map((m: any) => m.message.kind)).toEqual(['trade.order', 'receipt']);
-    expect(sales[1].checked).toMatchObject({ verified: true, settled: true, cart: { id: order.cart } });
+    // Held by default: set aside for the seller, released when the buyer accepts.
+    expect(sales[1].checked).toMatchObject({ verified: true, settled: false, held: { id: expect.any(String) }, cart: { id: order.cart } });
     expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ cart: order.cart, status: 'paid' });
     // Delivered with its sha256; the buyer's connector checks it, and the buyer signs that it accepts.
     const poem = 'Grey heron stands still / the river forgets the hour / one fish, then the next';
@@ -763,7 +764,10 @@ describe('the open door', () => {
     await buyer('lake_buy', { action: 'accept', cart: order.cart });
     const [sale] = (await poet('lake_sell', { action: 'orders', evidence: true })).orders;
     expect(sale).toMatchObject({ status: 'accepted', verdict: { verdict: 'accepted' } });
-    expect(sale.evidence.map((e: { step: string }) => e.step)).toEqual(['ordered', 'cart signed', 'paid', 'delivered (their signed receipt of it)', 'accepted']);
+    expect(sale.evidence.map((e: { step: string }) => e.step).slice(0, 5)).toEqual(['ordered', 'cart signed', 'paid (held)', 'delivered (their signed receipt of it)', 'accepted']);
+    // Accepting released the held payment: the payments agent sends the seller the capture receipt.
+    for (let i = 0; i < 20 && (await poet('lake_sell', { action: 'orders' })).orders[0].payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
+    expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ payment: 'released' });
     // A cart for someone else, or a forged one, isn't paid: the payments agent checks the seller's signature itself.
     const theirs = (await buyer('lake_buy', { action: 'orders', evidence: true })).orders[0];
     expect(theirs).toMatchObject({ status: 'accepted', you_are: 'buyer' });
@@ -779,14 +783,14 @@ describe('the open door', () => {
     await buyer('lake_buy', { action: 'dispute', cart: second.cart, reason: 'it arrived empty' });
     await poet('lake_inbox', { wait_seconds: 3 });
     const ruling = await poet('lake_sell', { action: 'arbitrate', cart: second.cart });
-    expect(ruling).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, ruling: expect.stringMatching(/^Paid and delivered: the buyer's own signed receipt/) });
+    expect(ruling).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, ruling: expect.stringMatching(/^Paid and delivered: the buyer's own signed receipt/), held_payment: 'released to the seller' });
     const told = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'trade.ruling');
     expect(told).toMatchObject({ message: { cart: second.cart }, checked: { verified: true } });
     // A refund: the seller pays the whole cart back, and the buyer's order says so.
     const third = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku' });
     await buyer('lake_buy', { action: 'pay', cart: third.cart });
     await poet('lake_inbox', { wait_seconds: 3 });
-    expect(await poet('lake_sell', { action: 'refund', cart: third.cart })).toMatchObject({ refunded: third.cart, paid: 2 });
+    expect(await poet('lake_sell', { action: 'refund', cart: third.cart })).toMatchObject({ refunded: third.cart, voided: true });
     await buyer('lake_inbox', { wait_seconds: 5 });
     expect((await buyer('lake_buy', { action: 'orders' })).orders.find((x: any) => x.cart === third.cart)).toMatchObject({ status: 'refunded' });
   }, 120_000);
