@@ -1,0 +1,132 @@
+# Two local staging Lakes, sandbox-shaped and federated, built from this checkout (scripts/local-lakes.sh drives it).
+# One file, two projects: lake-local-a and lake-local-b, each with its own volumes, network and Caddy:
+#   Lake A  http://lake-a.localhost:8081      Lake B  http://lake-b.localhost:8082
+# Same paths as the public sandbox (deploy/apache-sandbox.conf): / node, /s/* specialists, /t/* houses, /pods/* pods,
+# /mcp connector, plus /g/* for the grocers (on the sandbox they're internal; here a peer Lake must reach them).
+#
+# Why the names work everywhere: *.localhost resolves to the loopback on the laptop, so the browser, curl and node
+# scripts reach Caddy's published port. Inside a Lake's network, that Lake's Caddy answers to BOTH Lakes' host names
+# (network aliases) and listens on both ports: its own it serves, the peer's it forwards to the peer's Caddy over the
+# shared network lake-local. So every advertised URL (cards, WebIDs, pods, node --follow) is the same string on the
+# laptop and in every container, and a node can fetch a peer Lake's agents' cards from their own endpoints (SPEC §9).
+#
+# Needs (set by the script): LAKE_ID LAKE_PORT PEER_ID PEER_PORT. Images: lake-local/*:dev (scripts/local-lakes.sh build).
+
+x-small: &small
+  restart: unless-stopped
+  logging: { driver: json-file, options: { max-size: "5m", max-file: "2" } }
+  depends_on: [caddy]
+
+services:
+  caddy:
+    restart: unless-stopped
+    image: caddy:2.8.4
+    environment: { LAKE_PORT: "${LAKE_PORT}", PEER_ID: "${PEER_ID:?}", PEER_PORT: "${PEER_PORT:?}" }
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro]
+    ports: ["127.0.0.1:${LAKE_PORT}:${LAKE_PORT}", "[::1]:${LAKE_PORT}:${LAKE_PORT}"]
+    networks:
+      default: { aliases: ["lake-${LAKE_ID}.localhost", "lake-${PEER_ID}.localhost"] }
+      lake-local: { aliases: ["lake-${LAKE_ID}-caddy"] }
+    mem_limit: 64m
+    memswap_limit: 64m
+
+  lake-node:
+    <<: *small
+    image: lake-local/lake-node:dev
+    hostname: lake-node
+    # Follows the other Lake's node at its public address: its cards are re-verified here from the agents' own endpoints.
+    command: ["--domain", "lake-${LAKE_ID}.localhost", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--guild-min", "2", "--follow", "http://lake-${PEER_ID}.localhost:${PEER_PORT}"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/t/", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-local}" }
+    volumes: [node:/data]
+    mem_limit: ${LAKE_NODE_MEM:-180m}
+    memswap_limit: ${LAKE_NODE_MEM:-180m}
+
+  specialists:
+    <<: *small
+    image: lake-local/lake-specialists:dev
+    hostname: specialists
+    command: ["all", "--port", "4300", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s", "--public-node", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--spar-every", "1800", "--packs", "health,shopping"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=160", LAKE_NODE_URL: "http://lake-node:7000" }
+    volumes: [specialists:/data]
+    depends_on: [caddy, lake-node]
+    # The grocers ask the food register for their authorisation once, at start: they wait for this (else "fetch failed").
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://localhost:4300/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"], interval: 60s, timeout: 4s, retries: 3, start_period: 90s, start_interval: 2s }
+    mem_limit: ${LAKE_SPECIALISTS_MEM:-240m}
+    memswap_limit: ${LAKE_SPECIALISTS_MEM:-240m}
+
+  houses:
+    <<: *small
+    image: lake-local/lake-house:dev
+    hostname: houses
+    command: ["--tenants", "${LAKE_TENANTS:-4}", "--tenant-prefix", "sb-", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--pod-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/pods/", "--open-pairing"]
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-320}"
+      LAKE_START_CONCURRENCY: "2"
+      LAKE_NODE_URL: "http://lake-node:7000"
+      LAKE_ISSUER_URL: "http://specialists:4300/issuer"
+      LAKE_PACKS: "health,shopping"
+      LAKE_ISSUERS: "health=http://specialists:4300/issuer,shopping=http://specialists:4300/receipts"
+      LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
+      LAKE_PERSON_URL: "http://specialists:4300/person"
+      LAKE_TELLERS: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s/teller-a/a2a,http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s/teller-b/a2a"
+    volumes: [houses:/data]
+    depends_on: [caddy, specialists]
+    mem_limit: ${LAKE_HOUSES_MEM:-500m}
+    memswap_limit: ${LAKE_HOUSES_MEM:-500m}
+
+  mcp:
+    <<: *small
+    image: lake-local/lake:dev
+    hostname: mcp
+    command: ["mcp", "--http", "4800", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}"]
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=${LAKE_MCP_HEAP:-200}"
+      LAKE_NODE_URL: "http://lake-node:7000"
+      LAKE_ETHICS_URL: "http://specialists:4300/ethics"
+      LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
+      LAKE_PAYMENTS_URL: "http://specialists:4300/payments"
+      LAKE_PUBLIC_NODE_URL: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}"
+      LAKE_PACKS: "health,shopping"
+      LAKE_ALLOWANCE_USD: "50"
+    depends_on: [caddy, houses]
+    mem_limit: ${LAKE_MCP_MEM:-260m}
+    memswap_limit: ${LAKE_MCP_MEM:-260m}
+
+  grocers:
+    <<: *small
+    image: lake-local/lake:dev
+    hostname: grocers
+    # Unlike the sandbox (http://grocers:4810, reachable only inside its network), a public address under /g, so the
+    # peer Lake's node can verify their cards and its agents can reach them.
+    command: ["quoters", "--packs", "shopping", "--port", "4810", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/g", "--node", "http://lake-node:7000", "--auditor", "http://specialists:4300/auditor", "--authority", "http://specialists:4300/foodregister", "--payments", "http://specialists:4300/payments"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=64" }
+    depends_on: { caddy: { condition: service_started }, specialists: { condition: service_healthy } }
+    mem_limit: ${LAKE_GROCERS_MEM:-110m}
+    memswap_limit: ${LAKE_GROCERS_MEM:-110m}
+
+  sponsor:
+    <<: *small
+    profiles: [sponsor]
+    image: lake-local/lake:dev
+    hostname: sponsor
+    command: ["sponsor", "--every", "900", "--node", "http://lake-node:7000", "--ethics", "http://specialists:4300/ethics", "--auditor", "http://specialists:4300/auditor", "--payments", "http://specialists:4300/payments", "--budget", "1000000"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=96" }
+    volumes: [cli:/root/.lake]
+    depends_on: [caddy, houses]
+    mem_limit: 140m
+    memswap_limit: 140m
+
+  swarm:
+    <<: *small
+    profiles: [lively]
+    image: lake-local/lake:dev
+    command: ["swarm", "--traders", "3", "--attackers", "1", "--interval", "30000", "--node", "http://lake-node:7000"]
+    environment: { NODE_OPTIONS: "--max-old-space-size=64" }
+    depends_on: [caddy, houses]
+    mem_limit: 100m
+    memswap_limit: 100m
+
+networks:
+  lake-local: { external: true, name: lake-local }
+
+volumes: { node: {}, specialists: {}, houses: {}, cli: {} }

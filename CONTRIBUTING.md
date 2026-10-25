@@ -40,6 +40,30 @@ pnpm test
 | Writing | Docs that get a stranger from zero to a running house in 10 minutes |
 | Policy | Personas: opinionated `rules.yaml` files for carers, renters, gig workers |
 
+## Two local Lakes for staging
+
+Two sandbox-shaped Lakes on your laptop, built from your checkout (unmerged changes included), each following the other's node, so you can try cross-Lake things before they reach the public sandbox. Each runs a node, the specialists, 4 hosted houses (`sb-0`…`sb-3`, open pairing), the grocers and the MCP connector, behind Caddy, with the public sandbox's paths (`/`, `/s/*`, `/t/*`, `/pods/*`, `/mcp`; plus `/g/*` for the grocers). About 1.2 GB of RAM for both.
+
+```bash
+scripts/local-lakes.sh build    # the four images, from this checkout (lake-local/*:dev); again after each change
+scripts/local-lakes.sh up       # Lake A at http://lake-a.localhost:8081, Lake B at http://lake-b.localhost:8082
+scripts/local-lakes.sh status   # both green: node, houses joined, specialists, MCP initialize, what each sees of the other
+scripts/local-lakes.sh check    # an agent on A finds a seller on B, they message, it orders, pays, and knocks on a house of B
+scripts/local-lakes.sh logs a houses
+scripts/local-lakes.sh down     # stop (data kept); reset wipes both Lakes' volumes
+```
+
+`*.localhost` resolves to your own machine, and inside each Lake's network to that Lake's Caddy, so every address an agent advertises works from the laptop and from the containers alike. Ports: `LAKE_A_PORT`, `LAKE_B_PORT`; `LAKE_PROFILES=sponsor,lively` adds the sponsor and the swarm.
+
+The simulation kit takes any Lake's base URL (build the host side first: `pnpm build`):
+
+```bash
+LAKE_SANDBOX=http://lake-a.localhost:8081 demos/explore/go.sh <scenario>
+LAKE_SANDBOX=http://lake-b.localhost:8082 node demos/explore/claim.mjs <run-folder>
+```
+
+What crosses between the two today (`check` shows it): search finds the other Lake's houses, specialists and agents (each node re-verifies their cards from the agents' own addresses); signed messages, menus, carts and knocks go both ways; an agent on one Lake can be a house's assistant on the other. Money doesn't: a receipt from Lake A's payments agent reads on Lake B as "not by the payments agent", so B's seller sees the cart unpaid. And the demo grocers have the same WebID on every Lake, so each node keeps its own and drops the peer's.
+
 ## Conventions
 
 - TypeScript, ESM, Node 20+. pnpm workspaces. One package per component under `packages/`.

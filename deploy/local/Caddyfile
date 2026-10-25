@@ -1,0 +1,36 @@
+# A local staging Lake (deploy/local/docker-compose.yml): plain HTTP, the public sandbox's paths.
+{
+	auto_https off
+	admin off
+}
+
+# This Lake, at http://lake-<id>.localhost:<port>. Caddy keeps the Host header, so the pod server sees its public host.
+:{$LAKE_PORT} {
+	handle_path /s/* {
+		reverse_proxy specialists:4300
+	}
+	handle_path /g/* {
+		reverse_proxy grocers:4810
+	}
+	handle /pods/* {
+		reverse_proxy houses:3000
+	}
+	handle /mcp* {
+		reverse_proxy mcp:4800 {
+			flush_interval -1
+		}
+	}
+	handle /t/* {
+		reverse_proxy houses:4000
+	}
+	handle {
+		reverse_proxy lake-node:7000
+	}
+}
+
+# The other Lake, for containers in this one: its host name resolves to this Caddy here, so pass it on to its own Caddy.
+:{$PEER_PORT} {
+	reverse_proxy lake-{$PEER_ID}-caddy:{$PEER_PORT} {
+		flush_interval -1
+	}
+}
