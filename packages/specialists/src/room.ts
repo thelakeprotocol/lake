@@ -1,11 +1,13 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import type { AgentCard, LakeData } from '@thelakeprotocol/core';
 import { specialist, type SpecialistOptions } from './review.js';
 
 /**
  * Rooms (SPEC §11.6): a few agents agree to meet in one place, and every member reads the same messages in the same
  * order (one-to-one messages can't give a group that).
  *
- * - In a **room**, members speak as themselves, so what they say can be quoted as theirs.
+ * - In a **room**, members speak as themselves, so what they say can be quoted as theirs: each message's signed envelope is
+ *   kept, and `room.read { signed: true }` returns it with its sender's card, as evidence anyone can check.
  * - A **bubble** is blind: a private space with no capabilities attached that this agent can't read. Each member joins
  *   with a fresh encryption key for that bubble alone (so a key can't be matched to its card), appears as a handle
  *   (m1, m2…), and says things as a JWE encrypted for the members' keys (RFC 7516, several recipients). Here there is
@@ -15,7 +17,8 @@ import { specialist, type SpecialistOptions } from './review.js';
  * What agents are told about a bubble is facts only, never a suggestion of what to do there.
  */
 interface Member { webId: string; handle: string; joinedAt: string; left?: string; /** A bubble member's encryption key for this bubble alone. */ key?: Record<string, unknown> }
-interface Said { seq: number; at: string; from: string; body: unknown; /** Said in a room still waiting to start. */ lobby?: boolean }
+interface Said { seq: number; at: string; from: string; body: unknown; /** Said in a room still waiting to start. */ lobby?: boolean;
+  /** In a room (never a bubble): the room.say as its sender signed it, and its card's key in `Room.cards`. */ signed?: { card: string; envelope: LakeData['envelope'] } }
 interface Room {
   id: string;
   mode: 'room' | 'bubble';
@@ -26,6 +29,8 @@ interface Room {
   until: number;
   members: Member[];
   said: Said[];
+  /** In a room: the cards its members signed with, by key id, so a message read with `signed` checks on its own. */
+  cards?: Record<string, AgentCard>;
   /** Nothing is said until this many have joined, so nobody's opening is sealed before the others are in. */
   startWith?: number;
   /** A quorum that drops at a deadline (run 25): after `startBy`, it starts with `startMin` members present. */
@@ -89,9 +94,9 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       ...(r.startWith ? { start_with: r.startWith, started: !waitingFor, ...(waitingFor ? { needs: waitingFor } : {}), ...(r.startBy ? { start_by: new Date(r.startBy).toISOString(), start_min: r.startMin } : {}) } : {}) };
   };
 
-  const describe = `Rooms and bubbles: a few agents meet and all read the same messages in the same order. Open one with { kind: "room.open", id, topic, mode: "room" | "bubble", invite: [webIds] | "anyone", hours, start_with?, start_by?, start_min? } (start_with: it starts when that many have joined; until then a room is a lobby, its messages marked lobby, and a bubble is silent; start_by and start_min: at that time (ISO, or minutes from now) it starts with start_min if that many are in); members send room.join, room.say { body }, room.read { after, wait } (wait: up to 20 seconds for something new), room.leave; the opener may lower start_with with room.update; room.list shows what's open and how many more each needs. In a room, the room itself notes who joins and leaves and when it starts (from: "room"). In a room you speak as yourself. A bubble is private to its members, who appear as handles (m1, m2…); a message body may be any JSON value, and no message kinds are required. Nothing in a bubble can pay, sign, promise or open a house, and nothing said there binds anyone outside it.`;
+  const describe = `Rooms and bubbles: a few agents meet and all read the same messages in the same order. Open one with { kind: "room.open", id, topic, mode: "room" | "bubble", invite: [webIds] | "anyone", hours, start_with?, start_by?, start_min? } (start_with: it starts when that many have joined; until then a room is a lobby, its messages marked lobby, and a bubble is silent; start_by and start_min: at that time (ISO, or minutes from now) it starts with start_min if that many are in); members send room.join, room.say { body } (one message a second each), room.read { after, wait, signed } (wait: up to 20 seconds for something new; signed, in a room: each message as its sender signed it, with their cards, to quote or forward as evidence), room.leave; the opener may lower start_with with room.update; room.list shows what's open and how many more each needs. In a room, the room itself notes who joins and leaves and when it starts (from: "room"). In a room you speak as yourself. A bubble is private to its members, who appear as handles (m1, m2…); a message body may be any JSON value, and no message kinds are required. Nothing in a bubble can pay, sign, promise or open a house, and nothing said there binds anyone outside it.`;
 
-  const s = await specialist(o, 'Rooms', describe, 'room', async (p, from) => {
+  const s = await specialist(o, 'Rooms', describe, 'room', async (p, from, profile, card, envelope) => {
     const id = String(p.id ?? '');
     // A room is listed to whoever it invites (or to anyone, if anyone may join); a bubble's topic only to its invitees.
     if (p.kind === 'room.list') return { kind: 'room.list', rooms: [...rooms.values()].filter((r) => !r.closed && (r.invited === 'anyone' || r.invited.includes(from) || r.opener === from)).map((r) => (r.mode === 'bubble' && r.invited === 'anyone' && r.opener !== from && !r.members.some((m) => m.webId === from && !m.left) ? { ...view(r), topic: undefined, members: undefined } : view(r))) };
@@ -175,7 +180,11 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       const key = `${id}|${from}`;
       if (Date.now() - (lastSaid.get(key) ?? 0) < 1000) return { kind: 'refused', problems: ['one message a second'] };
       lastSaid.set(key, Date.now());
-      const said: Said = { seq: r.said.length + 1, at: new Date().toISOString(), from: me.handle, body: p.body, ...(waitingFor ? { lobby: true } : {}) };
+      // In a room, members speak as themselves: their signed words are kept, so an agreement made here can be shown elsewhere
+      // (run 35's had to send theirs again one-to-one). A bubble keeps no signatures: it is blind.
+      const kid = profile.publicJwk.kid!;
+      if (r.mode === 'room') (r.cards ??= {})[kid] = card;
+      const said: Said = { seq: r.said.length + 1, at: new Date().toISOString(), from: me.handle, body: p.body, ...(waitingFor ? { lobby: true } : {}), ...(r.mode === 'room' ? { signed: { card: kid, envelope } } : {}) };
       r.said.push(said);
       wake(id);
       if (r.said.length > 2000) close(r, 'long enough');
@@ -188,7 +197,11 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     const wait = Math.min(Math.max(Number(p.wait ?? 0), 0), MAX_WAIT) * 1000;
     if (wait && (r.said.length <= after || waitingFor)) await new Promise<void>((done) => { const t = setTimeout(done, wait); (waiting.get(id) ?? waiting.set(id, new Set()).get(id)!).add(() => { clearTimeout(t); done(); }); });
     const stillWaiting = r.startWith && !started(r) ? Math.max(0, r.startWith - present(r)) : 0;
-    return { kind: 'room.messages', id, messages: r.said.filter((x) => x.seq > after).slice(0, 200), members: memberList(r), last: r.said.length, ...(r.startWith ? { started: !stillWaiting, ...(stillWaiting ? { needs: stillWaiting } : {}) } : {}) };
+    const page = r.said.filter((x) => x.seq > after).slice(0, 200);
+    const withSigned = p.signed === true && r.mode === 'room';
+    const messages = page.map(({ signed, ...m }) => (withSigned && signed ? { ...m, signed } : m));
+    const cards = withSigned ? Object.fromEntries([...new Set(page.map((m) => m.signed?.card).filter((k): k is string => !!k))].map((k) => [k, r.cards?.[k]])) : undefined;
+    return { kind: 'room.messages', id, messages, ...(cards ? { cards, note: 'each message\'s signed: { card: <key in cards>, envelope }; to check or forward one, pass { card: cards[key], envelope } to lake_verify' } : {}), members: memberList(r), last: r.said.length, ...(r.startWith ? { started: !stillWaiting, ...(stillWaiting ? { needs: stillWaiting } : {}) } : {}) };
     // Quiet, like the tally: who talks in which room, and when, is the members' business (the first bubble's handles were
     // matched to names through the feed).
   }, [], true);

@@ -110,8 +110,9 @@ export async function inspect(target: string, o: { publicOnly: boolean; sandbox:
   const why = (r: Record<string, unknown>) => String(r.code ?? (r.problems as string[] | undefined)?.[0] ?? r.kind);
   const message = async (payload: Record<string, unknown>, now?: number) => ({ lake: '0.1', card: probe.card, envelope: (await signMessage(payload, probe.id, { iss: probe.webId, now, ttl: 60 })) as LakeData['envelope'] }) as LakeData;
 
-  // Nothing the agent would act on: it should answer, signed, and say it doesn't know what this is.
-  const ping = await message({ kind: 'ping' });
+  // Nothing the agent would act on: it should answer, signed, and say it doesn't know what this is. Marked as a test ping, so
+  // an assistant's connector files it quietly instead of showing it as mail (run 35).
+  const ping = await message({ kind: 'inspector.ping' });
   let first: Record<string, unknown>;
   try {
     first = await send(ping);
@@ -142,9 +143,9 @@ export async function inspect(target: string, o: { publicOnly: boolean; sandbox:
   }
   const forged = structuredClone(probe.card);
   forged.capabilities!.extensions[0]!.params!.ownerDomain = 'trusted-hospital.example';
-  await trick('refuses a forged card', { ...(await message({ kind: 'ping' })), card: forged }, 'the card was edited after it was signed');
-  await trick('refuses an unsigned card', { ...(await message({ kind: 'ping' })), card: { ...probe.card, signatures: [] } }, 'the card carries no signature');
-  await trick('refuses an expired message', await message({ kind: 'ping' }, Date.now() - 10 * 60_000), 'the message expired ten minutes ago');
+  await trick('refuses a forged card', { ...(await message({ kind: 'inspector.ping' })), card: forged }, 'the card was edited after it was signed');
+  await trick('refuses an unsigned card', { ...(await message({ kind: 'inspector.ping' })), card: { ...probe.card, signatures: [] } }, 'the card carries no signature');
+  await trick('refuses an expired message', await message({ kind: 'inspector.ping' }, Date.now() - 10 * 60_000), 'the message expired ten minutes ago');
 
   if (o.nodeUrl) {
     const listed = await fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards');

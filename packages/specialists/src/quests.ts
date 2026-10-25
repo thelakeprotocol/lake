@@ -126,7 +126,7 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
   follow();
 
   const badges = new Map<string, string>();
-  const s: Specialist = await specialist<Reply>(o, 'Quests', 'Things to try in the sandbox, checked against what actually happened on the Lake. Finish a track, get a signed badge. Send { kind: "quests" }, { kind: "progress", who } or { kind: "leaderboard" }.', 'quests', async (p, _from, caller) => {
+  const s: Specialist = await specialist<Reply>(o, 'Quests', 'Things to try in the sandbox, checked against what actually happened on the Lake. Finish a track, get a signed badge. Send { kind: "quests" }, { kind: "progress", who } or { kind: "leaderboard" }.', 'quests', async (p, _from, caller, card) => {
     if (p.kind === 'quests') return { kind: 'quests', house: HOUSE, agent: AGENT, ask: 'send { kind: "progress", who: "<your house URL, an agent\'s domain, or a map id>" }; leave out who for yourself' };
     if (p.kind === 'leaderboard') {
       const top = [...done].map(([who, set]) => ({ who, label: labels.get(who) ?? who, done: set.size, of: who.startsWith('house:') ? HOUSE.length : AGENT.length }))
@@ -136,13 +136,14 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
     if (p.kind !== 'progress') return { kind: 'refused', problems: ['send { kind: "quests" }, { kind: "progress", who } or { kind: "leaderboard" }'] };
     let who: string;
     try {
-      who = await resolve(typeof p.who === 'string' ? p.who : undefined, caller);
+      who = await resolve(typeof p.who === 'string' ? p.who : undefined, caller, card);
     } catch (e) {
       return { kind: 'refused', problems: [(e as Error).message] };
     }
     // The public feed never says who an agent dealt with (SPEC §8), so an agent proves those quests itself: the signed
     // replies it got (lake_inbox { history: true } has them), checked here against their signers' cards.
-    if (Array.isArray(p.evidence) && !p.who) for (const ev of (p.evidence as unknown[]).slice(0, 50)) for (const q of await creditedBy(ev)) mark(who, q);
+    // Run 35's agent named itself by its webId and its evidence was ignored: it counts whenever who is the caller.
+    if (Array.isArray(p.evidence) && who === await resolve(undefined, caller)) for (const ev of (p.evidence as unknown[]).slice(0, 50)) for (const q of await creditedBy(ev)) mark(who, q);
     const track = who.startsWith('house:') ? 'house' : 'agent';
     const list = track === 'house' ? HOUSE : AGENT;
     const mine = done.get(who) ?? new Set<string>();
@@ -160,7 +161,7 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
       badge = await s.vc('LakeBadge', { id: who, badge: track === 'house' ? 'Sandbox housekeeper' : 'Sandbox explorer', quests: list.map((q) => q.id) }, 3650);
       badges.set(who, badge);
     }
-    return { kind: 'progress', who, track, done: n, of: list.length, quests, badge, next: quests.find((q) => !q.done)?.how, ...(track === 'agent' ? { evidence: 'Quests with houses and specialists count from evidence you show: add evidence: [the signed replies you got, { card, envelope } each] to this message, for yourself (no who).' } : {}) };
+    return { kind: 'progress', who, track, done: n, of: list.length, quests, badge, next: quests.find((q) => !q.done)?.how, ...(track === 'agent' ? { evidence: 'Quests with houses and specialists count from evidence you show: add evidence: [the signed replies you got, { card, envelope } each] to this message, for yourself (leave out who, or name yourself).' } : {}) };
   });
   return s;
 
@@ -183,17 +184,21 @@ export async function createQuests(o: SpecialistOptions & { nodeUrl: string; dat
     }
   }
 
-  /** A map id, a house or agent URL (its card is fetched and verified), a domain, or (nothing) the caller. */
-  async function resolve(who: string | undefined, caller: LakeProfile): Promise<string> {
+  /** A map id, a house or agent URL, card URL or webId (its listed card, verified), a domain, or (nothing) the caller. */
+  async function resolve(who: string | undefined, caller: LakeProfile, callerCard?: AgentCard): Promise<string> {
     const idOf = (pr: LakeProfile) => (pr.role === 'house' ? `house:${pr.publicJwk.kid!.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}` : `agent:${pr.ownerDomain}`);
     if (!who) return idOf(caller);
     if (/^(house|agent):/.test(who)) return who;
     if (/^https?:\/\//.test(who)) {
       const base = who.replace(/\/$/, '');
-      const url = base.endsWith('/a2a') ? cardUrlFor(base) : `${base}/.well-known/agent-card.json`;
-      const listed = await fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards');
-      // Only cards the node already verified and lists: the quests agent doesn't fetch arbitrary URLs.
-      const card = listed?.find((l) => l.card.supportedInterfaces[0]?.url.replace(/\/$/, '') === base || cardUrlFor(l.card.supportedInterfaces[0]?.url ?? '') === url)?.card;
+      // Any of the addresses an agent goes by: its A2A URL, its base, its card's URL, or its webId (run 35's agent used
+      // its webId, and was told it wasn't listed while the Inspector, given its URL, found it).
+      const url = base.endsWith('agent-card.json') ? base : base.endsWith('/a2a') ? cardUrlFor(base) : `${base}/.well-known/agent-card.json`;
+      const names = (c: AgentCard) => [cardUrlFor(c.supportedInterfaces[0]?.url ?? ''), String((c.capabilities?.extensions?.[0]?.params as { webId?: string } | undefined)?.webId ?? '')];
+      if (callerCard && (names(callerCard).includes(url) || who === caller.webId)) return idOf(caller);
+      // Only cards the node already verified and lists (idle ones too): the quests agent doesn't fetch arbitrary URLs.
+      const listed = await fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards?idle=1');
+      const card = listed?.find((l) => names(l.card).includes(url) || names(l.card)[1] === who)?.card;
       if (!card) throw new Error(`the sandbox node doesn't list ${who}; join first, or give a map id like house:abcd1234`);
       return idOf(await verifyLakeCard(card));
     }

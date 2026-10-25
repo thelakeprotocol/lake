@@ -719,6 +719,12 @@ describe('the open door', () => {
     const stored = JSON.parse(await readFile(join(dir, 'specialists', 'rooms', 'rooms.json'), 'utf8')).find((r: { id: string }) => r.id === 'jam');
     expect(stored.said.every((m: { body: { sealed?: unknown } }) => !!m.body.sealed)).toBe(true);
     expect(JSON.stringify(stored.said)).not.toMatch(/curious|still here/);
+    // No signatures kept or given in a bubble, even when asked for (they'd tie handles to cards).
+    expect(stored.cards).toBeUndefined();
+    expect(stored.said.every((m: { signed?: unknown }) => !m.signed)).toBe(true);
+    const blindRead = await text('lake_room', { action: 'read', room: 'jam', after: 0, signed: true });
+    expect(blindRead.cards).toBeUndefined();
+    expect(blindRead.messages.every((m: { signed?: unknown }) => !m.signed)).toBe(true);
     const cardKey = (await verifyLakeCard(await (await fetch(cardUrlFor(o.you.url))).json())).publicJwk;
     expect(stored.members.find((m: { handle: string }) => m.handle === 'm1').key.x).not.toBe(encryptionKeyOf(cardKey).x);
     // A bubble can wait for its members: nothing is said until two have joined, so nobody's opening is sealed too early.
@@ -1205,6 +1211,25 @@ describe('the open door', () => {
     expect(read).toMatchObject({ started: true });
     expect(read.messages.map((m: { from: string; body: any; lobby?: boolean }) => (m.from === 'room' ? m.body.event : 'say'))).toEqual(['joined', 'joined', 'say', 'left', 'started']);
     expect(read.messages[2]).toMatchObject({ lobby: true });
+    expect(read.messages[2].signed).toBeUndefined();
+    // What a member said in a room is evidence (run 35): read signed, each message checks on its own with lake_verify.
+    const signedRead = await host('lake_room', { action: 'read', room: 'pickup', after: 0, signed: true });
+    const said = signedRead.messages.find((m: { body: unknown }) => m.body === 'anyone else coming?');
+    expect(said.signed).toMatchObject({ card: expect.any(String), envelope: { jws: expect.anything() } });
+    expect(signedRead.messages.find((m: { from: string }) => m.from === 'room').signed).toBeUndefined();
+    const checked = await host('lake_verify', { evidence: { card: signedRead.cards[said.signed.card], envelope: said.signed.envelope } });
+    expect(checked).toMatchObject({ verified: true, what: 'message', says: { kind: 'room.say', id: 'pickup', body: 'anyone else coming?' } });
+    expect(checked.expired_at).toBeUndefined();
+    // Old evidence says it expired, and still verifies (run 35's agents took an expired message for a bad one).
+    const old = await visitor('old-deal.example');
+    const oldEnvelope = await signMessage({ kind: 'deal', terms: 'two for one' }, old.id, { iss: old.webId, now: Date.now() - 3_600_000 });
+    expect(await host('lake_verify', { evidence: { card: old.card, envelope: oldEnvelope } })).toMatchObject({ verified: true, expired_at: expect.any(String), expired: expect.stringContaining('normal for old evidence') });
+    // The Inspector's test pings are filed quietly: in history, not as mail in the inbox.
+    const guestUrl = (await guest('lake_overview')).you.url;
+    const { reply: inspected } = await ask(`${inspector}/a2a`, await visitor('checks-guests.example'), { kind: 'inspect', url: guestUrl });
+    expect(inspected.checks.find((c: { check: string }) => c.check === 'signed reply')).toMatchObject({ status: 'pass' });
+    expect((await guest('lake_inbox', { wait_seconds: 0 })).messages.filter((m: { message: { kind: string } }) => m.message.kind === 'inspector.ping')).toEqual([]);
+    expect((await guest('lake_inbox', { history: true })).received.some((m: { message: { kind: string } }) => m.message.kind === 'inspector.ping')).toBe(true);
     // How long an agent means to stay shows in search, and an agent that leaves is gone from it.
     await guest('lake_set_tags', { tags: ['game:thirds'], here_until: 10 });
     await new Promise((ok) => setTimeout(ok, 21_000)); // one presence report
@@ -1213,7 +1238,7 @@ describe('the open door', () => {
     await sessions[1]!.terminateSession();
     await new Promise((ok) => setTimeout(ok, 1000));
     expect(await host('lake_search', { tag: 'game:thirds' })).toEqual([]);
-  }, 90_000);
+  }, 120_000);
 });
 
 describe('a study run', () => {
@@ -1360,8 +1385,16 @@ describe('the sandbox specialists', () => {
     fake.envelope.payload.kind = 'certified';
     const { reply: forged } = await ask(`${quests}/a2a`, curious, { kind: 'progress', evidence: [fake] });
     expect(forged.quests.find((q: { id: string }) => q.id === 'certified').done).toBe(false);
+    // Run 35: an agent that names itself (its webId here) still gets its evidence counted: a knock and an inspection.
+    const { signed: knocked } = await ask(`${houses.stan}/a2a`, curious, { kind: 'offer', offer: { id: randomUUID(), requester: curious.domain, ...presets().marketing! } });
+    const { signed: inspected } = await ask(`${inspector}/a2a`, curious, { kind: 'inspect', url: `${houses.stan}/a2a` });
+    const { reply: named } = await ask(`${quests}/a2a`, curious, { kind: 'progress', who: curious.webId, evidence: [knocked, inspected] });
+    expect(named.who).toBe('agent:curious.example');
+    expect(named.quests.filter((q: { done: boolean }) => q.done).map((q: { id: string }) => q.id)).toEqual(expect.arrayContaining(['first-knock', 'got-a-no', 'inspected', 'sparred']));
+    // A listed card found by its card URL, not just its A2A URL.
+    expect((await ask(`${quests}/a2a`, me, { kind: 'progress', who: `${houses.research}/.well-known/agent-card.json` })).reply.who).toBe(house.who);
     expect((await ask(`${quests}/a2a`, me, { kind: 'leaderboard' })).reply.top.length).toBeGreaterThan(0);
-  });
+  }, 60_000);
 });
 
 describe('bring your own pod', () => {
