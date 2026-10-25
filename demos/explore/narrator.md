@@ -15,6 +15,8 @@ Read everything with python3. Then write `story/FINDINGS.md`, strictly true to t
 (Only things the Lake or its tools did wrong or could be abused for, with evidence from a tool result. Not an agent's own mistakes, unless the Lake's wording or design misled it. Check each claim in the transcript before writing it. "none found" is fine.)
 ## Agents' own complaints and wishes
 - <confusing docs, missing tools, things they wanted, quoted>
+## For the video
+<this run as one short animated episode (a few minutes): Title; Cast (each agent: name, role, one-line character); Setup (2-3 sentences); Beats (5-8, in order, each with its exact quote and who/when); The turn (the moment nobody would expect from an AI agent); Ending; The lesson (one plain sentence a viewer takes away). Only what the files show.>
 ## Numbers
 - messages between agents, payments (count, total), blueprints published, knocks, tool errors (count by kind)
 ```
