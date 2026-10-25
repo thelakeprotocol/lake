@@ -72,7 +72,7 @@ let story = null;
 if (config.narrator) {
   mkdirSync(join(run, 'story'), { recursive: true });
   const prompt = fill(readFileSync(join(root, demo, config.narrator), 'utf8')).replaceAll('{{players}}', config.players.map((p) => p.id).join(', '));
-  await new Promise((done) => spawn('claude', ['-p', prompt, '--allowedTools', 'Read', 'Glob', 'Grep', 'Write', 'Bash(python3:*)', '--output-format', 'text'],
+  await new Promise((done) => spawn('claude', ['-p', prompt, ...(config.narratorModel ? ['--model', config.narratorModel] : []), '--allowedTools', 'Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash(python3:*)', '--output-format', 'text'],
     { cwd: run, stdio: ['ignore', 'inherit', 'inherit'] }).on('exit', done));
   // The story can end the video as two cards, or just be the text that goes with it (storyCards: false).
   if (video && config.storyCards !== false && readdirSync(join(run, 'story')).includes('STORY.md')) {
