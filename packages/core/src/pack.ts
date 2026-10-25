@@ -38,8 +38,18 @@ export interface LakePack {
     /** Terms an owner may leave as `auto`, worked out inside the house from their own claims (e.g. a price band they can afford). */
     auto?: (claims: Claim[]) => Record<string, string | number>;
   };
-  /** The authority whose authorisation an agent must carry before a house sends it an intent (a regulator). */
-  authority?: { name: string; description: string; domain: string; path: string; register: string[] };
+  /**
+   * The authority (a register, a regulator) whose authorisation an agent must carry to ask for this pack's fields
+   * or hear its intents (SPEC §5.2).
+   */
+  authority?: {
+    name: string; description: string; domain: string; path: string; register: string[];
+    /**
+     * Whether a certified study may read this pack's fields without the register's authorisation (a study lets only
+     * totals out). Default false: a register's fields go only to agents on it, and no auditor certifies a study that reads them.
+     */
+    studies?: boolean;
+  };
   /** What an owner hands over when they accept an offer: the issuer-signed original, so the asker can check it with the issuer. */
   release?: ('original' | 'credential' | 'claims')[];
   /** With release 'claims': which fields' claims go, and nothing else (a shopping list, not the receipts behind it). */
@@ -152,6 +162,20 @@ export const fieldSpec = (field: string): (PackField & { pack: LakePack }) | und
   for (const p of registry.values()) if (p.fields[field]) return { ...p.fields[field]!, pack: p };
   return undefined;
 };
+/**
+ * The fields a register guards (SPEC §5.2), by pack: those of `fields` whose pack names an authority, less any a
+ * certified study reads (`readByStudy`) where that pack lets studies read its fields. An agent needs the register's
+ * authorisation to ask for what's left.
+ */
+export function guardedFields(fields: string[], readByStudy: string[] = []): { pack: LakePack; fields: string[] }[] {
+  const out = new Map<LakePack, string[]>();
+  for (const f of new Set(fields)) {
+    const spec = fieldSpec(f);
+    if (!spec?.pack.authority || (spec.pack.authority.studies && readByStudy.includes(f))) continue;
+    out.set(spec.pack, [...(out.get(spec.pack) ?? []), f]);
+  }
+  return [...out].map(([pack, fields]) => ({ pack, fields }));
+}
 /** Ready-made offers the loaded packs provide, by name (`gp`, `marketing`…), for CLIs, demos and tests. */
 export const exampleOffers = () => Object.assign({}, ...packs().map((p) => p.examples?.offers ?? {})) as Record<string, Omit<import('./offer.js').Offer, 'id' | 'requester'>>;
 /** Studies the loaded packs offer as examples (what sandbox sponsors and assistants may run). */

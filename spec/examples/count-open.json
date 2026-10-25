@@ -31,7 +31,7 @@
             "tags": [],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "iNylcEyqKuYttdi8zVf--pFbMsv65NVgQf4OXqQ1joA",
+              "x": "47n_uIo4wYKrIkkAeEAO5wrOJq9e_OhTJqeuGn1uCJI",
               "kty": "OKP",
               "kid": "visitor-uni.example",
               "alg": "EdDSA"
@@ -53,7 +53,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "9meV6O0-gZPmaC6flwa4b0sKs8WwWasINYM0QoVOxe7cKnhuIRnaOShRpCO8nxJmkylEsBIjSXttJ7SH32rIDg"
+        "signature": "rTOTB6ngGkIn7pKdVK_WwqcCtCz0MGJEXIfH-4QkTIlPQPvhuB92qzdhqIOI8Q20iqclQxsIMstYj0UD2meyAQ"
       }
     ]
   },
@@ -63,19 +63,19 @@
       "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
       "length": 8,
       "min": 20,
-      "deadline": "2026-10-24T05:21:21.553Z",
+      "deadline": "2026-10-25T10:47:17.131Z",
       "helper": {
         "url": "https://teller-b.example/a2a",
         "domain": "teller-b.example"
       },
-      "nonce": "7ec65b3e-6ce9-49b3-8c1e-33fad07831df",
-      "iat": 1792815681,
-      "exp": 1792815981,
+      "nonce": "c808e9ad-21ba-4a7c-861a-8ac2374d8b6d",
+      "iat": 1792921637,
+      "exp": 1792921937,
       "iss": "https://uni.example/#agent"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
-      "signature": "ZbVuHnbBKajsObBOywjEYU8tNtxAH9dW_RBdefWJH8t-SaNUN97YyW46_OBQvgSrCzeH0lkdycPQc5C2rIpmCA"
+      "signature": "zjYMDLnHBPqD6vLWfeJ_9g7N_-Gv9ZZDia4C0FbnkeqPMJKOeymqnB4stI5Qw3VQRyc3O1aD7yYen0RCzySfCg"
     }
   }
 }

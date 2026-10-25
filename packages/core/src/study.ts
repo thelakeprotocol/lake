@@ -56,6 +56,9 @@ export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
     if (!spec) problems.push(`question "${p?.name}" reads "${p?.field}", which no pack here declares`);
     else if (!OPS[spec.kind].includes(p.op) || !valueOk) problems.push(`question "${p.name}" can't ask "${p.op}" of ${spec.kind} field "${p.field}"`);
     if (spec?.pack.identifying?.includes(p?.field)) problems.push(`"${p.field}" is identifying; no study may read it`);
+    // A register's fields go only to agents on it, unless its pack lets studies read them (SPEC §5.2): run 28's rogue
+    // padded a study with shopping fields and got it certified.
+    if (spec?.pack.authority && !spec.pack.authority.studies) problems.push(`question "${p.name}" reads "${p.field}", which ${spec.pack.id}'s register (${spec.pack.authority.name}) keeps for agents on it: its pack lets no study read it`);
   }
   if (s?.privacy?.mechanism !== 'dap-prio3') problems.push('answers must be counted by two tellers, Leader and Helper, with Prio3 proofs (dap-prio3)');
   else {

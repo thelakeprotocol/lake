@@ -32,7 +32,7 @@ export interface DispatchOptions {
   auditor: string;
   study: Study;
   priceUsd: number;
-  /** Extra fields to ask for beyond what the study reads (e.g. postcode, to see houses push back). */
+  /** Extra fields to ask for beyond what the study reads (e.g. postcode, to see houses push back): in the offer only, never in the ethics protocol. */
   extraFields?: string[];
   concurrency?: number;
   /** How long to wait for owners who were asked to tap Allow. 0: don't wait. */
@@ -117,8 +117,9 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
     log('mandate', `${o.money.human.card.name} signed an Intent Mandate: this study only, budget $${o.money.budgetUsd}`);
   }
 
+  // Ethics approves what the study reads, nothing more (data minimisation); any extras go in the offer, for owners' rules to bargain away.
   log('ethics', 'asking the ethics agent to review the protocol');
-  const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study, purpose: 'research', fields, retention: 'none' } });
+  const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study, purpose: 'research', fields: studyFields(study), retention: 'none' } });
   if (ethics.reply.kind !== 'approved') throw new Error(`ethics refused: ${(ethics.reply.problems ?? []).join('; ')}`);
   // Named by its signed domain, not the address it was reached at (inside a hosting setup, an internal hostname).
   log('ethics', `approved by ${ethics.from.ownerDomain}`);

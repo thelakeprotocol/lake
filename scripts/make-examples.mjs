@@ -49,7 +49,8 @@ const sid = studyId(study);
 write('study.json', { id: sid, study }, 'A declarative study. Its id is urn:lake:study: + the digest of its canonical JSON.');
 
 const fields = ['age_band', 'medications', 'readmissions', 'postcode'];
-const ethicsVc = await vc(ethics, 'LakeEthicsApproval', { id: sid, question: study.question, purpose: 'research', fields, sponsor: visitor.webId, reviewedBy: 'example' });
+// The approval covers what the study reads (data minimisation); the offer also asks for the postcode, for owners' rules to bargain over.
+const ethicsVc = await vc(ethics, 'LakeEthicsApproval', { id: sid, question: study.question, purpose: 'research', fields: study.predicates.map((p) => p.field), sponsor: visitor.webId, reviewedBy: 'example' });
 const auditVc = await vc(auditor, 'LakeStudyCertificate', { id: sid, checks: ['declarative study, no code', 'answers split between two tellers run by different parties', 'totals only', 'no table from fewer than 20 houses'] });
 write('ethics-approval.json', { credential: ethicsVc, card: ethics.card, decoded: decode(ethicsVc) }, 'An ethics approval (VC-JOSE) for this study and these fields, with its issuer\'s card. Counts only if the owner trusts ethics.example.');
 write('study-certificate.json', { credential: auditVc, card: auditor.card, decoded: decode(auditVc) }, 'An auditor\'s certificate for the study. Without one from a trusted auditor, no house runs it.');

@@ -34,7 +34,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "Je2kf9cHkrTvge7XqUkjvn50aSfFPAxu9sSyazB92Uk",
+              "x": "5ctDTnDRm2NYGdn9vHI4z2_QfT1Q_c4nrdRek-7vxsA",
               "kty": "OKP",
               "kid": "specialist-teller-a.example",
               "alg": "EdDSA"
@@ -56,7 +56,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtdGVsbGVyLWEuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "LV0c5vWrT1Orcf7PknpndgTpZcD0s0kX18hWauThpXKE6U7L8Cmtu4jtQ5AG-XiptlNtEDVrmZz5-409q9tGCQ"
+        "signature": "5MDjjYgi5Y3vIcxOaEsvhQRAvsliNuD4mi-Uo0vwQCgQjTB-eKohYqEAsH_ikVJzTHJ_16lrZ1tZ7I0Szkr5AA"
       }
     ]
   },
@@ -68,38 +68,38 @@
       "rejected": 0,
       "share": [
         {
-          "$n": "162858794069925778115926281558157113035"
+          "$n": "279830981909763117653458757512653545745"
         },
         {
-          "$n": "87384904219959238825366892031238120828"
+          "$n": "295602747622928835625840201302827024310"
         },
         {
-          "$n": "189708323244620637353812231528493895460"
+          "$n": "187289618894238104194110638508312477004"
         },
         {
-          "$n": "222233742840564693571769301284968107521"
+          "$n": "115827183323894595110854843172807659537"
         },
         {
-          "$n": "305270499749360654831757541412106183189"
+          "$n": "73806103638300178456958884876065441056"
         },
         {
-          "$n": "208952884595463995604660604848612027083"
+          "$n": "292512507538988446918151333936799785557"
         },
         {
-          "$n": "214735866328821602688330319848356460125"
+          "$n": "3750542862192646219652214033848680607"
         },
         {
-          "$n": "275604157171298896052321817055946361064"
+          "$n": "132149318669191236599978660168933058432"
         }
       ],
-      "nonce": "86e2504c-3216-401e-8951-a084d3283bd2",
-      "iat": 1792815681,
-      "exp": 1792815981,
+      "nonce": "e993b546-57f6-48d0-9e2b-113917a9f691",
+      "iat": 1792921637,
+      "exp": 1792921937,
       "iss": "https://teller-a.example/#teller"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtdGVsbGVyLWEuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "6gmKDbBpSaV9kkl6Ct5Nvwibm0wBG5brBE-kpIyrLJ0eMkkEYsQK40gdLk_mDm6lGI9tKzV-Y5vLlAryc8YcDw"
+      "signature": "cTbd9dLUrSxFSZvRX35uy0uO6MULKUL097Jc6F1rdl-VeNwVcXdGrAnGZD8y-IvwfFRTi3JJbIcCcD_PCdQbBw"
     }
   }
 }

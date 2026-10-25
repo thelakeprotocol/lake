@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, consentRecord, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, consentRecord, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -224,23 +224,28 @@ export class Housekeeper {
       if (!tellers.ok) return decide('decline', `its answers would go to tellers your owner doesn't trust: ${tellers.why}`, {}, 'this house does not trust the tellers this study names');
       auditCertified = true;
       const ethics = await checkAttachment(p.attachments?.ethics, { trusted: this.o.trust.ethics, type: 'LakeEthicsApproval', subject: id, sandbox: this.o.sandbox });
+      // An ethics approval is of the study: it must cover every field the study reads. Fields an offer adds beyond those
+      // are never read by the study (only its one cell leaves), and approved by nobody: the owner's rules bargain them
+      // away (a bloc dropping the postcode), and the owner is told.
       const approvedFields = ethics.ok ? ((ethics.vc.credentialSubject.fields as string[] | undefined) ?? []) : [];
+      const reads = studyFields(p.study);
+      const unread = offer.fields.filter((f) => !reads.includes(f) && !approvedFields.includes(f));
       if (!ethics.ok) notes.push(`no ethics approval you trust: ${ethics.why}`);
-      else if (offer.fields.some((f) => !approvedFields.includes(f))) notes.push('asks for more fields than its ethics approval covers');
+      else if (reads.some((f) => !approvedFields.includes(f))) notes.push('its ethics approval does not cover every field the study reads');
       else ethicsApproved = true;
+      if (unread.length) notes.push(`also asks for ${unread.join(', ')}, which the study never reads and no ethics approval covers`);
     }
     if (this.o.sandbox) notes.push('sandbox Lake: the visitor domain was not proved');
-    // A pack with a register guards its fields (SPEC §5.3): outside a certified study, only an agent showing that register's
-    // authorisation, from a regulator the owner trusts, may ask for them. Run 24's unregistered grocer put eight requests for
-    // shopping lists on owners' phones with no warning; the register only stood at the quote door.
-    if (!auditCertified) {
-      for (const pk of new Set(offer.fields.map((f) => fieldSpec(f)?.pack).filter((x): x is LakePack => !!x?.authority))) {
-        const auth = await checkAttachment(p.attachments?.authorisation, { trusted: this.o.trust.regulators, type: 'LakeAuthorisation', subject: visitorWebId, sandbox: this.o.sandbox });
-        if (auth.ok && auth.vc.credentialSubject.pack === packId(pk)) continue;
-        const why = `asks for ${packId(pk)} fields without ${pk.authority!.name}'s authorisation (${auth.ok ? 'it is for another pack' : auth.why})`;
-        this.declinedAt.set(`${visitorWebId}|${offer.purpose}`, Date.now());
-        return decide('decline', why, { code: 'unauthorised' }, `declined: ${offer.fields.filter((f) => fieldSpec(f)?.pack === pk).join(', ')} belong to ${packId(pk)}, and only agents on ${pk.authority!.name} may ask for them: attach its authorisation (attachments.authorisation), or ask through a certified study`);
-      }
+    // A pack with a register guards its fields (SPEC §5.2): only an agent showing that register's authorisation, from a
+    // regulator the owner trusts, may ask for them; a certified study may read them only if the pack says studies may.
+    // Run 24's unregistered grocer put eight requests for shopping lists on owners' phones with no warning; run 28's rogue
+    // padded a certified study with shopping fields, and the study's certificate waved them through.
+    for (const { pack: pk, fields } of guardedFields(offer.fields, auditCertified && p.study ? studyFields(p.study) : [])) {
+      const auth = await checkAttachment(p.attachments?.authorisation, { trusted: this.o.trust.regulators, type: 'LakeAuthorisation', subject: visitorWebId, sandbox: this.o.sandbox });
+      if (auth.ok && auth.vc.credentialSubject.pack === packId(pk)) continue;
+      const why = `asks for ${packId(pk)} fields without ${pk.authority!.name}'s authorisation (${auth.ok ? 'it is for another pack' : auth.why})${p.study ? ', in a study' : ''}`;
+      this.declinedAt.set(`${visitorWebId}|${offer.purpose}`, Date.now());
+      return decide('decline', why, { code: 'unauthorised' }, `declined: ${fields.join(', ')} belong to ${packId(pk)}, and only agents on ${pk.authority!.name} may ask for them: attach its authorisation (attachments.authorisation)${pk.authority!.studies ? ', or ask through a certified study that reads them' : `; ${packId(pk)} lets no study read them`}`);
     }
 
     // House manners (run 21's agents asked): a visitor turned down for a purpose isn't heard again on it for a day, and one
@@ -261,7 +266,7 @@ export class Housekeeper {
       // Another visitor asking for exactly the same, for the same reason: one of them may not be who it says (run 19 had a
       // second "GP" asking for what the first did).
       const twins = [...new Set(this.o.desk.pendingLike(offer.purpose, offer.fields).filter((x) => x.visitor.webId !== visitorWebId).map((x) => x.visitor.domain))];
-      const warnings = [...offerWarnings(offer), ...(twins.length ? [`${twins.join(' and ')} asked for exactly this too, for the same reason: check which one is really who it says`] : []), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
+      const warnings = [...offerWarnings({ ...offer, certifiedStudy: auditCertified }), ...(twins.length ? [`${twins.join(' and ')} asked for exactly this too, for the same reason: check which one is really who it says`] : []), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
       // The note is the visitor's words: never read by the rules, shown to the owner quoted, and only if it isn't trying to give orders.
       const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
       filed = this.o.desk.ask({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, studyId, toWire, unshardCounts, type Study } from './index.js';
+import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -86,6 +86,24 @@ describe('studies', () => {
     expect(auditStudy({ ...study, privacy: { ...study.privacy, tellers: [one] } }).ok).toBe(false);
     expect(auditStudy({ ...study, privacy: { mechanism: 'unary-randomized-response', epsilon: 2 } as never }).ok).toBe(false);
     expect(auditStudy({ ...study, predicates: [{ name: 'postcode', field: 'postcode' as never, op: 'present' }] }).ok).toBe(false);
+  });
+
+  it("are refused when they read a register's fields, unless its pack lets studies read them (run 28)", () => {
+    const authority = { name: 'Fixture Register', description: 'x', domain: 'register.example', path: 'register', register: ['member.example'] };
+    registerPack({ id: 'guarded', version: '1.0.0', title: 'Guarded', vocab: 'urn:guarded#', folder: 'guarded/', recordClass: 'urn:guarded#Record', fields: { basket: { class: 'urn:guarded#Basket', kind: 'code', label: 'basket' } }, authority });
+    registerPack({ id: 'open', version: '1.0.0', title: 'Open to studies', vocab: 'urn:open#', folder: 'open/', recordClass: 'urn:open#Record', fields: { balance: { class: 'urn:open#Balance', kind: 'number', label: 'balance' } }, authority: { ...authority, studies: true } });
+    const reads = (field: string, op: 'has_code' | 'present') => ({ ...study, predicates: [...study.predicates, op === 'has_code' ? { name: 'x', field, op, value: 'y' } : { name: 'x', field, op }] });
+    const padded = auditStudy(reads('basket', 'has_code'));
+    expect(padded.ok).toBe(false);
+    expect(padded.problems.join()).toMatch(/"basket", which guarded's register \(Fixture Register\) keeps for agents on it/);
+    expect(auditStudy(reads('balance', 'present')).ok).toBe(true);
+
+    // At a house's door: what an agent needs the register's authorisation for.
+    expect(guardedFields(['age_band', 'basket', 'balance'])).toEqual([{ pack: expect.objectContaining({ id: 'guarded' }), fields: ['basket'] }, { pack: expect.objectContaining({ id: 'open' }), fields: ['balance'] }]);
+    // A certified study reading them covers only the pack that lets studies in, and only the fields the study reads.
+    expect(guardedFields(['age_band', 'basket', 'balance'], ['age_band', 'basket', 'balance']).map((g) => g.fields)).toEqual([['basket']]);
+    expect(guardedFields(['balance'], ['age_band']).map((g) => g.fields)).toEqual([['balance']]);
+    expect(guardedFields(['age_band', 'medications'])).toEqual([]);
   });
 });
 

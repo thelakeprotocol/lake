@@ -55,19 +55,28 @@ export function toOdrl(o: Offer, assigner: string) {
 }
 
 /**
- * What an owner should look at twice before allowing an offer, in plain words: fields that identify them, fields no
- * use case here defines, and keeping the data for a year or more. Codes only; nothing the sender wrote as prose.
+ * What an owner should look at twice before allowing an offer, in plain words: sensitive (special-category) data asked
+ * for outside a certified study or to decide something about them, fields that identify them, fields no use case here
+ * defines, and keeping the data for a year or more. Codes only; nothing the sender wrote as prose.
  */
-export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose?: string }): string[] {
+export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose?: string; certifiedStudy?: boolean }): string[] {
   const identifying = new Set(identifyingFields());
   const known = new Set(offerableFields());
   const ids = o.fields.filter((f) => identifying.has(f));
   const unknown = o.fields.filter((f) => !identifying.has(f) && !known.has(f));
   const years = retentionYears(o.retention);
-  // Sensitive data asked for to decide something about you: an insurer pricing you on your health (run 19).
-  const special = o.purpose && PURPOSES[o.purpose]?.decides ? o.fields.filter((f) => fieldSpec(f)?.special) : [];
+  const special = o.fields.filter((f) => fieldSpec(f)?.special);
+  const named = special.join(', ').replace(/_/g, ' ');
+  const purpose = o.purpose ? PURPOSES[o.purpose] : undefined;
+  // Sensitive data asked for to decide something about you: an insurer pricing you on your health (run 19). Asked for
+  // outside a certified study, for anything else: run 28's made-up "carer" asked for conditions and reached the Allow
+  // button at 9 of 10 houses with nothing in red. A certified study lets out only a total; this lets out the person's own.
+  const sensitive = !special.length || !purpose ? ''
+    : purpose.decides ? `asks for sensitive data (${named}) to make decisions about you (${purpose.label})`
+    : !o.certifiedStudy ? `asks for sensitive data (${named}) for ${purpose.label}, outside any certified study: no auditor or ethics body checked it, and allowing it lets this agent use your own ${named}, not a total`
+    : '';
   return [
-    special.length ? `asks for sensitive data (${special.join(', ').replace(/_/g, ' ')}) to make decisions about you (${PURPOSES[o.purpose!]!.label})` : '',
+    sensitive,
     ids.length ? `asks for fields that identify you: ${ids.join(', ').replace(/_/g, ' ')}` : '',
     unknown.length ? `asks for fields no use case here defines: ${unknown.join(', ').replace(/_/g, ' ')}` : '',
     years >= 1 ? `wants to keep your data for ${years >= 2 ? `${Math.round(years)} years` : 'a year or more'}` : '',

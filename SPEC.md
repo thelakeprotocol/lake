@@ -158,7 +158,7 @@ A housekeeper answers every offer with exactly one of the following. What the vi
 | `ask` | The owner decides. A request goes to their approvals device. |
 | `counter` | The owner would join on different terms (fewer fields, higher price). |
 
-A request sent to the owner (`ask`) SHOULD say what to look at twice, worked out from codes, never from the sender's prose: fields that identify the owner (a pack's `identifying` fields), fields no loaded pack defines, and retention of a year or more. When there is any, the housekeeper's recommendation leans to No.
+A request sent to the owner (`ask`) SHOULD say what to look at twice, worked out from codes, never from the sender's prose: fields that identify the owner (a pack's `identifying` fields), fields no loaded pack defines, and retention of a year or more. It MUST say so plainly when the request asks for **special-category** fields (a pack marks them `special`: health, beliefs…) for a purpose that decides something about the owner (insurance, credit), or for any purpose outside a certified study: no auditor or ethics body checked such a request, and allowing it lets the asker use the owner's own data, not a total. The purpose it names is the asker's word. When there is any, the housekeeper's recommendation leans to No.
 
 Decisions MUST be computed in code from the owner's rules (see [`rules.yaml`](https://lake.doneinfifty.com/docs/rules)). A model MAY write the plain-English reason shown to the owner. A model MUST NOT decide, and MUST NOT hold the power to issue a grant.
 
@@ -183,13 +183,15 @@ An approval from a domain the owner does not list counts as no approval. Nobody 
 |---|---|---|---|
 | Health record | `LakeHealthRecordCredential` | the owner's WebID; `relatedResource.digestSRI` pins the original | a trusted issuer |
 | Converter certificate | `LakeConverterCertificate` | `urn:lake:converter:<package>@<version>` | a trusted auditor |
-| Ethics approval | `LakeEthicsApproval` | the study id; lists approved `fields` | a trusted ethics body |
+| Ethics approval | `LakeEthicsApproval` | the study id; lists approved `fields`: the ones the study reads | a trusted ethics body |
 | Study certificate | `LakeStudyCertificate` | the study id | a trusted auditor |
 | Authorisation | `LakeAuthorisation` | the agent's WebID; names the `pack` | a pack's authority (a register), trusted in `trust.regulators` |
 
 A study without a valid certificate from a trusted auditor MUST be declined, whatever the owner's rules say.
 
-**A register guards its pack's fields.** When a pack names an authority (a register of food businesses, of licensed lenders), a house MUST decline, before its rules, an offer outside a certified study that asks for that pack's fields unless it carries `attachments.authorisation`: a `LakeAuthorisation` for that pack, made out to the asking agent, from an authority the owner trusts (`code: "unauthorised"`). An authority SHOULD answer `{ kind: "registered", domain }` with a signed yes or no, so anyone can check an agent against it.
+**An ethics approval is of the study.** It counts (`ethics_approved` in the owner's rules) when it covers every field the study reads. An ethics body SHOULD approve only those (data minimisation): a protocol that declares fields its study never reads is refused. An offer MAY still ask for fields beyond the study's (a postcode, to bargain over); the study never reads them, no approval covers them, the house says so in its `notes`, and the owner's rules decide (a bloc drops them, §5.3).
+
+**A register guards its pack's fields.** When a pack names an authority (a register of food businesses, of licensed lenders), a house MUST decline, before its rules, an offer that asks for that pack's fields unless it carries `attachments.authorisation`: a `LakeAuthorisation` for that pack, made out to the asking agent, from an authority the owner trusts (`code: "unauthorised"`). A study is no way round it. Only a pack that says so (`authority.studies: true`) lets a certified study read its fields without the authorisation, and then only the fields the study's questions read; fields an offer adds beyond those still need it. An auditor MUST refuse to certify a study whose questions read a guarded pack's fields when the pack doesn't let studies read them, saying which and why. An authority SHOULD answer `{ kind: "registered", domain }` with a signed yes or no, so anyone can check an agent against it.
 
 ### 5.3 Collective counter-offers
 
@@ -340,6 +342,8 @@ The Lake supports exactly one data model, in RDF, with SHACL shapes for validati
 Each use case is a **pack** (`health@1`, `mortgage@1`), versioned with semver. A pack declares:
 
 - **fields:** the coarse, safe fields programs may read and offers may name, each a claim class in the pack's vocabulary, ideally mapped to an existing standard (FHIR, FIBO, schema.org), with a kind: `band`, `number`, `code` or `flag`;
+- **special-category** fields (`special: true`: health, beliefs, biometrics…), which a house warns its owner about when they're asked for outside a certified study or to decide about them (§5);
+- optionally an **authority**, a register whose authorisation an agent needs to ask for the pack's fields or hear its intents (§5.2, §12), and whether certified studies may read them anyway (`studies`, default no);
 - **identifying fields** no program may ever read, and **quasi-identifying fields** (a postcode) an offer may name but no program reads. An offer naming a field no loaded pack declares in any of these three lists MUST be rejected as malformed, like an unknown purpose;
 - **shapes:** SHACL that every converted claims document MUST pass, on top of the core shapes;
 - **a source:** the credential type its issuer signs, the converter (`package@version`) an auditor certifies, and the media type of the original.

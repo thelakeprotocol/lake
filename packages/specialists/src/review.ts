@@ -48,6 +48,31 @@ export async function specialist<R extends { kind: string } = Reply>(o: Speciali
   return { app, card, webId, vc };
 }
 
+export interface Protocol { study: Study; purpose: string; fields: string[]; retention: string }
+
+/**
+ * The demo ethics checklist. Data minimisation: a protocol declares exactly the fields its study's questions read, no
+ * more (run 28's rogue padded one with shopping fields, and this checklist signed it). A visitor that wants to see owners
+ * bargain puts extras in its offer, outside the approval, where owners' rules can drop them.
+ */
+export function ethicsProblems(protocol: Partial<Protocol> | undefined): string[] {
+  if (!protocol?.study) return ['no study in the protocol'];
+  const problems: string[] = [];
+  const fields = Array.isArray(protocol.fields) ? protocol.fields.map(String) : [];
+  if (!purposeWithin(String(protocol.purpose), 'research')) problems.push('purpose must be research');
+  if (protocol.retention !== 'none') problems.push('results only; no retention of anything else');
+  const identifying = fields.filter((f) => identifyingFields().includes(f));
+  if (identifying.length) problems.push(`directly identifying fields: ${identifying.join(', ')}`);
+  const reads = studyFields(protocol.study);
+  const missing = reads.filter((f) => !fields.includes(f));
+  if (missing.length) problems.push(`the study uses fields the protocol doesn't declare: ${missing.join(', ')}`);
+  const extra = fields.filter((f) => !reads.includes(f) && !identifying.includes(f));
+  if (extra.length) problems.push(`data minimisation: the study never reads ${extra.join(', ')}; declare only the fields its questions read`);
+  const audit = auditStudy(protocol.study);
+  if (!audit.ok) problems.push(...audit.problems);
+  return problems;
+}
+
 /**
  * The demo Ethics agent: a fixed checklist, clearly labelled. A real one is a door to a human committee;
  * owners decide which ethics domains they trust (rules.yaml → trust.ethics).
@@ -55,19 +80,11 @@ export async function specialist<R extends { kind: string } = Reply>(o: Speciali
 export async function createEthics(o: SpecialistOptions): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
   const s: Specialist = await specialist<Reply>(o, 'Ethics (demo checklist)', 'Reviews study protocols against a fixed checklist. A demo, not a human ethics committee.', 'ethics-review', async (p, from) => {
     if (p.kind !== 'ethics-review') return { kind: 'refused', problems: ['send { kind: "ethics-review", protocol }'] };
-    const protocol = p.protocol as { study: Study; purpose: string; fields: string[]; retention: string } | undefined;
-    const problems: string[] = [];
-    if (!protocol?.study) return { kind: 'refused', problems: ['no study in the protocol'] };
-    if (!purposeWithin(protocol.purpose, 'research')) problems.push('purpose must be research');
-    if (protocol.retention !== 'none') problems.push('results only; no retention of anything else');
-    const identifying = (protocol.fields ?? []).filter((f) => identifyingFields().includes(f));
-    if (identifying.length) problems.push(`directly identifying fields: ${identifying.join(', ')}`);
-    const missing = studyFields(protocol.study).filter((f) => !protocol.fields.includes(f));
-    if (missing.length) problems.push(`the study uses fields the protocol doesn't declare: ${missing.join(', ')}`);
-    const audit = auditStudy(protocol.study);
-    if (!audit.ok) problems.push(...audit.problems);
-    if (problems.length) return { kind: 'refused', problems };
-    const credential = await s.vc('LakeEthicsApproval', { id: studyId(protocol.study), question: protocol.study.question, purpose: protocol.purpose, fields: protocol.fields, sponsor: from, reviewedBy: 'demo checklist, not a human committee' }, 90);
+    const protocol = p.protocol as Protocol | undefined;
+    const problems = ethicsProblems(protocol);
+    if (problems.length || !protocol) return { kind: 'refused', problems };
+    // The approval names exactly the fields the study reads.
+    const credential = await s.vc('LakeEthicsApproval', { id: studyId(protocol.study), question: protocol.study.question, purpose: protocol.purpose, fields: studyFields(protocol.study), sponsor: from, reviewedBy: 'demo checklist, not a human committee' }, 90);
     return { kind: 'approved', credential, notes: ['demo approval: counts only with owners who trust this domain'] };
   });
   return { app: s.app, card: s.card, webId: s.webId };
@@ -78,6 +95,7 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
   const s: Specialist = await specialist<Reply>(o, 'Auditor (demo)', 'Certifies studies (exact totals of known questions, counted by two tellers) and converter packages.', 'study-audit', async (p) => {
     if (p.kind === 'audit-study') {
       const study = p.study as Study;
+      // auditStudy also refuses a study reading a register's fields that its pack keeps from studies (SPEC §5.2).
       const audit = auditStudy(study);
       if (!audit.ok) return { kind: 'refused', problems: audit.problems };
       const credential = await s.vc('LakeStudyCertificate', { id: studyId(study), checks: ['declarative study, no code', 'answers split between two tellers run by different parties', 'totals only', `no table from fewer than ${study.privacy.min} houses`] }, 90);

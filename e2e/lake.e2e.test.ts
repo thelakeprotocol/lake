@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, cardUrlFor, checkCredentialStatus, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, cardUrlFor, checkCredentialStatus, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -326,6 +327,19 @@ describe('the owner', () => {
     const asks = (await ownerCall({ kind: 'list' })).requests as { visitor: { domain: string }; warnings?: string[] }[];
     expect(asks.find((q) => q.visitor.domain === 'gp-one.example')!.warnings!.join()).toMatch(/gp-two\.example asked for exactly this too/);
     expect(asks.find((q) => q.visitor.domain === 'gp-two.example')!.warnings!.join()).toMatch(/gp-one\.example asked for exactly this too/);
+  });
+
+  it("warns in red when sensitive data is asked for outside a certified study, whatever the purpose says (run 28's made-up carer)", async () => {
+    const phone = await generateIdentity('kai-phone');
+    const token = (await readFile(join(dir, 'houses', 'kai', 'pairing-token'), 'utf8')).trim();
+    const paired = await fetch(`${houses.kai}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk, token }) });
+    const kaiWebId = (await paired.json()).webId;
+    const { reply } = await knock(houses.kai!, await visitor('carer.example'), { purpose: 'care', fields: ['conditions'], retention: 'none', priceUsd: 0, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false } });
+    expect(reply.decision).toBe('ask');
+    const list = await (await fetch(`${houses.kai}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, phone, { iss: kaiWebId })) })).json();
+    const req = (list.requests as { visitor: { domain: string }; warnings?: string[]; recommendation: string }[]).find((q) => q.visitor.domain === 'carer.example')!;
+    expect(req.warnings).toEqual(['asks for sensitive data (conditions) for care (someone looking after you), outside any certified study: no auditor or ethics body checked it, and allowing it lets this agent use your own conditions, not a total']);
+    expect(req.recommendation).toMatch(/^I'd deny this, for the reasons in red/);
   });
 
   it('runs the control panel: overview, rules edited and saved in the pod, everything exported', async () => {
@@ -1107,7 +1121,7 @@ describe('the weekly shop, priced inside the house', () => {
       const rules = join(dir, `${name}.yaml`);
       await writeFile(rules, `owner: ${name}\ndefault: decline\nrules: []\nintents:\n  - pack: shopping\n    terms: { region: vic, budget: 350, delivery: this-week }\n`);
       const [pp, hp] = [await freePort(), await freePort()];
-      await start(['packages/house/dist/main.js', '--name', name, '--rules', rules, '--data', join(dir, 'houses'), '--packs', 'health,shopping',
+      await start(['packages/house/dist/main.js', '--name', name, '--rules', rules, '--data', join(dir, 'houses'), '--packs', 'health,shopping', '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`,
         '--issuers', `health=${issuerUrl},shopping=${specialistsUrl}/receipts`, '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--open-pairing'], /joined the Lake/);
       const url = `http://localhost:${hp}`;
       const phone = await generateIdentity('phone');
@@ -1159,6 +1173,32 @@ describe('the weekly shop, priced inside the house', () => {
     const check = async (domain: string) => (await ask(`${specialistsUrl}/foodregister/a2a`, rogue, { kind: 'registered', domain })).reply;
     expect(await check('corner.lake.local')).toMatchObject({ registered: true, pack: 'shopping@1' });
     expect(await check('rogue-grocer.example')).toMatchObject({ registered: false });
+  });
+
+  it("a study can't carry the shopping fields past the register (run 28): no certificate for one that reads them, no ethics approval and no door for one padded with them", async () => {
+    const rogue = await makeVisitor(await generateIdentity(), 'rogue-study.example');
+    const tellers = [{ url: `${specialistsUrl}/teller-a/a2a`, domain: 'teller-a.lake.local' }, { url: `${specialistsUrl}/teller-b/a2a`, domain: 'teller-b.lake.local' }];
+    // A study whose questions read the shopping list: the pack lets no study read it, so the auditor says no, and why.
+    const clean = readmissionStudy('Do over-60s on drug X get readmitted less?', tellers);
+    const reading = { ...clean, question: 'Do vegans on drug X get readmitted less?', predicates: [{ name: 'vegan', field: 'dietary_needs', op: 'has_code' as const, value: 'vegan' }, ...clean.predicates.slice(1)] };
+    expect((await ask(auditor, rogue, { kind: 'audit-study', study: reading })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringContaining('Food Business Register')] });
+    await expect(dispatch({ visitor: rogue, node, ethics, auditor, study: reading, priceUsd: 0 })).rejects.toThrow(/refused: .*Food Business Register/);
+
+    // A clean study, certified, with shopping fields riding along. The ethics checklist approves only what the study reads.
+    const padded = [...studyFields(clean), 'staples', 'dietary_needs'];
+    expect((await ask(ethics, rogue, { kind: 'ethics-review', protocol: { study: clean, purpose: 'research', fields: padded, retention: 'none' } })).reply).toMatchObject({ kind: 'refused', problems: ['data minimisation: the study never reads staples, dietary_needs; declare only the fields its questions read'] });
+    const approval = (await ask(ethics, rogue, { kind: 'ethics-review', protocol: { study: clean, purpose: 'research', fields: studyFields(clean), retention: 'none' } })).reply;
+    const cert = (await ask(auditor, rogue, { kind: 'audit-study', study: clean })).reply;
+    expect([approval.kind, cert.kind]).toEqual(['approved', 'certified']);
+    const cardOf = async (u: string) => (await fetch(cardUrlFor(`${u}/a2a`))).json();
+    const attachments = { ethics: { credential: approval.credential, card: await cardOf(ethics) }, audit: { credential: cert.credential, card: await cardOf(auditor) } };
+    const offer = (fields: string[]) => ({ id: randomUUID(), requester: 'rogue-study.example', purpose: 'research', fields, retention: 'none', priceUsd: 5, study: studyId(clean), credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true } });
+    // Without the padding the house's rules answer (this one declines by default); with it, the register's guard does.
+    expect((await ask(`${buyers[2]!.url}/a2a`, rogue, { kind: 'offer', offer: offer(studyFields(clean)), study: clean, attachments })).reply).toMatchObject({ decision: 'decline', code: 'default' });
+    const { reply } = await ask(`${buyers[2]!.url}/a2a`, rogue, { kind: 'offer', offer: offer(padded), study: clean, attachments });
+    expect(reply).toMatchObject({ decision: 'decline', code: 'unauthorised', reason: expect.stringContaining('shopping@1 lets no study read them') });
+    expect(reply.reason).toMatch(/^declined: staples, dietary_needs belong to shopping@1/);
+    expect((await buyers[2]!.call({ kind: 'list' })).requests).toEqual([]);
   });
 
   it("the owner's assistant suggests an offer, hears when it's accepted, and pays the grocer in its currency under the allowance", async () => {

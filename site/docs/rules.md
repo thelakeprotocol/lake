@@ -72,11 +72,11 @@ trust:
   auditors: [audit.lake.local]     # who may certify studies and converters
   ethics: [ethics.lake.local]      # whose ethics approvals count
   payments: [payments.lake.local]  # whose receipts you file
-  regulators: [register.lake.local] # whose authorisation an agent needs before it hears your intents
+  regulators: [register.lake.local] # whose authorisation an agent needs to hear your intents or ask for a register's fields
   tellers: [https://lake.example/s/teller-a/a2a, teller-b.example] # who may count your study answers: an address, or a domain that proves its key
 ```
 
-`ethics_approved: true` in a rule means *approved by an ethics body you list here*. An approval from anyone else counts as none. Nobody appoints these for the Lake; you choose. A sandbox house with no `trust` section trusts the demo specialists and says so in its log; outside the sandbox, an empty list trusts nobody.
+`ethics_approved: true` in a rule means *approved by an ethics body you list here*, for every field the study reads. An approval from anyone else counts as none. Fields an offer asks for beyond what its study reads (a postcode) are approved by nobody: your `allow_fields` and `deny_fields` decide them, and your housekeeper notes them. Nobody appoints these for the Lake; you choose. A sandbox house with no `trust` section trusts the demo specialists and says so in its log; outside the sandbox, an empty list trusts nobody.
 
 Whatever your rules say, a study without a certificate from an auditor you trust never runs in your house.
 
