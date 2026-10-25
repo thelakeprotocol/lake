@@ -736,8 +736,16 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async (q) => {
       try {
         // "agent" means any agent that isn't a house: visitors, assistants and specialists (run 17 found nothing).
-        if (q.role === 'agent') return json((await (await agent()).find({ ...q, role: undefined })).filter((c) => c.role !== 'house'));
-        return json(await (await agent()).find(q));
+        const me = await agent();
+        const found = q.role === 'agent' ? (await me.find({ ...q, role: undefined })).filter((c) => c.role !== 'house') : await me.find(q);
+        // Sellers come with their record from the transparency log: sales released to them, refunds, rulings. Facts, counted.
+        const log = found.some((c) => c.menu) ? (await me.find({ skill: 'log' }))[0] : undefined;
+        const withRecord = await Promise.all(found.map(async (c, i) => {
+          if (!c.menu || !log || i >= 10) return c;
+          const r = (await me.ask(log.url, { kind: 'log.record', webId: c.webId }).catch(() => null)) as Record<string, unknown> | null;
+          return r?.kind === 'log.record' ? { ...c, record: { sales: r.sales, sold: r.sold, refunds_given: r.refunds_given, held_now: r.held_now, rulings: r.rulings } } : c;
+        }));
+        return json(withRecord);
       } catch (e) {
         return fail(e);
       }

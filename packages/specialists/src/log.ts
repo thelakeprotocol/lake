@@ -42,6 +42,27 @@ export async function createLog(o: SpecialistOptions & { dataDir: string }): Pro
   const s: Specialist = await specialist<{ kind: string } & Record<string, unknown>>(o, 'Transparency log', `An append-only log anyone can check (RFC 9162 Merkle tree, C2SP signed checkpoints; origin "${origin}"). { kind: "log.add", entry } puts something on the record (a string, or JSON, logged in its canonical form) and returns its index, inclusion proof and the signed checkpoint; { kind: "log.find", entry | leaf_hash } proves an entry is in it; { kind: "log.consistency", from } proves today's tree still holds the tree of that size; { kind: "log.checkpoint" } is the current one. Payment receipts and arbiter rulings are logged here as they are made. It logs; it vouches for nothing inside.`, 'log', async (p, from) => {
     const proofFor = async (index: number) => ({ index, size: leaves.length, leaf_hash: b64(leaves[index]!), proof: inclusionProof(index, leaves).map(b64), checkpoint: await current(), entry_kind: entries[index]!.kind, at: entries[index]!.at });
     const text = (x: unknown) => (typeof x === 'string' ? x : x === undefined ? '' : canonicalize(x));
+    // What the record says about one agent: only entries the payments agent and the arbiter logged themselves count (an
+    // agent's own log.add can't pad it). Facts with counts, not a score.
+    if (p.kind === 'log.record') {
+      const who = String(p.webId ?? '');
+      if (!who) return { kind: 'refused', problems: ['webId: whose record'] };
+      const r = { sales: 0, purchases: 0, refunds_given: 0, held_now: 0, rulings: { delivered: 0, not_delivered: 0 } };
+      const amounts: Record<string, number> = {};
+      for (const e of entries) {
+        if (e.kind === 'agent') continue;
+        let sub: Record<string, any> | undefined;
+        try { sub = JSON.parse(Buffer.from(e.entry.split('.')[1] ?? '', 'base64url').toString()).credentialSubject; } catch { continue; }
+        if (!sub) continue;
+        if ((e.kind === 'receipt' || e.kind === 'capture') && sub.settlement === 'simulated' && sub.id === who) { r.sales++; amounts[sub.amount?.currency ?? 'USD'] = Math.round(((amounts[sub.amount?.currency ?? 'USD'] ?? 0) + Number(sub.amount?.value ?? 0)) * 100) / 100; }
+        if ((e.kind === 'receipt' || e.kind === 'capture') && sub.settlement === 'simulated' && sub.payer === who) r.purchases++;
+        if (e.kind === 'receipt' && sub.settlement === 'held' && sub.id === who) r.held_now++;
+        if ((e.kind === 'capture' || e.kind === 'void') && sub.seller === who) r.held_now = Math.max(0, r.held_now - 1);
+        if (e.kind === 'void' && sub.seller === who) r.refunds_given++;
+        if (e.kind === 'ruling' && sub.seller === who) sub.delivered ? r.rulings.delivered++ : r.rulings.not_delivered++;
+      }
+      return { kind: 'log.record', webId: who, ...r, sold: amounts, size: leaves.length, note: 'counted from receipts and rulings the payments agent and the arbiter put on this log; nothing an agent added itself' };
+    }
     if (p.kind === 'log.checkpoint') return { kind: 'log.checkpoint', origin, size: leaves.length, checkpoint: await current() };
     if (p.kind === 'log.add') {
       const entry = text(p.entry);

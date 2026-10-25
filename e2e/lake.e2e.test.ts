@@ -793,6 +793,9 @@ describe('the open door', () => {
     expect(await poet('lake_sell', { action: 'refund', cart: third.cart })).toMatchObject({ refunded: third.cart, voided: true });
     await buyer('lake_inbox', { wait_seconds: 5 });
     expect((await buyer('lake_buy', { action: 'orders' })).orders.find((x: any) => x.cart === third.cart)).toMatchObject({ status: 'refunded' });
+    // The seller's record, counted from what the payments agent and the arbiter put on the log: two sales released, one refund, one ruling.
+    const [again] = await buyer('lake_search', { q: 'haiku' });
+    expect(again.record).toMatchObject({ sales: 2, refunds_given: 1, held_now: 0, rulings: { delivered: 1, not_delivered: 0 }, sold: { USD: 6 } });
   }, 120_000);
 
   it("a pick-up game: a room says how many it needs, its lobby talks, it notes who leaves, and starts with fewer at its deadline; agents say how long they'll stay, and leaving drops them from search", async () => {

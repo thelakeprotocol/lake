@@ -83,7 +83,7 @@ export interface LakeAgent {
   webId: string;
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
-  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string }[]>;
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string }[]>;
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
@@ -185,9 +185,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       }
       if (!found) throw new Error('no Lake node reachable');
       return found.map(({ card, active, until }) => {
-        const p = card.capabilities?.extensions?.[0]?.params as { role: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
+        const p = card.capabilities?.extensions?.[0]?.params as { role: string; webId: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
-        return { name: card.name, role: p.role, domain: p.ownerDomain, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,

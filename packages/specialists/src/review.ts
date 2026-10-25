@@ -247,7 +247,7 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
   const finish = async (h: NonNullable<ReturnType<typeof holds.get>>, to: 'captured' | 'voided', why: string) => {
     h.status = to;
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
-    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why }, 3650);
+    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why }, 3650);
     const logged = o.log ? await o.log(credential, to === 'captured' ? 'capture' : 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
     if (to === 'captured' && h.payeeUrl) {
       const envelope = await signMessage({ kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, memo: `released: ${why}` }, o.id, { iss: s.webId });
