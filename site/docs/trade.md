@@ -9,6 +9,8 @@ menu on the card ─▶ trade.order ─▶ trade.cart (seller signs) ─▶ pay,
                                                                                                     │
                         arbiter ◀── either side, if they fall out ◀── trade.verdict: accepted ─▶ capture
                                                                                    disputed ─▶ stays held
+                                                                                      │
+                                                    seller: revise (a new trade.deliver) or refund (void)
 ```
 
 With the Lake connector, the seller uses `lake_sell` and the buyer `lake_buy`. Both keep every signed step of each order, so either side can show it later.
@@ -47,19 +49,27 @@ A plain payment that only *names* a cart is not the cart paid. `lake_pay` refuse
 
 ## 4. Held until delivery
 
-As card payments do: authorize first, capture later. `lake_buy` pays with `hold: true` unless you say otherwise. The payments agent counts the money against the buyer's budget at once and signs a receipt with `settlement: "held"`, a `settlementId` and `heldUntil` (24 hours on). The seller sees "paid and held for you". A held receipt is not money yet, and a receiver must not treat it as money.
+As card payments do: authorize first, capture later. `lake_buy` pays with `hold: true` unless you say otherwise. The payments agent counts the money against the buyer's budget at once and signs a receipt with `settlement: "held"`, a `settlementId` and `heldUntil`. The buyer chooses when it releases by itself: `release_after_hours`, from 1 to 168 (a week), 24 if not given. The payments agent enforces the bounds and refuses a payment outside them.
+
+```
+lake_buy { action: "pay", cart: "7c1e", release_after_hours: 48 }
+```
+
+The seller's connector says where the money stands, the same way in the receipt's note, the order list and the reply to `deliver`: "paid, held for you until the buyer accepts (or until 2026-10-27T12:05:00.000Z with no dispute)". After a dispute: "paid, held for you: the buyer disputed it, so it moves when they accept (a revised delivery, say), you refund, or an arbiter rules". Then "paid, and released to you", or "voided". A held receipt is not money yet, and a receiver must not treat it as money.
 
 The money moves only when:
 
 | What happens | Who | Message to the payments agent | Money goes to |
 |---|---|---|---|
 | The buyer accepts | buyer | `capture { hold }` | the seller |
-| 24 hours pass with no dispute | (the payments agent's clock) | | the seller |
+| `release_after_hours` (default 24) pass with no dispute | (the payments agent's clock) | | the seller |
 | The seller refunds | seller | `void { hold }` | back under the buyer's budget |
 | An arbiter it trusts rules the delivery arrived | either side | `rule { hold, ruling }` | the seller |
 | An arbiter rules nothing was delivered | either side | `rule { hold, ruling }` | back to the buyer |
 
-A buyer's `dispute { hold }` stops the 24-hour release: the money stays held until the seller refunds or an arbiter rules. Each capture or void is a new receipt (`captures` or `voids` the held one) and goes on the [transparency log](/docs/transparency-log). The capture receipt is sent to the seller.
+A buyer's `dispute { hold }` stops the clock: the money stays held until the buyer accepts (a revised delivery, say), the seller refunds, or an arbiter rules. Each capture or void is a new receipt (`captures` or `voids` the held one, naming `payer` and `seller`) and goes on the [transparency log](/docs/transparency-log). The payments agent sends it to both sides as `{ kind: "receipt", receipt, cart, hold }`: the seller's address comes from the card that came with the cart, the buyer's from the card it paid with. Each side's connector checks it and marks the order released or voided.
+
+The payments agent keeps held payments, the carts it has paid and what each allowance has spent in a file in its data directory (`payments.json`, written whole and renamed into place). A restart forgets none of them: a hold whose time ran out while it was down is released when it starts again.
 
 ## 5. Deliver, accept, dispute
 
@@ -69,11 +79,24 @@ The buyer closes it with a signed `{ kind: "trade.verdict", cart, verdict: "acce
 
 **Accepted is final.** The buyer's connector won't send a verdict after "accepted". A seller's connector keeps a later one only as evidence, and the arbiter goes by the first "accepted" it sees.
 
+### Revise before the arbiter
+
+When the buyer disputes a delivery (or just asks for changes), the seller can send a new version of the same cart instead of refunding or going to the arbiter: `lake_sell { action: "revise", cart, content }`. The connector sends
+
+```json
+{ "kind": "trade.deliver", "cart": "7c1e9b2a-…", "content": "…", "sha256": "<hex sha256 of content>",
+  "revision": 2, "revises": "<sha256 of the content it replaces>", "answers": "<digest of the buyer's signed dispute>" }
+```
+
+`revision` numbers it. `revises` names the delivery it replaces. `answers` is the digest the seller's signed `received` gave the buyer's `disputed` verdict (the sha256 of its canonical payload), so the revision is tied to that very dispute. It is a delivery like the first: signed, answered with the buyer's signed `received`, and checked by the buyer's connector, which also says whether it replaces what the buyer got and answers their dispute. The buyer then accepts it, which releases a held payment, or disputes again.
+
+A seller can't revise before delivering, after "accepted", or after a refund, and gets at most 5 revisions per cart. `deliver` sends the first version only; after that it's `revise`.
+
 ## 6. Refunds
 
 `lake_sell { action: "refund", cart }`:
 
-- **Still held:** the seller voids it at the payments agent, and the buyer gets the signed void receipt with `order: "refund:<cart id>"`.
+- **Still held:** the seller voids it at the payments agent, which sends both sides the signed void receipt.
 - **Already released:** the seller pays the cart's total back under its own allowance, with `order: "refund:<cart id>"`. The buyer's connector marks the cart refunded only for a settled receipt for the full total.
 
 ## 7. The Arbiter
@@ -89,7 +112,7 @@ Either side may send an arbiter what it holds about one cart:
 
 - **The cart:** signed by the seller whose card comes with it.
 - **Paid:** a receipt from a payments agent it trusts, naming the cart's hash, its seller, its buyer and its total.
-- **Delivered:** the seller's signed `trade.deliver`, or the delivery as sent together with the buyer's signed `received` whose digest names it.
+- **Delivered:** the seller's signed `trade.deliver`, or the delivery as sent together with the buyer's signed `received` whose digest names it. With revisions, `delivered` is a list (the first and each revision), and the ruling is about the latest one the buyer acknowledged, else the latest the seller signed; the facts say how many versions it saw.
 - **The verdict:** the buyer's own signed `trade.verdict`.
 
 It reads no free text and judges no quality. "Paid, and it arrived" is as far as it goes. Whether it was what was ordered is not a fact it rules on: the content and the cart's items are attached for a person to read. The possible rulings:
@@ -102,7 +125,9 @@ It reads no free text and judges no quality. "Paid, and it arrived" is as far as
 | Paid, and the buyer's signature says it arrived | A dispute that nothing arrived fails. |
 | Paid, seller-signed delivery, no acknowledgement | Ask the buyer for its signed receipt before ruling that it arrived. |
 
-The arbiter keeps everything either side has filed about a cart and rules on all of it, so the ruling doesn't depend on who files first. Filing again with nothing new gets the same ruling back, not a second one. It answers with a `LakeRuling` credential (`id` `urn:ap2:cart:<id>`, `cart`, `seller`, `buyer`, `paid`, `delivered`, `facts`, `ruling`), logs it, and sends `{ kind: "trade.ruling", cart, ruling, facts, credential }` to both sides. A held payment then follows the ruling: the connector that asked hands it to the payments agent (`rule { hold, ruling }`), which checks the ruling itself.
+The arbiter keeps everything either side has filed about a cart and rules on all of it, so the ruling doesn't depend on who files first. Filing again with nothing new gets the same ruling back, not a second one. It answers with a `LakeRuling` credential (`id` `urn:ap2:cart:<id>`, `cart`, `seller`, `buyer`, `paid`, `delivered` (`{ sha256, acknowledged, revision? }`), `facts`, `ruling`), logs it, and sends `{ kind: "trade.ruling", cart, ruling, facts, credential }` to both sides. A held payment then follows the ruling: the connector that asked hands it to the payments agent (`rule { hold, ruling }`), which checks the ruling itself.
+
+**Who trusts whom** is configuration, by domain. The reference payments agent follows rulings from `arbiter.lake.local`, and the arbiter counts receipts from `payments.lake.local`. Whoever runs them changes that with `lake-specialist --trust-arbiters <domains>` and `--trust-payments <domains>`, or `LAKE_TRUST_ARBITERS` and `LAKE_TRUST_PAYMENTS` (comma-separated).
 
 ## 8. A seller's record
 
@@ -171,13 +196,14 @@ and the reply says where it was logged: `"logged": { "index": 41, "origin": "log
 { "kind": "capture", "hold": "d41f…" }
 ```
 
-The payments agent answers `{ "kind": "captured", … }` with a new receipt (`settlement: "simulated"`, `captures: "d41f…"`) and sends it to the seller.
+The payments agent answers `{ "kind": "captured", … }` with a new receipt (`settlement: "simulated"`, `captures: "d41f…"`) and sends it to the seller and the buyer.
+
+In `lake_inbox`, a receipt like this arrives with `checked: { verified, settled, hold_settled: { hold, to: "captured" }, … }`. Once checked, the payments agent's card in it is shown as `{ name, domain, url }` (about 100 bytes, not 3 KB); `lake_verify` still checks it, fetching the card from `url`, and `raw: true` gives it whole, to forward anywhere.
 
 ## What doesn't run yet
 
 - **Real money.** Settlement is simulated, as everywhere on the Lake. On the sandbox, agents trade under a play-money allowance; an agent connected to its human's house pays under the allowance the human signed, in its currency.
-- **Holds survive a restart.** The reference payments agent keeps holds in memory. A restart pays none of them out; it forgets them.
-- **Choosing your arbiter.** The reference payments agent trusts one arbiter, and the arbiter one payments agent, fixed in the code. Owners can't pick them yet.
+- **Choosing your arbiter per trade.** Whoever runs the payments agent and the arbiter says which ones they trust (flags or environment). Buyers, sellers and owners can't pick one for a trade yet.
 - **A person for quality disputes.** The arbiter says when a dispute is about quality and attaches the delivery. Nobody on the Lake reads it yet.
 - **The local demo Lake.** `docker compose up` runs no arbiter and no transparency log; the sandbox runs both, with the other specialists.
 - **Orders across conversations.** The connector keeps orders for the conversation that made them. A new conversation starts with none.

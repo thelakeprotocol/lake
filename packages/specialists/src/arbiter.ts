@@ -32,7 +32,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     }
   };
 
-  const s: Specialist = await specialist<{ kind: string } & Record<string, unknown>>(o, 'Arbiter', 'Rules on trades (SPEC §6.5) from signed evidence alone: send { kind: "arbitrate", cart, seller_card, evidence: [signed messages { card, envelope }…], receipt?: { credential, card }, delivered?: <the trade.deliver payload you sent> }. It checks the seller\'s cart, the payments agent\'s receipt, the seller\'s signed delivery and the buyer\'s signed receipt of it, and answers with a signed ruling on those facts. It reads no free text and judges no quality.', 'arbiter', async (p, from) => {
+  const s: Specialist = await specialist<{ kind: string } & Record<string, unknown>>(o, 'Arbiter', 'Rules on trades (SPEC §6.5) from signed evidence alone: send { kind: "arbitrate", cart, seller_card, evidence: [signed messages { card, envelope }…], receipt?: { credential, card }, delivered?: <the trade.deliver payload you sent, or a list of them: the first and its revisions> }. It checks the seller\'s cart, the payments agent\'s receipt, the seller\'s signed delivery and the buyer\'s signed receipt of it, and answers with a signed ruling on those facts. It reads no free text and judges no quality.', 'arbiter', async (p, from) => {
     if (p.kind !== 'arbitrate') return { kind: 'refused', problems: ['send { kind: "arbitrate", cart, seller_card, evidence, receipt?, delivered? }'] };
     // The cart: signed by the seller whose card comes with it.
     let cart;
@@ -48,7 +48,8 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     const filed = ((Array.isArray(p.evidence) ? p.evidence : []) as Signed[]).slice(0, 20);
     kept.evidence.push(...filed);
     if (from === cart.buyer) kept.fromBuyer.push(...filed);
-    if (p.delivered && typeof p.delivered === 'object') kept.delivered.push(p.delivered as Record<string, unknown>);
+    // The deliveries as the seller sent them: the first and any revisions (SPEC §6.5), each a separate trade.deliver.
+    kept.delivered.push(...((Array.isArray(p.delivered) ? p.delivered : [p.delivered]) as unknown[]).slice(0, 10).filter((d): d is Record<string, unknown> => !!d && typeof d === 'object'));
     if (p.receipt && typeof p.receipt === 'object') kept.receipts.push(p.receipt as { credential?: string; card?: AgentCard });
     const facts: string[] = [];
     // Paid: a receipt from a payments agent this arbiter trusts, naming this very cart, for its total.
@@ -77,7 +78,11 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     const fromSeller = evidence.filter((x) => x?.by === cart.seller && x.payload.kind === 'trade.deliver' && x.payload.cart === cart.id);
     const deliveries = [...fromSeller.map((x) => x!.payload), ...kept.delivered.filter((d) => d.kind === 'trade.deliver' && d.cart === cart.id)];
     const acks = evidence.filter((x) => x?.by === cart.buyer && x.payload.kind === 'received' && typeof x.payload.digest === 'string');
-    let delivered: { sha256: string; content: string; acknowledged: boolean; signedBySeller: boolean } | null = null;
+    // A revision is a delivery like any other, numbered: the ruling goes by the latest one the buyer acknowledged, else the
+    // latest the seller signed.
+    const revision = (d: Record<string, unknown>) => (Number.isInteger(d.revision) && Number(d.revision) > 1 ? Number(d.revision) : 1);
+    let delivered: { sha256: string; content: string; acknowledged: boolean; signedBySeller: boolean; revision: number } | null = null;
+    const shown = new Set<string>();
     for (const d of deliveries) {
       const content = typeof d.content === 'string' ? d.content : JSON.stringify(d.content ?? null);
       // Arrived: the buyer's connector signed that exactly this came, or the buyer itself filed the seller's signed delivery.
@@ -85,11 +90,13 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
       const signedBySeller = fromSeller.some((x) => x!.payload === d);
       // A plain delivery counts only when the buyer's signed receipt names it; the seller's own signature counts by itself.
       if (!acknowledged && !signedBySeller) continue;
-      if (!delivered || (acknowledged && !delivered.acknowledged)) delivered = { sha256: sha256(content), content, acknowledged, signedBySeller };
+      shown.add(sha256(content));
+      if (!delivered || (acknowledged && !delivered.acknowledged) || (acknowledged === delivered.acknowledged && revision(d) > delivered.revision)) delivered = { sha256: sha256(content), content, acknowledged, signedBySeller, revision: revision(d) };
     }
     const size = (c: string) => `${c.length} character${c.length === 1 ? '' : 's'}, ${c.split('\n').length} line${c.split('\n').length === 1 ? '' : 's'}`;
     if (delivered) facts.push(delivered.acknowledged ? `delivered: it reached the buyer, as signed (content sha256 ${delivered.sha256}; ${size(delivered.content)})` : `the seller signed this delivery (content sha256 ${delivered.sha256}; ${size(delivered.content)}); nothing shows it reached the buyer`);
     else facts.push('no delivery shown that the seller signed or the buyer acknowledged');
+    if (delivered && shown.size > 1) facts.push(`${shown.size} different deliveries of this cart shown (a first and its revisions): the facts above are about revision ${delivered.revision}`);
     const verdicts = evidence.filter((x) => x?.by === cart.buyer && x.payload.kind === 'trade.verdict' && x.payload.cart === cart.id).sort((a, b) => String(a!.at).localeCompare(String(b!.at)));
     const firstAccept = verdicts.find((v) => v!.payload.verdict === 'accepted');
     if (firstAccept) facts.push(`the buyer signed "accepted" at ${firstAccept.at}`);
@@ -102,7 +109,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     // Nothing new since the last ruling on this cart: the same ruling, not a second one on the record.
     const key = JSON.stringify({ paid, delivered: delivered && { sha256: delivered.sha256, acknowledged: delivered.acknowledged }, facts, ruling });
     if (kept.last?.key === key) return kept.last.reply as never;
-    const credential = await s.vc('LakeRuling', { id: `urn:ap2:cart:${cart.id}`, cart: { id: cart.id, hash: cartHash((p.cart as CartMandate).contents) }, seller: cart.seller, buyer: cart.buyer, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged } : null, facts, ruling }, 3650);
+    const credential = await s.vc('LakeRuling', { id: `urn:ap2:cart:${cart.id}`, cart: { id: cart.id, hash: cartHash((p.cart as CartMandate).contents) }, seller: cart.seller, buyer: cart.buyer, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}) } : null, facts, ruling }, 3650);
     // On the record, so a ruling can't be denied or rewritten later.
     const logged = await o.log?.(credential, 'ruling').then(({ index, origin }) => ({ index, origin })).catch(() => undefined);
     // Both sides hear it, whoever asked: a ruling one party keeps to itself settles nothing.
@@ -115,7 +122,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
         await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }).catch(() => {});
       })();
     }
-    const reply = { kind: 'ruling', ...(logged ? { logged } : {}), cart: cart.id, items: cart.items.map((i) => i.label), paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
+    const reply = { kind: 'ruling', ...(logged ? { logged } : {}), cart: cart.id, items: cart.items.map((i) => i.label), paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}), content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
     kept.last = { key, reply };
     return reply;
   });

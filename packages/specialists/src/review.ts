@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, signCard, signMessage, studyFields, studyId, verifyLakeData,
   packId, checkCart, type CartMandate, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
@@ -144,26 +145,64 @@ export async function createAuthority(o: SpecialistOptions & { pack: LakePack })
 
 export const newId = () => randomUUID();
 
+/** How long a buyer may have a held payment wait before it releases by itself (SPEC §6.5): hours, and the default. */
+export const HOLD_HOURS = { min: 1, max: 168, default: 24 } as const;
+
+/** A payment held until delivery, as the payments agent keeps it. */
+interface Hold {
+  id: string; payer: string; payerUrl?: string; payee: string; payeeUrl?: string; amount: number; currency: string; digest: string;
+  cart: { id: string; hash: string }; until: number; status: 'held' | 'captured' | 'voided'; disputed?: boolean; settledAt?: number;
+}
+
 /**
  * The demo Payments agent: checks the AP2 mandate chain (a human's Intent Mandate, the agent's Payment
  * Mandates under it, the budget) and records settlements. Settlement is simulated; receipts are real VCs.
  */
-export async function createPayments(o: SpecialistOptions & { onSettled?: (amount: number, count: number) => void; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }> }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
-  const spent = new Map<string, number>();
+export async function createPayments(o: SpecialistOptions & {
+  onSettled?: (amount: number, count: number) => void; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }>;
+  /** Where held payments, paid carts and budgets spent are kept across restarts. Without it, in memory only. */
+  dataDir?: string;
+  /** The domains of arbiters whose rulings move a held payment. Default: arbiter.lake.local. */
+  arbiters?: string[];
+}): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
+  // Kept in a file, so a restart neither forgets a hold (the seller's money) nor lets a cart be paid twice or a budget
+  // be spent again. Written whole to a temporary file and renamed over the old one: a crash leaves one or the other.
+  const file = o.dataDir ? `${o.dataDir}/payments.json` : undefined;
+  if (o.dataDir) await mkdir(o.dataDir, { recursive: true }).catch(() => {});
+  const saved = (file ? JSON.parse(await readFile(file, 'utf8').catch(() => '{}')) : {}) as { holds?: Hold[]; paidCarts?: string[]; spent?: [string, number][] };
+  const spent = new Map<string, number>(saved.spent ?? []);
   // Carts already paid, by the hash of their contents: a seller's cart is paid once.
-  const paidCarts = new Set<string>();
+  const paidCarts = new Set<string>(saved.paidCarts ?? []);
   /**
    * Payments held until delivery (authorize, then capture, as card payments do): a cart paid with hold is counted
    * against the buyer's budget at once, but reaches the seller only when the buyer accepts, when its time runs out with
    * no dispute, or when an arbiter's ruling says it was delivered; the seller can void it (a refund), and a ruling that
-   * it wasn't delivered voids it. Kept in memory: a restart pays out nothing it shouldn't, and forgets holds.
+   * it wasn't delivered voids it. Settled ones are kept a while, so a late capture or void is told what happened.
    */
-  const holds = new Map<string, { id: string; payer: string; payee: string; payeeUrl?: string; amount: number; currency: string; digest: string; cart: { id: string; hash: string }; until: number; status: 'held' | 'captured' | 'voided'; disputed?: boolean }>();
-  const HOLD_MS = 24 * 3_600_000;
-  const arbiters = ['arbiter.lake.local'];
-  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', 'Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed. Pays an AP2 cart a seller signed (SPEC §6.5) for exactly its total, once.', 'payments', async (p, agentWebId, agent) => {
+  const holds = new Map<string, Hold>((saved.holds ?? []).filter((h) => h.status === 'held' || (h.settledAt ?? 0) > Date.now() - 30 * DAY).map((h) => [h.id, h]));
+  let saving = Promise.resolve();
+  const save = () => {
+    if (!file) return saving;
+    saving = saving.then(async () => {
+      const tmp = `${file}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify({ holds: [...holds.values()], paidCarts: [...paidCarts], spent: [...spent] }));
+      await rename(tmp, file);
+    }).catch(() => {});
+    return saving;
+  };
+  const arbiters = o.arbiters ?? ['arbiter.lake.local'];
+  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', `Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed. Pays an AP2 cart a seller signed (SPEC §6.5) for exactly its total, once; with hold: true, holds it until the buyer accepts, or for release_after_hours (${HOLD_HOURS.min} to ${HOLD_HOURS.max}, default ${HOLD_HOURS.default}) with no dispute.`, 'payments', async (p, agentWebId, agent, agentCard) => {
     if (p.kind === 'capture' || p.kind === 'void' || p.kind === 'dispute' || p.kind === 'rule') return settleHold(p, agentWebId);
-    if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...], cart?, hold? }, or for a held payment capture / void / dispute { hold }, or rule { hold, ruling: { credential, card } }'] };
+    if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...], cart?, hold?, release_after_hours? }, or for a held payment capture / void / dispute { hold }, or rule { hold, ruling: { credential, card } }'] };
+    // The buyer says when a held payment releases by itself, within bounds: long enough to check a delivery, short enough
+    // that a seller isn't kept waiting for a week and a day.
+    let holdMs = HOLD_HOURS.default * 3_600_000;
+    if (p.release_after_hours !== undefined) {
+      const hours = Number(p.release_after_hours);
+      if (p.hold !== true || !p.cart) return { kind: 'refused', problems: ['release_after_hours is for a cart paid with hold: true'] };
+      if (!Number.isFinite(hours) || hours < HOLD_HOURS.min || hours > HOLD_HOURS.max) return { kind: 'refused', problems: [`release_after_hours: ${HOLD_HOURS.min} to ${HOLD_HOURS.max} hours (default ${HOLD_HOURS.default})`] };
+      holdMs = Math.round(hours * 3_600_000);
+    }
     const intent = p.intent as { credential: string; card: AgentCard; owner?: string } | undefined;
     const payments = (p.payments as string[] | undefined) ?? [];
     if (!intent?.credential || !intent.card) return { kind: 'refused', problems: ['no Intent Mandate'] };
@@ -243,38 +282,47 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     spent.set(digest, already + total);
     if (cart) paidCarts.add(cart.hash);
     const hold = !!cart && p.hold === true;
+    const until = Date.now() + holdMs;
     const receipts = await Promise.all(
       checked.map(async (c) => {
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
         const settlementId = randomUUID();
-        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until: Date.now() + HOLD_MS, status: 'held' });
+        // Where both sides are reached when it settles: the seller's card came with the cart, the buyer's with this message.
+        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held' });
         return {
           payee: c.payee,
-          credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash } } : {}), intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(Date.now() + HOLD_MS).toISOString() } : {}) }, 3650),
+          credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash } } : {}), intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
         };
       }),
     );
+    await save();
     o.onSettled?.(total / 100, checked.length);
     // On the record: every receipt goes into the transparency log, so it can't be quietly rewritten or denied later.
     const logged = await Promise.all(receipts.map(async (r) => ({ ...r, ...(o.log ? { logged: await o.log(r.credential, 'receipt').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) } : {}) })));
-    return { kind: 'settled', receipts: logged, currency, total: total / 100, remaining: (cap - already - total) / 100, ...(hold ? { held: true, until: new Date(Date.now() + HOLD_MS).toISOString() } : {}) };
+    return { kind: 'settled', receipts: logged, currency, total: total / 100, remaining: (cap - already - total) / 100, ...(hold ? { held: true, until: new Date(until).toISOString() } : {}) };
   });
 
-  // The money of a held payment moves: to the seller (capture), or back under the buyer's budget (void). The seller gets
-  // the capture receipt; either way it goes on the log.
-  const finish = async (h: NonNullable<ReturnType<typeof holds.get>>, to: 'captured' | 'voided', why: string) => {
+  // The money of a held payment moves: to the seller (capture), or back under the buyer's budget (void). Both sides get
+  // the signed receipt from this agent itself (run 31: only the seller heard of a release), and it goes on the log.
+  const finish = async (h: Hold, to: 'captured' | 'voided', why: string) => {
+    if (h.status !== 'held') return { kind: 'refused', problems: [`it was ${h.status} already`] };
     h.status = to;
+    h.settledAt = Date.now();
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
+    await save();
     const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why }, 3650);
     const logged = o.log ? await o.log(credential, to === 'captured' ? 'capture' : 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
-    if (to === 'captured' && h.payeeUrl) {
-      const envelope = await signMessage({ kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, memo: `released: ${why}` }, o.id, { iss: s.webId });
-      void sendLake(h.payeeUrl, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }).catch(() => {});
+    const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `${to === 'captured' ? 'released' : 'voided'}: ${why}` };
+    for (const url of new Set([h.payeeUrl, h.payerUrl].filter((u): u is string => !!u))) {
+      void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
     }
     if (to === 'captured') o.onSettled?.(h.amount / 100, 1);
     return { kind: to, hold: h.id, cart: h.cart.id, credential, ...(logged ? { logged } : {}), why };
   };
-  setInterval(() => { for (const h of holds.values()) if (h.status === 'held' && !h.disputed && h.until < Date.now()) void finish(h, 'captured', 'its time ran out with no dispute'); }, 60_000).unref();
+  // Time runs out with no dispute: released. Checked at start too, for holds whose time passed while this agent was down.
+  const sweep = () => { for (const h of holds.values()) if (h.status === 'held' && !h.disputed && h.until < Date.now()) void finish(h, 'captured', 'its time ran out with no dispute'); };
+  setTimeout(sweep, 1_000).unref();
+  setInterval(sweep, 60_000).unref();
   const settleHold = async (p: Record<string, unknown>, from: string): Promise<Reply> => {
     const h = holds.get(String(p.hold ?? ''));
     if (!h) return { kind: 'refused', problems: ['no held payment with that id (the receipt\'s settlementId)'] };
@@ -284,7 +332,8 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
     if (p.kind === 'dispute') {
       if (from !== h.payer) return { kind: 'refused', problems: ['only the buyer disputes it'] };
       h.disputed = true;
-      return { kind: 'disputed', hold: h.id, note: 'held until the seller refunds or an arbiter rules' } as never;
+      await save();
+      return { kind: 'disputed', hold: h.id, note: 'held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules' } as never;
     }
     // A ruling, from an arbiter this payments agent trusts, about this very cart: delivered and acknowledged releases it;
     // not delivered voids it; anything else leaves it held.

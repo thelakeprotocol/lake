@@ -52,6 +52,10 @@ const { positionals, values } = parseArgs({
     'passes-url': { type: 'string' },
     // The use cases whose demo issuers to run (and whose converters the auditor certifies).
     packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
+    // Who settles trades (SPEC §6.5): the arbiters whose rulings the payments agent follows, and the payments agents whose
+    // receipts the arbiter counts as paid. Domains, comma-separated.
+    'trust-arbiters': { type: 'string', default: process.env.LAKE_TRUST_ARBITERS ?? 'arbiter.lake.local' },
+    'trust-payments': { type: 'string', default: process.env.LAKE_TRUST_PAYMENTS ?? 'payments.lake.local' },
     production: { type: 'boolean', default: false },
   },
 });
@@ -75,6 +79,7 @@ const port = Number(values.port ?? (several ? '4300' : DEFAULTS[kind]!.port));
 const base = (values.url ?? `http://localhost:${port}`).replace(/\/$/, '');
 const nodes = (values.lake ?? '').split(',').map((u) => u.trim()).filter(Boolean);
 const log = (msg: string) => console.log(JSON.stringify({ at: new Date().toISOString(), msg }));
+const domains = (v: string) => v.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
 
 // The log, when it runs in this process: payments and the arbiter put what they sign on its record.
 let logger: Logger | undefined;
@@ -89,7 +94,7 @@ async function start(k: string, url: string) {
     DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack! })
     : DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
     : k === 'ethics' ? await createEthics(o)
-    : k === 'payments' ? await createPayments({ ...o, log: toLog, onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
+    : k === 'payments' ? await createPayments({ ...o, log: toLog, dataDir: values.data!, arbiters: domains(values['trust-arbiters']!), onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
     : k === 'guide' ? await createGuide({ ...o, nodeUrl: nodes[0], publicNodeUrl: values['public-node'] })
     : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
     : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })
@@ -98,7 +103,7 @@ async function start(k: string, url: string) {
     : k === 'passes' ? await createPasses({ ...o, dataDir: values.data! })
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
     : k === 'rooms' ? await createRooms({ ...o, dataDir: values.data! })
-    : k === 'arbiter' ? await createArbiter({ ...o, log: toLog })
+    : k === 'arbiter' ? await createArbiter({ ...o, log: toLog, payments: domains(values['trust-payments']!) })
     : k === 'log' ? (logger = await createLog({ ...o, dataDir: values.data! }))
     : k.startsWith('teller-') ? await createTeller({ ...o, dataDir: values.data!, name: `Teller ${k.slice(7).toUpperCase()}` })
     : await createAuditor(o);
