@@ -129,10 +129,18 @@ components:
         why: { type: string }
     Counters:
       type: object
+      description: Counted from the events each party reported (SPEC §8), everyday things first.
       properties:
         houses: { type: integer }
         agents: { type: integer }
+        cartsPaid: { type: integer, description: "Seller-signed carts paid (SPEC §6.5), at once or held until delivery: payment.settled with cart, from a specialist." }
+        paymentsSettled: { type: integer, description: Payments that moved money (paid at once, or a held payment released), from a specialist. }
+        valueSettled: { type: number, description: "Their sum, whatever each one's currency. A held payment counts once, when released." }
+        offersPriced: { type: integer, description: Offers worked out inside a house on its owner's data (quote.made from houses). }
+        offersAccepted: { type: integer, description: Offers owners accepted (offer.accepted from houses). }
+        agreementsSigned: { type: integer, description: Agreements houses signed (agreement.signed from houses). }
+        keysRevoked: { type: integer, description: Keys owners took back (grant.revoked from houses). }
+        studiesRun: { type: integer, description: Studies that got their answer (study.result, from the agent that ran it). }
         conversations: { type: integer }
-        valueSettled: { type: number }
         attacksBlocked: { type: integer }
         recordsMoved: { type: integer, description: Sum of recordsOut from houses' audit logs. The target is 0. }

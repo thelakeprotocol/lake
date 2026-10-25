@@ -62,7 +62,13 @@ export function describe(e: LakeEvent): string {
     case 'approval.requested': return e.subject ? `${e.actor} asked its owner about ${e.subject}.` : `${e.actor} asked its owner.`;
     case 'approval.answered': return `The owner of ${e.actor} tapped ${d.answer}.`;
     case 'approval.withdrawn': return e.subject ? `${e.subject} took back its request to ${e.actor}'s owner.` : `A visitor took back its request to ${e.actor}'s owner.`;
-    case 'payment.settled': return `Payments settled $${d.amount} with ${d.count} participant(s).`;
+    // A cart paid into a hold has moved no money yet: it moves when the buyer accepts (released) or goes back (no event).
+    case 'payment.settled': {
+      const money = !d.currency || d.currency === 'USD' ? `$${d.amount}` : `${d.currency} ${d.amount}`;
+      return d.held ? `A seller-signed cart was paid: ${money}, held until the buyer accepts the delivery.`
+        : d.released ? `A held payment of ${money} was released to its seller.`
+        : d.cart ? `A seller-signed cart was paid: ${money}.` : `Payments settled ${money} with ${d.count} participant(s).`;
+    }
     // Worded for what it is: a quarantined key is the agent's own key (run 21's assistant read "an agent claiming" as an
     // impersonation of that agent); an impersonation names who pretended to be whom.
     case 'attack.blocked': return d.why === 'quarantined' ? `${e.actor} turned away a quarantined key${d.claimed ? ` (its card says ${d.claimed})` : ''}.`

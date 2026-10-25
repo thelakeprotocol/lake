@@ -313,6 +313,8 @@ Participants report events to a node as a signed batch (`{ kind: "events", event
 
 A node SHOULD publish a signed, timestamped reading of its counters at `/snapshot`, so a bet or a contract can name a reading anyone can check later.
 
+A node SHOULD count only what the party that did it reports, by the role on its registered card: money from a specialist (the payments agent), offers priced and accepted, agreements signed and keys revoked from houses. A payments agent's `payment.settled` says whether it paid a seller-signed cart (`cart: true`), whether its money is only held (`held: true`) or a hold being released (`released: true`), and its `currency`; a node counts a held cart as paid and its money once, when it is released (a voided hold moved nothing).
+
 Kinds in v0:
 
 `house.joined` · `house.left` · `agent.registered` · `knock` · `offer` · `counter` · `decision` · `agreement.signed` · `grant.issued` · `grant.revoked` · `approval.requested` · `approval.answered` · `approval.withdrawn` · `payment.settled` · `attack.blocked` · `agent.quarantined` · `guild.formed` · `study.result` · `compute.done` · `record.moved` · `intent.opened` · `quote.made` · `offer.accepted` · `blueprint.published` · `agent.message` · `tally.update`

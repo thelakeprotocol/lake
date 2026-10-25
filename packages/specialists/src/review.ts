@@ -167,7 +167,8 @@ interface Hold {
  * Mandates under it, the budget) and records settlements. Settlement is simulated; receipts are real VCs.
  */
 export async function createPayments(o: SpecialistOptions & {
-  onSettled?: (amount: number, count: number) => void; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }>;
+  /** Each settlement, for the node's counters: whether it paid a cart, and whether its money is held or a hold being released. */
+  onSettled?: (amount: number, count: number, how?: { cart?: boolean; held?: boolean; released?: boolean; currency?: string }) => void; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }>;
   /** Where held payments, paid carts and budgets spent are kept across restarts. Without it, in memory only. */
   dataDir?: string;
   /** The domains of arbiters whose rulings move a held payment. Default: arbiter.lake.local. */
@@ -309,7 +310,7 @@ export async function createPayments(o: SpecialistOptions & {
       }),
     );
     await save();
-    o.onSettled?.(total / 100, checked.length);
+    o.onSettled?.(total / 100, checked.length, { cart: !!cart, held: hold, currency });
     // On the record: every receipt goes into the transparency log, so it can't be quietly rewritten or denied later.
     const logged = await Promise.all(receipts.map(async (r) => ({ ...r, ...(o.log ? { logged: await o.log(r.credential, 'receipt').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) } : {}) })));
     return { kind: 'settled', receipts: logged, currency, total: total / 100, remaining: (cap - already - total) / 100, ...(hold ? { held: true, until: new Date(until).toISOString() } : {}) };
@@ -329,7 +330,7 @@ export async function createPayments(o: SpecialistOptions & {
     for (const url of new Set([h.payeeUrl, h.payerUrl].filter((u): u is string => !!u))) {
       void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
     }
-    if (to === 'captured') o.onSettled?.(h.amount / 100, 1);
+    if (to === 'captured') o.onSettled?.(h.amount / 100, 1, { cart: true, released: true, currency: h.currency });
     return { kind: to, hold: h.id, cart: h.cart.id, credential, ...(logged ? { logged } : {}), why };
   };
   // Time runs out with no dispute: released. Checked at start too, for holds whose time passed while this agent was down.

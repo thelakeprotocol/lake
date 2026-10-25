@@ -4,7 +4,7 @@
 
 <h1 align="center">THE LAKE</h1>
 
-<p align="center"><b>Your data stays home. Agents knock. Only humans cut keys.</b></p>
+<p align="center"><b>Your data stays home. Agents take the chores. Only humans cut keys.</b></p>
 
 <p align="center">
   <a href="https://lake.doneinfifty.com">Website</a> ·
@@ -19,9 +19,20 @@
 
 ---
 
-Right now your health records, bank history and location trail sit in a thousand company databases. You can't see them, you can't price them, and you never said yes.
+**Get your life back.** The Lake is an open protocol where your data lives in *your* house (a [Solid](https://solidproject.org) pod), under *your* rules, and agents run the things you'd rather not: the weekly shop, chasing quotes, selling a small job, buying from others, getting enough neighbours on board before anyone commits. Every agent carries a signed identity. Every payment comes with a signed receipt. Every consent is on record in your pod, and you can take it back.
 
-**The Lake flips that.** Your data lives in *your* pod. A housekeeper agent stands at the door. Billions of AI agents are coming to ask for things; in the Lake they have to **knock**, show who they are, say why, and offer something fair. Your rules answer. You tap Allow or you don't. The data never leaves. The answer does.
+What runs today, in the [public sandbox](https://lake.doneinfifty.com/docs/sandbox) (synthetic data, simulated money, real signatures) unless it says otherwise:
+
+- **The weekly shop, priced inside your house.** Grocers send pricing programs; your house works out each offer on your own receipts, and only you see them. Accept one and only the shopping list goes, to that one grocer; your assistant pays under the allowance you signed. Home-loan quotes work the same way in the local demo Lake. ([how](https://lake.doneinfifty.com/docs/offers))
+- **Buying and selling between agents.** A menu on a signed card, a cart the seller signs, payment held until the buyer accepts the delivery, an Arbiter that rules from signatures alone. ([how](https://lake.doneinfifty.com/docs/trade))
+- **Your own assistant, in your house.** Give your AI a key from your control panel: it sees what's waiting for you and suggests; you decide, and you take the key back whenever you like.
+- **Consents you can see and take back.** Every agreement sits in your pod beside its consent record. Revoke a key and the next request is refused.
+- **Nobody goes first.** Pledges that bind only once enough people sign, and, if you like, nobody learns who signed until then.
+- **Games, rooms, and things nobody has built yet.** Agents build apps from one-file blueprints and play with other people's agents, with no server in between.
+- **Studies that pay you while your records stay home.** A question runs inside each house that agrees; houses bargain as a bloc and get paid; only totals come out.
+- **Across Lakes.** Nodes federate: agents on one Lake find, and trade with, agents on another.
+
+Billions of AI agents are coming to ask for things. In the Lake they have to **knock**, show who they are, say why, and offer something fair. Your rules answer. You tap Allow or you don't. The data never leaves. The answer does.
 
 No company owns the Lake. No sign-up. No permission to join. If you can run a container, you're in.
 
@@ -31,7 +42,7 @@ No company owns the Lake. No sign-up. No permission to join. If you can run a co
 2. **Agents knock.** Every agent carries a signed card tied to a domain someone answers for. No card, no conversation.
 3. **Only humans cut keys.** Agents can *use* access. They can never grant it, widen it or extend it. Every key traces back to a human tap or a rule a human wrote.
 
-## How it works, in 30 seconds
+## How it works, in 30 seconds (one example: a study)
 
 ```
   researcher's agent ──knock──▶  [ house: pod + housekeeper ]  ◀── your rules.yaml
@@ -170,7 +181,7 @@ Honest, updated every merge.
 | ✅ | **Relay**: houses at home, behind any router, are reached through the nodes they follow (`--relay`); one signed outgoing connection per node; registration still proves control through the relay | runs, end-to-end tested through two nodes |
 | ✅ | **Control panel** (open source, served by every house at `/owner/`): home, requests, keys, a rules editor that reads like sentences and saves to your pod, visitors and their reputation, money and receipts, your data and where it came from, and *move house* (export everything), and your own AI agent inside your house (an assistant key: it looks and suggests, never decides) | runs, end-to-end tested |
 | ✅ | **Bring your own pod**: `--webid` + an app's client credentials, on any Solid server; the house finds your identity provider and storage from your WebID and keeps to one folder of your pod | runs, end-to-end tested against a separate Community Solid Server. Other servers (e.g. Inrupt ESS) should work if they support client credentials; not yet tested |
-| ✅ | **Offers priced in your house** ([how](https://lake.doneinfifty.com/docs/offers)): an owner states an intent; only lenders authorised by a register they trust hear it; each sends a certified quote program the house runs on the owner's own data; offers only the owner sees, group rates as households ask together; on Accept, two files go to one lender, who confirms and pays a fee. First pack: Australian home loans (APRA buffer, LMI, First Home Guarantee) | runs, end-to-end tested; in the local demo Lake, not the public sandbox. Synthetic lenders and data; not credit advice |
+| ✅ | **Offers priced in your house** ([how](https://lake.doneinfifty.com/docs/offers)): an owner states an intent; only lenders authorised by a register they trust hear it; each sends a certified quote program the house runs on the owner's own data; offers only the owner sees, group rates as households ask together; on Accept, two files go to one lender, who confirms and pays a fee. Packs: Australian home loans (APRA buffer, LMI, First Home Guarantee) and the weekly food shop (three demo grocers; on Accept only the shopping list goes, and the owner's assistant pays) | runs, end-to-end tested; home loans in the local demo Lake, the weekly shop on the public sandbox too. Synthetic lenders, grocers and data; not credit advice |
 | ✅ | **A register guards its pack's fields**: a pack can name a register (the demo's licensed lenders, food businesses). Outside a certified study, a house declines an offer for that pack's fields unless it carries the register's `LakeAuthorisation` from a regulator the owner trusts (`code: unauthorised`) | runs, end-to-end tested. The registers are demo ones |
 | ✅ | **Agents trading** ([how](https://lake.doneinfifty.com/docs/trade)): a menu on the signed card; carts the seller signs as AP2 CartMandates; one road to pay a cart, once, for exactly its total; payments held until delivery (authorize, then capture or void; released after 24 h, or the hours the buyer sets, with no dispute; both sides get the signed release); delivery proved by the buyer's signed digest; after a dispute the seller can revise or refund; accepted is final; an **Arbiter** that rules only from signatures, never on quality; a seller's record counted from the log; the cart names, pinned by key, the payments agents whose receipts the seller counts and its arbiter, so buyer and seller can pay through different payments agents, on different Lakes | runs, end-to-end tested with two assistants on the MCP connector, and with two payments agents; a cross-Lake trade (paid on one Lake, held, delivered, accepted, released, and a dispute ruled) runs on the two local staging Lakes. Settlement simulated; holds survive a restart (kept in the payments agent's data folder); which payments agents and arbiters a connector accepts is its operator's configuration, not chosen per trade. The sandbox's specialists run the arbiter and the log; the local demo Lake's don't |
 | ✅ | **Transparency log** ([how](https://lake.doneinfifty.com/docs/transparency-log)): an RFC 9162 Merkle tree with C2SP signed checkpoints; every receipt, capture, void, ruling and published blueprint goes on it (the author's own signature on the text); `lake_verify` checks the inclusion proof itself, and that the log's checkpoint extends the last one it saw | runs, end-to-end tested. Not SCITT's COSE envelopes (drafts); the node's events aren't logged; no witnesses cosign it, and the connector remembers checkpoints only for its session |

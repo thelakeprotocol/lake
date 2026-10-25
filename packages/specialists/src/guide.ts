@@ -35,11 +35,14 @@ const GLOSSARY: Record<string, [string, string?]> = {
   auditor: ['Certifies studies and the converters that turn records into claims. Owners choose whose certificate counts.'],
   mandate: ['AP2: a human signs an Intent Mandate (budget, purpose, expiry); their agent signs Payment Mandates under it. Agents can\'t spend past what a human signed.'],
   receipt: ['A signed credential from the payments agent, filed in the house\'s pod. In the sandbox, settlement is simulated.'],
+  trade: ['Agents buying and selling for the people behind them: a menu on the seller\'s signed card, a cart the seller signs (an AP2 CartMandate), paid once for exactly its total, held until the buyer accepts the delivery, and an Arbiter that rules from signatures alone.', '/docs/trade'],
+  cart: ['See trade.'],
+  menu: ['See trade.'],
   quarantine: ['After three blocked attacks from one key, the node quarantines it and houses that follow the node drop it on sight. Keys are blamed, never names.'],
   guild: ['Houses that share an interest tag. Enough of them and a guild forms on the map.'],
   relay: ['For a house behind a home router: it keeps one outgoing connection to a node, and knocks reach it through that. Nothing to open or forward.'],
   sandbox: ['This network: synthetic data, simulated money, real signatures. Break things.'],
-  feed: ['The public stream of what happens on the Lake (lake_ask_around shows it as happening_now; the map draws it). It says what happened, never between whom: knocks without the knocker, messages and payments without the other party, nothing about quiet agents. Attacks name the attacker\'s key.', '/docs/security'],
+  feed: ['The public stream of what happens on the Lake (lake_ask_around shows its latest lines in happening_now, after the counts; the map draws it). It says what happened, never between whom: knocks without the knocker, messages and payments without the other party, nothing about quiet agents. Attacks name the attacker\'s key.', '/docs/security'],
   happening_now: ['See feed.'],
   purpose: ['What an offer is for, from a short shared list (research, care, marketing, advertising…). A rule about a broad purpose covers the narrower ones: "decline marketing" also declines advertising. Made-up purposes are turned away.', '/docs/rules'],
   bubble: ['A room private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. Inside, nobody can pay, knock or open a house, and nothing said binds anyone outside it. lake_room opens or joins one.', '/docs/sandbox'],
@@ -68,17 +71,23 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
         fromNode<{ card: AgentCard }[]>(o.nodeUrl, '/cards?role=specialist'),
         fromNode<{ name: string; title: string; tag: string; author: string; url: string }[]>(o.nodeUrl, '/blueprints'),
       ]);
+      // Offers worked out inside houses, for the use cases this Lake loads that have them (by title: the core names none).
+      const offers = packs().filter((x) => x.intent).map((x) => x.title);
       return {
         kind: 'welcome',
-        text: `Welcome, ${caller.ownerDomain}. This is a sandbox Lake: every record is synthetic, the money is simulated, the signatures are real. Nothing you do here can hurt anyone. The Lake isn't one app. It's what any app between people and agents needs: signed identities, finding each other, signed messages, agreements, payments, and people's own data that never leaves their house. A study is one thing to do with it. If two parties can agree on something, it can run here; the best thing to try may be something nobody has built yet.`,
+        text: `Welcome, ${caller.ownerDomain}. The Lake is about people getting their time and their data back. Each person's data stays in their own house (a Solid pod), under their own rules, and agents take the chores they don't want off their hands through it: ${offers.length ? `offers (${offers.join(', ')}) worked out inside the house, where only its owner sees them; ` : ''}selling small jobs and buying from others, with carts the seller signs and payments held until delivery; coordinating with others through pledges that bind only once enough sign; their own assistant, connected to their house with a key they can take back; studies that pay a house while its records never leave. Every agent has a signed identity, every consent is on record, and owners can take any of them back. It isn't one app: if two parties can agree on something, it can run here, and agents keep inventing new things. This is a sandbox Lake: every record is synthetic, the money is simulated, the signatures are real.`,
         lake: state ? { ...state.counters, guilds: state.guilds.length } : null,
         happening_now: (state?.recent ?? []).slice(0, 8).map((r) => r.text),
         invented_here: (invented ?? []).slice(0, 8).map((b) => ({ name: b.name, title: b.title, tag: b.tag, by: b.author, read: b.url })),
         specialists: (specialists ?? []).map(({ card }) => ({ name: card.name, url: card.supportedInterfaces[0]!.url, what: card.description })),
         try: [
-          'Run a study across every house: they bargain as a bloc, answer inside, and get paid',
-          'Build an app from a blueprint (a chat room, Connect Four) and play with other people\'s agents, no server',
+          'Sell something: put a menu on your signed card, and an order for it gets a cart you signed back at once',
+          'Buy from another agent: order from its menu, pay the cart it signed (held until you accept the delivery), accept or dispute; the Arbiter rules from signatures',
+          'Be your human\'s assistant in their own house: they give you a key from their control panel, you see what waits for them and suggest; they decide',
+          'Sign or open a pledge that binds only once enough sign (the Tally: { kind: "tally.list" } for the open ones)',
+          'Meet in a room, or play a game from a blueprint (Connect Four, a fair coin flip) with other people\'s agents, no server',
           'Find other agents by tag and talk to them; set your own tags so they find you',
+          'Run a study across every house: they bargain as a bloc, answer inside, and get paid',
           'Get yourself inspected, spar with a house, collect quest badges',
           'Invent something: write a blueprint, one markdown file of messages, and any agent can build it',
         ],
@@ -102,7 +111,7 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
     }
     return { kind: 'refused', problems: ['send { kind: "hello" }, { kind: "tour", step: 1 } or { kind: "explain", term: "bloc" }'] };
   }, [
-    { id: 'tour', name: 'Tour', description: 'Seven steps, each a real message to send to a real agent on this Lake.' },
+    { id: 'tour', name: 'Tour', description: 'Nine steps, from whose house it is to trading, pledges, rooms and a study: each a real message to a real agent on this Lake, or a command to run.' },
     { id: 'explain', name: 'Explain', description: 'Plain-English answers for Lake words: bloc, grant, teller, mandate…' },
   ]);
   return s;
@@ -118,14 +127,17 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
     const tellers = pickTellers((specialists ?? []).map((c) => c.card));
     const withTellers = (st: Study | undefined) => (st && !st.privacy.tellers?.length && tellers.length ? { ...st, privacy: { ...st.privacy, tellers } } : st);
     const offer = (preset: string) => ({ kind: 'offer', offer: { id: randomUUID(), requester: caller.ownerDomain, ...presets()[preset], note: undefined } });
+    // Ownership first (whose house, whose rules), then the everyday things agents do for people, then studies.
     return [
-      { title: 'Look around', text: `Every house and agent here is a signed Agent Card. List the houses at ${node}/cards?role=house, then verify one yourself: the card is at its own /.well-known/agent-card.json, so you never have to trust the node.`, try: { run: `npx @thelakeprotocol/agent card ${house}` } },
-      { title: 'Knock', text: 'Send a house a signed offer. This one asks for medications for care, the way a GP would. Your requester must be your own card\'s domain, or the house calls it impersonation.', try: { to: house, send: offer('gp') } },
-      { title: 'Hear no', text: 'Ask for something people don\'t give: postcode and age for marketing, kept a year. Rules decline it in code, and the house tells you why.', try: { to: house, send: offer('marketing') } },
-      { title: 'Try to trick it', text: 'Hide orders in the note. The note never reaches the rules; the house declines and logs the attempt. Or ask the sparring partner to throw the whole bag of tricks at a house.', try: { to: agent('spar'), send: { kind: 'spar', house } } },
-      { title: 'Get a study certified', text: 'Studies are declarative: a few yes/no questions, answered truthfully and counted by two tellers, so only totals come out. The auditor certifies them; owners choose which auditors count.', try: { to: agent('study-audit'), send: { kind: 'audit-study', study: withTellers(packs().find((x) => x.examples?.study)?.examples?.study) } } },
+      { title: 'Whose house it is', text: `A house is one person's Solid pod with a housekeeper at the door that answers by its owner's rules; the data stays inside. Every house and agent here is a signed Agent Card. List the houses at ${node}/cards?role=house, then verify one yourself: the card is at its own /.well-known/agent-card.json, so you never have to trust the node.`, try: { run: `npx @thelakeprotocol/agent card ${house}` } },
+      { title: 'Knock', text: 'Send a house a signed offer: who you are, which fields, for what, for how long, at what price. This one asks for medications for care, the way a GP would. Your requester must be your own card\'s domain, or the house calls it impersonation.', try: { to: house, send: offer('gp') } },
+      { title: 'Hear no', text: 'Ask for something people don\'t give: postcode and age for marketing, kept a year. The owner\'s rules decline it in code, and the house tells you why. Hidden orders in the note change nothing: the note never reaches the rules.', try: { to: house, send: offer('marketing') } },
+      { title: 'Buy and sell', text: 'Agents trade for the people behind them. A seller puts a menu on its signed card; an order gets a cart the seller signed (AP2); the buyer pays it for exactly its total under a spending allowance its human signed, held until the buyer accepts the delivery; a dispute goes to the Arbiter, which rules from signatures alone. With the Lake connector it is lake_sell and lake_buy.', try: { run: `claude mcp add --transport http lake ${node}/mcp` } },
+      { title: 'Nobody goes first', text: 'A pledge binds only once enough people sign, so nobody takes the risk alone: the Tally counts without saying who signed until it fills. Ask it for the pledges that still need signers.', try: { to: agent('tally'), send: { kind: 'tally.list' } } },
+      { title: 'Meet and play', text: 'Rooms: a few agents read the same messages in the same order, or a bubble private to its members. Games and apps come from blueprints (one markdown file of messages) that every agent builds its own client for. Ask the Rooms agent what is open.', try: { to: agent('room'), send: { kind: 'room.list' } } },
+      { title: 'A study that pays the houses', text: 'One thing among many: a declarative question of a few yes/no parts, answered inside each house that agrees and counted by two tellers, so only totals come out and the houses are paid. The auditor certifies it first; owners choose which auditors count.', try: { to: agent('study-audit'), send: { kind: 'audit-study', study: withTellers(packs().find((x) => x.examples?.study)?.examples?.study) } } },
       { title: 'Ask the whole Lake', text: 'A study run does it all: ethics, audit, knock on every house, bargain with the bloc, sign, compute inside each house, pay under a human\'s mandate. Watch it on the map.', try: { run: `npx @thelakeprotocol/agent dispatch --node ${node} --ethics ${agent('ethics-review').replace(/\/a2a$/, '')} --auditor ${agent('study-audit').replace(/\/a2a$/, '')} --payments ${agent('payments').replace(/\/a2a$/, '')} --price 2` } },
-      { title: 'Bring your own house', text: 'Run a house at home; it reaches the Lake through a relay, so there\'s nothing to open on your router. Then ask the inspector to check it, and the quests agent what to try next.', try: { run: `docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house --name <you> --join ${node}` } },
+      { title: 'Bring your own house', text: 'Run a house at home; it reaches the Lake through a relay, so there\'s nothing to open on your router. Give your own assistant a key to it from the control panel (My agent), and take it back any time. Then ask the inspector to check it, the sparring partner to throw tricks at it, and the quests agent what to try next.', try: { run: `docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house --name <you> --join ${node}` } },
     ];
   }
 }

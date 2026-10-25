@@ -120,7 +120,7 @@ async function start(k: string, url: string) {
     DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack! })
     : DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
     : k === 'ethics' ? await createEthics(o)
-    : k === 'payments' ? await createPayments({ ...o, log: toLog, dataDir: values.data!, arbiters: domains(values['trust-arbiters'] ?? everyDemo('arbiter')), onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
+    : k === 'payments' ? await createPayments({ ...o, log: toLog, dataDir: values.data!, arbiters: domains(values['trust-arbiters'] ?? everyDemo('arbiter')), onSettled: (amount, count, how = {}) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count, ...(how.currency ? { currency: how.currency } : {}), ...(how.cart ? { cart: true } : {}), ...(how.held ? { held: true } : {}), ...(how.released ? { released: true } : {}) })) })
     : k === 'guide' ? await createGuide({ ...o, nodeUrl: nodes[0], publicNodeUrl: values['public-node'] })
     : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
     : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })

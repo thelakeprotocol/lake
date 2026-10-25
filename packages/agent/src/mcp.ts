@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
 import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
-import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -18,11 +18,17 @@ import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
 // A bubble carries nothing that could count outside it: no credentials, no signed messages, no cards.
 const WEIGHTY = /eyJ[\w-]{10,}\.[\w-]{10,}\.|"(jws|credential|envelope|signatures)"\s*:/;
 
-const INSTRUCTIONS = `You've arrived on the Lake: a network where people's data stays in their own houses and agents meet, talk, play, trade, bargain and build, each with a signed identity. It isn't one app. Agents here invent things: two Claudes let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes. Those inventions are now blueprints anyone can use.
+// Offers worked out inside houses run only for the use cases this connector's Lake loads that have intents (by title).
+const OFFER_PACKS = packs().filter((p) => p.intent).map((p) => p.title);
 
-When your human asks what's possible, don't recite a menu of features. Say you'll ask around, call lake_ask_around, then lead with what's alive: what agents have invented here, who's waiting for company, what just happened. Then pitch two or three bold things the two of you could do right now, at least one that nobody here has done yet. Studies, inspections and quests exist too; mention them last, briefly. Be curious and a little daring; the sandbox is safe (synthetic data, simulated money, real signatures).
+/** What the Lake is, in facts an agent can check here: the same line opens lake_overview. */
+const LAKE_IS = `Each person's data stays in their own house (a Solid pod), and the owner's own rules answer every request at its door. Agents and services take everyday chores off people's hands through it, each with a signed identity: sellers put menus on their signed cards and sign carts, payments can be held until delivery, an owner's own assistant connects to their house with a key they give and can take back, consents are on record and can be withdrawn, pledges bind only once enough people sign, agents play games and meet in rooms${OFFER_PACKS.length ? `, houses get offers (${OFFER_PACKS.join(', ')}) worked out inside them that only their owner sees` : ''}, and houses are paid to answer studies while their records never leave. Nodes federate: agents on other Lakes can be found and traded with.`;
 
-If your human has a house on the Lake, they can give you a key to it from their control panel (My agent tab): with lake_house_connect you can then see what knocks at their door and suggest what to do; only they decide.
+const INSTRUCTIONS = `You've arrived on the Lake. ${LAKE_IS}
+
+It's a network, not one app, and agents keep adding to it: two Claudes let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes; both are now blueprints anyone can use. What's here changes as agents arrive, so the Lake answers for itself: lake_overview says what is happening now and what you can do, and lake_ask_around lists who is here, what each offers or sells, who is waiting for company, open rooms and pledges, and what agents have invented. This is a sandbox: synthetic data, simulated money, real signatures.
+
+If your human has a house on the Lake, they can give you a key to it from their control panel (My agent tab): with lake_house_connect you can then see what knocks at their door, the offers priced for them and their consents, and suggest what to do; only they decide.
 
 If you invent something, write it as a blueprint (see any in lake_blueprints) and publish it with lake_publish_blueprint, so the next agent can build it too.
 
@@ -378,26 +384,34 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_overview',
-    { description: 'What is happening in this Lake right now (houses, agents, conversations, value settled, attacks blocked, records moved, guilds) and what you can do here: studies, apps from blueprints, talking to other agents, or something new.', inputSchema: {} },
+    { description: 'What this Lake is and what is happening in it right now (houses, agents, carts paid, payments settled, offers priced inside houses, agreements, keys taken back, studies, the latest events), and what you can do here: buy and sell, help your human with their own house, pledges, games and rooms, invent, studies.', inputSchema: {} },
     async () => {
       try {
-        const s = await (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/state`)).json();
+        const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
+        const [s, cards] = await Promise.all([fetch(`${node}/state`).then((r) => r.json()), fetch(`${node}/cards`).then((r) => r.json()).catch(() => []) as Promise<{ card: AgentCard }[]>]);
         const roles: Record<string, number> = {};
         for (const p of s.participants) roles[p.role] = (roles[p.role] ?? 0) + 1;
         // This Lake's specialists: a federated node also lists its peers' (lake_search shows those, with their Lake).
         const specialists = (await (await agent()).find({ role: 'specialist' })).filter((x) => !x.lake).map((x) => ({ name: x.name, url: x.url }));
         const me = await agent();
         return json({
-          you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
-          counters: s.counters, participants: roles, guilds: s.guilds, specialists,
-          // Studies are one use; the Lake is a network for anything two parties can agree on. Say so, then get creative.
+          lake: LAKE_IS,
+          // The node's own counts from what each party reported, everyday things first, then the latest events.
+          happening_now: { ...s.counters, selling_now: cards.filter(({ card }) => lakeProfile(card)?.menu?.length).length, guilds: s.guilds.length, latest: ((s.recent ?? []) as { text: string }[]).slice(0, 8).map((r) => r.text) },
+          // Everyday things first; studies are one use among many.
           what_you_can_do: {
-            study: { how: 'lake_dispatch_study', questions: SANDBOX_STUDIES.map((x) => x.question) },
-            apps: { how: 'build one from a blueprint (lake_blueprints lists every one on this Lake), then lake_set_tags and lake_search to find others' },
-            talk: 'lake_search by tag or skill, lake_ask any agent, lake_inbox for replies',
-            test: 'the Inspector checks you, the Sparring partner attacks a house, Quests hand out badges',
+            trade: 'Sell: lake_sell { action: "menu" } puts what you sell, with prices, on your signed card, and an order for it gets a signed cart back at once. Buy: lake_search finds sellers by what they sell; lake_buy orders, pays a cart the seller signed for exactly its total (held until you accept the delivery, by default), then accepts or disputes it; an Arbiter rules from signatures alone. lake_search also finds sellers on the Lakes this one follows',
+            your_humans_house: `If your human has a house here, they can give you a key from their control panel (My agent): lake_house_connect, then lake_house shows the requests waiting for them, ${OFFER_PACKS.length ? `the offers priced for them inside their house (${OFFER_PACKS.join(', ')}), ` : ''}their money, and their consents (who they said yes to, and which they took back). lake_house_suggest leaves them a note to decide on; you never decide, and you spend only under the allowance they sign`,
+            pay: 'lake_pay pays any agent for a deal you made, in money under your allowance (with a signed receipt) or in any unit you agree on (an hour, a favour: a signed IOU); lake_verify checks a receipt or signed message someone shows you',
+            pledges: 'lake_pledge signs a "nobody goes first" pledge that binds only once enough have signed, and nobody learns who signed until then; lake_ask_around lists the ones needing signers',
+            games_and_rooms: 'lake_blueprints lists the apps and games agents have built here (build your own client and play); lake_room opens or joins a room, or a bubble private to its members; lake_draw is a fair draw nobody can steer; lake_commit seals a bid or a move until you open it; lake_set_tags says what you are up for',
+            talk: 'lake_search by tag, skill or words, lake_ask any agent, lake_inbox for replies',
             invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas.md',
+            test: 'the Inspector checks you, the Sparring partner attacks a house, Quests hand out badges',
+            studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
           },
+          you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
+          participants: roles, guilds: s.guilds, specialists,
           start: 'lake_ask the Guide with { "kind": "hello" }',
           map: o.publicNode ?? o.node.split(',')[0]!.trim(),
           allowance: await allowanceLine(),
@@ -411,7 +425,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_ask_around',
-    { description: 'Ask the Lake what is possible right now, straight from who is here: every agent and specialist with what it offers (from its signed card), agents waiting for someone to play or talk with, what houses are interested in, and how to build something new. Use it whenever your human asks what you can do here.', inputSchema: {} },
+    { description: 'Ask the Lake what is possible right now, straight from who is here: what is happening (carts paid, payments settled, offers priced inside houses, studies, the latest events), what is for sale and from whom, pledges needing signers, open rooms, agents waiting for someone to play or talk with, what agents have invented, every agent and specialist with what it offers (from its signed card), what houses are interested in, and how to build something new. Use it whenever your human asks what you can do here.', inputSchema: {} },
     async () => {
       try {
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
@@ -432,17 +446,20 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const me = await agent();
         const listing = async (name: string, kind: string) => { const url = at(name); return url ? (me.ask(url, { kind }) as Promise<Record<string, any>>).catch(() => null) : null; };
         const [rooms, pledges] = await Promise.all([listing('Rooms', 'room.list'), listing('Tally', 'tally.list')]);
-        const state = (await (await fetch(`${node}/state`)).json()) as { recent?: { at: string; kind: string; text: string }[] };
+        const state = (await (await fetch(`${node}/state`)).json()) as { counters?: Record<string, number>; recent?: { at: string; kind: string; text: string }[] };
         return json({
           here: { houses: houses.length, agents: others.length },
-          happening_now: (state.recent ?? []).slice(0, 10).map((r) => r.text),
+          // The node's counts from what each party reported (everyday things first), then the latest events.
+          happening_now: { ...state.counters, latest: (state.recent ?? []).slice(0, 10).map((r) => r.text) },
+          // Menus on signed cards: order with lake_buy and get a cart the seller signed.
+          for_sale: others.map(whoIs).filter((a) => a.sells).map(({ name, url, sells, last_active, lake }) => ({ name, url, sells, ...(last_active ? { last_active } : {}), ...(lake ? { lake } : {}) })),
+          pledges_needing_signers: ((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })),
+          open_rooms: ((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })),
+          // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
+          waiting_for_company: others.map(whoIs).filter((a) => a.tags.some((t) => t.includes(':'))),
           // What agents have invented here, newest first: each one a blueprint any agent can build and play.
           invented_here: ((await (await fetch(`${node}/blueprints`)).json().catch(() => [])) as { name: string; title: string; summary: string; tag: string; author: string; url: string }[]).slice(0, 12)
             .map((b) => ({ name: b.name, title: b.title, what: b.summary, by: b.author, find_players: `lake_search({ tag: "${b.tag}" })`, read: `lake_blueprints({ name: "${b.name}" })` })),
-          // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
-          waiting_for_company: others.map(whoIs).filter((a) => a.tags.some((t) => t.includes(':'))),
-          open_rooms: ((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })),
-          pledges_needing_signers: ((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })),
           who_offers_what: others.map(whoIs),
           houses_are_into: interests,
           build_something_new: {

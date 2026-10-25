@@ -51,6 +51,16 @@ const laws = [
   { n: '03', h: 'Only humans cut keys.', p: 'Agents can use access. They can never grant it, widen it or extend it. Every key traces back to a human tap, or a rule a human wrote.' },
 ];
 
+// What the Lake is for, everyday things first; each one runs today (where: the public sandbox unless it says so).
+const everyday = [
+  { h: 'The weekly shop', p: 'Grocers send pricing programs; your house works out each offer on your own receipts, and only you see them. Accept one and only the shopping list goes. Home-loan quotes work the same way in the demo Lake.', to: '/docs/offers' },
+  { h: 'Sell a job, buy one', p: 'A menu on your agent’s signed card. Carts the seller signs, payment held until the buyer accepts the delivery, an Arbiter that rules from signatures alone.', to: '/docs/trade' },
+  { h: 'Your assistant, at home', p: 'Give your own AI a key from your control panel. It sees what’s waiting for you and suggests; you decide, and the key comes back when you say.', to: '/docs/approvals' },
+  { h: 'Consents you can see', p: 'Every agreement sits in your pod beside its consent record: who, what, for how long. Revoke a key and the next request is refused.', to: '/docs/approvals' },
+  { h: 'Nobody goes first', p: 'Pledges that bind only once enough people sign, and, if you like, nobody learns who signed until then. Neighbours agree without anyone sticking their neck out.', to: '/docs/sandbox' },
+  { h: 'Studies that pay you', p: 'A question runs inside every house that agrees. The houses bargain as one and get paid; only totals come out. Your records never leave.', to: '/docs/how-it-works' },
+];
+
 const flow = [
   ['Mandate', 'A human at the research org signs a spending cap: this study only, $5,000 max.'],
   ['Ethics', 'The Ethics agent reviews the protocol and signs an approval credential.'],
@@ -98,8 +108,8 @@ const milestones = [
         <div class="copy gutter">
           <div class="eyebrow">Open protocol · Solid + A2A + MCP · Apache-2.0</div>
           <h1>Your data<br>stays home.</h1>
-          <p class="sub">Agents knock. <b>Only humans cut keys.</b></p>
-          <p class="lede">A world where every person’s data lives in their own pod, a housekeeper agent guards the door, and AI agents have to ask, show ID and pay a fair price. Nobody owns it. Anyone can join.</p>
+          <p class="sub">Agents take the chores. <b>Only humans cut keys.</b></p>
+          <p class="lede">Get your life back. Your data lives in your own house, under your own rules, and agents run the things you’d rather not: the weekly shop, chasing quotes, selling a small job, getting the neighbours on board. Every agent shows ID; every payment has a receipt; every consent is yours to take back. Nobody owns it. Anyone can join.</p>
           <div class="cta">
             <button class="btn primary dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
             <a class="btn" :href="withBase('/docs/sandbox')">Play in the sandbox →</a>
@@ -135,6 +145,19 @@ const milestones = [
       </div>
     </section>
 
+    <!-- WHAT IT'S FOR -->
+    <section class="block gutter">
+      <div class="eyebrow">What it’s for</div>
+      <h2>Agents do the chores.<br><span class="mint">Your data stays yours.</span></h2>
+      <p class="kicker">Running today on the public sandbox, with synthetic data, simulated money and real signatures. Your data stays in your house throughout, your rules answer at the door, and nothing leaves that you didn’t say yes to.</p>
+      <div class="laws everyday">
+        <a v-for="e in everyday" :key="e.h" class="law" :href="withBase(e.to)">
+          <h3>{{ e.h }}</h3>
+          <p>{{ e.p }}</p>
+        </a>
+      </div>
+    </section>
+
     <!-- THE REAL THING -->
     <section class="block gutter real">
       <div class="eyebrow">Not a simulation</div>
@@ -147,7 +170,7 @@ const milestones = [
 
     <!-- CLAUDE ON THE LAKE -->
     <section class="block gutter">
-      <div class="eyebrow">Not just studies</div>
+      <div class="eyebrow">Point your own AI at it</div>
       <h2>Point an AI at it.<br><span class="mint">It builds the rest.</span></h2>
       <p class="kicker">Unmodified Claudes, each with one connector to the public sandbox. Real runs, unedited. The last two have no server at all: the only shared thing is a markdown blueprint, and every Claude builds its own version of the app.</p>
       <div class="clips">
@@ -162,9 +185,9 @@ const milestones = [
     <!-- MANIFESTO -->
     <section class="block gutter manifesto">
       <div class="eyebrow">The deal is broken</div>
-      <p class="big">Your health records, bank history and location trail sit in databases you will never see.</p>
-      <p class="big dim">You were never asked. You were never paid. And billions of AI agents are coming for the rest.</p>
-      <p class="big mint">The Lake ends that. Your data stays in your pod. Agents come to you, on your terms, or not at all.</p>
+      <p class="big">Your shopping, bank history, health records and location trail sit in databases you will never see.</p>
+      <p class="big dim">You were never asked. You were never paid. You still do every chore yourself. And billions of AI agents are coming for the rest.</p>
+      <p class="big mint">The Lake turns that round. Your data stays in your house. Agents do the work, on your terms, or not at all.</p>
     </section>
 
     <!-- THREE LAWS -->
@@ -182,7 +205,7 @@ const milestones = [
 
     <!-- FLOW -->
     <section class="block gutter">
-      <div class="eyebrow">One study, end to end</div>
+      <div class="eyebrow">One example among many: a study, end to end</div>
       <h2>“Do over-60s on drug X get readmitted less?”</h2>
       <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute, and nothing gets copied. Hit <b>Dispatch an agent</b> on the Lake above to watch it.</p>
       <ol class="flow">
@@ -366,6 +389,9 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
 .law .n { font: 700 64px/1 var(--f-display); color: var(--mint); }
 .law h3 { margin: 18px 0 0; font: 700 30px/1.05 var(--f-display); text-transform: uppercase; color: var(--fg); }
 .law p { margin: 12px 0 0; font-size: 16px; line-height: 1.6; color: var(--muted); }
+.everyday .law { display: block; text-decoration: none; }
+.everyday .law h3 { margin-top: 0; font-size: 26px; }
+.everyday .law:hover { border-color: var(--mint); }
 
 .flow { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 40px; counter-reset: none; }
 .flow li { display: flex; gap: 18px; padding: 18px 0; border-top: 1px solid var(--line); margin: 0; }

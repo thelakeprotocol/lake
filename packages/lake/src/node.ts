@@ -49,14 +49,32 @@ export interface NodeOptions {
 /** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
 export interface Signals { kind: 'signals'; blocklist: string[]; reputation: Record<string, number> }
 
+/**
+ * What a node counts from the events it is told, everyday things first. Each counts only what the party that did it
+ * reports (SPEC §8): money from a specialist (the payments agent); offers, agreements and keys from houses.
+ */
 export interface Counters {
   houses: number;
   agents: number;
-  conversations: number;
+  /** Carts a seller signed and a buyer paid (SPEC §6.5), at once or held until delivery. */
+  cartsPaid: number;
+  /** Payments that moved money: paid at once, or held and then released to the seller (a voided hold moved nothing). */
+  paymentsSettled: number;
+  /** The sum of those payments, whatever currency each was in (a sandbox's money is simulated). */
   valueSettled: number;
+  /** Offers worked out inside a house on its owner's own data (only the owner sees them), and those owners accepted. */
+  offersPriced: number;
+  offersAccepted: number;
+  /** Agreements houses signed (each beside its owner's consent record), and keys owners took back. */
+  agreementsSigned: number;
+  keysRevoked: number;
+  /** Studies that got their answer, as the agents that ran them reported it. */
+  studiesRun: number;
+  conversations: number;
   attacksBlocked: number;
   recordsMoved: number;
 }
+const zeroCounters = (): Counters => ({ houses: 0, agents: 0, cartsPaid: 0, paymentsSettled: 0, valueSettled: 0, offersPriced: 0, offersAccepted: 0, agreementsSigned: 0, keysRevoked: 0, studiesRun: 0, conversations: 0, attacksBlocked: 0, recordsMoved: 0 });
 
 type Wire =
   | { type: 'snapshot'; node: string; sandbox: boolean; approvalsUrl?: string; participants: Participant[]; counters: Counters; recent: Line[]; guilds: { tag: string; members: number }[] }
@@ -72,7 +90,7 @@ interface Line { event: LakeEvent; text: string }
 export async function createNode(o: NodeOptions): Promise<{ server: Server; card: AgentCard; registry: Registry; publish: (e: LakeEvent) => void }> {
   const registry = new Registry({ sandbox: o.sandbox });
   const replay = new ReplayGuard();
-  const counters: Counters = { houses: 0, agents: 0, conversations: 0, valueSettled: 0, attacksBlocked: 0, recordsMoved: 0 };
+  const counters = zeroCounters();
   const recent: Line[] = [];
   const sockets = new Set<WebSocket>();
   const seenVisitors = new Set<string>();
@@ -145,6 +163,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   }
 
   function publishNow(event: LakeEvent, p?: Participant) {
+    // Who reported it, by the role on its registered card: the node set the actor itself (SPEC §8).
+    const by = (role: string) => registry.get(event.actor)?.profile.role === role;
     switch (event.kind) {
       case 'knock': {
         // A house reports each knock it gets; agents no longer report their own (it only paired them with the house).
@@ -168,10 +188,23 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
         }
         break;
       }
-      case 'agreement.signed': tally(event.subject, 'kept'); break;
+      case 'agreement.signed': tally(event.subject, 'kept'); if (by('house')) counters.agreementsSigned++; break;
       // Agents talking to each other are conversations too (the payment's money is counted by the payments agent).
       case 'agent.message': if (event.data?.kind !== 'payment') counters.conversations++; break;
-      case 'payment.settled': counters.valueSettled += Number(event.data?.amount ?? 0); break;
+      // From the payments agent: a held payment is a cart paid, and its money counts once, when it is released.
+      case 'payment.settled': {
+        if (!by('specialist')) break;
+        const d = event.data ?? {};
+        if (d.cart === true && d.released !== true) counters.cartsPaid++;
+        if (d.held === true) break;
+        counters.paymentsSettled += Math.max(1, Number(d.count) || 1);
+        counters.valueSettled += Number(d.amount) || 0;
+        break;
+      }
+      case 'quote.made': if (by('house')) counters.offersPriced++; break;
+      case 'offer.accepted': if (by('house')) counters.offersAccepted++; break;
+      case 'grant.revoked': if (by('house')) counters.keysRevoked += Math.max(1, Number(event.data?.count) || 1); break;
+      case 'study.result': counters.studiesRun++; break;
       // Computed from what each house's audit log says left it, never assumed.
       case 'compute.done': counters.recordsMoved += Number(event.data?.recordsOut ?? 0); break;
       case 'record.moved': counters.recordsMoved += Number(event.data?.count ?? 1); break;
@@ -224,7 +257,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   app.post('/reset', (req, res) => {
     if (!o.resetToken) return void res.status(404).json({ error: 'reset is off on this node' });
     if (req.get('x-lake-reset') !== o.resetToken) return void res.status(403).json({ error: 'wrong reset token' });
-    Object.assign(counters, { conversations: 0, valueSettled: 0, attacksBlocked: 0, recordsMoved: 0 });
+    Object.assign(counters, zeroCounters());
     recent.length = 0;
     for (const set of [blocks, quarantined, record, guilds, seenVisitors, peerBlocked] as { clear(): void }[]) set.clear();
     for (const e of registry.all()) if (e.profile.role === 'visitor') registry.remove(e.id);
@@ -578,7 +611,7 @@ export async function replayNode(o: { file: string; uiDir?: string; speed?: numb
   const sockets = new Set<WebSocket>();
   let participants = new Map<string, Participant>();
   let recent: Line[] = [];
-  let counters: Counters = { houses: 0, agents: 0, conversations: 0, valueSettled: 0, attacksBlocked: 0, recordsMoved: 0 };
+  let counters = zeroCounters();
   const send = (ws: WebSocket, w: Wire) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(w));
   wss.on('connection', (ws) => {
     sockets.add(ws);

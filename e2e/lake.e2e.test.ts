@@ -625,7 +625,17 @@ describe('the open door', () => {
     };
     const o = await text('lake_overview');
     expect(o.you).toMatchObject({ name: expect.stringMatching(/^[A-Z][a-z]+ \(Claude, via MCP\)$/), domain: expect.stringMatching(/^claude-ai-[0-9a-f]{8}\.mcp\.example$/) });
-    expect(o.what_you_can_do.study.questions).toContain('Are people with heart failure on drug Y readmitted more?');
+    expect(o.what_you_can_do.studies.questions).toContain('Are people with heart failure on drug Y readmitted more?');
+    // What an assistant finds first: what the Lake is, what is happening (everyday counts before security ones), and
+    // everyday things to do before studies, which come last.
+    expect(Object.keys(o).slice(0, 3)).toEqual(['lake', 'happening_now', 'what_you_can_do']);
+    expect(o.lake).toMatch(/^Each person's data stays in their own house/);
+    const counts = Object.keys(o.happening_now);
+    expect(counts.indexOf('cartsPaid')).toBeLessThan(counts.indexOf('attacksBlocked'));
+    expect(o.happening_now.latest).toEqual(expect.any(Array));
+    const doing = Object.keys(o.what_you_can_do);
+    expect(doing.slice(0, 4)).toEqual(['trade', 'your_humans_house', 'pay', 'pledges']);
+    expect(doing.at(-1)).toBe('studies');
     expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === o.you.name)).toBe(true);
     // Two assistants make a deal and settle it: $3 under the sandbox allowance, then 2 favours, backed only by a signature.
     const other = new Client({ name: 'claude-ai', version: '0' });
@@ -780,6 +790,9 @@ describe('the open door', () => {
     expect(client.getInstructions()).toMatch(/lake_ask_around/);
     const around = await text('lake_ask_around');
     expect(around.here.houses).toBeGreaterThan(0);
+    // Live facts first: the node's counts and its latest lines, then what is for sale, pledges and rooms.
+    expect(Object.keys(around).slice(0, 4)).toEqual(['here', 'happening_now', 'for_sale', 'pledges_needing_signers']);
+    expect(around.happening_now).toMatchObject({ houses: expect.any(Number), cartsPaid: expect.any(Number), latest: expect.any(Array) });
     expect(around.who_offers_what.some((a: { name: string }) => a.name === 'Guide')).toBe(true);
     // What agents invent stays on the Lake: publish a blueprint, and the next agent finds it.
     const mine = (await readFile('spec/blueprints/coinflip.md', 'utf8')).replace('name: coinflip', 'name: dice').replaceAll('coinflip.', 'dice.').replace('tag: game:coinflip', 'tag: game:dice');
@@ -913,6 +926,8 @@ describe('the open door', () => {
     };
     const poet = await connect('claude-poet');
     const buyer = await connect('claude-buyer');
+    const counted = async () => (await (await fetch(`${node}/state`)).json()).counters as Record<string, number>;
+    const before = await counted();
     // The seller puts a menu on its signed card; search finds it by what it sells.
     await poet('lake_sell', { action: 'menu', items: [{ sku: 'haiku', label: 'A haiku on any topic', price: 2, currency: 'USD', unit: 'poem' }] });
     const [found] = await buyer('lake_search', { q: 'haiku' });
@@ -959,6 +974,10 @@ describe('the open door', () => {
     // Accepting released the held payment: the payments agent sends the seller the capture receipt.
     for (let i = 0; i < 20 && (await poet('lake_sell', { action: 'orders' })).orders[0].payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
     expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ payment: 'released', money: 'paid, and released to you' });
+    // The node counts it from the payments agent's word: one cart paid, and its money once, when the hold was released.
+    for (let i = 0; i < 20 && (await counted()).paymentsSettled === before.paymentsSettled; i++) await new Promise((r) => setTimeout(r, 250));
+    const now = await counted();
+    expect({ carts: now.cartsPaid! - before.cartsPaid!, payments: now.paymentsSettled! - before.paymentsSettled!, value: now.valueSettled! - before.valueSettled! }).toEqual({ carts: 1, payments: 1, value: 4 });
     // The buyer gets the payments agent's release receipt too, signed, naming its hold.
     const released = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'receipt');
     expect(released).toMatchObject({ from: { domain: 'payments.lake.local' }, message: { cart: order.cart, hold: paid.hold.id }, checked: { verified: true, hold_settled: { hold: paid.hold.id, to: 'captured' }, cart: { id: order.cart } } });
@@ -1264,11 +1283,17 @@ describe('the sandbox specialists', () => {
     expect(hi.lake.houses).toBe(4);
     expect(hi.specialists.map((x: { name: string }) => x.name)).toEqual(expect.arrayContaining(['Guide', 'Inspector', 'Sparring partner', 'Quests']));
     const { reply: step } = await ask(`${guide}/a2a`, me, { kind: 'tour', step: 2 });
-    expect(step).toMatchObject({ kind: 'tour', step: 2, of: 7, next: expect.any(String) });
+    expect(step).toMatchObject({ kind: 'tour', step: 2, of: 9, next: expect.any(String) });
     const { reply: d } = await ask(step.try.to, me, step.try.send);
     expect(d).toMatchObject({ kind: 'decision' });
-    const { reply: audit } = await ask(`${guide}/a2a`, me, { kind: 'tour', step: 5 }).then(({ reply: s5 }) => ask(s5.try.to, me, s5.try.send));
-    expect(audit.kind).toBe('certified');
+    // Whose house it is opens the tour, everyday things come before the study, and each message step works as sent.
+    const { reply: first } = await ask(`${guide}/a2a`, me, { kind: 'tour', step: 1 });
+    expect(first.title).toBe('Whose house it is');
+    expect(hi.text).toMatch(/^Welcome, newcomer\.example\. The Lake is about people getting their time and their data back/);
+    const tryStep = async (n: number) => ask(`${guide}/a2a`, me, { kind: 'tour', step: n }).then(({ reply: s }) => ask(s.try.to, me, s.try.send)).then((r) => r.reply);
+    expect((await tryStep(5)).kind).toBe('tally.list');
+    expect((await tryStep(6)).kind).toBe('room.list');
+    expect((await tryStep(7)).kind).toBe('certified');
     expect((await ask(`${guide}/a2a`, me, { kind: 'explain', term: 'bloc' })).reply.kind).toBe('explained');
   });
 

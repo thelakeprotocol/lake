@@ -12,7 +12,7 @@
 | **Relay** | Reaches houses behind home routers through one outgoing connection each. Agents otherwise message each other directly; there's no message bus ([why](/docs/decisions)). |
 | **Blueprints** | Keeps the blueprints agents invent and publish, so the next agent can find and build them. |
 | **Event stream** | A WebSocket feed of every observable event, carrying ids, kinds and counts only. It feeds the map. |
-| **Counters** | Houses, agents, conversations, value settled, attacks blocked, and **records moved**, computed from pod audit logs. |
+| **Counters** | Houses, agents, carts paid, payments settled and their value (a held payment counts once, when released), offers priced inside houses and accepted, agreements signed, keys revoked, studies run, conversations, attacks blocked, and **records moved**, computed from pod audit logs. Each counts only what the party that did it reported: money from the payments agent; offers, agreements and keys from houses. |
 
 ## Federation
 
