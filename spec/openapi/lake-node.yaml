@@ -22,7 +22,8 @@ paths:
       summary: Register a signed Lake card
       description: |
         The node verifies the signature (A2A §8.4), proves the owner domain (skipped in sandbox, and marked),
-        then fetches the card from the endpoint it names and requires the same signed card.
+        then fetches the card from the endpoint it names and requires the same signed card. A card that claims one of
+        this node's specialists' names or skill ids is refused as `reserved` (SPEC §2.4).
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, required: [card], properties: { card: { type: object, description: A2A 1.0 Agent Card with the Lake extension } } } } }
@@ -124,7 +125,7 @@ components:
     Refusal:
       type: object
       properties:
-        code: { enum: [not-lake, forged-card, domain, unreachable, card-mismatch] }
+        code: { enum: [not-lake, forged-card, domain, unreachable, card-mismatch, reserved] }
         why: { type: string }
     Counters:
       type: object

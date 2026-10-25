@@ -19,7 +19,10 @@ export interface Entry {
   hereUntil?: number;
 }
 
-export type Refusal = { code: 'not-lake' | 'forged-card' | 'domain' | 'unreachable' | 'card-mismatch'; why: string };
+export type Refusal = { code: 'not-lake' | 'forged-card' | 'domain' | 'unreachable' | 'card-mismatch' | 'reserved'; why: string };
+
+/** A name as words, its aside dropped: "Payments (demo)" is "payments", "Arbiter, official!" is "arbiter official". */
+const words = (name: string) => name.toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 /**
  * A search index of signed Agent Cards. Not a gatekeeper: anything here can also be found at its
@@ -39,6 +42,8 @@ export class Registry {
     }
     // A menu others will order from must make sense: a search shows it as it is.
     if (profile.menu !== undefined && menuProblems(profile.menu).length) return { ok: false, refusal: { code: 'not-lake', why: menuProblems(profile.menu).join('; ') } };
+    const claimed = via === 'direct' ? this.claims(card, profile) : undefined;
+    if (claimed) return { ok: false, refusal: { code: 'reserved', why: claimed } };
     const proof = await proveDomain(profile, { sandbox: this.o.sandbox });
     if (!proof.ok) return { ok: false, refusal: { code: 'domain', why: proof.reason } };
 
@@ -63,6 +68,26 @@ export class Registry {
     const entry: Entry = { id, label: card.name, card, profile, domainVia: proof.via, registeredAt: new Date().toISOString(), url, via, lastSeen: Date.now() };
     this.entries.set(id, entry);
     return { ok: true, entry, replaced };
+  }
+
+  /**
+   * Whether a card claims a specialist's identity (SPEC §2.4): run 27's and 31's agents named themselves like the Lake's
+   * specialists, or carried their skill ids as tags. A specialist registered here directly (the operator's own, which
+   * register at boot) holds its name and its skill ids: no other card registered here may carry that name among its words,
+   * and no card but a specialist may carry those ids as a skill or tag (Teller A and Teller B share theirs). Cards synced
+   * from peers are not checked: a peer's Lake runs its own Payments and Arbiter.
+   */
+  private claims(card: AgentCard, profile: LakeProfile): string | undefined {
+    const name = ` ${words(card.name)} `;
+    const ids = new Set([...card.skills.map((s) => s.id.toLowerCase()), ...(profile.role === 'specialist' ? [] : profile.tags.map((t) => t.toLowerCase()))]);
+    for (const e of this.entries.values()) {
+      if (e.via !== 'direct' || e.profile.role !== 'specialist' || e.profile.webId === profile.webId) continue;
+      const theirs = words(e.card.name);
+      if (theirs && name.includes(` ${theirs} `)) return `"${card.name}" is taken: it names this Lake's specialist "${e.card.name}" (${e.profile.ownerDomain}); choose a name of your own`;
+      const id = profile.role === 'specialist' ? undefined : e.card.skills.map((s) => s.id.toLowerCase()).find((s) => ids.has(s));
+      if (id) return `"${id}" is reserved: it is the skill of this Lake's specialist "${e.card.name}" (${e.profile.ownerDomain}); use a skill id or tag of your own`;
+    }
+    return undefined;
   }
 
   remove(id: string) {

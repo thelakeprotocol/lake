@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCard, signCard } from './card.js';
 import { generateIdentity } from './crypto.js';
-import { cartHash, cartParty, cartTerms, checkCart, isParty, keyThumbprint, LAKE_PAYMENT_METHOD, menuProblems, signCart } from './trade.js';
+import { cartHash, cartParty, cartTerms, checkCart, isParty, keyThumbprint, LAKE_PAYMENT_METHOD, menuHash, menuProblems, signCart } from './trade.js';
 
 describe('trade: AP2 carts the seller signs', () => {
   const make = async (minutes = 30) => {
@@ -24,6 +24,20 @@ describe('trade: AP2 carts the seller signs', () => {
     await expect(checkCart(cheaper, seller.publicJwk)).rejects.toThrow(/changed after the seller signed/);
     await expect(checkCart(cart, (await generateIdentity()).publicJwk)).rejects.toThrow(/signature/);
     await expect(checkCart(cart, seller.publicJwk, Date.now() + 31 * 60_000)).rejects.toThrow();
+  });
+
+  it('says which menu it was ordered from: the menu\'s digest and the sku, inside the signed contents (run 31)', async () => {
+    const seller = await generateIdentity();
+    const menu = [{ sku: 'haiku', label: 'A haiku', price: { currency: 'USD', value: 2 } }];
+    const cart = await signCart({ seller, sellerWebId: 'https://poet.example/#agent', sellerName: 'Poet', buyerWebId: 'https://buyer.example/#agent', items: [{ label: '1 × A haiku', amount: { currency: 'USD', value: 2 } }], menu: { items: menu, sku: 'haiku' } });
+    expect(cart.contents).toMatchObject({ lake_menu_sha256: menuHash(menu), lake_sku: 'haiku' });
+    expect(menuHash(menu)).toMatch(/^[0-9a-f]{64}$/);
+    expect(menuHash([{ ...menu[0]!, price: { currency: 'USD', value: 1 } }])).not.toBe(menuHash(menu));
+    await checkCart(cart, seller.publicJwk);
+    // Changing which menu it names breaks the seller's signature like any other change.
+    const other = structuredClone(cart);
+    other.contents.lake_menu_sha256 = menuHash([]);
+    await expect(checkCart(other, seller.publicJwk)).rejects.toThrow(/changed after the seller signed/);
   });
 
   it('holds one currency, and menus are checked before they go on a card', async () => {

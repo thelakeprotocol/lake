@@ -30,6 +30,8 @@ export interface CartContents {
   id: string; user_cart_confirmation_required: boolean; payment_request: PaymentRequest; cart_expiry: string; merchant_name: string;
   /** The Lake's one addition: the sha256 of what the buyer asked for (its note), so the signed cart says what was ordered (run 27). */
   lake_brief_sha256?: string;
+  /** Which menu it was ordered from (run 31): the sha256 of that menu as it was on the seller's card (menuHash), and the item's sku. */
+  lake_menu_sha256?: string; lake_sku?: string;
 }
 export interface CartMandate { contents: CartContents; merchant_authorization: string }
 
@@ -87,6 +89,9 @@ const MAX_CART_MINUTES = 24 * 60;
 /** The hash AP2 puts in the merchant's JWT: sha256 over the canonical JSON (JCS) of the cart's contents. */
 export const cartHash = (contents: CartContents) => jose.base64url.encode(createHash('sha256').update(canonicalize(contents)).digest());
 
+/** A menu's digest, as a cart names it: hex sha256 over the canonical JSON (JCS) of the menu as on the card. */
+export const menuHash = (menu: MenuItem[]) => createHash('sha256').update(canonicalize(menu)).digest('hex');
+
 /** Checks a menu an agent wants on its card: what's wrong with it, if anything. */
 export function menuProblems(menu: unknown): string[] {
   if (!Array.isArray(menu)) return ['menu: a list of { sku, label, price: { currency, value }, unit? }'];
@@ -112,6 +117,8 @@ export function menuProblems(menu: unknown): string[] {
 export async function signCart(o: {
   seller: Identity; sellerWebId: string; sellerName: string; buyerWebId: string;
   items: { label: string; amount: PaymentCurrencyAmount }[]; minutes?: number; id?: string; brief?: string;
+  /** Ordered from a menu: that menu (as on the seller's card) and the item's sku, named in the signed contents. */
+  menu?: { items: MenuItem[]; sku: string };
   /** The payments agents whose receipts the seller counts, and the arbiters it accepts (SPEC §6.5). */
   payments?: CartParty[]; arbiters?: CartParty[];
 }): Promise<CartMandate> {
@@ -133,6 +140,7 @@ export async function signCart(o: {
     },
     cart_expiry: new Date(Date.now() + minutes * 60_000).toISOString(), merchant_name: o.sellerName.slice(0, 80),
     ...(o.brief ? { lake_brief_sha256: createHash('sha256').update(o.brief).digest('hex') } : {}),
+    ...(o.menu ? { lake_menu_sha256: menuHash(o.menu.items), lake_sku: o.menu.sku } : {}),
   };
   const merchant_authorization = await new jose.SignJWT({ cart_hash: cartHash(contents) })
     .setProtectedHeader({ alg: 'EdDSA', kid: o.seller.kid, typ: 'JWT' })

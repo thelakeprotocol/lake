@@ -27,7 +27,9 @@ The sku is made from the label if you don't give one. An empty list clears the m
 
 ## 2. Order, and a cart the seller signs
 
-The buyer sends `{ kind: "trade.order", sku, qty, note? }` (`lake_buy { action: "order", seller_url, sku, qty, note }`). For an item on its menu, the seller's connector answers at once with `{ kind: "trade.cart", cart }`, without waiting for the model. The `note` is the buyer's brief: its sha256 goes into the signed cart.
+The buyer sends `{ kind: "trade.order", sku, qty, note? }` (`lake_buy { action: "order", seller_url, sku, qty, note }`). For an item on its menu, the seller's connector answers at once with `{ kind: "trade.cart", cart }`, without waiting for the model. The `note` is the buyer's brief: its sha256 goes into the signed cart, with the item's sku and the sha256 of the menu it was ordered from, so the cart says which version of the menu the price came from (the buyer's connector says whether that menu is still the one on the seller's card).
+
+Only while the seller is around: once the `here_until` it set with `lake_set_tags` has passed with nothing done since, or after half an hour with no tool call, the connector signs no cart. The buyer gets `{ kind: "received", away: "the seller is away; your order is in its inbox" }`, and the order waits in the seller's inbox for it to answer with `lake_sell { action: "cart" }`.
 
 The cart is an AP2 **CartMandate**. Its `contents` hold a W3C PaymentRequest: one line per item, the total in one currency, an expiry (30 minutes by default, at most a day) and the seller's name. The seller signs the contents as the `merchant_authorization` JWT: EdDSA with its card key, with `iss` (the seller's WebID), `sub` (the buyer's), `aud` (`payments`), `iat`, `exp`, `jti` and `cart_hash`, the base64url sha256 of the contents in JCS canonical form.
 
@@ -165,7 +167,9 @@ A buyer orders one haiku from a seller whose menu has it at USD 2. The shapes ar
   },
   "cart_expiry": "2026-10-25T12:30:00.000Z",
   "merchant_name": "Haiku stall",
-  "lake_brief_sha256": "<hex sha256 of the note>"
+  "lake_brief_sha256": "<hex sha256 of the note>",
+  "lake_sku": "haiku",
+  "lake_menu_sha256": "<hex sha256 of JCS(the menu on the seller's card)>"
 }
 ```
 

@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, QUICKNET, type Identity } from '../packages/core/src/index.js';
+import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, menuHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, QUICKNET, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -190,6 +190,17 @@ describe('the Lake node', () => {
     card.name = 'Edited after signing';
     const forged = await fetch(`${node}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ card }) });
     expect((await forged.json()).code).toBe('forged-card');
+  });
+
+  it("refuses a card posing as one of its specialists: the Arbiter's name, or its skill (runs 27 and 31)", async () => {
+    const id = await generateIdentity();
+    const register = async (name: string, skill: string) => (await (await fetch(`${node}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ card: await signCard(buildCard({ name, description: 'x', url: 'http://localhost:9/a2a', skills: [{ id: skill, name: skill, description: 'x' }], profile: { role: 'visitor', webId: 'https://gale.example/#agent', ownerDomain: 'gale.example', tags: [] } }, id), id) }) })).json()) as { code?: string; why?: string };
+    expect(await register('Arbiter', 'arbiter')).toMatchObject({ code: 'reserved', why: expect.stringMatching(/"Arbiter" is taken: it names this Lake's specialist "Arbiter" \(arbiter\.lake\.local\)/) });
+    expect(await register('Gale', 'arbiter')).toMatchObject({ code: 'reserved', why: expect.stringMatching(/"arbiter" is reserved/) });
+    // Searches show each card's domain with its name, so a look-alike is told apart.
+    const checker = await joinLake({ name: 'Look-alike checker', domain: 'checker.example', node, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+    expect((await checker.find({ skill: 'arbiter' }))[0]).toMatchObject({ name: 'Arbiter', domain: 'arbiter.lake.local' });
+    await checker.close();
   });
 
   it('shows when an agent last acted, in its own signed word, and refuses a time to come', async () => {
@@ -894,6 +905,8 @@ describe('the open door', () => {
     // An order from the menu gets a signed cart back at once, without the seller's model.
     const order = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', qty: 2, note: 'about herons' });
     expect(order).toMatchObject({ total: { currency: 'USD', value: 4 }, items: [{ label: '2 × A haiku on any topic' }] });
+    // The cart says which menu it was ordered from (run 31): the item's sku and the menu's digest, signed by the seller.
+    expect(order.ordered_from).toEqual({ sku: 'haiku', menu_sha256: menuHash(found.menu), current: true });
     // Paid under the buyer's allowance, for exactly the cart, once; the receipt names the cart. The buyer says when the hold
     // releases by itself, within the payments agent's bounds (1 to 168 hours).
     expect(await buyer('lake_buy', { action: 'pay', cart: order.cart, release_after_hours: 500 }, false)).toMatch(/release_after_hours: 1 to 168 hours/);
@@ -1011,6 +1024,18 @@ describe('the open door', () => {
     expect(farmed.logged).toBeUndefined();
     const [after] = await buyer('lake_search', { q: 'haiku' });
     expect(after.record).toMatchObject(record);
+    // Away (run 31): past the here_until the seller set, its menu signs no cart; the order waits in its inbox. Once the
+    // seller acts again, its menu answers again.
+    const orderCount = (await poet('lake_sell', { action: 'orders' })).orders.length;
+    await poet('lake_set_tags', { tags: [], here_until: 0.05 });
+    await new Promise((r) => setTimeout(r, 3500));
+    const away = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', note: 'while you were out' });
+    expect(away).toMatchObject({ reply: { kind: 'received', away: 'the seller is away; your order is in its inbox' } });
+    expect(away.cart).toBeUndefined();
+    const waiting = (await poet('lake_inbox', { wait_seconds: 3 })).messages.find((m: any) => m.message.note === 'while you were out');
+    expect(waiting.checked.note).toMatch(/while you were away, so no cart was signed/);
+    expect((await poet('lake_sell', { action: 'orders' })).orders).toHaveLength(orderCount);
+    expect(await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku' })).toMatchObject({ cart: expect.any(String) });
   }, 120_000);
 
   it('a held payment survives the payments agent restarting: the hold, the cart paid once and the budget spent are kept', async () => {

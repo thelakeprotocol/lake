@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { followCheckpoint, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
+import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
 import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
@@ -235,7 +235,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     if (x.payment === 'released') return seller ? 'paid, and released to you' : 'paid, and released to the seller';
     return x.payment === 'paid' ? 'paid' : 'not paid yet';
   };
-  const onTrade = async (m: Incoming): Promise<{ reply?: Record<string, unknown>; checked?: Record<string, unknown> } | null> => {
+  /** A menu stops answering orders by itself after this long with nothing done here: its driver has gone. */
+  const AWAY_AFTER_MS = 30 * 60_000;
+  const onTrade = async (m: Incoming):Promise<{ reply?: Record<string, unknown>; checked?: Record<string, unknown> } | null> => {
     const p = m.payload as Record<string, any>;
     const me = await agent();
     const peer = { name: m.card.name, url: m.card.supportedInterfaces?.[0]?.url, webId: m.from.webId };
@@ -244,8 +246,15 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       const item = menu.find((x) => x.sku === p.sku);
       const qty = Number.isInteger(p.qty) && p.qty >= 1 && p.qty <= 100 ? p.qty : 1;
       if (!item) return { checked: { note: menu.length ? `"${String(p.sku)}" is not on your menu: answer with lake_sell { action: "cart" } if you can do it` : 'an order for you: answer with lake_sell { action: "cart" } if you can do it' } };
+      // Away (run 31: "take the menu down so no cart gets auto-signed for me while I'm gone"): past the here_until the seller
+      // set and not back since, or nothing done here for half an hour. The order waits in the inbox; nothing is signed.
+      const now = Date.now();
+      if ((hereUntil && now > hereUntil && lastActive <= hereUntil) || now - lastActive > AWAY_AFTER_MS) {
+        return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: 'the seller is away; your order is in its inbox' },
+          checked: { note: 'an order from your menu came while you were away, so no cart was signed: answer with lake_sell { action: "cart" } if you still want to sell it' } };
+      }
       const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
-      const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note);
+      const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note, item.sku);
       const c = await checkCart(cart, (await key).publicJwk);
       orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
       return { reply: { kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${c.id}" }` }, checked: { note: `from your menu: you sent cart ${c.id} (${c.total.currency} ${c.total.value}) automatically; deliver once it's paid (lake_sell { action: "deliver" })` } };
@@ -772,7 +781,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const c = await checkCart(reply.cart as CartMandate, seller.publicJwk);
           if (c.seller !== seller.webId || c.buyer !== me.webId) throw new Error('the cart is not from this seller to you');
           orders.set(c.id, { cart: c.id, role: 'buyer', with: { name: sellerCard.name, url: a.seller_url, webId: seller.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: reply.cart as CartMandate, sellerCard, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: me.sent.at(-1)?.reply }] });
-          return json({ cart: c.id, total: c.total, items: c.items, expires: c.expires, next: `lake_buy { action: "pay", cart: "${c.id.slice(0, 8)}" }` });
+          // Which menu it was ordered from, in the seller's signed word, and whether that is the one on its card now.
+          const { lake_menu_sha256: sha256, lake_sku: sku } = (reply.cart as CartMandate).contents;
+          const from = sha256 ? { ordered_from: { sku, menu_sha256: sha256, current: sha256 === menuHash(seller.menu ?? []) } } : {};
+          return json({ cart: c.id, total: c.total, items: c.items, expires: c.expires, ...from, next:`lake_buy { action: "pay", cart: "${c.id.slice(0, 8)}" }` });
         }
         if (a.action === 'pay') {
           const x = findOrder(a.cart ?? '', 'buyer');
