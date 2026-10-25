@@ -22,7 +22,7 @@ describe('rules engine', () => {
 
   it('joins once the terms fit', () => {
     const d = evaluate(persona('stan'), { ...study, fields: ['age_band', 'medications'], priceUsd: 5 });
-    expect(d).toMatchObject({ decision: 'join', rule: 1, grantHours: 48 });
+    expect(d).toMatchObject({ decision: 'join', rule: 2, grantHours: 48 });
   });
 
   it('declines marketing outright', () => {
@@ -97,12 +97,22 @@ rules:
 
   it('tells the owner what their own join rule is missing', () => {
     const cheap = { ...study, priceUsd: 2, credentials: { ...study.credentials, ethicsApproved: false } };
-    expect(nearMiss(persona('stan'), cheap)).toMatch(/^your rule 1 would join if it had an ethics approval you trust and paid at least \$\d and didn't ask for postcode$/);
+    expect(nearMiss(persona('stan'), cheap)).toMatch(/^your rule 2 would join if it had an ethics approval you trust and paid at least \$\d and didn't ask for postcode$/);
     expect(nearMiss(persona('stan'), { ...study, purpose: 'marketing' })).toBeNull();
     // Never a near miss when the rule wouldn't take a field asked for (run 18: nhs_number), whatever credentials came.
     expect(nearMiss(persona('stan'), { ...cheap, fields: [...cheap.fields, 'nhs_number'] })).toMatch(/didn't ask for postcode and nhs_number$/);
     // Nothing the rule would take at all: not a near miss.
     expect(nearMiss(persona('stan'), { ...cheap, fields: ['postcode', 'nhs_number'] })).toBeNull();
+  });
+
+  it('declines anything asking for a field the packs mark identifying, before any join rule bargains over it', () => {
+    const identifying = ['name', 'dob', 'nhs_number'];
+    const named = { ...study, fields: [...study.fields, 'name'], priceUsd: 5 };
+    expect(evaluate(persona('stan'), named, { identifying })).toMatchObject({ decision: 'decline', rule: 1, code: 'identifying', reason: 'your rule 1 declines requests for fields that identify you' });
+    // Without the identifying field, the same study is heard as before; a postcode identifies nobody alone.
+    expect(evaluate(persona('stan'), { ...study, priceUsd: 5 }, { identifying })).toMatchObject({ decision: 'counter', rule: 2 });
+    for (const p of ['research', 'strict', 'shopper']) expect(evaluate(persona(p), named, { identifying }).decision, p).toBe('decline');
+    expect(() => parseRules('owner: x\nrules:\n  - match: { asks_identifying: yes please }\n    decision: decline')).toThrow(/asks_identifying/);
   });
 
   it('rejects a rule about a purpose nobody uses, so a misspelt "decline" never lets things through', () => {

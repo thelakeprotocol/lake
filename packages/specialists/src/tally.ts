@@ -17,6 +17,8 @@ interface Tally {
   deadline: number;
   opener: string;
   state: 'open' | 'triggered' | 'lapsed';
+  /** When it filled: a listed pledge stays in tally.list for a day after, so agents see what bound. */
+  triggeredAt?: number;
   /** Count people, not identities: each signature needs a person stamp, and one person counts once (SPEC §6.4). */
   peopleOnly?: boolean;
   signers: { webId: string; domain: string; url: string; at: string; person?: string }[];
@@ -133,7 +135,10 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       if (b.spent.includes(ok.nonce)) return { kind: 'refused', problems: ['that pass has been used'] };
       b.spent.push(ok.nonce);
       b.passes.push({ commit: String(p.commit), withdraw: String(p.withdraw), at: new Date().toISOString(), ...(b.unveil ? { sealed: String(p.sealed) } : {}) });
-      if (t.state === 'open' && b.passes.length >= t.threshold) t.state = 'triggered';
+      if (t.state === 'open' && b.passes.length >= t.threshold) {
+        t.state = 'triggered';
+        t.triggeredAt = Date.now();
+      }
       void save();
       report(t);
       return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), note: t.state === 'triggered' ? (b.unveil ? `It has filled: every sealed reveal opens at once at ${new Date(roundTimeMs(b.unveil)).toISOString()}, and each signer is told who is in.` : 'It has filled: reveal yourself with tally.reveal { id, salt } from your own identity.') : 'Counted, by a pass nobody can trace to you.' };
@@ -192,9 +197,16 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: 'tally.opened', ...view(t) };
     }
     // Pledges their openers listed, still open: what each says and how many more it needs (run 22's pledges lapsed one short).
+    // And those that filled in the last day, with where they stand (run 31: a pledge that filled vanished from the list,
+    // and nobody could see it had bound). When it filled isn't said: that moment would point at its last signer.
     if (p.kind === 'tally.list') {
       for (const t of tallies.values()) lapse(t);
-      return { kind: 'tally.list', pledges: [...tallies.values()].filter((t) => t.listed && t.state === 'open').map((t) => ({ ...view(t), needs: Math.max(0, t.threshold - counted(t)) })) };
+      const listed = [...tallies.values()].filter((t) => t.listed);
+      return {
+        kind: 'tally.list',
+        pledges: listed.filter((t) => t.state === 'open').map((t) => ({ ...view(t), needs: Math.max(0, t.threshold - counted(t)) })),
+        filled: listed.filter((t) => t.state === 'triggered' && Date.now() - (t.triggeredAt ?? 0) < 86_400_000).map(view),
+      };
     }
     if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     const t = tallies.get(id);
@@ -235,6 +247,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}) });
       if (t.state === 'open' && t.signers.length >= t.threshold) {
         t.state = 'triggered';
+        t.triggeredAt = Date.now();
         const signers = t.signers.map(({ domain, url }) => ({ domain, url }));
         for (const x of t.signers) if (x.webId !== from && x.url) void tell(x.url, { kind: 'tally.triggered', id: t.id, text: t.text, count: t.signers.length, signers });
       }

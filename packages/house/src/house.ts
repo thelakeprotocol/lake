@@ -113,11 +113,13 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
   let link: LakeLinks | null = null;
   // What happened at this door, for the owner's control panel. Kept in memory; the pod keeps the agreements and audit log.
-  const activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[] = [];
+  // Each entry numbered, so an assistant polling for news asks only for what came after the last one it saw.
+  const activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[] = [];
+  let seq = 0;
   const emit = (e: LakeEvent) => {
     o.emit(e);
     link?.report(e);
-    activity.unshift({ at: e.at, kind: e.kind, text: describe(e), subject: e.subject, data: e.data });
+    activity.unshift({ seq: ++seq, at: e.at, kind: e.kind, text: describe(e), subject: e.subject, data: e.data });
     activity.length = Math.min(activity.length, 300);
   };
 
@@ -378,7 +380,7 @@ const decode = (jws: string) => {
 
 /** Everything the owner's control panel shows and changes. Every call arrives signed by the owner's key. */
 function panelFor(x: {
-  o: HouseOptions; owner: OwnerSession; id: Identity; actor: string; activity: { at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
+  o: HouseOptions; owner: OwnerSession; id: Identity; actor: string; activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
   card: AgentCard; recard: (r: Rules) => Promise<void>; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
   trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
@@ -476,7 +478,16 @@ function panelFor(x: {
       x.o.say('the owner changed their rules in the control panel');
       return { ok: true as const };
     },
-    activity: () => mine().slice(0, 100),
+    // `since`: the seq of the newest entry already seen (or a time): only what came after it (run 31's assistant reread
+    // everything on every poll). Activity is kept in memory, so a seq ahead of this house's own means it restarted, and
+    // all of it is new.
+    activity(since?: number | string) {
+      if (since === undefined || since === '') return mine().slice(0, 100);
+      const n = typeof since === 'number' ? since : /^\d+$/.test(since) ? Number(since) : NaN, t = Date.parse(String(since));
+      if (Number.isNaN(n) && Number.isNaN(t)) throw new Error('since: the seq of the newest entry you saw, or a time');
+      const after = !Number.isNaN(n) ? (n > (x.activity[0]?.seq ?? 0) ? mine() : mine().filter((a) => a.seq > n)) : mine().filter((a) => Date.parse(a.at) > t);
+      return after.slice(0, 100);
+    },
     agents() {
       const by = new Map<string, { agent: string; knocks: number; last: string; lastDecision?: string; blocked: number }>();
       for (const a of [...mine()].reverse()) {

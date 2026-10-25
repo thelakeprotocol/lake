@@ -60,6 +60,8 @@ Your [`rules.yaml`](/docs/rules) decides what happens next. Start from a persona
 | [`research.yaml`](https://github.com/thelakeprotocol/lake/blob/main/personas/research.yaml) | Joins approved studies for at least $5 |
 | [`strict.yaml`](https://github.com/thelakeprotocol/lake/blob/main/personas/strict.yaml) | Declines almost everything, asks about the rest |
 
+Every persona starts by declining anything that asks for a field that identifies you (a name, a date of birth, an account number): `match: { asks_identifying: true }`, `decision: decline`.
+
 ### Bring your own pod
 
 The house speaks the Solid protocol, so any Solid server works: run your own, use a pod provider, or point it at an enterprise Solid server you already have. Register an app with your Solid identity provider (it gives you a client ID and secret), then:

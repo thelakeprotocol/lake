@@ -5,6 +5,8 @@ device: approvals-app
 default: ask
 tags: [home-buyers]
 rules:
+  - match: { asks_identifying: true }   # name, date of birth, account numbers…: whatever a pack marks identifying
+    decision: decline
   - match: { purpose: research, ethics_approved: true }
     allow_fields: [age_band, medications, readmissions]
     deny_fields: [name, postcode, dob]

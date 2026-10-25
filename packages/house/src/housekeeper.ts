@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -283,8 +283,9 @@ export class Housekeeper {
     }
     if (waiting.length >= MAX_WAITING && !waiting.some((x) => x.purpose === offer.purpose && [...x.fields].sort().join() === [...offer.fields].sort().join())) return decide('decline', `already has ${waiting.length} requests waiting for the owner`, { code: 'too-many' }, `declined: you have ${waiting.length} requests waiting for this owner; withdraw one or wait for an answer`);
 
-    const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
-    if (d.decision === 'decline') this.declinedAt.set(declinedKey, Date.now());
+    const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() });
+    // Turned down for asking who the owner is, a visitor may ask again on that purpose without those fields.
+    if (d.decision === 'decline' && d.code !== 'identifying') this.declinedAt.set(declinedKey, Date.now());
     let filed: { offerId: string; asked?: number } | null = null;
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
@@ -303,7 +304,7 @@ export class Housekeeper {
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
         grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
-        recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] }) ?? '' : '', ...notes].filter(Boolean).join('. '),
+        recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
       // And the earlier look-alike gets the same warning, so the owner sees it on both.
       for (const t of this.o.desk.pendingLike(offer.purpose, offer.fields)) {
@@ -542,7 +543,7 @@ function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: n
   if (decision === 'counter' && counter) return `would join for $${counter.priceUsd}, with ${counter.fields.join(', ').replace(/_/g, ' ')}`;
   if (decision === 'ask') return 'the owner decides this one; ask for its status later with { kind: "status", offerId }';
   // A coarse reason a visitor can act on (don't ask again for this), never the owner's rule, its number or its limits.
-  return { purpose: `declined: this house doesn't take ${purpose} requests`, price: 'declined: it pays too little', retention: 'declined: this house keeps no data; ask with retention "none"', default: 'declined: nothing in its rules covers this' }[code ?? ''] ?? 'declined';
+  return { purpose: `declined: this house doesn't take ${purpose} requests`, price: 'declined: it pays too little', retention: 'declined: this house keeps no data; ask with retention "none"', identifying: 'declined: this house gives out nothing that identifies its owner; ask without those fields', default: 'declined: nothing in its rules covers this' }[code ?? ''] ?? 'declined';
 }
 
 const lastActive = (a: OwnerActive) => (a === 'no owner' ? 'nobody has claimed this house, so no owner will answer' : `owner last active: ${a}`);

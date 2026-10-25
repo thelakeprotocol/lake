@@ -560,9 +560,13 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house',
-    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules. Read only.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules']) } },
+    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules. Read only. Polling activity? Pass the next_since it gave you back as since, and get only what happened after.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules']), since: z.union([z.number(), z.string()]).optional().describe('activity only: the next_since from your last look (or a time): only what happened after it') } },
     async (a) => {
       try {
+        if (a.view === 'activity') {
+          const items = (await houseCall({ kind: 'panel.activity', ...(a.since !== undefined ? { since: a.since } : {}) })) as { seq?: number }[];
+          return json({ activity: items, next_since: items[0]?.seq ?? a.since ?? 0 });
+        }
         return json(await houseCall({ kind: VIEWS[a.view]! }));
       } catch (e) {
         return fail(e);

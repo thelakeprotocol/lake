@@ -24,7 +24,8 @@ const offer = computed(() => offers[sel.value].o);
 
 const result = computed(() => {
   try {
-    return { d: evaluate(parseRules(text.value), offer.value) };
+    // What the health pack marks identifying, for asks_identifying (a house asks its loaded packs).
+    return { d: evaluate(parseRules(text.value), offer.value, { identifying: ['name', 'dob', 'nhs_number', 'email', 'phone', 'address'] }) };
   } catch (e) {
     return { err: e.message };
   }

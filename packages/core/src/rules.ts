@@ -36,7 +36,7 @@ export interface Rule {
   decision: 'join' | 'decline' | 'ask';
 }
 
-const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least', 'price_below'] as const;
+const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least', 'price_below', 'asks_identifying'] as const;
 type MatchKey = (typeof MATCH_KEYS)[number];
 const DECISIONS = ['join', 'decline', 'ask'];
 const TRUST_LISTS = ['ethics', 'auditors', 'issuers', 'payments', 'regulators', 'tellers'];
@@ -59,6 +59,8 @@ export function parseRules(text: string): Rules {
     // "Decline research paying under $5" needs a price test before the decision, not min_price_usd (a join rule's counter).
     const below = r.match?.price_below;
     if (below !== undefined && !(typeof below === 'number' && below > 0)) throw new RulesError(`rule ${i + 1}: price_below must be a positive number of dollars`);
+    const ids = r.match?.asks_identifying;
+    if (ids !== undefined && typeof ids !== 'boolean') throw new RulesError(`rule ${i + 1}: asks_identifying must be true or false`);
     const purpose = r.match?.purpose;
     if (purpose !== undefined && !isPurpose(String(purpose))) throw new RulesError(`rule ${i + 1}: unknown purpose "${purpose}" (known: ${Object.keys(PURPOSES).join(', ')})`);
     return { ...r, match: r.match ?? {} };
@@ -77,7 +79,7 @@ export function parseRules(text: string): Rules {
 }
 
 /** Why a house declined, as a visitor may be told it: coarse, never the owner's rule, its number or its limits (SPEC §5). */
-export type DeclineCode = 'purpose' | 'price' | 'retention' | 'default' | 'rule';
+export type DeclineCode = 'purpose' | 'price' | 'retention' | 'identifying' | 'default' | 'rule';
 
 export type Decision =
   | { decision: 'join'; rule: number | null; reason: string; grantHours: number; fields: string[] }
@@ -85,12 +87,17 @@ export type Decision =
   | { decision: 'ask'; rule: number | null; reason: string }
   | { decision: 'counter'; rule: number; reason: string; counter: { fields: string[]; priceUsd: number } };
 
-/** What a house knows about the visitor besides the offer: its reputation from the signals it follows (0–1). */
-export interface Context { reputation?: number }
+/**
+ * What a house knows besides the offer: the visitor's reputation from the signals it follows (0–1), and which fields
+ * directly identify someone (the loaded packs say: `identifyingFields()`), for `asks_identifying`.
+ */
+export interface Context { reputation?: number; identifying?: string[] }
 
 function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
   const facts: Record<Exclude<MatchKey, 'reputation_at_least' | 'price_below'>, string | boolean> = {
     purpose: o.purpose,
+    // "Decline anything asking for direct identifiers" (run 31's owners): a field a pack marks identifying, not a guess.
+    asks_identifying: o.fields.some((f) => ctx.identifying?.includes(f)),
     requester: o.requester,
     sponsor_verified: o.credentials.sponsorVerified,
     ethics_approved: o.credentials.ethicsApproved,
@@ -138,7 +145,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
   for (const [i, r] of rules.rules.entries()) {
     if (!matches(r.match, offer, ctx)) continue;
     const n = i + 1;
-    if (r.decision === 'decline') return { decision: 'decline', rule: n, reason: `your rule ${n} declines ${offer.purpose} requests`, code: r.match.price_below !== undefined ? 'price' : r.match.purpose !== undefined ? 'purpose' : 'rule' };
+    if (r.decision === 'decline') return { decision: 'decline', rule: n, reason: r.match.asks_identifying === true ? `your rule ${n} declines requests for fields that identify you` : `your rule ${n} declines ${offer.purpose} requests`, code: r.match.asks_identifying === true ? 'identifying' : r.match.price_below !== undefined ? 'price' : r.match.purpose !== undefined ? 'purpose' : 'rule' };
     if (r.decision === 'ask') return { decision: 'ask', rule: n, reason: `your rule ${n} says ask you first about ${offer.purpose} requests` };
 
     const denied = offer.fields.filter((f) => r.deny_fields?.includes(f));

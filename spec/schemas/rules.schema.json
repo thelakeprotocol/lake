@@ -77,6 +77,10 @@
                 "type": "number",
                 "exclusiveMinimum": 0,
                 "description": "Matches offers paying less than this many dollars: decline research under $5"
+              },
+              "asks_identifying": {
+                "type": "boolean",
+                "description": "Matches offers that ask for any field a loaded pack marks directly identifying (a name, a date of birth, an account number): decline them before any join rule bargains over them"
               }
             },
             "additionalProperties": false

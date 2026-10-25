@@ -10,7 +10,16 @@ type Status = 'pass' | 'fail' | 'warn';
 interface Check { check: string; status: Status; detail: string }
 // Run 24's rogue grocer showed its 10/10 to households as if it vouched for the business: say what it covers.
 const SCOPE = 'This checks protocol conformance only: it says nothing about who runs the agent, whether it is on any register, or what it does with data.';
-type Reply = { kind: 'report'; target: string; role?: string; passed: number; of: number; checks: Check[]; credential?: string; verdict: string };
+type Reply = { kind: 'report'; target: string; role?: string; headline: string; passed: number; warnings: number; of: number; checks: Check[]; credential?: string; verdict: string };
+
+// Run 31: a house whose domain didn't vouch for its key read "10/10". A warning is counted as one, not as a pass, and
+// still earns the credential: the sandbox lets it through, the real Lake won't.
+const WARNS: Record<string, string> = { domain: 'the domain doesn\'t vouch for the key', 'a replay does nothing twice': 'a retried message is refused, not answered again', listed: 'the node doesn\'t list it' };
+export function headline(checks: Check[]): string {
+  const n = (s: Status) => checks.filter((c) => c.status === s);
+  const [passed, warned, failed] = [n('pass'), n('warn'), n('fail')];
+  return [`${passed.length}/${checks.length} passed`, warned.length ? `${warned.length} warning${warned.length > 1 ? 's' : ''}: ${warned.map((c) => WARNS[c.check] ?? c.check).join('; ')}` : '', failed.length ? `${failed.length} failed: ${failed.map((c) => c.check).join(', ')}` : ''].filter(Boolean).join(', ');
+}
 
 /**
  * The Inspector: point it at any Lake agent (your house, your research agent, a node) and it checks it
@@ -25,14 +34,14 @@ export async function createInspector(o: SpecialistOptions & { nodeUrl?: string 
     if (p.kind !== 'inspect' || typeof p.url !== 'string') return { kind: 'refused', problems: ['send { kind: "inspect", url: "<the agent\'s A2A URL or its base URL>" }'] };
     if (!allowed(from)) return { kind: 'refused', problems: ['six inspections a minute; try again shortly'] };
     const r = await inspect(p.url, { publicOnly, sandbox: o.sandbox, nodeUrl: o.nodeUrl });
-    const passed = r.checks.filter((c) => c.status !== 'fail').length;
-    const allPass = passed === r.checks.length;
+    const passed = r.checks.filter((c) => c.status === 'pass').length, warnings = r.checks.filter((c) => c.status === 'warn').length;
+    const allPass = passed + warnings === r.checks.length;
     const credential = allPass && r.profile
       ? await s.vc('LakeConformance', { id: r.profile.webId, card: r.cardUrl!, role: r.profile.role, checks: r.checks.map((c) => `${c.check}: ${c.status}`), lakeVersion: r.profile.lakeVersion, scope: SCOPE }, 30)
       : undefined;
     return {
-      kind: 'report', target: p.url, role: r.profile?.role, passed, of: r.checks.length, checks: r.checks, credential,
-      verdict: `${allPass ? 'Speaks the Lake: a stranger can find it, check its card is really its own, and can\'t fool it with the usual tricks.' : `${r.checks.length - passed} check(s) failed. Each one says what a stranger saw.`} ${SCOPE}`,
+      kind: 'report', target: p.url, role: r.profile?.role, headline: headline(r.checks), passed, warnings, of: r.checks.length, checks: r.checks, credential,
+      verdict: `${allPass ? `Speaks the Lake: a stranger can find it, check its card is really its own, and can't fool it with the usual tricks${warnings ? ' (mind the warnings)' : ''}.` : `${r.checks.length - passed - warnings} check(s) failed. Each one says what a stranger saw.`} ${SCOPE}`,
     };
   });
   return s;

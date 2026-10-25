@@ -40,7 +40,8 @@ export interface PanelProvider {
   overview(tzOffset?: number): Promise<unknown>;
   rules(): Promise<{ text: string; rules: unknown }>;
   setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
-  activity(): unknown[];
+  /** Newest first; with `since` (a seq from an earlier look, or a time), only what came after it. */
+  activity(since?: number | string): { seq: number }[];
   agents(): unknown[];
   money(): Promise<unknown>;
   /** The owner's consent records (one beside each agreement), newest first, each with where it stands now. */
@@ -500,7 +501,7 @@ export class OwnerDesk {
           'panel.overview': () => panel.overview(Number((q as { tz_offset?: number }).tz_offset)),
           'panel.rules': () => panel.rules(),
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
-          'panel.activity': async () => panel.activity(),
+          'panel.activity': async () => panel.activity((q as { since?: number | string }).since),
           'panel.agents': async () => panel.agents(),
           'panel.money': () => panel.money(),
           'panel.consents': () => panel.consents(),

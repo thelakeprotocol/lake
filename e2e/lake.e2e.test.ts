@@ -131,6 +131,10 @@ describe('one house', () => {
     expect(JSON.stringify(declined)).not.toMatch(/rule \d/);
     // House manners: turned down for a purpose, it isn't heard again on that purpose for a day.
     expect((await knock(houses.stan!, ads, presets().marketing!)).reply).toMatchObject({ decision: 'decline', code: 'repeat' });
+    // Stan's first rule declines anything asking who he is; turned away for that, a visitor may ask again without it.
+    const nosy = await visitor('nosy.example');
+    expect((await knock(houses.stan!, nosy, { ...presets().marketing!, fields: ['name', 'age_band'] })).reply).toMatchObject({ decision: 'decline', code: 'identifying' });
+    expect((await knock(houses.stan!, nosy, presets().marketing!)).reply).toMatchObject({ decision: 'decline', code: 'purpose' });
     // Asking again for exactly the same thing is the same request; the visitor can check it, and take it back.
     const again = (await knock(houses.stan!, uni, presets().research!)).reply;
     expect(again).toMatchObject({ decision: 'ask', offerId: first.offerId });
@@ -396,6 +400,13 @@ describe('the owner', () => {
     };
     expect((await as({ kind: 'panel.overview' })).status).toBe(200);
     expect((await as({ kind: 'list' })).status).toBe(200);
+    // Polling the door: each entry has a seq, and since returns only what came after it (run 31).
+    await knock(houses.strict!, await visitor('poll.example'), presets().marketing!);
+    const door = (await as({ kind: 'panel.activity' })).body as { seq: number }[];
+    expect(door.length).toBeGreaterThan(1);
+    expect((await as({ kind: 'panel.activity', since: door[0]!.seq })).body).toEqual([]);
+    expect((await as({ kind: 'panel.activity', since: door[1]!.seq })).body).toEqual([door[0]]);
+    expect((await as({ kind: 'panel.activity', since: 'whenever' })).status).toBe(400);
     for (const kind of ['answer', 'revoke', 'panel.rules.set', 'panel.export', 'panel.offer.accept', 'panel.assistant.invite']) expect((await as({ kind })).status).toBe(403);
     const first = (await as({ kind: 'assistant.suggest', text: 'Decline ads.example: it keeps asking for your date of birth.' })).body;
     // Got it wrong: the assistant replaces its own note, and the owner sees only the corrected one.
@@ -538,11 +549,11 @@ describe('money', () => {
     type Row = { id: string; visitor: string; purpose: string; purposeLabel: string; fields: { name: string; label: string }[]; how: { rule?: number; live?: boolean }; status: string; given: string; withdrawnAt?: string };
     const rows: Row[] = await call({ kind: 'panel.consents' });
     expect(rows.map((r) => r.given)).toEqual(rows.map((r) => r.given).sort().reverse());
-    // The study the bloc just joined: research, by Stan's first rule, its one-use key used.
-    expect(rows).toContainEqual(expect.objectContaining({ visitor: 'uni.example', purpose: 'research', how: { rule: 1 }, status: 'used', fields: expect.arrayContaining([{ name: 'readmissions', label: 'hospital readmissions' }]) }));
+    // The study the bloc just joined: research, by Stan's research rule, its one-use key used.
+    expect(rows).toContainEqual(expect.objectContaining({ visitor: 'uni.example', purpose: 'research', how: { rule: 2 }, status: 'used', fields: expect.arrayContaining([{ name: 'readmissions', label: 'hospital readmissions' }]) }));
     // The GP's key from the first knock: care (DPV calls care and a service you asked for the same thing; the key says which), still live.
     const gp = rows.find((r) => r.visitor === 'gp.example' && r.status === 'active')!;
-    expect(gp).toMatchObject({ purpose: 'care', purposeLabel: 'care (someone looking after you)', how: { rule: 3 }, fields: [{ name: 'medications', label: 'medications' }] });
+    expect(gp).toMatchObject({ purpose: 'care', purposeLabel: 'care (someone looking after you)', how: { rule: 4 }, fields: [{ name: 'medications', label: 'medications' }] });
     expect(await call({ kind: 'revoke', revoke: gp.id })).toEqual({ revoked: 1 });
     expect((await call({ kind: 'panel.consents' }) as Row[]).find((r) => r.id === gp.id)).toMatchObject({ status: 'withdrawn', withdrawnAt: expect.any(String) });
     const onDisk = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', `${gp.id}.consent.jsonld`), 'utf8'));
@@ -722,12 +733,16 @@ describe('the open door', () => {
     // A blind tally: nobody, not even the opener, learns who signed until the threshold; then every signer is told at once.
     const tally = `${specialistsUrl}/tally/a2a`;
     const t = (who: Client, message: Record<string, unknown>) => who.callTool({ name: 'lake_ask', arguments: { agent_url: tally, message } }).then((r) => JSON.parse((r.content as { text: string }[])[0]!.text));
-    expect((await t(client, { kind: 'tally.open', id: 'e2e-strike', text: 'We all stop answering ad agents.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString() })).kind).toBe('tally.opened');
+    expect((await t(client, { kind: 'tally.open', id: 'e2e-strike', text: 'We all stop answering ad agents.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), listed: true })).kind).toBe('tally.opened');
     expect(await t(client, { kind: 'tally.sign', id: 'e2e-strike' })).toMatchObject({ kind: 'tally.signed', count: 1 });
     for (const who of [client, other]) expect((await t(who, { kind: 'tally.count', id: 'e2e-strike' })).signers).toBeUndefined();
     const triggered = await t(other, { kind: 'tally.sign', id: 'e2e-strike' });
     expect(triggered).toMatchObject({ kind: 'tally.triggered', count: 2, state: 'triggered' });
     expect(triggered.signers).toHaveLength(2);
+    // Filled, it leaves the pledges needing signers and stays findable for a day, saying it bound (run 31).
+    const listing = await t(other, { kind: 'tally.list' });
+    expect(listing.pledges.some((x: { id: string }) => x.id === 'e2e-strike')).toBe(false);
+    expect(listing.filled).toContainEqual(expect.objectContaining({ id: 'e2e-strike', state: 'triggered', count: 2 }));
     // Late is still welcome until the deadline (run 16 turned a late signer away), and the tally's signed reply names the
     // signer: proof it can show anyone.
     const late = await ask(tally, await visitor('late.example'), { kind: 'tally.sign', id: 'e2e-strike' });
@@ -1283,6 +1298,9 @@ describe('the sandbox specialists', () => {
     const me = await visitor('builder.example');
     const { reply } = await ask(`${inspector}/a2a`, me, { kind: 'inspect', url: `${houses.stan}/a2a` });
     expect(reply.checks.filter((c: { status: string }) => c.status === 'fail')).toEqual([]);
+    // A warning is said as one, not counted as a pass (run 31): this house's domain proves nothing here.
+    expect(reply.passed + reply.warnings).toBe(reply.of);
+    expect(reply.headline).toMatch(new RegExp(`^${reply.passed}/${reply.of} passed, \\d+ warnings?: .*the domain doesn't vouch for the key`));
     expect(reply.checks.map((c: { check: string }) => c.check)).toEqual(expect.arrayContaining(['signature', 'endpoint', 'signed reply', 'a replay does nothing twice', 'refuses a forged card', 'refuses an unsigned card', 'refuses an expired message']));
     expect(String(reply.credential).split('.')).toHaveLength(3);
     const { reply: bad } = await ask(`${inspector}/a2a`, me, { kind: 'inspect', url: `${node}/nowhere` });

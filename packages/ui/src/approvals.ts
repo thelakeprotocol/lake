@@ -335,6 +335,7 @@ function summary(r: Rule): Child[] {
   if (r.match.sponsor_verified) when.push('from a verified sponsor');
   if (r.match.reputation_at_least !== undefined) when.push(`reputation at least ${r.match.reputation_at_least}`);
   if (r.match.price_below !== undefined) when.push(`paying under $${r.match.price_below}`);
+  if (r.match.asks_identifying) when.push('asking for anything that identifies you');
   const head = when.length ? when.join(', ') : 'Any request';
   const verb = { join: 'join', ask: 'ask me first', decline: 'decline' }[r.decision];
   const out: Child[] = [h('b', {}, head[0]!.toUpperCase() + head.slice(1)), ' → ', h('b', {}, verb)];

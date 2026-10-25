@@ -86,7 +86,7 @@ Your house starts a real Solid pod, creates your WebID, gets a **synthetic** hea
 docker compose run --rm lake knock http://house-you:4000 --offer gp
 # ← JOIN: matches your rule 3 …
 docker compose run --rm lake knock http://house-you:4000 --offer injection
-# ← DECLINE: your rule 2 declines marketing requests
+# ← DECLINE: this house gives out nothing that identifies its owner…
 docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper forge-card
 # ✗ REJECTED (forged-card): card signature does not verify
 ```
@@ -115,6 +115,8 @@ Your `rules.yaml` is the note on the fridge:
 owner: you
 default: ask
 rules:
+  - match: { asks_identifying: true }   # a name, a date of birth…: declined, whatever else is offered
+    decision: decline
   - match: { purpose: research, ethics_approved: true }
     allow_fields: [age_band, medications, readmissions]
     deny_fields: [name, postcode, dob]
