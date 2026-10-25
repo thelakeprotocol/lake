@@ -5,6 +5,8 @@
  * then withdrawn when the owner takes the key back). The agreement and the access grant stay the binding objects; the
  * record is the owner's (and a regulator's) readable account of the consent.
  */
+import { PURPOSES } from './purpose.js';
+
 export const CONSENT_RECORD_CONTEXT = {
   dpv: 'https://w3id.org/dpv#',
   dct: 'http://purl.org/dc/terms/',
@@ -73,4 +75,56 @@ export function withdrawConsent(record: Record<string, unknown>, at: string): Re
   const history = (record['dpv:hasConsentStatus'] as Record<string, unknown>[] | undefined) ?? [];
   if (history.some((s) => s['@type'] === 'dpv:ConsentWithdrawn')) return record;
   return { ...record, 'dpv:hasConsentStatus': [...history, { '@type': 'dpv:ConsentWithdrawn', 'dct:date': at, 'dpv:isIndicatedBy': record['dpv:hasDataSubject'] }] };
+}
+
+/** A consent record as the owner reads it: who, what, why, how it was given, until when, and whether it was taken back. */
+export interface ConsentSummary {
+  id: string;
+  visitor: { webId: string; domain: string };
+  /**
+   * The Lake purposes the record's purpose can be: one, unless two share a DPV term (care and a service you asked
+   * for are both dpv:ServiceProvision), when the reader picks by what else it knows.
+   */
+  purposes: string[];
+  fields: string[];
+  /** "none", or an ISO 8601 duration. */
+  retention: string;
+  given: string;
+  until: string;
+  /** How it was given: by which standing rule, or live on the owner's device. */
+  method: { standingRule: number | null } | { live: true } | null;
+  /** When the owner withdrew it, if they have. */
+  withdrawn?: string;
+  agreement: string;
+}
+
+/** Reads back a record `consentRecord` wrote (and `withdrawConsent` updated); null for anything else. */
+export function readConsentRecord(r: Record<string, any>): ConsentSummary | null {
+  if (r?.['@type'] !== 'dpv:ConsentRecord' || typeof r['dct:identifier'] !== 'string') return null;
+  const p = r['dpv:hasProcess'] ?? {};
+  const purpose = String(p['dpv:hasPurpose'] ?? '');
+  const purposes = purpose.startsWith('urn:lake:purpose:')
+    ? [purpose.slice('urn:lake:purpose:'.length)]
+    : Object.entries(PURPOSES).filter(([, x]) => x.dpv && `dpv:${x.dpv}` === purpose).map(([name]) => name);
+  const history = (Array.isArray(r['dpv:hasConsentStatus']) ? r['dpv:hasConsentStatus'] : []) as Record<string, any>[];
+  const given = history.find((s) => s['@type'] === 'dpv:ConsentGiven');
+  const withdrawn = history.find((s) => s['@type'] === 'dpv:ConsentWithdrawn');
+  // DPV has no term for a standing rule, so the record names the rule in words (consentRecord above): read its number back.
+  const method = given?.['dpv:hasIndicationMethod'] === 'urn:lake:consent:live' ? { live: true as const }
+    : given?.['dpv:hasIndicationMethod'] === 'urn:lake:consent:standing-rule' ? { standingRule: Number(/standing rule (\d+)/.exec(String(given['dct:description'] ?? ''))?.[1]) || null }
+      : null;
+  const [from = '', until = ''] = String(r['dct:valid'] ?? '').split('/');
+  const storage = p['dpv:hasStorageCondition'];
+  return {
+    id: r['dct:identifier'],
+    visitor: { webId: String(p['dpv:hasRecipient']?.['@id'] ?? ''), domain: String(p['dpv:hasRecipient']?.['dct:title'] ?? '') },
+    purposes,
+    fields: (Array.isArray(p['dpv:hasPersonalData']) ? p['dpv:hasPersonalData'] : []).map((d: Record<string, unknown>) => String(d['dct:identifier'])),
+    retention: typeof storage === 'object' && storage?.['dpv:hasDuration'] ? String(storage['dpv:hasDuration']) : 'none',
+    given: String(given?.['dct:date'] ?? from),
+    until,
+    method,
+    ...(withdrawn ? { withdrawn: String(withdrawn['dct:date']) } : {}),
+    agreement: String(r['dct:source'] ?? ''),
+  };
 }

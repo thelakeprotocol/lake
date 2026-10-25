@@ -40,6 +40,8 @@ export interface PanelProvider {
   activity(): unknown[];
   agents(): unknown[];
   money(): Promise<unknown>;
+  /** The owner's consent records (one beside each agreement), newest first, each with where it stands now. */
+  consents(): Promise<unknown>;
   data(): Promise<unknown>;
   exportAll(): Promise<unknown>;
   /** What the owner is looking for, and the offers priced for them in this house. */
@@ -80,7 +82,7 @@ export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: s
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion { id: string; from: string; text: string; request?: string; offer?: string; at: string }
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent']);
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -286,11 +288,18 @@ export class OwnerDesk {
   async revoke(which: 'all' | string): Promise<number> {
     const ids = which === 'all' ? [...this.grants.values()].filter((g) => !g.revoked).map((g) => g.id) : [which];
     let n = 0;
+    const at = new Date().toISOString();
+    const withdrawn: Promise<void>[] = [];
     for (const id of ids) {
       const g = this.grants.get(id);
-      if (g && !g.revoked) { g.revoked = true; n++; void this.o.withdrawConsent?.(id, new Date().toISOString()).catch(() => {}); }
+      // The consent record says it was taken back, and when. A key cut before a restart isn't in memory any more, but
+      // its record is still in the pod, and still the owner's to withdraw (the panel's Consents list offers it).
+      if (g ? !g.revoked : !this.revokedIds.has(id)) withdrawn.push(this.o.withdrawConsent?.(id, at).catch(() => {}) ?? Promise.resolve());
+      if (g && !g.revoked) { g.revoked = true; n++; }
       this.revokedIds.add(id);
     }
+    // Awaited, so the panel that asked sees the record withdrawn when it looks again.
+    await Promise.all(withdrawn);
     await this.o.saveRevoked([...this.revokedIds]);
     if (n) this.o.emit(makeEvent('grant.revoked', this.o.actor, undefined, { count: n }));
     return n;
@@ -468,6 +477,7 @@ export class OwnerDesk {
           'panel.activity': async () => panel.activity(),
           'panel.agents': async () => panel.agents(),
           'panel.money': () => panel.money(),
+          'panel.consents': () => panel.consents(),
           'panel.data': () => panel.data(),
           'panel.export': () => panel.exportAll(),
           'panel.market': () => panel.market(),

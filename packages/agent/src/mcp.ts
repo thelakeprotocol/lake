@@ -438,7 +438,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     }
     return o.allowanceUsd ? `you may pay other agents up to $${o.allowanceUsd} with lake_pay (sandbox play money, signed for you by the sandbox in place of your human)` : 'none: lake_pay is off here';
   };
-  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules' };
+  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', consents: 'panel.consents', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules' };
 
   server.registerTool(
     'lake_house_connect',
@@ -465,7 +465,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house',
-    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, data and rules. Read only.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'data', 'rules']) } },
+    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules. Read only.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules']) } },
     async (a) => {
       try {
         return json(await houseCall({ kind: VIEWS[a.view]! }));

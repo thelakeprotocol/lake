@@ -268,16 +268,44 @@ function requestCard(all: Request[]) {
     h('div', { class: 'actions' }, allow, deny));
 }
 
-// ---- Keys ----
+// ---- Keys: who you've said yes to ----
+/** One consent record from your pod (ISO/IEC TS 27560 in DPV terms), as the house reads it for you. */
+interface Consent {
+  id: string; visitor: string; fields: { name: string; label: string }[]; purpose: string; purposeLabel: string; given: string; until: string; retention: string;
+  how: { live?: true; rule?: number | null }; status: 'active' | 'withdrawn' | 'used' | 'ended'; withdrawnAt?: string;
+}
+const dayTime = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
 async function keys(box: HTMLElement) {
-  const v = await call<{ keys: Key[] }>({ kind: 'list' });
+  const [v, consents] = await Promise.all([call<{ keys: Key[] }>({ kind: 'list' }), call<Consent[]>({ kind: 'panel.consents' })]);
+  // Taking a consent back is revoking its key: the house marks the record withdrawn, with the date.
+  const takeBack = (id: string) => async (e: Event) => { (e.target as HTMLButtonElement).disabled = true; await call({ kind: 'revoke', revoke: id }).catch((x) => alert((x as Error).message)); void show(); };
+  const row = (c: Consent) => h('li', {},
+    h('div', {},
+      h('div', { class: 'r-title' }, `${c.visitor}, for ${c.purposeLabel}`),
+      h('div', { style: 'margin-top:6px' }, ...c.fields.map((f) => h('span', { class: 'chip' }, f.label))),
+      h('div', { class: 'r-meta' }, [
+        c.how.live ? 'you tapped Allow' : c.how.rule ? `your rule ${c.how.rule} said yes` : 'one of your rules said yes',
+        c.retention === 'none' ? 'they keep nothing' : `they keep it for ${duration(c.retention)}`,
+        { active: `until ${dayTime(c.until)} (${hoursLeft(c.until)} left)`, withdrawn: c.withdrawnAt ? `you took it back on ${dayTime(c.withdrawnAt)}` : 'you took it back', used: 'used once, can’t be used again', ended: `ended ${dayTime(c.until)}` }[c.status],
+      ].join(' · '))),
+    c.status === 'active'
+      ? h('button', { class: 'btn danger small', type: 'button', onclick: takeBack(c.id) }, 'Take it back')
+      : h('span', { class: `chip ${c.status === 'withdrawn' ? '' : 'neutral'}` }, { withdrawn: 'taken back', used: 'used', ended: 'ended' }[c.status]));
+  // Keys with no consent record beside them (cut before records were kept): still yours to revoke.
+  const recorded = new Set(consents.map((c) => c.id));
+  const loose = v.keys.filter((k) => !recorded.has(k.id));
+  const live = consents.filter((c) => c.status === 'active').length + loose.length;
+  // A long history folds away on a phone; the newest stay in sight.
+  const [recent, older] = [consents.slice(0, 20), consents.slice(20)];
   box.replaceChildren(
-    h('p', { class: 'lede' }, 'Everyone who can use something in your house right now. Revoking cuts them off on their next request.'),
-    v.keys.length ? h('ul', { class: 'rows' }, ...v.keys.map((k) => h('li', {},
+    h('p', { class: 'lede' }, 'Everyone you’ve said yes to, newest first: who, what, for what, and how. Take one back and they’re cut off on their next request; your pod keeps the record, with the day you took it back.'),
+    consents.length ? h('ul', { class: 'rows' }, ...recent.map(row)) : h('p', { class: 'muted' }, 'You haven’t said yes to anyone yet.'),
+    older.length ? h('details', { class: 'fold' }, h('summary', { class: 'muted' }, `${older.length} older`), h('ul', { class: 'rows' }, ...older.map(row))) : '',
+    loose.length ? h('div', {}, h('h2', {}, 'Other keys'), h('ul', { class: 'rows' }, ...loose.map((k) => h('li', {},
       h('div', {}, h('div', { class: 'r-title' }, `${k.visitor} · ${k.purpose}`), h('div', { class: 'r-meta' }, `${k.fields.map(nice).join(', ')} · ${hoursLeft(k.until)} left · ${k.authorizedBy}`)),
-      h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'revoke', revoke: k.id }); void show(); } }, 'Revoke'))))
-      : h('p', { class: 'muted' }, 'No one holds a key to your house.'),
-    v.keys.length ? h('div', { class: 'savebar' }, h('button', { class: 'btn danger', type: 'button', onclick: async () => { if (confirm('Revoke every key to your house?')) { await call({ kind: 'revoke', revoke: 'all' }); void show(); } } }, 'Revoke every key')) : '',
+      h('button', { class: 'btn danger small', type: 'button', onclick: takeBack(k.id) }, 'Revoke'))))) : '',
+    live ? h('div', { class: 'savebar' }, h('button', { class: 'btn danger', type: 'button', onclick: async () => { if (confirm('Take back every key to your house?')) { await call({ kind: 'revoke', revoke: 'all' }); void show(); } } }, 'Take every key back')) : '',
   );
 }
 

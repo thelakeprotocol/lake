@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, withdrawConsent, fetchPasses, ownerKeyCredential, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -221,7 +221,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   let keeperRef: Housekeeper | null = null;
   // Everyone holds this one card object, so a re-signed card is changed in place; then the nodes hear of it.
   const recard = async (r: Rules) => { Object.assign(card, await cardFor(r)); await link?.register(3); };
-  const panel = panelFor({ o, owner, id, actor, activity, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records });
+  // Consent records that are settled (withdrawn, or past their date), so the panel doesn't re-read them on every refresh.
+  const consentCache = new Map<string, Record<string, unknown>>();
+  const panel = panelFor({ o, owner, id, actor, activity, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache });
   const desk = new OwnerDesk({
     panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit,
@@ -231,7 +233,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     writeConsent: (gid, record) => put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json'),
     withdrawConsent: async (gid, at) => {
       const r = await owner.fetch(`${owner.podRoot}agreements/${gid}.consent.jsonld`).catch(() => null);
-      if (r?.ok) await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(withdrawConsent(await r.json(), at), null, 1), 'application/ld+json');
+      if (!r?.ok) return;
+      const record = withdrawConsent(await r.json(), at);
+      await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json');
+      consentCache.set(`agreements/${gid}.consent.jsonld`, record);
     },
     saveRevoked: (ids) => put(owner, 'agreements/revoked.json', JSON.stringify(ids), 'application/json'),
     loadRevoked: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/revoked.json`); return r.ok ? r.json() : []; },
@@ -365,6 +370,7 @@ function panelFor(x: {
   card: AgentCard; recard: (r: Rules) => Promise<void>; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
   trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
+  consentCache: Map<string, Record<string, unknown>>;
 }): PanelProvider {
   const { owner } = x;
   // A signed request from this house to another agent, and its verified reply.
@@ -463,6 +469,39 @@ function panelFor(x: {
       return [...by.values()].sort((a, b) => (a.last < b.last ? 1 : -1)).map((e) => ({ ...e, reputation: e.agent.startsWith('agent:') ? rep[e.agent.slice(6)] ?? null : null }));
     },
     money,
+    async consents() {
+      const files = (await listContainer(owner, 'agreements/')).filter((f) => f.endsWith('.consent.jsonld'));
+      const read = await Promise.all(files.map(async (f) => {
+        const cached = x.consentCache.get(f);
+        if (cached) return readConsentRecord(cached);
+        const r = await owner.fetch(owner.podRoot + f).catch(() => null);
+        const rec = r?.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null;
+        const c = rec ? readConsentRecord(rec) : null;
+        // A record taken back or past its date won't change again: read it once. A live one is read each time.
+        if (c && (c.withdrawn || Date.parse(c.until) <= Date.now())) x.consentCache.set(f, rec!);
+        return c;
+      }));
+      // On a leased house, the list starts at this owner's claim: the last owner's consents were theirs, not this one's.
+      const since = x.desk().claimedAt();
+      const desk = x.desk();
+      return read.filter((c): c is ConsentSummary => !!c && (!since || Date.parse(c.given) >= since))
+        .sort((a, b) => (a.given < b.given ? 1 : -1))
+        .map((c) => {
+          const g = desk.grants.get(c.id);
+          // Two Lake purposes can share a DPV term; the key in memory says which one it was, else both are named.
+          const purposes = c.purposes.length > 1 && g && c.purposes.includes(g.purpose) ? [g.purpose] : c.purposes;
+          // Taken back by the owner (the record says when), used up (a study key is good for one run), past its date, or live.
+          const status = c.withdrawn ? 'withdrawn' : desk.isRevoked(c.id) ? (g && !g.spent ? 'withdrawn' : 'used') : Date.parse(c.until) <= Date.now() ? 'ended' : 'active';
+          return {
+            id: c.id, visitor: c.visitor.domain || c.visitor.webId, visitorWebId: c.visitor.webId,
+            fields: c.fields.map((f) => ({ name: f, label: fieldSpec(f)?.label ?? f.replace(/_/g, ' ') })),
+            purpose: purposes.join(' or '), purposeLabel: purposes.map((p) => PURPOSES[p]?.label ?? p.replace(/-/g, ' ')).join(' or ') || 'unstated',
+            given: c.given, until: c.until, retention: c.retention,
+            how: c.method && 'live' in c.method ? { live: true } : { rule: c.method?.standingRule ?? null },
+            status, ...(c.withdrawn ? { withdrawnAt: c.withdrawn } : {}),
+          };
+        });
+    },
     async data() {
       const claims = await x.keeper().allClaims();
       const chain = await x.keeper().verifyOwnRecord();

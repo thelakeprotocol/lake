@@ -462,6 +462,25 @@ describe('money', () => {
     expect((await (await fetch(`${node}/state`)).json()).counters.valueSettled - before).toBe(15);
   });
 
+  it("shows the owner every consent in plain words, and taking one back marks its record withdrawn", async () => {
+    const phone = await generateIdentity('stan-phone');
+    const token = (await readFile(join(dir, 'houses', 'stan', 'pairing-token'), 'utf8')).trim();
+    const paired = await (await fetch(`${houses.stan}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk, token }) })).json();
+    const call = async (payload: Record<string, unknown>) => (await fetch(`${houses.stan}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: paired.webId })) })).json();
+    type Row = { id: string; visitor: string; purpose: string; purposeLabel: string; fields: { name: string; label: string }[]; how: { rule?: number; live?: boolean }; status: string; given: string; withdrawnAt?: string };
+    const rows: Row[] = await call({ kind: 'panel.consents' });
+    expect(rows.map((r) => r.given)).toEqual(rows.map((r) => r.given).sort().reverse());
+    // The study the bloc just joined: research, by Stan's first rule, its one-use key used.
+    expect(rows).toContainEqual(expect.objectContaining({ visitor: 'uni.example', purpose: 'research', how: { rule: 1 }, status: 'used', fields: expect.arrayContaining([{ name: 'readmissions', label: 'hospital readmissions' }]) }));
+    // The GP's key from the first knock: care (DPV calls care and a service you asked for the same thing; the key says which), still live.
+    const gp = rows.find((r) => r.visitor === 'gp.example' && r.status === 'active')!;
+    expect(gp).toMatchObject({ purpose: 'care', purposeLabel: 'care (someone looking after you)', how: { rule: 3 }, fields: [{ name: 'medications', label: 'medications' }] });
+    expect(await call({ kind: 'revoke', revoke: gp.id })).toEqual({ revoked: 1 });
+    expect((await call({ kind: 'panel.consents' }) as Row[]).find((r) => r.id === gp.id)).toMatchObject({ status: 'withdrawn', withdrawnAt: expect.any(String) });
+    const onDisk = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', `${gp.id}.consent.jsonld`), 'utf8'));
+    expect(onDisk['dpv:hasConsentStatus'].map((s: { '@type': string }) => s['@type'])).toEqual(['dpv:ConsentGiven', 'dpv:ConsentWithdrawn']);
+  });
+
   it("walks away from a bloc it can't afford", async () => {
     const r = await paidRun(2, 6, ['postcode']);
     expect(r.bloc?.priceUsd).toBe(5);
