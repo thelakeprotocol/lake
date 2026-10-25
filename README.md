@@ -55,7 +55,9 @@ Built on real open standards, not look-alikes:
 | Keys | Solid Access Requests and Grants: scoped, time-limited, revocable |
 | Terms of a deal | [W3C ODRL](https://www.w3.org/TR/odrl-model/) |
 | Proof the data is real | W3C Verifiable Credentials |
-| Payment authority | AP2 mandates (signed; settlement simulated) |
+| Payment authority | AP2 mandates and carts (signed; settlement simulated) |
+| Records anyone can check | A transparency log: RFC 9162 Merkle tree, C2SP signed checkpoints |
+| Consent records | ISO/IEC TS 27560's shape, in W3C DPV terms |
 
 ## Join the Lake
 
@@ -167,6 +169,11 @@ Honest, updated every merge.
 | ✅ | **Control panel** (open source, served by every house at `/owner/`): home, requests, keys, a rules editor that reads like sentences and saves to your pod, visitors and their reputation, money and receipts, your data and where it came from, and *move house* (export everything), and your own AI agent inside your house (an assistant key: it looks and suggests, never decides) | runs, end-to-end tested |
 | ✅ | **Bring your own pod**: `--webid` + an app's client credentials, on any Solid server; the house finds your identity provider and storage from your WebID and keeps to one folder of your pod | runs, end-to-end tested against a separate Community Solid Server. Other servers (e.g. Inrupt ESS) should work if they support client credentials; not yet tested |
 | ✅ | **Offers priced in your house** ([how](https://lake.doneinfifty.com/docs/offers)): an owner states an intent; only lenders authorised by a register they trust hear it; each sends a certified quote program the house runs on the owner's own data; offers only the owner sees, group rates as households ask together; on Accept, two files go to one lender, who confirms and pays a fee. First pack: Australian home loans (APRA buffer, LMI, First Home Guarantee) | runs, end-to-end tested; in the local demo Lake, not the public sandbox. Synthetic lenders and data; not credit advice |
+| ✅ | **A register guards its pack's fields**: a pack can name a register (the demo's licensed lenders, food businesses). Outside a certified study, a house declines an offer for that pack's fields unless it carries the register's `LakeAuthorisation` from a regulator the owner trusts (`code: unauthorised`) | runs, end-to-end tested. The registers are demo ones |
+| ✅ | **Agents trading** ([how](https://lake.doneinfifty.com/docs/trade)): a menu on the signed card; carts the seller signs as AP2 CartMandates; one road to pay a cart, once, for exactly its total; payments held until delivery (authorize, then capture or void; released after 24 h with no dispute); delivery proved by the buyer's signed digest; accepted is final; refunds; an **Arbiter** that rules only from signatures, never on quality; a seller's record counted from the log | runs, end-to-end tested with two assistants on the MCP connector. Settlement simulated; holds live in the payments agent's memory; the arbiter and payments agent trust each other by fixed name. The sandbox's specialists run the arbiter and the log; the local demo Lake's don't |
+| ✅ | **Transparency log** ([how](https://lake.doneinfifty.com/docs/transparency-log)): an RFC 9162 Merkle tree with C2SP signed checkpoints; every receipt, capture, void and ruling goes on it; `lake_verify` checks the inclusion proof itself | runs, end-to-end tested. Not SCITT's COSE envelopes (drafts); blueprints and the node's events aren't logged yet; no witnesses cosign it |
+| ✅ | **Consent records**: beside every agreement in `/agreements/`, the owner's consent record in ISO/IEC TS 27560's shape (W3C DPV terms): who, for whom, what, how long, how it was given, how to withdraw; marked withdrawn when the owner revokes the key | runs; written for standing-rule and live consents, end-to-end tested for standing rules |
+| ✅ | **Presence**: an agent tells the nodes, signed, when whoever drives it last acted and until when it means to stay; search leaves out agents idle for 15 minutes; leaving drops it at once; a `received` says when its reader last read its inbox | runs, end-to-end tested |
 | ✅ | **Public sandbox** at [sandbox.lake.doneinfifty.com](https://sandbox.lake.doneinfifty.com), with agents to play with: the **Guide** (a tour where every step is a real message), the **Inspector** (checks your house or agent like a stranger would), the **Sparring partner** (a friendly red team), **Quests** (signed badges), and a **sponsor** that runs a paid study every 15 minutes. Claim a hosted house, or bring your own with `--relay` | runs on a 1 GB droplet; end-to-end tested |
 
 ## Hack on it
@@ -189,7 +196,7 @@ packages/
   house/         Solid pod + housekeeper + MCP pod door                   ✅
   lake/          registry, event stream, counters, relay, blueprints       ✅
   visitor/       `lake` CLI: knock, dispatch, attack, swarm, quoters      ✅
-  specialists/   ethics, auditor, payments, the packs' issuers and registers, sandbox guides ✅
+  specialists/   ethics, auditor, payments, arbiter, transparency log, tellers, rooms, the packs' issuers and registers, sandbox guides ✅
   ui/            the live map · the control panel                         ✅
   agent/         SDK for outside agents + the Lake MCP connector          ✅
 usecases/        one package per use case ("pack"): fields, shapes, converter, demo data
