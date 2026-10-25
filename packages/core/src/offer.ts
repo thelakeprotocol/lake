@@ -59,7 +59,12 @@ export function toOdrl(o: Offer, assigner: string) {
  * for outside a certified study or to decide something about them, fields that identify them, fields no use case here
  * defines, and keeping the data for a year or more. Codes only; nothing the sender wrote as prose.
  */
-export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose?: string; certifiedStudy?: boolean }): string[] {
+/**
+ * What the owner should look at twice, in red. `askerVerified`: the asker's domain proved its key (SPEC §2.3). A verified
+ * asker wanting sensitive data for a purpose that doesn't decide about the owner (a GP for care) gets a calm note instead
+ * (offerNotes): the user asked that real doctors not be made to look like a threat; an unverified one still gets the red.
+ */
+export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose?: string; certifiedStudy?: boolean; askerVerified?: boolean }): string[] {
   const identifying = new Set(identifyingFields());
   const known = new Set(offerableFields());
   const ids = o.fields.filter((f) => identifying.has(f));
@@ -73,7 +78,7 @@ export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose
   // button at 9 of 10 houses with nothing in red. A certified study lets out only a total; this lets out the person's own.
   const sensitive = !special.length || !purpose ? ''
     : purpose.decides ? `asks for sensitive data (${named}) to make decisions about you (${purpose.label})`
-    : !o.certifiedStudy ? `asks for sensitive data (${named}) for ${purpose.label}, outside any certified study: no auditor or ethics body checked it, and allowing it lets this agent use your own ${named}, not a total`
+    : !o.certifiedStudy && !o.askerVerified ? `asks for sensitive data (${named}) for ${purpose.label}, outside any certified study, from a sender whose identity isn't verified: allowing it lets this agent use your own ${named}, not a total`
     : '';
   return [
     sensitive,
@@ -81,6 +86,14 @@ export function offerWarnings(o: Pick<Offer, 'fields' | 'retention'> & { purpose
     unknown.length ? `asks for fields no use case here defines: ${unknown.join(', ').replace(/_/g, ' ')}` : '',
     years >= 1 ? `wants to keep your data for ${years >= 2 ? `${Math.round(years)} years` : 'a year or more'}` : '',
   ].filter(Boolean);
+}
+
+/** A calm line for the owner, not a warning: a verified sender asking for sensitive data for a purpose that doesn't decide about them. */
+export function offerNotes(o: Pick<Offer, 'fields'> & { purpose?: string; certifiedStudy?: boolean; askerVerified?: boolean }): string[] {
+  const special = o.fields.filter((f) => fieldSpec(f)?.special);
+  const purpose = o.purpose ? PURPOSES[o.purpose] : undefined;
+  if (!special.length || !purpose || purpose.decides || o.certifiedStudy || !o.askerVerified) return [];
+  return [`includes ${special.join(', ').replace(/_/g, ' ')}, for ${purpose.label}, from a verified sender: yours to share or not`];
 }
 
 /** An ISO 8601 retention ("P99Y", "P400D") in years; 0 for "none". */

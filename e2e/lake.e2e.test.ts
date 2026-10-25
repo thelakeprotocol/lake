@@ -347,7 +347,7 @@ describe('the owner', () => {
     expect(reply.decision).toBe('ask');
     const list = await (await fetch(`${houses.kai}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, phone, { iss: kaiWebId })) })).json();
     const req = (list.requests as { visitor: { domain: string }; warnings?: string[]; recommendation: string }[]).find((q) => q.visitor.domain === 'carer.example')!;
-    expect(req.warnings).toEqual(['asks for sensitive data (conditions) for care (someone looking after you), outside any certified study: no auditor or ethics body checked it, and allowing it lets this agent use your own conditions, not a total']);
+    expect(req.warnings).toEqual(['asks for sensitive data (conditions) for care (someone looking after you), outside any certified study, from a sender whose identity isn\'t verified: allowing it lets this agent use your own conditions, not a total']);
     expect(req.recommendation).toMatch(/^I'd deny this, for the reasons in red/);
   });
 

@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, consentRecord, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   questionId, studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -289,7 +289,10 @@ export class Housekeeper {
       // Another visitor asking for exactly the same, for the same reason: one of them may not be who it says (run 19 had a
       // second "GP" asking for what the first did).
       const twins = [...new Set(this.o.desk.pendingLike(offer.purpose, offer.fields).filter((x) => x.visitor.webId !== visitorWebId).map((x) => x.visitor.domain))];
-      const warnings = [...offerWarnings({ ...offer, certifiedStudy: auditCertified }), ...(twins.length ? [`${twins.join(' and ')} asked for exactly this too, for the same reason: check which one is really who it says`] : []), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
+      // Outside a sandbox every visitor's domain proved its key before we got here (verify before reading).
+      const askerVerified = !this.o.sandbox;
+      notes.push(...offerNotes({ ...offer, certifiedStudy: auditCertified, askerVerified }));
+      const warnings = [...offerWarnings({ ...offer, certifiedStudy: auditCertified, askerVerified }), ...(twins.length ? [`${twins.join(' and ')} asked for exactly this too, for the same reason: check which one is really who it says`] : []), ...(shopped.length ? [`asked this house for the same data as ${shopped.join(' and ')} in the last hour`] : [])];
       // The note is the visitor's words: never read by the rules, shown to the owner quoted, and only if it isn't trying to give orders.
       const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
       filed = this.o.desk.ask({
