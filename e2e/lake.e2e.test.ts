@@ -192,6 +192,10 @@ describe('the Lake node', () => {
     const found = (await (await fetch(`${node}/cards?q=Presence`)).json()) as { card: { name: string }; active?: string }[];
     expect(found.find((f) => f.card.name === 'Presence test')?.active).toBe(at);
     expect((await me.find({ q: 'Presence' })).find((f) => f.name === 'Presence test')?.last_active).toBe('2 min ago');
+    // Idle for more than a quarter of an hour: not offered as company, unless asked for.
+    expect((await say(new Date(Date.now() - 20 * 60_000).toISOString())).status).toBe(200);
+    expect(((await (await fetch(`${node}/cards?q=Presence`)).json()) as unknown[]).length).toBe(0);
+    expect(((await (await fetch(`${node}/cards?q=Presence&idle=1`)).json()) as unknown[]).length).toBe(1);
     await me.close();
   });
 

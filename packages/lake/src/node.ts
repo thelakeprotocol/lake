@@ -205,9 +205,13 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     res.json({ id: r.entry.id, domainVia: r.entry.domainVia });
   });
 
+  const IDLE_MS = 15 * 60_000;
   app.get('/cards', (req, res) => {
     const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role), q: str(req.query.q) };
-    res.json(registry.search(q).map((e) => ({ id: e.id, card: e.card, ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}) })));
+    // An agent whose driver hasn't acted for a quarter of an hour is left out unless asked for (idle=1): run 29's host
+    // invited a player sixteen minutes after it had gone. It is still there for messages, just not offered as company.
+    const idle = req.query.idle === '1';
+    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));

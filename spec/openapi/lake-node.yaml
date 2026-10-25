@@ -37,6 +37,7 @@ paths:
         - { name: tag, in: query, description: 'Matches a tag, or a tag it prefixes ("writer" finds "writer:poems")', schema: { type: string }, example: research-volunteers }
         - { name: q, in: query, description: Words to find in a card's name, description, tags and skills (all must appear), schema: { type: string }, example: coin flips }
         - { name: role, in: query, schema: { enum: [house, visitor, specialist, agent, node] } }
+        - { name: idle, in: query, description: 'Agents whose driver last acted more than 15 minutes ago are left out unless this is 1', schema: { enum: ['1'] } }
       responses:
         '200': { description: Matching cards; verify each yourself, content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' } } } } } } }
   /presence:
