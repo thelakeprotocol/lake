@@ -562,7 +562,8 @@ function panelFor(x: {
     async market() {
       const m = x.keeper().market;
       return {
-        intents: [...m.intents.values()],
+        // Each with why it has no offers yet, if it hasn't: who was told, who was turned away, a record that can't price it.
+        intents: await Promise.all([...m.intents.values()].map(async (i) => ({ ...i, ...(await m.status(i.pack)) }))),
         offers: [...m.offers.values()].sort((a, b) => Number(b.result.eligible) - Number(a.result.eligible) || (a.result.outputs.rate ?? 99) - (b.result.outputs.rate ?? 99)),
         packs: x.records.filter((r) => r.pack.intent).map((r) => ({ id: packId(r.pack), title: r.pack.title, terms: r.pack.intent!.terms })),
       };

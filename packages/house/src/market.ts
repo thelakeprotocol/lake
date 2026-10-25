@@ -31,6 +31,24 @@ export interface StoredOffer {
   paid?: { amount: number; currency: string; at: string };
 }
 
+/**
+ * Why an open intent has no offers yet, in plain facts for the owner and their assistant. Run 32: three grocers were
+ * told every minute for 26 minutes, the house turned every quote away (its own record had stopped checking out), and
+ * all anyone saw was an empty offers board.
+ */
+export interface IntentStatus {
+  /** Authorised agents that have heard about it since it opened (on this run of the house). */
+  agentsTold: number;
+  /** The latest agents that got no offer in, newest first: a quote this house refused, or an agent it couldn't tell. */
+  turnedAway: TurnedAway[];
+  /** This house's own record can't price anything for this pack: no agent's quote can run until it's fixed. */
+  warning?: string;
+}
+export interface TurnedAway { agent: string; domain?: string; code: string; why: string; at: string }
+
+/** A handful per intent is enough to say why; more would be a log. */
+const TURNED_AWAY_KEPT = 6;
+
 interface Ctx {
   actor: string;
   webId: string;
@@ -44,7 +62,7 @@ interface Ctx {
   claims: (fields: string[]) => Promise<Claim[]>;
   read: (path: string) => Promise<string>;
   write: (path: string, content: string) => Promise<void>;
-  verifyRecord: (fields: string[]) => Promise<{ ok: true } | { ok: false; why: string }>;
+  verifyRecord: (fields: string[]) => Promise<{ ok: true } | { ok: false; why: string; transient?: boolean }>;
   emit: (e: LakeEvent) => void;
   say: (msg: string) => void;
 }
@@ -56,6 +74,8 @@ export class Market {
   private authorised = new Map<string, { ok: Promise<boolean>; until: number }>();
   /** The certified programs behind open offers, so a growing group can be re-priced here without asking anyone. */
   private programs = new Map<string, QuoteProgram>();
+  /** Per open intent: who was told, who got no offer in and why (by card URL), and what the owner was already told. */
+  private heard = new Map<string, { told: Set<string>; away: Map<string, TurnedAway & { telling?: true }>; said: Set<string> }>();
   private refreshedAt = 0;
   private announcedAt = 0;
 
@@ -99,8 +119,11 @@ export class Market {
     }
   }
 
-  /** Open (or replace) an intent. `auto` terms are worked out here, from the owner's own claims. */
-  async open(id: string, terms: Record<string, string | number>): Promise<Intent> {
+  /**
+   * Open (or replace) an intent. `auto` terms are worked out here, from the owner's own claims. It opens even when this
+   * house's record can't price it (the owner may be fixing it), but says so at once rather than leave an empty board.
+   */
+  async open(id: string, terms: Record<string, string | number>): Promise<Intent & { warning?: string }> {
     const p = packOf(id);
     if (!p?.intent) throw new Error(`no pack here takes intents called ${id}`);
     const resolved = { ...terms };
@@ -116,15 +139,55 @@ export class Market {
     const group = p.intent.groupBy.map((k) => `${k}=${resolved[k] ?? 'any'}`).join(';');
     const intent: Intent = { pack: packId(p), terms: resolved, group, members: 1, openedAt: new Date().toISOString() };
     this.intents.set(intent.pack, intent);
+    this.heard.delete(intent.pack);
     await this.publish();
     await this.save();
     void this.announce(p, intent);
-    return intent;
+    const warning = await this.recordWarning(intent.pack);
+    if (warning) this.c.say(`market: ${intent.pack}: ${warning}`);
+    return warning ? { ...intent, warning } : intent;
+  }
+
+  /** What the owner and their assistant see next to an open intent while it waits for offers. */
+  async status(pack: string): Promise<IntentStatus> {
+    const h = this.heard.get(pack);
+    const warning = await this.recordWarning(pack);
+    return {
+      agentsTold: h?.told.size ?? 0,
+      turnedAway: [...(h?.away.values() ?? [])].reverse().map(({ telling: _, ...t }) => t),
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  /** A busy pod is no reason to alarm anyone: only a record that is missing or fails its checks gets a warning. */
+  private async recordWarning(pack: string): Promise<string | undefined> {
+    const p = packOf(pack);
+    const chain = p ? await this.c.verifyRecord(Object.keys(p.fields)) : null;
+    if (!chain || chain.ok || chain.transient) return undefined;
+    return `offers can't be priced until this house's record is fixed: ${chain.why}`;
+  }
+
+  private track(pack: string) {
+    let h = this.heard.get(pack);
+    if (!h) this.heard.set(pack, (h = { told: new Set(), away: new Map(), said: new Set() }));
+    return h;
+  }
+
+  /** The latest reason per agent, oldest dropped first. `telling`: it never got as far as quoting (it wasn't told). */
+  private turnAway(pack: string, url: string, t: Omit<TurnedAway, 'at'>, telling?: true) {
+    if (!this.intents.has(pack)) return;
+    const away = this.track(pack).away;
+    away.delete(url);
+    away.set(url, { ...t, at: new Date().toISOString(), ...(telling ? { telling } : {}) });
+    for (const k of away.keys()) if (away.size > TURNED_AWAY_KEPT) away.delete(k);
   }
 
   async close(id: string) {
     const p = packOf(id);
-    if (p) this.intents.delete(packId(p));
+    if (p) {
+      this.intents.delete(packId(p));
+      this.heard.delete(packId(p));
+    }
     await this.publish();
     await this.save();
   }
@@ -134,6 +197,7 @@ export class Market {
     this.intents.clear();
     this.offers.clear();
     this.programs.clear();
+    this.heard.clear();
     await this.publish();
     await this.save();
   }
@@ -161,12 +225,20 @@ export class Market {
         const url = card.supportedInterfaces?.[0]?.url;
         if (!url || seen.has(url)) return;
         seen.add(url);
+        let profile: LakeProfile | undefined;
         try {
-          const profile = await verifyLakeCard(card);
-          if (!(await this.isAuthorised(url, profile, intent.pack))) return;
+          profile = await verifyLakeCard(card);
+          if (!(await this.isAuthorised(url, profile, intent.pack))) {
+            return this.turnAway(intent.pack, url, { agent: card.name, domain: profile.ownerDomain, code: 'unauthorised', why: 'carries no authorisation for this from a regulator my owner trusts, so it was not told' }, true);
+          }
           await this.send(url, { kind: 'intent', pack: intent.pack, terms: intent.terms, group: intent.group, members: intent.members });
-        } catch {
-          // An agent that's down or misbehaving just doesn't hear about it.
+          const h = this.track(intent.pack);
+          h.told.add(url);
+          // Told now: an older "couldn't tell it" is no longer true. A refused quote stays until it quotes again.
+          if (h.away.get(url)?.telling) h.away.delete(url);
+        } catch (e) {
+          // An agent that's down or misbehaving just doesn't hear about it; the owner can see that it didn't.
+          this.turnAway(intent.pack, url, { agent: card.name, domain: profile?.ownerDomain, code: profile ? 'unreachable' : 'bad-card', why: (e as Error).message.slice(0, 120) }, true);
         }
       }));
     }
@@ -185,9 +257,9 @@ export class Market {
       const r = await this.send(url, { kind: 'authorisation', pack }).catch((e: Error) => {
         this.authorised.delete(key);
         this.c.say(`market: couldn't ask ${profile.ownerDomain} for its authorisation (${e.message.slice(0, 80)}); will ask again`);
-        return null;
+        // Not a no: it couldn't be asked, which the owner sees as unreachable.
+        throw new Error(`couldn't ask it for its authorisation: ${e.message.slice(0, 80)}`);
       });
-      if (!r) return false;
       const check = r.authorisation ? await checkAttachment(r.authorisation as Attachment, { trusted: this.c.trust().regulators, type: 'LakeAuthorisation', subject: profile.webId, sandbox: this.c.sandbox }) : null;
       const yes = !!check?.ok && check.vc.credentialSubject.pack === pack;
       this.authorised.set(key, { ok: Promise.resolve(yes), until: Date.now() + (yes ? 86_400_000 : 600_000) });
@@ -202,19 +274,34 @@ export class Market {
     const p = q.program;
     const intent = p ? this.intents.get(p.pack) : undefined;
     if (!intent) return { kind: 'rejected', code: 'no-intent', why: 'my owner is not looking for that right now' };
+    const url = card.supportedInterfaces[0]!.url;
+    // The agent hears why; so does the owner, next to the intent: it's why their board is empty. A stranger this house
+    // never told, quoting without an authorisation, isn't why, and mustn't crowd out the agents that are.
+    const refuse = (code: string, why: string) => {
+      if (code !== 'unauthorised' || this.heard.get(p.pack)?.told.has(url)) this.turnAway(p.pack, url, { agent: card.name, domain: profile.ownerDomain, code, why });
+      return { kind: 'rejected', code, why };
+    };
     const authorised = await checkAttachment(q.authorisation, { trusted: this.c.trust().regulators, type: 'LakeAuthorisation', subject: profile.webId, sandbox: this.c.sandbox });
-    if (!authorised.ok || authorised.vc.credentialSubject.pack !== p.pack) return { kind: 'rejected', code: 'unauthorised', why: `no authorisation from a regulator my owner trusts${authorised.ok ? '' : `: ${authorised.why}`}` };
+    if (!authorised.ok || authorised.vc.credentialSubject.pack !== p.pack) return refuse('unauthorised', `no authorisation from a regulator my owner trusts${authorised.ok ? '' : `: ${authorised.why}`}`);
     const certified = await checkAttachment(q.certificate, { trusted: this.c.trust().auditors, type: 'LakeProgramCertificate', subject: programId(p), sandbox: this.c.sandbox });
     const audit = auditProgram(p);
     // A program without a valid certificate never runs here (SPEC §12).
-    if (!certified.ok || !audit.ok) return { kind: 'rejected', code: 'uncertified', why: certified.ok ? audit.problems.join('; ') : certified.why };
+    if (!certified.ok || !audit.ok) return refuse('uncertified', certified.ok ? audit.problems.join('; ') : certified.why);
     const chain = await this.c.verifyRecord(p.inputs);
-    if (!chain.ok) return { kind: 'rejected', code: 'no-record', why: `my record isn't usable right now (${chain.why})` };
+    if (!chain.ok) {
+      // The house's own problem, not the agent's: said once per intent and reason, not each time an agent tries again.
+      const h = this.track(p.pack);
+      if (!h.said.has(chain.why)) {
+        h.said.add(chain.why);
+        this.c.say(`market: ${p.pack}: turning quotes away (${h.told.size} agent(s) told): my record isn't usable (${chain.why})`);
+      }
+      return refuse('no-record', `my record isn't usable right now (${chain.why})`);
+    }
     if (Date.now() - this.refreshedAt > 5_000) await this.refresh();
 
     const result = runProgram(p, await this.c.claims(p.inputs), { ...intent.terms, [GROUP_SIZE]: intent.members });
     const offer: StoredOffer = {
-      id: randomUUID(), pack: p.pack, quoter: { name: card.name, domain: profile.ownerDomain, webId: profile.webId, url: card.supportedInterfaces[0]!.url },
+      id: randomUUID(), pack: p.pack, quoter: { name: card.name, domain: profile.ownerDomain, webId: profile.webId, url },
       title: p.title, program: programId(p), result, labels: p.labels, fee: typeof q.fee === 'number' ? q.fee : undefined,
       currency: typeof q.currency === 'string' && /^[A-Z]{3}$/.test(q.currency) ? q.currency : undefined, groupSize: intent.members, at: new Date().toISOString(), status: 'open',
     };
@@ -222,6 +309,7 @@ export class Market {
     for (const [k, old] of this.offers) if (old.pack === offer.pack && old.quoter.webId === offer.quoter.webId && old.status === 'open') { this.offers.delete(k); this.programs.delete(k); }
     this.offers.set(offer.id, offer);
     this.programs.set(offer.id, p);
+    this.heard.get(p.pack)?.away.delete(url);
     await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
     this.c.emit(makeEvent('quote.made', this.c.actor, `agent:${profile.ownerDomain}`, { pack: p.pack }));
     // The same answer whatever the result: the agent learns nothing until the owner accepts.

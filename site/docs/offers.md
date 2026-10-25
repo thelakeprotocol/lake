@@ -42,6 +42,8 @@ Then it keeps the result. The lender gets the same reply whether you qualify or 
 
 Your panel fills up, cheapest first: *Wattle Mutual, 6.04%, $2,254 a month, First Home Guarantee, no LMI.* Lenders that wouldn't lend say so, to you alone.
 
+No offers yet? Your panel says why, in plain facts, and so does `lake_house { view: "offers" }` for your assistant: how many authorised lenders your house told, and which ones it turned away or couldn't reach, with the reason and the time. If your own record can't price anything (it's missing, or it stopped checking out), your house still opens the intent but warns you at once: no lender's program can run until the record is fixed. A lender whose quote is turned away is told so too, and doesn't take the refusal for a delivered quote.
+
 ## 6. Ask together, pay less
 
 As more households join your group, your house learns the new size and runs the lenders' programs again itself: most of them take a little off when three or more of you ask together. The discount is written into each certified program, the same for everyone in the group, so nobody has to be asked again and nothing leaves your house.

@@ -99,11 +99,24 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       void sendQuote(queue.shift()!).finally(() => { active--; enqueue(''); });
     }
   }
+  // What each house last said when it turned a quote away: logged when it changes, not every minute it says it again.
+  const refusedBy = new Map<string, string>();
   async function sendQuote(house: string) {
     for (let attempt = 1; ; attempt++) {
       try {
         const envelope = await signMessage({ kind: 'quote', program: ex.program, certificate, authorisation, fee: ex.feeOnAccept, currency }, id, { iss: webId });
-        await sendLake(house, { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { me: id, timeoutMs: 20_000 });
+        const raw = await sendLake(house, { lake: '0.1', card, envelope: envelope as LakeData['envelope'] }, { me: id, timeoutMs: 20_000 });
+        // A reply is not a yes (run 32: three grocers took a day of refusals for quotes delivered). A refusal isn't retried:
+        // the house will say the same until something changes, and it tells us again with its next intent.
+        const v = raw ? await verifyLakeData<Record<string, unknown>>(raw as LakeData<Record<string, unknown>>, { sandbox: o.sandbox ?? true }) : null;
+        const r = v?.ok ? v.payload : { kind: 'rejected', code: 'unreadable', why: v ? `its reply did not verify: ${v.rejection.why}` : 'no reply we could open' };
+        if (r.kind === 'rejected') {
+          const said = `${String(r.code)}: ${String(r.why)}`;
+          if (refusedBy.get(house) !== said) log(`${ex.name}: ${house} turned our quote away (${said})`);
+          refusedBy.set(house, said);
+          return;
+        }
+        refusedBy.delete(house);
         quotes++;
         return;
       } catch (e) {

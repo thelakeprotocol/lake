@@ -474,7 +474,7 @@ const choice = (t: Term | undefined, x: string | number) =>
   t?.kind === 'band' && isCurrency(t.unit) ? String(x).split('-').map((y) => money0(Number(y), t.unit)).join('–') : t?.names?.[String(x)] ?? String(x);
 
 async function offers(box: HTMLElement) {
-  const m = await call<{ intents: { pack: string; terms: Record<string, string | number>; members: number; group: string }[]; offers: Offer[]; packs: { id: string; title: string; terms: Record<string, Term> }[] }>({ kind: 'panel.market' });
+  const m = await call<{ intents: { pack: string; terms: Record<string, string | number>; members: number; group: string; agentsTold?: number; turnedAway?: { agent: string; code: string; why: string; at: string }[]; warning?: string }[]; offers: Offer[]; packs: { id: string; title: string; terms: Record<string, Term> }[] }>({ kind: 'panel.market' });
   if (!m.packs.length) return void box.replaceChildren(h('p', { class: 'muted' }, 'This house takes part in no use case that has offers yet.'));
   const blocks: Child[] = [h('p', { class: 'lede' }, 'Say what you’re looking for. Authorised agents price it inside your house, on your own data, and only you see the result. Nothing leaves until you accept.')];
   for (const p of m.packs) {
@@ -506,9 +506,12 @@ async function offers(box: HTMLElement) {
     blocks.push(h('div', { class: 'card ok', style: 'max-width:820px' },
       h('h3', {}, `Looking for ${p.title.toLowerCase()}`),
       h('p', { class: 'muted', style: 'margin:6px 0 10px' }, `${Object.entries(intent.terms).map(([k, x]) => `${p.terms[k]?.label ?? k}: ${choice(p.terms[k], x)}`).join(' · ')}`),
-      h('div', { class: 'r-meta' }, `${intent.members} household${intent.members === 1 ? '' : 's'} in your group · ${mine.length} priced it · ${eligible.length} offer${eligible.length === 1 ? '' : 's'} for you`),
+      h('div', { class: 'r-meta' }, `${intent.members} household${intent.members === 1 ? '' : 's'} in your group · ${intent.agentsTold ?? 0} agent${intent.agentsTold === 1 ? '' : 's'} told · ${mine.length} priced it · ${eligible.length} offer${eligible.length === 1 ? '' : 's'} for you`),
+      // Why the board is empty, when it is: the house's own record, or the agents it turned away and why.
+      intent.warning ? h('p', { style: 'margin:10px 0 0;padding:8px 12px;border-left:3px solid var(--threat)' }, `${intent.warning.charAt(0).toUpperCase()}${intent.warning.slice(1)}.`) : '',
+      intent.turnedAway?.length ? h('ul', { class: 'r-meta', style: 'margin:8px 0 0 18px' }, ...intent.turnedAway.map((t) => h('li', {}, `${t.agent}: ${t.why} (${t.code}, ${new Date(t.at).toLocaleTimeString()})`))) : '',
       h('div', { style: 'margin-top:12px' }, stop)));
-    if (!mine.length) blocks.push(h('p', { class: 'muted' }, 'Waiting for authorised agents to price it…'));
+    if (!mine.length && !intent.warning) blocks.push(h('p', { class: 'muted' }, 'Waiting for authorised agents to price it…'));
     for (const o of mine) {
       const out = o.result.outputs;
       const lab = (k: string) => o.labels?.[k] ?? { label: k };
