@@ -687,6 +687,14 @@ describe('the open door', () => {
     expect(r.isError).toBe(true); // only certified questions
     const done = await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', price_usd: 5, budget_usd: 200 });
     expect(done.paid.total).toBeGreaterThan(0);
+    // Everything the study rests on, signed, in one bundle anyone can check (run 22 asked for it).
+    expect(done.evidence).toMatchObject({ ethics: true, audit: true, mandate: true, tellers: 2, receipts: done.paid.houses, on_the_log: done.paid.houses });
+    const bundle = await text('lake_dispatch_study', { evidence_for: done.study });
+    expect(bundle.agreements.length).toBe(done.participants);
+    const leader = bundle.tellers.leader;
+    expect(await text('lake_verify', { evidence: { card: bundle.cards[leader.card], envelope: leader.envelope } })).toMatchObject({ verified: true, says: { kind: 'count.share' } });
+    const receipt = bundle.receipts[0];
+    expect(await text('lake_verify', { evidence: { credential: receipt.credential, card: bundle.cards[receipt.card] } })).toMatchObject({ verified: true, on_record: { logged: true } });
     await client.close();
   }, 60_000);
 

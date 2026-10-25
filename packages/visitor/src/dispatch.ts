@@ -63,6 +63,17 @@ export interface StudyRun {
   seconds: number;
   /** The keys this agent was given, by house. Its own to keep until they expire or are revoked. */
   grants: { house: string; url: string; grant: string }[];
+  /**
+   * Everything signed that this study rests on, to show anyone (run 22 asked for it): the ethics approval and audit
+   * certificate, the human's mandate, each house's countersigned agreement, both tellers' signed shares (their sum is
+   * the table), and the payments agent's receipts. Each checks on its own; none needs this agent's word.
+   */
+  evidence: {
+    ethics: Attachment; audit: Attachment; mandate?: Attachment;
+    agreements: { house: string; agreement: SignedAgreement }[];
+    tellers: { leader?: unknown; helper?: unknown };
+    receipts: { payee: string; credential: string; card?: AgentCard; logged?: { index: number; origin: string } }[];
+  };
 }
 /** The old name for a study run, kept so code written against it still compiles. */
 export type MissionResult = StudyRun;
@@ -244,12 +255,13 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   await beat();
   // Only houses that answered get paid; excluded ones don't.
   let paid: StudyRun['paid'] = null;
+  const kept: StudyRun['evidence']['receipts'] = [];
   if (o.money && intent && answered.length) {
     const webIdOf = (j: Joined) => String(j.agreement?.agreement.assigner ?? '');
     const payable = answered.filter((j) => j.agreement && j.priceUsd > 0);
     const payments = await Promise.all(payable.map((j) => signPaymentMandate(o.visitor.id, o.visitor.webId, { payee: webIdOf(j), amount: j.priceUsd, intentMandate: intent!.credential, agreement: j.agreement!.agreement.uid })));
     // Settle in batches; the payments agent keeps the running total against the human's budget.
-    const receipts: { payee: string; credential: string }[] = [];
+    const receipts: { payee: string; credential: string; logged?: { index: number; origin: string } }[] = [];
     let total = 0;
     let remaining = o.money.budgetUsd;
     let refused: string | undefined;
@@ -278,6 +290,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
         else notFiled.push(`${j.house.name}: ${ack.why ?? ack.kind}`);
       });
       paid = { total: reply.total, houses: reply.receipts.length, receiptsFiled: filed, ...(notFiled.length ? { notFiled } : {}), ...(refused ? { refused } : {}) };
+      kept.push(...reply.receipts.map((r) => ({ ...r, card: paymentsCard })));
       log('pay', `Payments settled $${reply.total} with ${reply.receipts.length} participants; ${filed} receipts filed in their pods. $${reply.remaining} of the mandate left${refused ? `. Then refused: ${refused}` : ''}`);
     }
   }
@@ -285,6 +298,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   // Close both counts over the same houses: the ones that said they sent pieces and that both tellers heard from.
   // `took` is how many houses answered; `n` is how many the published table comes from (0 when too few to publish).
   let n = 0, took = 0;
+  const tellerSigned: StudyRun['evidence']['tellers'] = {};
   let cells = Array<number>(cellCount(study)).fill(0);
   let tooFew = walkedAway;
   if (answered.length) {
@@ -294,8 +308,12 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
     if (members.length < study.privacy.min) tooFew = `${members.length} answered, and no table is published from fewer than ${study.privacy.min} houses`;
     else {
       // The Leader and Helper check every answer's proof together and each publish one aggregate share; added, the table.
-      const lead = (await askPatiently(leader.url, o.visitor, { kind: 'count.close', id: count, members })).reply;
-      const help = lead.kind === 'count.share' ? (await askPatiently(helper.url, o.visitor, { kind: 'count.collect', id: count })).reply : lead;
+      const leadAsk = await askPatiently(leader.url, o.visitor, { kind: 'count.close', id: count, members });
+      const lead = leadAsk.reply;
+      tellerSigned.leader = leadAsk.signed;
+      const helpAsk = lead.kind === 'count.share' ? await askPatiently(helper.url, o.visitor, { kind: 'count.collect', id: count }) : null;
+      const help = helpAsk?.reply ?? lead;
+      if (helpAsk) tellerSigned.helper = helpAsk.signed;
       if (lead.kind !== 'count.share' || help.kind !== 'count.share') tooFew = `the tellers would not publish: ${((lead.kind !== 'count.share' ? lead : help).problems ?? ['no share']).join('; ')}`;
       else {
         cells = unshardCounts(cellCount(study), [lead.share, help.share], lead.count);
@@ -327,6 +345,11 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
     answer: { onX, notOnX, summary, reliable }, paid,
     seconds: Math.round((Date.now() - t0) / 100) / 10,
     grants: [...joined.values()].map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
+    evidence: {
+      ethics: ethicsAtt, audit: auditAtt, ...(intent ? { mandate: intent } : {}),
+      agreements: [...joined.values()].filter((j) => j.agreement).map((j) => ({ house: j.house.name, agreement: j.agreement! })),
+      tellers: tellerSigned, receipts: kept,
+    },
   };
 }
 

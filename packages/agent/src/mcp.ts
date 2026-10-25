@@ -380,6 +380,20 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
     return body;
   };
+  // Studies run in this conversation: their signed evidence, kept to show anyone (each card once, not per item).
+  const bundles = new Map<string, Awaited<ReturnType<LakeAgent['study']>>['evidence']>();
+  const compactBundle = (b: Awaited<ReturnType<LakeAgent['study']>>['evidence']) => {
+    const cards: Record<string, AgentCard> = {};
+    const ref = (c?: AgentCard) => { if (!c) return undefined; const k = lakeProfile(c)?.webId ?? c.name; cards[k] = c; return k; };
+    const att = (x?: { credential: string; card: AgentCard }) => x && { credential: x.credential, card: ref(x.card) };
+    const msg = (x: unknown) => { const m = x as { card?: AgentCard; envelope?: unknown } | undefined; return m?.envelope ? { card: ref(m.card), envelope: m.envelope } : undefined; };
+    return {
+      ethics: att(b.ethics), audit: att(b.audit), mandate: att(b.mandate), agreements: b.agreements,
+      tellers: { leader: msg(b.tellers.leader), helper: msg(b.tellers.helper) },
+      receipts: b.receipts.map((r) => ({ ...r, card: ref(r.card) })),
+      cards, note: 'each { credential, card } or { card, envelope } checks with lake_verify once card is replaced by cards[card]; the two tellers\' shares add up to the table',
+    };
+  };
   // Whether something is on the transparency log: the log's answer, with its proof and checkpoint checked here, not taken
   // on its word (SPEC §11.8).
   const onRecord = async (entry: string) => {
@@ -1007,16 +1021,24 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid (then it offers $0 and accepts no counter-offer with a price)'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
         wait_seconds: z.number().default(0).describe('How long to wait for owners asked to tap Allow'),
+        evidence_for: z.string().optional().describe('Instead of running a study: the signed evidence bundle of one you ran in this conversation (its study id), to show anyone'),
       },
     },
     async (a) => {
       try {
+        if (a.evidence_for) {
+          const kept = bundles.get(a.evidence_for) ?? [...bundles.entries()].find(([k]) => k.includes(a.evidence_for!))?.[1];
+          if (!kept) throw new Error('no study of yours with that id in this conversation');
+          return json(compactBundle(kept));
+        }
         const study = SANDBOX_STUDIES.find((x) => x.question.toLowerCase() === a.question.trim().toLowerCase());
         if (!study) throw new Error(`studies here are declarative and certified in advance; pick one of: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`);
         const steps: string[] = [];
         const r = await (await agent()).study(a.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
-        const { grants: _, ...result } = r;
-        return json({ ...result, steps });
+        const { grants: _, evidence, ...result } = r;
+        bundles.set(r.study, evidence);
+        // The bundle is big; say what's in it, and how to get it.
+        return json({ ...result, steps, evidence: { ethics: true, audit: true, mandate: !!evidence.mandate, agreements: evidence.agreements.length, tellers: Object.keys(evidence.tellers).length, receipts: evidence.receipts.length, on_the_log: evidence.receipts.filter((x) => x.logged).length, get: `lake_dispatch_study { evidence_for: "${r.study}" }` } });
       } catch (e) {
         return fail(e);
       }
