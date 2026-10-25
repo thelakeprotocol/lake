@@ -771,10 +771,11 @@ describe('the open door', () => {
     // A cart for someone else, or a forged one, isn't paid: the payments agent checks the seller's signature itself.
     const theirs = (await buyer('lake_buy', { action: 'orders', evidence: true })).orders[0];
     expect(theirs).toMatchObject({ status: 'accepted', you_are: 'buyer' });
-    // Run 27's trickster: accepted is final, and a cart is paid one way only.
+    // Run 27's trickster: accepted is final, and a cart is paid one way only (whatever the case of its id: run 30).
     expect(await buyer('lake_buy', { action: 'dispute', cart: order.cart, reason: 'changed my mind' }, false)).toMatch(/final/);
     const second = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', note: 'about the sea' });
     expect(await buyer('lake_pay', { agent_url: found.url, amount: 0.5, memo: 'cheap', order: second.cart }, false)).toMatch(/is a cart: pay it with lake_buy/);
+    expect(await buyer('lake_pay', { agent_url: found.url, amount: 0.5, memo: 'cheap', order: second.cart.toUpperCase() }, false)).toMatch(/is a cart: pay it with lake_buy/);
     await buyer('lake_buy', { action: 'pay', cart: second.cart });
     await poet('lake_inbox', { wait_seconds: 3 });
     await poet('lake_sell', { action: 'deliver', cart: second.cart, content: 'Salt on the wind / the sea keeps its own counsel / gulls argue the rest' });
@@ -782,8 +783,12 @@ describe('the open door', () => {
     // A false "it never arrived": the arbiter rules from signatures alone, and tells both sides.
     await buyer('lake_buy', { action: 'dispute', cart: second.cart, reason: 'it arrived empty' });
     await poet('lake_inbox', { wait_seconds: 3 });
+    // Whoever files first, the ruling is the same: it rules on everything either side has filed (run 30 got two).
+    const first = await buyer('lake_buy', { action: 'arbitrate', cart: second.cart });
+    expect(first).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, ruling: expect.stringMatching(/^Paid, and it arrived \(\d+ characters, 1 line\)/), held_payment: 'released to the seller' });
     const ruling = await poet('lake_sell', { action: 'arbitrate', cart: second.cart });
-    expect(ruling).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, ruling: expect.stringMatching(/^Paid and delivered: the buyer's own signed receipt/), held_payment: 'released to the seller' });
+    expect(ruling).toMatchObject({ ruling: first.ruling });
+    expect((await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === second.cart)).toMatchObject({ payment: 'released' });
     const told = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'trade.ruling');
     expect(told).toMatchObject({ message: { cart: second.cart }, checked: { verified: true } });
     // A refund: the seller pays the whole cart back, and the buyer's order says so.

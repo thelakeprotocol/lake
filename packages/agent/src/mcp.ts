@@ -224,7 +224,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       }
       return { checked: { ...money, note: refundOf.status === 'refunded' ? `cart ${refundOf.cart} refunded in full` : `this does not refund cart ${refundOf.cart} in full` } };
     }
-    const o = orders.get(String(p.cart ?? p.order ?? ''));
+    // Ids are matched as the seller wrote them, whatever case they come back in (run 30: an upper-cased id slipped past).
+    const o = orders.get(String(p.cart ?? p.order ?? '').trim().toLowerCase());
     if (p.kind === 'receipt' && o?.role === 'seller') {
       const money = await checkMoney(p, m.from, me.webId, paymentsWebId);
       if (money.verified && (money.settled || money.held) && money.cart?.id === o.cart && Math.round((money.amount ?? 0) * 100) === Math.round(o.total.value * 100) && money.unit === o.total.currency) {
@@ -492,7 +493,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async (a) => {
       try {
         // One road to pay a cart (run 27: a plain payment naming a $2 cart settled $0.50): a cart is paid with lake_buy.
-        const cart = a.order ? [...orders.values()].find((x) => x.role === 'buyer' && (x.cart === a.order || x.cart.startsWith(a.order!))) : undefined;
+        const ref = a.order?.trim().toLowerCase();
+        const cart = ref ? [...orders.values()].find((x) => x.role === 'buyer' && (x.cart === ref || x.cart.startsWith(ref) || ref.includes(x.cart))) : undefined;
         if (cart) throw new Error(`${cart.cart} is a cart: pay it with lake_buy { action: "pay", cart: "${cart.cart.slice(0, 8)}" }, for exactly ${cart.total.currency} ${cart.total.value}`);
         const r = await (await agent()).pay(a.agent_url, a.amount, a.memo, a.unit === 'usd' ? 'USD' : a.unit, a.order);
         const filed = await reportSpend(r);
@@ -537,9 +539,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       if (x.hold && x.payment === 'held') {
         const arbiterCard = (await (await fetch(cardUrlFor(arbiter.url))).json()) as AgentCard;
         const settled = await me.ask(`${o.payments ?? 'http://payments:4600'}/a2a`, { kind: 'rule', hold: x.hold, ruling: { credential: reply.credential, card: arbiterCard } });
-        if (settled.kind === 'captured') x.payment = 'released';
-        if (settled.kind === 'voided') x.payment = 'voided';
-        return { ...reply, held_payment: settled.kind === 'captured' ? 'released to the seller' : settled.kind === 'voided' ? 'voided: back to the buyer' : 'still held' };
+        // Already settled by the other side's filing: the same ruling, so say where the money went.
+        const was = String((settled.problems as string[] | undefined)?.[0] ?? '');
+        if (settled.kind === 'captured' || /captured already/.test(was)) x.payment = 'released';
+        if (settled.kind === 'voided' || /voided already/.test(was)) x.payment = 'voided';
+        return { ...reply, held_payment: x.payment === 'released' ? 'released to the seller' : x.payment === 'voided' ? 'voided: back to the buyer' : 'still held' };
       }
     }
     return reply;
