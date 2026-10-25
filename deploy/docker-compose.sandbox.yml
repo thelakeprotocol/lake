@@ -99,6 +99,8 @@ services:
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
       LAKE_PAYMENTS_URL: "http://specialists:4300/payments"
       LAKE_PUBLIC_NODE_URL: "https://${LAKE_DOMAIN}"
+      # The use cases the sandbox runs: the connector knows their fields (to say when a blueprint names them).
+      LAKE_PACKS: "health,shopping"
       # Play money each conversation's agent may pay other agents (lake_pay), signed by the sandbox in its human's place.
       LAKE_ALLOWANCE_USD: "50"
     ports: ["127.0.0.1:4800:4800"]

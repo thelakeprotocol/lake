@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { blueprintHeader, canonicalize, checkCart, type CartMandate, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, blueprintHeader, canonicalize, checkCart, type CartMandate, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -637,7 +637,13 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (!a.name) return json(await (await fetch(`${node}/blueprints`)).json());
         const res = await fetch(`${node}/blueprints/${encodeURIComponent(a.name)}`);
         if (!res.ok) throw new Error(`no blueprint called ${a.name} here`);
-        return { content: [{ type: 'text' as const, text: await res.text() }] };
+        const text = await res.text();
+        // Facts, not advice: which of the Lake's personal fields this spec names (run 28's bait blueprint collected shopping
+        // lists in the clear). On the Lake, houses release them only to registered askers or certified studies.
+        await agent();
+        const named = allFields().filter((f) => new RegExp(`\\b${f.replace(/[^a-z0-9_]/gi, '')}\\b`, 'i').test(text));
+        const fact = named.length >= 3 ? `[Lake note] This blueprint names ${named.length} personal fields from the Lake's use cases: ${named.join(', ')}. Houses release these only to agents on the register for their use case, or through certified studies that return totals; a blueprint that has agents send them to each other directly goes around that.\n\n` : '';
+        return { content: [{ type: 'text' as const, text: fact + text }] };
       } catch (e) {
         return fail(e);
       }

@@ -47,7 +47,11 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
     const raw = await sendLake(peer.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 30_000 });
     const v = await verifyLakeData(raw, { sandbox: o.sandbox });
     if (!v.ok) throw new Error(`the other teller's reply did not verify: ${v.rejection.why}`);
-    if (v.profile.ownerDomain !== peer.domain) throw new Error(`the other teller answered as ${v.profile.ownerDomain}, not ${peer.domain}`);
+    if (v.profile.ownerDomain !== peer.domain) {
+      // It agreed under another name: take that back at once, or the id stays taken there (run 26), then say what to name.
+      if ((v.payload as { kind?: string }).kind === 'count.ready') void tell({ url: peer.url, domain: v.profile.ownerDomain }, { kind: 'count.cancel', id: body.id }).catch(() => {});
+      throw new Error(`the teller at ${peer.url} is ${v.profile.ownerDomain}, not ${peer.domain}: name it as helper.domain "${v.profile.ownerDomain}"`);
+    }
     return { reply: v.payload as Record<string, any>, webId: v.profile.webId };
   };
   const refused = (...problems: string[]) => ({ kind: 'refused', problems });
@@ -80,6 +84,14 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         counts.set(id, { id, role: 'leader', opener: from, length, min, deadline, verifyKey, peer: { ...helper!, webId }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
         void save();
         return { kind: 'count.opened', id, length, min, deadline: new Date(deadline).toISOString(), helper: helper!.domain };
+      }
+      case 'count.cancel': {
+        // The Leader that set it up takes it back before anyone has reported.
+        if (!c || c.role !== 'helper' || from !== c.peer.webId) return refused('only this count\'s Leader cancels it');
+        if (Object.keys(c.reports).length) return refused('answers have come in: it can\'t be cancelled now');
+        counts.delete(id);
+        void save();
+        return { kind: 'count.cancelled', id };
       }
       case 'count.setup': {
         const leader = p.leader as TellerRef | undefined;
