@@ -28,6 +28,7 @@ export * from './deal.js';
 export * from './ap2.js';
 export * from './trade.js';
 export * from './tlog.js';
+export * from './consent.js';
 export * from './injection.js';
 export * from './blueprint.js';
 export * from './pack.js';

@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, consentRecord, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -305,6 +305,12 @@ export class Housekeeper {
     );
     // One file per deal: the agreement with its signatures, and the grant cut from it.
     await this.file(offer.id, { ...agreement, grant });
+    // And the owner's readable account of the consent, as ISO/IEC TS 27560 shapes it (DPV terms), beside it.
+    await this.tool('pod_write', { path: `agreements/${offer.id}.consent.jsonld`, content: JSON.stringify(consentRecord({
+      id: offer.id, owner: this.o.webId, visitor: { webId: visitorWebId, domain }, purpose: offer.purpose, dpvPurpose: PURPOSES[offer.purpose]?.dpv ? `dpv:${PURPOSES[offer.purpose]!.dpv}` : undefined,
+      fields: d.fields, retention: offer.retention, until: until.toISOString(), method: { standingRule: Number(d.rule), rulesDigest: digestSRI(this.o.rulesText) },
+      agreement: agreement.agreement.uid, status: `${this.statusUrl}#${await this.o.desk.statusIndex(offer.id)}`, given: new Date().toISOString(),
+    }), null, 1) }).catch(() => {});
     this.o.desk.record({ id: offer.id, jws: grant, visitor: domain, fields: d.fields, purpose: offer.purpose, until: new Date(Date.now() + d.grantHours * HOUR).toISOString(), authorizedBy: `standing rule ${d.rule}` });
     this.o.emit(makeEvent('grant.issued', this.actor, visitor, { hours: d.grantHours }));
     return decide('join', d.reason, { grantHours: d.grantHours, grant, agreement });

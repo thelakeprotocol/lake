@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, fetchPasses, ownerKeyCredential, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, withdrawConsent, fetchPasses, ownerKeyCredential, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -228,6 +228,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
     saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),
     writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),
+    writeConsent: (gid, record) => put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json'),
+    withdrawConsent: async (gid, at) => {
+      const r = await owner.fetch(`${owner.podRoot}agreements/${gid}.consent.jsonld`).catch(() => null);
+      if (r?.ok) await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(withdrawConsent(await r.json(), at), null, 1), 'application/ld+json');
+    },
     saveRevoked: (ids) => put(owner, 'agreements/revoked.json', JSON.stringify(ids), 'application/json'),
     loadRevoked: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/revoked.json`); return r.ok ? r.json() : []; },
     saveStatus: (indexes) => put(owner, 'agreements/status-indexes.json', JSON.stringify(indexes), 'application/json'),

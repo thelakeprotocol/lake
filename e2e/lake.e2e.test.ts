@@ -454,6 +454,10 @@ describe('money', () => {
     const agreements = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements'));
     const signed = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', agreements.find((f) => f.includes('.agreement.json'))!), 'utf8'));
     expect(signed.agreement['@type']).toBe('Agreement');
+    // Beside it, the owner's consent record as ISO/IEC TS 27560 shapes it, in DPV terms.
+    const consentFile = agreements.find((f) => f.includes('.consent.jsonld'))!;
+    const consent = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', consentFile), 'utf8'));
+    expect(consent).toMatchObject({ '@type': 'dpv:ConsentRecord', 'dct:conformsTo': 'https://w3id.org/dpv/schema/dpv-27560', 'dpv:hasProcess': { 'dpv:hasLegalBasis': 'dpv:Consent', 'dpv:hasPersonalData': expect.arrayContaining([{ 'dct:identifier': 'medications' }]) }, 'dpv:hasConsentStatus': [{ '@type': 'dpv:ConsentGiven', 'dpv:hasIndicationMethod': 'urn:lake:consent:standing-rule' }] });
     await new Promise((ok) => setTimeout(ok, 500));
     expect((await (await fetch(`${node}/state`)).json()).counters.valueSettled - before).toBe(15);
   });

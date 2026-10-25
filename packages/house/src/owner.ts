@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, digestSRI, isCurrency, makeEvent, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, consentRecord, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -113,6 +113,9 @@ export class OwnerDesk {
       panel?: PanelProvider;
       saveOwnerKey: (jwk: JWK) => Promise<void>;
       writeGrant: (id: string, jws: string) => Promise<void>;
+      /** The consent record beside an agreement (ISO/IEC TS 27560 in DPV terms): written on Allow, marked withdrawn on revoke. */
+      writeConsent?: (id: string, record: Record<string, unknown>) => Promise<void>;
+      withdrawConsent?: (id: string, at: string) => Promise<void>;
       saveRevoked: (ids: string[]) => Promise<void>;
       loadRevoked: () => Promise<string[]>;
       /** Each key's bit on the house's public status list (SPEC §6), kept with the agreements. */
@@ -285,7 +288,7 @@ export class OwnerDesk {
     let n = 0;
     for (const id of ids) {
       const g = this.grants.get(id);
-      if (g && !g.revoked) { g.revoked = true; n++; }
+      if (g && !g.revoked) { g.revoked = true; n++; void this.o.withdrawConsent?.(id, new Date().toISOString()).catch(() => {}); }
       this.revokedIds.add(id);
     }
     await this.o.saveRevoked([...this.revokedIds]);
@@ -533,6 +536,11 @@ export class OwnerDesk {
       until > Date.now() && until <= Date.now() + MAX_GRANT_MS + 60_000;
     if (!ok) return { error: 'grant does not match the request you were shown' };
     await this.o.writeGrant(req.offerId, grant);
+    await this.o.writeConsent?.(req.offerId, consentRecord({
+      id: req.offerId, owner: this.o.webId, visitor: { webId: req.visitor.webId, domain: req.visitor.domain }, purpose: req.purpose, dpvPurpose: PURPOSES[req.purpose]?.dpv ? `dpv:${PURPOSES[req.purpose]!.dpv}` : undefined,
+      fields: s!.fields, retention: req.retention, until: new Date(until).toISOString(), method: { live: true }, agreement: req.offerId,
+      status: (vc as { credentialStatus?: { id?: string } }).credentialStatus?.id, given: new Date().toISOString(), notice: digestSRI(JSON.stringify(req.grantDraft ?? {})),
+    })).catch(() => {});
     this.record({ id: req.offerId, jws: grant, visitor: req.visitor.domain, fields: s!.fields, purpose: s!.purpose, until: new Date(until).toISOString(), authorizedBy: 'owner, live' });
     req.status = 'allowed';
     req.grant = grant;
