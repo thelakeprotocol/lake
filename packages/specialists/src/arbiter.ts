@@ -111,8 +111,10 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     const key = JSON.stringify({ paid, delivered: delivered && { sha256: delivered.sha256, acknowledged: delivered.acknowledged }, facts, ruling });
     if (kept.last?.key === key) return kept.last.reply as never;
     const credential = await s.vc('LakeRuling', { id: `urn:ap2:cart:${cart.id}`, cart: { id: cart.id, hash: cartHash((p.cart as CartMandate).contents) }, seller: cart.seller, buyer: cart.buyer, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}) } : null, facts, ruling }, 3650);
-    // On the record, so a ruling can't be denied or rewritten later.
-    const logged = await o.log?.(credential, 'ruling').then(({ index, origin }) => ({ index, origin })).catch(() => undefined);
+    // On the record, so a ruling can't be denied or rewritten later; but only for a cart that was paid. A ruling on a cart
+    // nobody paid settles nothing (run 33 farmed "not delivered" marks, and a "delivered" one from unsolicited content,
+    // on carts nobody paid): it is answered, and goes on nobody's record.
+    const logged = paid ? await o.log?.(credential, 'ruling').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
     // Both sides hear it, whoever asked: a ruling one party keeps to itself settles nothing.
     const tellAll = [p.seller_card, p.buyer_card].filter(Boolean) as AgentCard[];
     for (const c of tellAll) {
@@ -123,7 +125,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
         await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }).catch(() => {});
       })();
     }
-    const reply = { kind: 'ruling', ...(logged ? { logged } : {}), cart: cart.id, items: cart.items.map((i) => i.label), paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}), content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
+    const reply = { kind: 'ruling', ...(logged ? { logged } : {}), ...(paid ? {} : { note: 'not on the record: no payment shown for this cart' }), cart: cart.id, items: cart.items.map((i) => i.label), paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}), content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
     kept.last = { key, reply };
     return reply;
   });

@@ -942,9 +942,26 @@ describe('the open door', () => {
     // The Arbiter, if asked later, sees every version: it rules on the revision the buyer accepted.
     const closed = await poet('lake_sell', { action: 'arbitrate', cart: fourth.cart });
     expect(closed).toMatchObject({ paid: true, delivered: { acknowledged: true, revision: 2 }, ruling: expect.stringMatching(/^Paid, delivered and accepted/), facts: expect.arrayContaining([expect.stringMatching(/^2 different deliveries of this cart/)]) });
-    // The seller's record, counted from what the payments agent and the arbiter put on the log: three sales released, one refund, two rulings.
+    // The seller's record, counted from what the payments agent and the arbiter put on the log: three held sales released,
+    // one refund, two rulings.
+    const record = { sales: 3, refunds_given: 1, held_now: 0, rulings: { delivered: 2, not_delivered: 0 }, sold: { USD: 8 } };
     const [again] = await buyer('lake_search', { q: 'haiku' });
-    expect(again.record).toMatchObject({ sales: 3, refunds_given: 1, held_now: 0, rulings: { delivered: 2, not_delivered: 0 }, sold: { USD: 8 } });
+    expect(again.record).toMatchObject(record);
+    // Run 33: a cart nobody paid. Nothing to refund; rulings on it ("not delivered", then "delivered" from a delivery
+    // nobody paid for) are answered, but go on nobody's record.
+    const unpaid = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku' });
+    await poet('lake_inbox', { wait_seconds: 3 });
+    expect(await poet('lake_sell', { action: 'refund', cart: unpaid.cart }, false)).toMatch(/is not paid: nothing to refund/);
+    const never = await buyer('lake_buy', { action: 'arbitrate', cart: unpaid.cart });
+    expect(never).toMatchObject({ kind: 'ruling', paid: false, delivered: null, note: 'not on the record: no payment shown for this cart' });
+    expect(never.logged).toBeUndefined();
+    await poet('lake_sell', { action: 'deliver', cart: unpaid.cart, content: 'unasked for' });
+    await buyer('lake_inbox', { wait_seconds: 5 });
+    const farmed = await poet('lake_sell', { action: 'arbitrate', cart: unpaid.cart });
+    expect(farmed).toMatchObject({ kind: 'ruling', paid: false, delivered: { acknowledged: true } });
+    expect(farmed.logged).toBeUndefined();
+    const [after] = await buyer('lake_search', { q: 'haiku' });
+    expect(after.record).toMatchObject(record);
   }, 120_000);
 
   it('a held payment survives the payments agent restarting: the hold, the cart paid once and the budget spent are kept', async () => {

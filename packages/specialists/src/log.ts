@@ -90,6 +90,10 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
       if (!who) return { kind: 'refused', problems: ['webId: whose record'] };
       const r = { sales: 0, purchases: 0, refunds_given: 0, held_now: 0, rulings: { delivered: 0, not_delivered: 0 } };
       const amounts: Record<string, number> = {};
+      // Carts paid to this agent, with their buyers: a plain refund counts only for one of them, paid back to its buyer,
+      // once (run 33 had a "refund" on a cart nobody paid).
+      const sold = new Map<string, string>();
+      const refunded = new Set<string>();
       for (const e of entries) {
         if (e.kind === 'agent') continue;
         let sub: Record<string, any> | undefined;
@@ -98,13 +102,15 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
         const paid = (e.kind === 'receipt' || e.kind === 'capture') && sub.settlement === 'simulated';
         // A sale is money released for a cart the seller signed; any other payment isn't one. A plain refund (paid back
         // with order "refund:<cart>") is a refund its payer gave, not a sale to the buyer.
-        if (paid && sub.cart && sub.id === who) { r.sales++; amounts[sub.amount?.currency ?? 'USD'] = Math.round(((amounts[sub.amount?.currency ?? 'USD'] ?? 0) + Number(sub.amount?.value ?? 0)) * 100) / 100; }
+        if (paid && sub.cart && sub.id === who) { sold.set(String(sub.cart.id), String(sub.payer)); r.sales++; amounts[sub.amount?.currency ?? 'USD'] = Math.round(((amounts[sub.amount?.currency ?? 'USD'] ?? 0) + Number(sub.amount?.value ?? 0)) * 100) / 100; }
         if (paid && sub.cart && sub.payer === who) r.purchases++;
-        if (paid && !sub.cart && String(sub.agreement ?? '').startsWith('urn:lake:order:refund:') && sub.payer === who) r.refunds_given++;
+        const refundOf = String(sub.agreement ?? '').startsWith('urn:lake:order:refund:') ? String(sub.agreement).slice('urn:lake:order:refund:'.length) : undefined;
+        if (paid && !sub.cart && refundOf && sub.payer === who && sold.get(refundOf) === sub.id && !refunded.has(refundOf)) { refunded.add(refundOf); r.refunds_given++; }
         if (e.kind === 'receipt' && sub.settlement === 'held' && sub.id === who) r.held_now++;
         if ((e.kind === 'capture' || e.kind === 'void') && sub.seller === who) r.held_now = Math.max(0, r.held_now - 1);
         if (e.kind === 'void' && sub.seller === who) r.refunds_given++;
-        if (e.kind === 'ruling' && sub.seller === who) sub.delivered ? r.rulings.delivered++ : r.rulings.not_delivered++;
+        // A ruling counts only on a cart it found paid: one on a cart nobody paid settles nothing (and isn't logged now).
+        if (e.kind === 'ruling' && sub.seller === who && sub.paid === true) sub.delivered ? r.rulings.delivered++ : r.rulings.not_delivered++;
       }
       return { kind: 'log.record', webId: who, ...r, sold: amounts, size: leaves.length, note: 'counted from receipts and rulings the payments agent and the arbiter put on this log; nothing an agent added itself' };
     }

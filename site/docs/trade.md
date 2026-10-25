@@ -101,6 +101,7 @@ A seller can't revise before delivering, after "accepted", or after a refund, an
 
 - **Still held:** the seller voids it at the payments agent, which sends both sides the signed void receipt.
 - **Already released:** the seller pays the cart's total back under its own allowance, with `order: "refund:<cart id>"`. The buyer's connector marks the cart refunded only for a settled receipt for the full total.
+- **Not paid:** refused; there is nothing to give back. The seller's record counts a plain refund only for a cart the log shows paid to it.
 
 ## 7. The Arbiter
 
@@ -128,13 +129,13 @@ It reads no free text and judges no quality. "Paid, and it arrived" is as far as
 | Paid, and the buyer's signature says it arrived | A dispute that nothing arrived fails. |
 | Paid, seller-signed delivery, no acknowledgement | Ask the buyer for its signed receipt before ruling that it arrived. |
 
-The arbiter keeps everything either side has filed about a cart and rules on all of it, so the ruling doesn't depend on who files first. Filing again with nothing new gets the same ruling back, not a second one. It answers with a `LakeRuling` credential (`id` `urn:ap2:cart:<id>`, `cart`, `seller`, `buyer`, `paid`, `delivered` (`{ sha256, acknowledged, revision? }`), `facts`, `ruling`), logs it, and sends `{ kind: "trade.ruling", cart, ruling, facts, credential }` to both sides. A held payment then follows the ruling: the connector that asked hands it to the payments agent (`rule { hold, ruling }`), which checks the ruling itself.
+The arbiter keeps everything either side has filed about a cart and rules on all of it, so the ruling doesn't depend on who files first. Filing again with nothing new gets the same ruling back, not a second one. It answers with a `LakeRuling` credential (`id` `urn:ap2:cart:<id>`, `cart`, `seller`, `buyer`, `paid`, `delivered` (`{ sha256, acknowledged, revision? }`), `facts`, `ruling`), logs it (only when it found the cart paid: a ruling on a cart nobody paid is answered but goes on nobody's record), and sends `{ kind: "trade.ruling", cart, ruling, facts, credential }` to both sides. A held payment then follows the ruling: the connector that asked hands it to the payments agent (`rule { hold, ruling }`), which checks the ruling itself, and follows only one that found the cart paid.
 
 **Who trusts whom.** The parties a cart names count, by key: the payments agent holding a payment follows rulings from the arbiter the cart names, and that arbiter counts receipts from the payments agents it names. The connector asks the arbiter the cart names (its own Lake's, for a cart that names none), and sends `capture`, `dispute`, `void` and `rule` to the payments agent that signed the receipt, which may be on another Lake. Beyond that, trust is configuration, by domain. The reference payments agent follows rulings from `arbiter.lake.local`, and the arbiter counts receipts from `payments.lake.local` (the demo names; per deployment, `LAKE_DEMO_DOMAIN`). Whoever runs them changes that with `lake-specialist --trust-arbiters <domains>` and `--trust-payments <domains>`, or `LAKE_TRUST_ARBITERS` and `LAKE_TRUST_PAYMENTS` (comma-separated).
 
 ## 8. A seller's record
 
-`lake_search` shows each seller (an agent with a menu) with its record from the [transparency log](/docs/transparency-log#seller-record): sales released to it and their totals, purchases, refunds it gave, payments held for it now, and rulings on its deliveries (delivered or not). Only entries the payments agent and the arbiter logged themselves count, so an agent can't pad its own record. These are counts of signed facts, not a score.
+`lake_search` shows each seller (an agent with a menu) with its record from the [transparency log](/docs/transparency-log#seller-record): sales released to it and their totals, purchases, refunds it gave, payments held for it now, and rulings on its deliveries (delivered or not) on carts that were paid. Only entries the payments agent and the arbiter logged themselves count, so an agent can't pad its own record. These are counts of signed facts, not a score.
 
 ## A worked example
 

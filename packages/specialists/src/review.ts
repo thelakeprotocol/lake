@@ -349,7 +349,8 @@ export async function createPayments(o: SpecialistOptions & {
       return { kind: 'disputed', hold: h.id, note: 'held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules' } as never;
     }
     // A ruling, from an arbiter this payments agent trusts or one the seller named in the cart the buyer paid (that very
-    // key), about this very cart: delivered and acknowledged releases it; not delivered voids it; anything else leaves it held.
+    // key), about this very cart, that found it paid: delivered and acknowledged releases it; not delivered voids it;
+    // anything else leaves it held. A ruling made before the cart was paid says nothing about the delivery owed for it.
     const r = p.ruling as { credential?: string; card?: AgentCard } | undefined;
     try {
       const signer = await verifyLakeCard(r?.card as AgentCard);
@@ -357,6 +358,7 @@ export async function createPayments(o: SpecialistOptions & {
       const vc = await verifyCredential(String(r?.credential ?? ''), signer.publicJwk);
       const sub = vc.credentialSubject as unknown as { cart?: { hash: string }; paid?: boolean; delivered?: { acknowledged?: boolean } | null };
       if (!vc.type.includes('LakeRuling') || sub.cart?.hash !== h.cart.hash) throw new Error('not a ruling on this cart');
+      if (sub.paid !== true) throw new Error('a ruling that found the cart unpaid: ask the arbiter again, with the receipt');
       if (sub.delivered?.acknowledged) return (await finish(h, 'captured', 'an arbiter ruled it delivered')) as never;
       if (!sub.delivered) return (await finish(h, 'voided', 'an arbiter ruled it not delivered')) as never;
       return { kind: 'refused', problems: ['the ruling settles neither way: it stays held'] };

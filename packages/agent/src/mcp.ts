@@ -719,6 +719,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const x = findOrder(a.cart ?? '', 'seller');
           if (!x.with.url) throw new Error('no address for the buyer');
           if (x.status === 'refunded') throw new Error(`cart ${x.cart} is refunded already`);
+          // Only money that came can go back (run 33 "refunded" a cart nobody paid).
+          if (!x.payment) throw new Error(`cart ${x.cart} is not paid: nothing to refund`);
           if (x.hold && x.payment === 'held') {
             // Still held: void it at the payments agent, which sends both sides its signed receipt.
             const v = await me.ask(await holder(x), { kind: 'void', hold: x.hold });

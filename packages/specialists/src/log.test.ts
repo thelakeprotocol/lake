@@ -68,8 +68,14 @@ describe('the transparency log', () => {
     await log.add(vc({ id: BUYER, payer: SELLER, amount: usd(2), agreement: 'urn:lake:order:refund:c1', settlement: 'simulated' }), 'receipt');
     // A plain payment for no cart (a tip, a memo): not a sale.
     await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(1), agreement: 'urn:lake:memo:thanks', settlement: 'simulated' }), 'receipt');
+    // Run 33: a "refund" of a cart nobody paid, a second refund of c1, and rulings on a cart nobody paid don't count.
+    await log.add(vc({ id: BUYER, payer: SELLER, amount: usd(2), agreement: 'urn:lake:order:refund:c9', settlement: 'simulated' }), 'receipt');
+    await log.add(vc({ id: BUYER, payer: SELLER, amount: usd(2), agreement: 'urn:lake:order:refund:c1', settlement: 'simulated', settlementId: 'again' }), 'receipt');
+    await log.add(vc({ id: 'urn:ap2:cart:c9', cart: cart('c9'), seller: SELLER, buyer: BUYER, paid: false, delivered: null }), 'ruling');
+    await log.add(vc({ id: 'urn:ap2:cart:c9', cart: cart('c9'), seller: SELLER, buyer: BUYER, paid: false, delivered: { sha256: 'x', acknowledged: true } }), 'ruling');
+    await log.add(vc({ id: 'urn:ap2:cart:c2', cart: cart('c2'), seller: SELLER, buyer: BUYER, paid: true, delivered: { sha256: 'y', acknowledged: true } }), 'ruling');
     const someone = await agent('someone.example', 'https://someone.example/a2a');
-    expect(await ask(someone, { kind: 'log.record', webId: SELLER })).toMatchObject({ sales: 2, purchases: 0, refunds_given: 2, held_now: 0, sold: { USD: 6 } });
+    expect(await ask(someone, { kind: 'log.record', webId: SELLER })).toMatchObject({ sales: 2, purchases: 0, refunds_given: 2, held_now: 0, sold: { USD: 6 }, rulings: { delivered: 1, not_delivered: 0 } });
     expect(await ask(someone, { kind: 'log.record', webId: BUYER })).toMatchObject({ sales: 0, purchases: 2, refunds_given: 0, sold: {} });
   });
 

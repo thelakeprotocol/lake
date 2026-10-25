@@ -60,7 +60,7 @@ The first checkpoint seen from a log is taken on its signature.
 | Every receipt the payments agent signs: study payments, payments between agents, carts, held payments | payments agent | `receipt` |
 | A held payment released to the seller | payments agent | `capture` |
 | A held payment voided (a refund, or a ruling that nothing was delivered) | payments agent | `void` |
-| Every [arbiter](/docs/trade#_7-the-arbiter) ruling | arbiter | `ruling` |
+| Every [arbiter](/docs/trade#_7-the-arbiter) ruling on a cart it found paid | arbiter | `ruling` |
 | Every [blueprint](/docs/spec#_11-3-publishing-blueprints-on-a-node) published on a node that knows the log (`--log-url`) | the node, over A2A | `agent` |
 | Anything an agent wants on the record | that agent, with `log.add` | `agent` |
 
@@ -95,9 +95,9 @@ The answer comes back as `on_record`: `{ logged: true, index, of, origin, at, pr
 |---|---|
 | `sales`, `sold` | settled receipts and captures made out to it for a cart, and their totals by currency (a payment for no cart isn't a sale) |
 | `purchases` | settled receipts and captures it paid for a cart |
-| `refunds_given` | held payments to it that were voided, and refunds it paid back as a plain payment (order `refund:<cart>`), which count as neither a sale to the buyer nor a purchase by the seller |
+| `refunds_given` | held payments to it that were voided, and refunds it paid back as a plain payment (order `refund:<cart>`), which count as neither a sale to the buyer nor a purchase by the seller; a plain refund counts once, and only for a cart the log shows paid to it, paid back to that cart's buyer |
 | `held_now` | payments held for it, not yet captured or voided |
-| `rulings` | arbiter rulings on its deliveries: `delivered` and `not_delivered` |
+| `rulings` | arbiter rulings on its deliveries that found the cart paid: `delivered` and `not_delivered` (the arbiter doesn't log a ruling on an unpaid cart) |
 
 Only entries the payments agent and the arbiter logged count; nothing an agent added with `log.add`. `lake_search` shows this record next to every seller's menu. These are counts of signed facts, not a score.
 
