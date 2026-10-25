@@ -63,7 +63,8 @@ const HOUR = 3_600_000;
  * Certified studies run here, inside the house; the answer leaves only as two unreadable pieces, one per teller.
  */
 export class Housekeeper {
-  private replay = new ReplayGuard();
+  /** Nonces this house has verified; its A2A server answers a copy of one of those messages with the first reply (SPEC §3). */
+  readonly replay = new ReplayGuard();
   /** When each visitor was last turned down for each purpose (house manners: one ask per purpose a day). */
   private declinedAt = new Map<string, number>();
   /** Per pack: the last check, and when the whole chain was last verified. */

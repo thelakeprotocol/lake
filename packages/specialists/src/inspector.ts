@@ -15,13 +15,13 @@ type Reply = { kind: 'report'; target: string; role?: string; passed: number; of
 /**
  * The Inspector: point it at any Lake agent (your house, your research agent, a node) and it checks it
  * against the protocol the way a stranger would: the card, its signature, the endpoint, a signed reply,
- * and whether it refuses replays, forged and unsigned cards and expired messages. All pass → a signed
+ * that it never acts on the same message twice, and that it refuses forged and unsigned cards and expired messages. All pass → a signed
  * conformance credential. For people building their own house or agent.
  */
 export async function createInspector(o: SpecialistOptions & { nodeUrl?: string }): Promise<Specialist> {
   const publicOnly = o.url.startsWith('https://');
   const allowed = rateLimit(6, 60_000);
-  const s: Specialist = await specialist<Reply>(o, 'Inspector', 'Checks any Lake agent the way a stranger would: card, signature, endpoint, signed replies, and that it refuses replays and forgeries. Send { kind: "inspect", url }.', 'inspect', async (p, from) => {
+  const s: Specialist = await specialist<Reply>(o, 'Inspector', 'Checks any Lake agent the way a stranger would: card, signature, endpoint, signed replies, that a replay does nothing twice, and that it refuses forgeries. Send { kind: "inspect", url }.', 'inspect', async (p, from) => {
     if (p.kind !== 'inspect' || typeof p.url !== 'string') return { kind: 'refused', problems: ['send { kind: "inspect", url: "<the agent\'s A2A URL or its base URL>" }'] };
     if (!allowed(from)) return { kind: 'refused', problems: ['six inspections a minute; try again shortly'] };
     const r = await inspect(p.url, { publicOnly, sandbox: o.sandbox, nodeUrl: o.nodeUrl });
@@ -103,9 +103,10 @@ export async function inspect(target: string, o: { publicOnly: boolean; sandbox:
 
   // Nothing the agent would act on: it should answer, signed, and say it doesn't know what this is.
   const ping = await message({ kind: 'ping' });
+  let first: Record<string, unknown>;
   try {
-    const r = await send(ping);
-    add('signed reply', 'pass', `answered over A2A, signed by the card's key (${r.kind}${refused(r) ? `: ${why(r)}` : ''})`);
+    first = await send(ping);
+    add('signed reply', 'pass', `answered over A2A, signed by the card's key (${first.kind}${refused(first) ? `: ${why(first)}` : ''})`);
   } catch (e) {
     add('signed reply', 'fail', (e as Error).message);
     return { checks, cardUrl, profile };
@@ -118,7 +119,18 @@ export async function inspect(target: string, o: { publicOnly: boolean; sandbox:
       add(name, 'fail', (e as Error).message);
     }
   };
-  await trick('refuses a replay', ping, 'the same signed message twice is a replay');
+  // The same signed message again (a sender retrying after a dropped connection, or someone replaying it) must not be
+  // acted on twice. SPEC §3: the answer is the reply it gave the first time, the very same signed envelope.
+  try {
+    const again = await send(ping);
+    const same = canonicalize(again) === canonicalize(first);
+    add('a replay does nothing twice', same ? 'pass' : refused(again) ? 'warn' : 'fail', same
+      ? 'answered the copy with its first reply, signed the same: recognised, and done once'
+      : refused(again) ? `refused the copy (${why(again)}): safe, but SPEC §3 asks for the first reply again, so a sender whose connection dropped can retry`
+      : `answered the copy anew (${again.kind}): it acts on the same message twice`);
+  } catch (e) {
+    add('a replay does nothing twice', 'fail', (e as Error).message);
+  }
   const forged = structuredClone(probe.card);
   forged.capabilities!.extensions[0]!.params!.ownerDomain = 'trusted-hospital.example';
   await trick('refuses a forged card', { ...(await message({ kind: 'ping' })), card: forged }, 'the card was edited after it was signed');

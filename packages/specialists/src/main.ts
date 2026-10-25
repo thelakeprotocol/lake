@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import express from 'express';
-import { LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type LakePack } from '@thelakeprotocol/core';
+import { keepAliveBehindProxy, LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type LakePack } from '@thelakeprotocol/core';
 import { createIssuer } from './issuer.js';
 import { createAuditor, createAuthority, createEthics, createPayments } from './review.js';
 import { createGuide } from './guide.js';
@@ -126,11 +126,11 @@ if (several) {
     started.push(s);
   }
   root.get('/health', (_req, res) => void res.json({ ok: true, agents: kinds }));
-  root.listen(port, async () => {
+  keepAliveBehindProxy(root.listen(port, async () => {
     log(`${kinds.length} specialists listening on :${port}`);
     for (const s of started) await s.join();
-  });
+  }));
 } else {
   const s = await start(kind, base);
-  s.app.listen(port, () => void s.join());
+  keepAliveBehindProxy(s.app.listen(port, () => void s.join()));
 }

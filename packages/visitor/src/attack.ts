@@ -30,8 +30,9 @@ export async function attack(o: { houses: string[]; count: number; domain?: stri
     let outcome: string;
     try {
       // Requests rules decline anyway, so a replay's first, genuine copy never lands on an owner's phone.
-      const { reply } = how === 'injection' ? await knock(house, attacker, presets().injection!) : await knock(house, attacker, presets().marketing!, how);
-      outcome = reply.kind === 'rejected' ? String(reply.code) : `${reply.decision}${reply.decision === 'join' ? ' (NOT BLOCKED)' : ''}`;
+      const { reply, sameReply } = how === 'injection' ? await knock(house, attacker, presets().injection!) : await knock(house, attacker, presets().marketing!, how);
+      // A replayed copy gets the first reply back, the same signed envelope, and nothing is done twice (SPEC §3).
+      outcome = sameReply ? 'replayed: the first reply again' : reply.kind === 'rejected' ? String(reply.code) : `${reply.decision}${reply.decision === 'join' ? ' (NOT BLOCKED)' : ''}`;
     } catch (e) {
       outcome = `error: ${(e as Error).message.slice(0, 60)}`;
     }

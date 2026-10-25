@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, cardUrlFor, checkCredentialStatus, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, canonicalize, cardUrlFor, checkCredentialStatus, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -148,9 +148,15 @@ describe('one house', () => {
     expect((await knock(houses.stan!, await visitor('evil.example'), presets().injection!)).reply.decision).toBe('decline');
   });
 
-  it.each(['forge-card', 'unsigned', 'replay', 'impersonate'] as const)('rejects %s', async (tamper) => {
+  it.each(['forge-card', 'unsigned', 'impersonate'] as const)('rejects %s', async (tamper) => {
     const { reply } = await knock(houses.stan!, await visitor('gp.example'), presets().gp!, tamper);
     expect(reply.kind).toBe('rejected');
+  });
+
+  it('answers a replayed offer with its first reply, the same signed envelope, and grants nothing twice (SPEC §3)', async () => {
+    const { reply, sameReply } = await knock(houses.stan!, await visitor('gp.example'), presets().gp!, 'replay');
+    expect(sameReply).toBe(true);
+    expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });
   });
 });
 
@@ -1043,11 +1049,33 @@ describe('the sandbox specialists', () => {
     expect((await ask(`${guide}/a2a`, me, { kind: 'explain', term: 'bloc' })).reply.kind).toBe('explained');
   });
 
+  it('a message sent twice, the same signed envelope, gets the same reply and is acted on once: a room post, a payment (SPEC §3)', async () => {
+    const me = await visitor('twice.example');
+    const once = async (url: string, payload: Record<string, unknown>) => {
+      const data = { lake: '0.1', card: me.card, envelope: await signMessage(payload, me.id, { iss: me.webId }) } as LakeData;
+      const a = await sendLake(url, data, { me: me.id });
+      const b = await sendLake(url, data, { me: me.id });
+      expect(canonicalize(b!.envelope)).toBe(canonicalize(a!.envelope));
+      return a!.envelope.payload as Record<string, any>;
+    };
+    const rooms = `${specialistsUrl}/rooms/a2a`;
+    expect((await ask(rooms, me, { kind: 'room.open', id: 'twice', topic: 'retries', mode: 'room', invite: 'anyone', hours: 1 })).reply).toMatchObject({ kind: 'room.opened' });
+    expect(await once(rooms, { kind: 'room.say', id: 'twice', body: 'said once' })).toMatchObject({ kind: 'room.said', seq: expect.any(Number) });
+    const read = (await ask(rooms, me, { kind: 'room.read', id: 'twice', after: 0 })).reply;
+    expect(read.messages.filter((m: { body: unknown }) => m.body === 'said once')).toHaveLength(1);
+    // A payment: the budget is charged once.
+    const human = await makeHuman(await generateIdentity(), 'twice.example');
+    const credential = await signIntentMandate(human.id, human.webId, { id: me.webId, natural_language_description: 'retry test', study: 'urn:lake:test:twice', budget: { currency: 'USD', amount: 10 }, intent_expiry: new Date(Date.now() + 3_600_000).toISOString(), user_cart_confirmation_required: false });
+    const settle = async (amount: number) => ({ kind: 'settle', intent: { credential, card: human.card }, payments: [await signPaymentMandate(me.id, me.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: credential, agreement: 'urn:lake:memo:twice', currency: 'USD' })] });
+    expect(await once(`${payments}/a2a`, await settle(4))).toMatchObject({ kind: 'settled', total: 4, remaining: 6 });
+    expect((await ask(`${payments}/a2a`, me, await settle(1))).reply).toMatchObject({ kind: 'settled', remaining: 5 });
+  });
+
   it('the inspector passes a real house, with a signed conformance credential, and fails what is not one', async () => {
     const me = await visitor('builder.example');
     const { reply } = await ask(`${inspector}/a2a`, me, { kind: 'inspect', url: `${houses.stan}/a2a` });
     expect(reply.checks.filter((c: { status: string }) => c.status === 'fail')).toEqual([]);
-    expect(reply.checks.map((c: { check: string }) => c.check)).toEqual(expect.arrayContaining(['signature', 'endpoint', 'signed reply', 'refuses a replay', 'refuses a forged card', 'refuses an unsigned card', 'refuses an expired message']));
+    expect(reply.checks.map((c: { check: string }) => c.check)).toEqual(expect.arrayContaining(['signature', 'endpoint', 'signed reply', 'a replay does nothing twice', 'refuses a forged card', 'refuses an unsigned card', 'refuses an expired message']));
     expect(String(reply.credential).split('.')).toHaveLength(3);
     const { reply: bad } = await ask(`${inspector}/a2a`, me, { kind: 'inspect', url: `${node}/nowhere` });
     expect(bad.passed).toBeLessThan(bad.of);

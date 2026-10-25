@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as jose from 'jose';
 import { canonicalize } from './canonical.js';
 
@@ -92,17 +92,30 @@ export async function verifyMessage<T>(msg: Signed<T>, resolveKey: KeyResolver, 
   }
   const now = Math.floor((opts.now ?? Date.now()) / 1000);
   if (msg.payload.exp < now) throw new SignatureError('expired', 'message expired');
-  if (opts.replay && !opts.replay.accept(msg.payload.nonce, msg.payload.exp)) throw new SignatureError('replayed', 'nonce already seen');
+  if (opts.replay && !opts.replay.accept(msg.payload.nonce, msg.payload.exp, now, messageDigest(msg))) throw new SignatureError('replayed', 'nonce already seen');
   return msg.payload;
 }
 
-/** Remembers nonces until they expire, so a captured message cannot be sent twice. */
+/**
+ * A signed message's fingerprint: its canonical payload and its signature, nothing else. The same message re-serialised,
+ * re-sealed or carried by another hop has the same one; a message changed in any way, or re-signed, has another.
+ */
+export function messageDigest(msg: Signed<unknown>): string {
+  return createHash('sha256').update(canonicalize({ payload: msg.payload, jws: { protected: msg.jws.protected, signature: msg.jws.signature } })).digest('base64url');
+}
+
+/** Remembers nonces until they expire, so a captured message cannot be acted on twice. */
 export class ReplayGuard {
-  private seen = new Map<string, number>();
-  accept(nonce: string, exp: number, now = Math.floor(Date.now() / 1000)): boolean {
-    if (this.seen.size > 10_000) for (const [n, e] of this.seen) if (e < now) this.seen.delete(n);
+  private seen = new Map<string, { exp: number; digest?: string }>();
+  accept(nonce: string, exp: number, now = Math.floor(Date.now() / 1000), digest?: string): boolean {
+    if (this.seen.size > 10_000) for (const [n, e] of this.seen) if (e.exp < now) this.seen.delete(n);
     if (this.seen.has(nonce)) return false;
-    this.seen.set(nonce, exp);
+    this.seen.set(nonce, { exp, digest });
     return true;
+  }
+  /** Whether this very message (not just its nonce) passed verification here: the one a repeat may be answered for (SPEC §3). */
+  accepted(msg: Signed<unknown>): boolean {
+    const e = msg?.payload?.nonce ? this.seen.get(msg.payload.nonce) : undefined;
+    return !!e?.digest && e.digest === messageDigest(msg);
   }
 }

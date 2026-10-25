@@ -9,8 +9,14 @@
 		reverse_proxy 127.0.0.1:4300
 	}
 	# The hosted houses' pods, at a public address (Caddy passes the host and https on).
+	# The pod server closes idle connections after Node's default 5 s; Caddy keeps its own for less, so it never sends a
+	# request down one the pod server is closing (the Lake's own servers keep theirs longer than Caddy's 2 minutes).
 	handle /pods/* {
-		reverse_proxy 127.0.0.1:4310
+		reverse_proxy 127.0.0.1:4310 {
+			transport http {
+				keepalive 4s
+			}
+		}
 	}
 	handle /mcp* {
 		reverse_proxy 127.0.0.1:4800 {

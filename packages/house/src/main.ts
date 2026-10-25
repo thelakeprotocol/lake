@@ -5,7 +5,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import express from 'express';
-import { describe, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
+import { describe, keepAliveBehindProxy, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
 
 import { startHouse, type House } from './house.js';
 import { loadPacks } from './packs.js';
@@ -122,6 +122,7 @@ async function single() {
     say(a.relay ? `reached through the Lake's relay: ${house.card.supportedInterfaces.map((i) => i.url).join(' · ')}` : `A2A on ${baseUrl}/a2a · card at ${baseUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
     await house.join();
   });
+  keepAliveBehindProxy(server);
   const stop = async () => {
     await house.leave();
     server.close();
@@ -198,6 +199,7 @@ async function hosted(n: number) {
     await pool(houses, at * 2, (h) => h.join());
     log(`${houses.length} houses joined in ${((Date.now() - t0) / 1000).toFixed(1)}s${warnings ? ` (${warnings} warnings)` : ''}; each at ${baseUrl}/t/<name>/a2a`);
   });
+  keepAliveBehindProxy(server);
   const stop = async () => {
     await Promise.all(houses.map((h) => h.leave()));
     server.close();

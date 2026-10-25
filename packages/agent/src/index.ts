@@ -157,7 +157,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     if (!v.ok) return reply({ kind: 'rejected', code: v.rejection.code, why: v.rejection.why });
     const { nonce: _n, iat: _i, exp: _e, iss: _s, ...payload } = v.payload;
     return reply(await o.onMessage({ from: v.profile, card: (data as LakeData).card, payload, signed: data as LakeData }));
-  }, id);
+  }, id, { replay });
   let server: Server | null = null;
   if (o.mount) o.mount(app);
   else {

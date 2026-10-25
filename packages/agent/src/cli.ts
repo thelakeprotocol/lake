@@ -13,7 +13,8 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
     log: (m) => console.log(m),
   });
-  app.listen(port, () => console.log(`Lake MCP over HTTP on :${port}/mcp`));
+  const { keepAliveBehindProxy } = await import('@thelakeprotocol/core');
+  keepAliveBehindProxy(app.listen(port, () => console.log(`Lake MCP over HTTP on :${port}/mcp`)));
 } else if (process.argv[2] === 'mcp') {
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { createLakeMcpServer } = await import('./mcp.js');

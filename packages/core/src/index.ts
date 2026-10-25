@@ -14,6 +14,7 @@ export type { AgentCard, Message } from '@a2a-js/sdk';
 export type { JWK } from 'jose';
 export * from './lake-link.js';
 export * from './agent.js';
+export * from './replies.js';
 export * from './study.js';
 export * from './count.js';
 export * from './grant.js';

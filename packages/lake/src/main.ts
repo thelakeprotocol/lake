@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { loadOrCreateIdentity } from '@thelakeprotocol/core';
+import { keepAliveBehindProxy, loadOrCreateIdentity } from '@thelakeprotocol/core';
 import { createNode, replayNode } from './node.js';
 
 const { values: a } = parseArgs({
@@ -49,5 +49,5 @@ function seeds(): string[] {
   return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.md') && f !== 'README.md').sort().map((f) => readFileSync(join(dir, f), 'utf8')) : [];
 }
 const { server } = await createNode({ id, url: a.url ?? `http://localhost:${port}`, domain: a.domain!, sandbox: !a.production, uiDir, approvalsUrl: a['approvals-url'], quarantineAfter: Number(a['quarantine-after']), feedBatchMs: Number(a['feed-batch-ms']), guildMin: Number(a['guild-min']), intentMin: Number(a['intent-min']), showIntentHouses: a['show-intent-houses'], resetToken: process.env.LAKE_RESET_TOKEN, record: a.record, blueprintsFile: `${a.data}/blueprints.json`, seedBlueprints: seeds(), follow: a.follow?.split(',').map((u) => u.trim()).filter(Boolean), syncMs: Number(a['sync-ms']) });
-server.listen(port, () => console.log(`[node:${a.domain}] Lake node on :${port} · map at http://localhost:${port}/ · ${a.production ? 'production' : 'sandbox'}${a.record ? ` · recording to ${a.record}` : ''}`));
+keepAliveBehindProxy(server).listen(port, () => console.log(`[node:${a.domain}] Lake node on :${port} · map at http://localhost:${port}/ · ${a.production ? 'production' : 'sandbox'}${a.record ? ` · recording to ${a.record}` : ''}`));
 }

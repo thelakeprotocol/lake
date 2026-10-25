@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, exampleOffers, sendLake, signCard, signMessage, verifyLakeData,
+  buildCard, canonicalize, exampleOffers, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type Offer,
 } from '@thelakeprotocol/core';
 
@@ -34,11 +34,10 @@ export const presets = (): Record<string, Omit<Offer, 'id' | 'requester'>> => ex
 
 export type Tamper = 'none' | 'forge-card' | 'unsigned' | 'replay' | 'impersonate';
 
-/** Signs a payload as this visitor and sends it to an agent over A2A; returns the verified, signed reply. */
-/** Network failures where the message may or may not have arrived. */
-const HOUSE_KINDS = new Set(['offer', 'compute', 'status', 'withdraw', 'receipt', 'quote', 'accept']);
-const DROPPED = /ECONNRESET|EPIPE|UND_ERR_SOCKET|other side closed|socket hang up|terminated/i;
-
+/**
+ * Signs a payload as this visitor and sends it to an agent over A2A; returns the verified, signed reply.
+ * A dropped connection is retried by sendLake with the same signed message, which the receiver answers once (SPEC §3).
+ */
 export async function ask(agentUrl: string, v: Visitor, payload: Record<string, unknown>, tamper: Tamper = 'none') {
   const envelope = await signMessage(payload, v.id, { iss: v.webId });
   let card = v.card;
@@ -48,28 +47,24 @@ export async function ask(agentUrl: string, v: Visitor, payload: Record<string, 
   }
   if (tamper === 'unsigned') card = { ...v.card, signatures: [] };
   const data: LakeData = { lake: '0.1', card, envelope: envelope as LakeData['envelope'] };
-  if (tamper === 'replay') await sendLake(agentUrl, data, { me: v.id });
-  // A connection that drops mid-call leaves the sender not knowing if it arrived. Sending the same signed message again
-  // is safe: the receiver refuses a nonce it has seen, and that refusal is the proof the first one got there.
+  const first = tamper === 'replay' ? await sendLake(agentUrl, data, { me: v.id }) : null;
   let retried = false;
-  const raw = await sendLake(agentUrl, data, { me: v.id }).catch(async (e: Error & { cause?: { code?: string } }) => {
-    // Not to a house: a house counts a repeat as an attack on it, and the honest sender would take the blame.
-    if (!DROPPED.test(`${e.cause?.code ?? ''} ${e.message}`) || HOUSE_KINDS.has(String(payload.kind))) throw e;
-    retried = true;
-    return sendLake(agentUrl, data, { me: v.id });
-  });
+  const raw = await sendLake(agentUrl, data, { me: v.id, onRetry: () => { retried = true; } });
   const verified = await verifyLakeData(raw, { sandbox: true });
   if (!verified.ok) throw new Error(`the reply from ${agentUrl} did not verify: ${verified.rejection.why}`);
   const reply = verified.payload as Record<string, any>;
+  // A replayed copy answered with the very reply the first got (the same signed envelope): recognised, and done once.
+  const sameReply = !!first?.envelope && canonicalize(first.envelope) === canonicalize(raw!.envelope);
   const repeat = (reply.kind === 'rejected' && reply.code === 'replayed') || (reply.kind === 'refused' && String(reply.problems?.[0] ?? '').startsWith('replayed'));
-  if (retried && repeat) return { reply: { kind: 'delivered', note: 'the connection dropped, but the first try had already arrived (the retry was refused as a repeat), so it got there once' } as Record<string, any>, from: verified.profile, signed: raw as LakeData };
+  // A receiver that doesn't keep its replies refuses the retry as a repeat: that refusal is the proof the first one got there.
+  if (retried && repeat) return { reply: { kind: 'delivered', note: 'the connection dropped, but the first try had already arrived (the retry was refused as a repeat), so it got there once; its reply was lost' } as Record<string, any>, from: verified.profile, signed: raw as LakeData, sameReply };
   // `signed` is the reply exactly as it came: the other side's signature on what it said, to keep as evidence.
-  return { reply, from: verified.profile, signed: raw as LakeData };
+  return { reply, from: verified.profile, signed: raw as LakeData, sameReply };
 }
 
 /** Sends one signed offer to a house over A2A and returns the house's verified, signed reply. */
 export async function knock(houseUrl: string, v: Visitor, terms: Omit<Offer, 'id' | 'requester'>, tamper: Tamper = 'none') {
   const offer: Offer = { id: randomUUID(), requester: tamper === 'impersonate' ? 'nhs.uk' : v.domain, ...terms };
-  const { reply, from } = await ask(houseUrl, v, { kind: 'offer', offer }, tamper);
-  return { offer, reply, house: from };
+  const { reply, from, sameReply } = await ask(houseUrl, v, { kind: 'offer', offer }, tamper);
+  return { offer, reply, house: from, sameReply };
 }
