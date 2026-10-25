@@ -6,7 +6,7 @@ import {
 } from '@thelakeprotocol/core';
 import { Market } from './market.js';
 import { checkRecord, quickCheck, type RecordCheck, type RecordPaths, type Trust } from './record.js';
-import type { OwnerDesk } from './owner.js';
+import type { OwnerActive, OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
 
 export interface HousekeeperOptions {
@@ -39,7 +39,7 @@ export interface HousekeeperOptions {
 type Decision = 'join' | 'decline' | 'ask' | 'counter';
 export type Reply =
   | { kind: 'rejected'; code: string; why: string }
-  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[]; /** Why it declined, coarsely (SPEC §5): purpose, price, retention, default, rule, repeat, too-many, relabel. */ code?: string }
+  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[]; /** Why it declined, coarsely (SPEC §5): purpose, price, retention, default, rule, repeat, too-many, relabel. */ code?: string; /** On an ask: when the owner was last at their desk, a bucket (SPEC §5). */ ownerActive?: OwnerActive }
   | { kind: 'filed'; receipt: string }
   | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'counted'; study: string; count: string; tellers: string[] }
@@ -217,7 +217,12 @@ export class Housekeeper {
     const decide = async (decision: Decision, reason: string, extra: Partial<Extract<Reply, { kind: 'decision' }>> = {}, told?: string) => {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision, reason }));
       reason = told ?? toVisitor(decision, extra.counter, (extra as { code?: string }).code, offer.purpose);
-      if (decision === 'ask') this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
+      if (decision === 'ask') {
+        this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
+        // Run 31's visitors couldn't tell whether anyone would ever look at a parked request.
+        extra = { ...extra, ownerActive: this.o.desk.ownerActive() };
+        reason += `; ${lastActive(extra.ownerActive!)}`;
+      }
       // What this house holds is said only to someone it is dealing with, never to someone it just turned away.
       const holds = decision === 'join' || decision === 'counter' ? [...new Set((await this.claims(offer.fields)).map((c) => c.field))] : [];
       return this.reply({ kind: 'decision', offerId: offer.id, decision, reason, holds, notes, ...extra });
@@ -493,7 +498,8 @@ export class Housekeeper {
       return this.reply({ ...base, decision: 'join', reason: 'the owner tapped Allow', grant: req.grant, grantHours: 48, agreement });
     }
     if (req.status === 'denied') return this.reply({ ...base, decision: 'decline', reason: 'the owner said no' });
-    return this.reply({ ...base, decision: 'ask', reason: 'still waiting for the owner' });
+    const ownerActive = this.o.desk.ownerActive();
+    return this.reply({ ...base, decision: 'ask', reason: `still waiting for the owner; ${lastActive(ownerActive)}`, ownerActive });
   }
 
   private async agreementOnFile(offerId: string): Promise<(SignedAgreement & { grant?: string }) | null> {
@@ -538,6 +544,8 @@ function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: n
   // A coarse reason a visitor can act on (don't ask again for this), never the owner's rule, its number or its limits.
   return { purpose: `declined: this house doesn't take ${purpose} requests`, price: 'declined: it pays too little', retention: 'declined: this house keeps no data; ask with retention "none"', default: 'declined: nothing in its rules covers this' }[code ?? ''] ?? 'declined';
 }
+
+const lastActive = (a: OwnerActive) => (a === 'no owner' ? 'nobody has claimed this house, so no owner will answer' : `owner last active: ${a}`);
 
 /** Why an offer isn't a well-formed Lake offer (SPEC §5.1), in our words, or null. Purposes and fields are codes, not prose. */
 function offerProblem(o: unknown): string | null {

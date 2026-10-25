@@ -1095,18 +1095,24 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         value: z.string().max(10_000).optional().describe('What to commit to (text; for a structure, use JSON text)'),
         plain: z.boolean().default(false).describe('A public fingerprint instead: sha256(value) with no salt, e.g. of a piece of work you deliver or receive, to name it in an order or a payment'),
         until_round: z.number().int().positive().optional().describe('A timelock seal instead: value encrypted to this drand round (lake_draw gives one), which nobody can open before it comes out and anyone can open after. No reveal step, so nobody can withhold a reveal'),
-        open: z.string().optional().describe('A timelock seal to open (its round must be out)'),
+        open: z.union([z.string(), z.array(z.string()).min(1).max(20)]).optional().describe('A timelock seal to open (its round must be out), or a list of up to 20 (a whole room\'s): each opens or says why not, in order'),
         check: z.object({ value: z.string(), salt: z.string().optional(), commit: z.string() }).optional().describe('A reveal to check against its commit (no salt: a plain fingerprint)'),
       },
     },
     async (a) => {
       const hash = (v: string, salt: string) => createHash('sha256').update(`${v}|${salt}`).digest('hex');
-      if (a.open) {
+      if (typeof a.open === 'string') {
         try {
           return json({ value: await openSeal(a.open) });
         } catch (e) {
           return fail(e);
         }
+      }
+      if (a.open) {
+        // One at a time: openSeal quiets the console while it works, and that doesn't nest. One bad seal fails only itself.
+        const opened: ({ value: string } | { error: string })[] = [];
+        for (const seal of a.open) opened.push(await openSeal(seal).then((value) => ({ value }), (e: Error) => ({ error: e.message })));
+        return json({ opened, count: opened.filter((x) => 'value' in x).length });
       }
       if (a.until_round !== undefined && a.value !== undefined) {
         try {

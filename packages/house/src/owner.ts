@@ -7,6 +7,9 @@ import {
   type AgentCard, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
+/** When the owner was last at their desk, as a visitor waiting on an ask hears it: a bucket, never a time (SPEC §5). */
+export type OwnerActive = 'within the hour' | 'today' | 'this week' | 'not this week' | 'no owner';
+
 /** An offer the rules couldn't settle: waiting for the owner's tap. */
 export interface PendingRequest {
   id: string;
@@ -102,6 +105,9 @@ export class OwnerDesk {
   readonly assistants = new Map<string, AssistantKey>();
   private invites = new Map<string, { label: string; until: number }>();
   suggestions: Suggestion[] = [];
+  /** When the owner's own key last called the desk (the panel polls while open; answers come through it too). */
+  private ownerSeen = 0;
+  private ownerSeenSaved = 0;
 
   constructor(
     private o: {
@@ -160,6 +166,21 @@ export class OwnerDesk {
     return this.o.leaseHours && at ? new Date(at + this.o.leaseHours * 3_600_000) : null;
   }
 
+  /** Whether anyone is likely to look at a parked request: coarse, so a visitor can't learn the owner's habits. */
+  ownerActive(now = Date.now()): OwnerActive {
+    if (!this.ownerJwk) return 'no owner';
+    const ago = now - this.ownerSeen;
+    return ago < 3_600_000 ? 'within the hour' : ago < 86_400_000 ? 'today' : ago < 7 * 86_400_000 ? 'this week' : 'not this week';
+  }
+
+  private seen() {
+    this.ownerSeen = Date.now();
+    // Kept across restarts, written at most every ten minutes: the finest bucket is an hour wide.
+    if (this.ownerSeen - this.ownerSeenSaved < 600_000) return;
+    this.ownerSeenSaved = this.ownerSeen;
+    void writeFile(join(this.o.dataDir, 'owner-seen'), String(this.ownerSeen)).catch(() => {});
+  }
+
   /** Back to nobody's: keys revoked, requests dropped, owner forgotten, house reset. Anyone can claim it again. */
   async release() {
     await this.revoke('all');
@@ -168,6 +189,7 @@ export class OwnerDesk {
     this.suggestions = [];
     await this.o.saveAssistants?.([]);
     this.ownerJwk = null;
+    this.ownerSeen = 0;
     await this.o.clearOwnerKey?.();
     this.token = await secret(join(this.o.dataDir, 'pairing-token'), true);
     await this.o.onRelease?.();
@@ -175,6 +197,7 @@ export class OwnerDesk {
 
   async init() {
     this.ownerJwk = await this.o.readOwnerKey();
+    this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
       check();
@@ -313,12 +336,13 @@ export class OwnerDesk {
     r.post('/pair', async (req, res) => {
       const { publicJwk, token } = req.body ?? {};
       if (!publicJwk?.x || publicJwk.crv !== 'Ed25519') return void res.status(400).json({ error: 'send an Ed25519 public key' });
-      if (this.ownerJwk && this.ownerJwk.x === publicJwk.x) return void res.json({ paired: true, webId: this.o.webId });
+      if (this.ownerJwk && this.ownerJwk.x === publicJwk.x) return void (this.seen(), res.json({ paired: true, webId: this.o.webId }));
       const firstCome = this.o.openPairing && !this.ownerJwk;
       if (!firstCome && token !== this.token) return void res.status(403).json({ error: this.ownerJwk ? 'this house already has an owner' : 'wrong or missing pairing token' });
       this.ownerJwk = { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid: String(publicJwk.kid ?? 'owner'), alg: 'EdDSA', ...(this.o.leaseHours ? { claimedAt: Date.now() } : {}) } as JWK;
       await this.o.saveOwnerKey(this.ownerJwk);
       this.token = await secret(join(this.o.dataDir, 'pairing-token'), true); // one use only
+      this.seen();
       res.json({ paired: true, webId: this.o.webId, until: this.leaseUntil()?.toISOString() });
     });
 
@@ -350,6 +374,8 @@ export class OwnerDesk {
         return void res.status(403).json({ error: (e as Error).message });
       }
       const assistant = signer !== this.ownerJwk.kid ? this.assistants.get(signer) : undefined;
+      // The owner's own key only: an assistant reading the panel isn't the owner looking.
+      if (!assistant) this.seen();
       if (assistant) {
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         if (p.kind === 'assistant.suggest') {

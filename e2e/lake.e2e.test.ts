@@ -122,6 +122,8 @@ describe('one house', () => {
     const uni = await visitor('uni.example');
     const first = (await knock(houses.stan!, uni, presets().research!)).reply;
     expect(first.decision).toBe('ask');
+    // Nobody has claimed this house yet: the visitor is told nobody will answer (run 31).
+    expect(first).toMatchObject({ ownerActive: 'no owner', reason: expect.stringContaining('no owner will answer') });
     const ads = await visitor('ads.example');
     const declined = (await knock(houses.stan!, ads, presets().marketing!)).reply;
     // A coarse reason the visitor can act on, never the owner's rule, its number or its limits.
@@ -132,7 +134,7 @@ describe('one house', () => {
     // Asking again for exactly the same thing is the same request; the visitor can check it, and take it back.
     const again = (await knock(houses.stan!, uni, presets().research!)).reply;
     expect(again).toMatchObject({ decision: 'ask', offerId: first.offerId });
-    expect((await ask(houses.stan!, uni, { kind: 'status', offerId: first.offerId })).reply).toMatchObject({ decision: 'ask' });
+    expect((await ask(houses.stan!, uni, { kind: 'status', offerId: first.offerId })).reply).toMatchObject({ decision: 'ask', ownerActive: 'no owner' });
     expect((await ask(houses.stan!, uni, { kind: 'withdraw', offerId: first.offerId })).reply).toMatchObject({ decision: 'decline', offerId: first.offerId });
     expect((await ask(houses.stan!, uni, { kind: 'withdraw', offerId: first.offerId })).reply).toMatchObject({ kind: 'rejected' });
   });
@@ -343,6 +345,8 @@ describe('the owner', () => {
     const kaiWebId = (await paired.json()).webId;
     const { reply } = await knock(houses.kai!, await visitor('carer.example'), { purpose: 'care', fields: ['conditions'], retention: 'none', priceUsd: 0, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false } });
     expect(reply.decision).toBe('ask');
+    // Its owner just paired: a coarse bucket, never a time.
+    expect(reply).toMatchObject({ ownerActive: 'within the hour', reason: expect.stringContaining('owner last active: within the hour') });
     const list = await (await fetch(`${houses.kai}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, phone, { iss: kaiWebId })) })).json();
     const req = (list.requests as { visitor: { domain: string }; warnings?: string[]; recommendation: string }[]).find((q) => q.visitor.domain === 'carer.example')!;
     expect(req.warnings).toEqual(['asks for sensitive data (conditions) for care (someone looking after you), outside any certified study, from a sender whose identity isn\'t verified: allowing it lets this agent use your own conditions, not a total']);
@@ -622,6 +626,9 @@ describe('the open door', () => {
     expect(sealed.commit).toMatch(/^[0-9a-f]{64}$/);
     expect((await text('lake_commit', { check: { value: 'bid 7', salt: sealed.salt, commit: sealed.commit } })).matches).toBe(true);
     expect((await text('lake_commit', { check: { value: 'bid 9', salt: sealed.salt, commit: sealed.commit } })).matches).toBe(false);
+    // A whole room's seals in one call (run 31): each opens or says why not, and one bad seal fails only itself.
+    const room = await text('lake_commit', { open: ['not a seal', '-----BEGIN AGE ENCRYPTED FILE-----\nYWdl\n-----END AGE ENCRYPTED FILE-----\n'] });
+    expect(room).toMatchObject({ count: 0, opened: [{ error: expect.any(String) }, { error: expect.any(String) }] });
     // A blueprint's header checked without publishing, with its quoting fixed in one go.
     const dry = await text('lake_publish_blueprint', { markdown: '---\nblueprint: "0.1"\nname: corpse\nsummary: A game: each writes one line\n---\n# corpse', dry_run: true });
     expect(dry.header).toContain('summary: "A game: each writes one line"');
