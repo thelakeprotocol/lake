@@ -36,7 +36,8 @@ services:
     hostname: lake-node
     # Follows the other Lake's node at its public address: its cards are re-verified here from the agents' own endpoints.
     command: ["--domain", "lake-${LAKE_ID}.localhost", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--guild-min", "2", "--follow", "http://lake-${PEER_ID}.localhost:${PEER_PORT}"]
-    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/t/", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-local}" }
+    # Published blueprints go on the transparency log, which runs with the specialists.
+    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/t/", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-local}", LAKE_LOG_URL: "http://specialists:4300/log/a2a" }
     volumes: [node:/data]
     mem_limit: ${LAKE_NODE_MEM:-180m}
     memswap_limit: ${LAKE_NODE_MEM:-180m}

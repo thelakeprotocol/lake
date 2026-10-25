@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
+import { followCheckpoint, type SeenCheckpoint } from '@thelakeprotocol/core';
 import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, type CartMandate, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
@@ -456,18 +457,30 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     };
   };
   // Whether something is on the transparency log: the log's answer, with its proof and checkpoint checked here, not taken
-  // on its word (SPEC §11.8).
+  // on its word (SPEC §11.8). The connector remembers the last checkpoint it accepted from each log (by origin) and takes
+  // a later one only with the proof that it extends that one: a log that rewrote or forked its history is caught here.
+  const logsSeen = new Map<string, SeenCheckpoint>(), logOrigins = new Map<string, string>();
   const onRecord = async (entry: string) => {
     try {
       const me = await agent();
       const log = (await me.find({ skill: 'log' }))[0];
       if (!log) return { checked: false, why: 'no transparency log on this Lake' };
-      const r = (await me.ask(log.url, { kind: 'log.find', entry })) as Record<string, any>;
-      const card = (await (await fetch(cardUrlFor(log.url))).json()) as AgentCard;
-      const cp = verifyCheckpoint(String(r.checkpoint ?? ''), (await verifyLakeCard(card)).publicJwk);
+      const jwk = (await verifyLakeCard((await (await fetch(cardUrlFor(log.url))).json()) as AgentCard)).publicJwk;
+      const find = async (since?: number) => (await me.ask(log.url, { kind: 'log.find', entry, ...(since ? { since } : {}) })) as Record<string, any>;
+      let r = await find(logsSeen.get(logOrigins.get(log.url) ?? '')?.size);
+      let cp = verifyCheckpoint(String(r.checkpoint ?? ''), jwk);
+      // A log met at a new address may be one already watched: ask again from the size it signed before.
+      const last = logsSeen.get(cp.origin);
+      if (last?.size && r.since !== last.size && cp.size > last.size) cp = verifyCheckpoint(String((r = await find(last.size)).checkpoint ?? ''), jwk);
+      try {
+        logsSeen.set(cp.origin, followCheckpoint(last, String(r.checkpoint), jwk, r.since === last?.size ? r.consistency : undefined));
+        logOrigins.set(log.url, cp.origin);
+      } catch (e) {
+        return { logged: false, trusted: false, why: `don't trust this log: ${(e as Error).message}` };
+      }
       if (r.kind !== 'log.found') return { logged: false, size: cp.size };
       const ok = cp.size === r.size && verifyInclusion(unb64(r.leaf_hash), r.index, r.size, (r.proof as string[]).map(unb64), cp.root) && b64(leafHash(entry)) === r.leaf_hash;
-      return ok ? { logged: true, index: r.index, of: cp.size, origin: cp.origin, at: r.at, proof: 'checked: RFC 9162 inclusion under the log\'s signed checkpoint' } : { logged: false, why: 'the log\'s proof does not check' };
+      return ok ? { logged: true, index: r.index, of: cp.size, origin: cp.origin, at: r.at, proof: `checked: RFC 9162 inclusion under the log's signed checkpoint${last ? `, which extends the one of size ${last.size} seen before` : ''}` } : { logged: false, why: 'the log\'s proof does not check' };
     } catch (e) {
       return { checked: false, why: (e as Error).message.slice(0, 120) };
     }

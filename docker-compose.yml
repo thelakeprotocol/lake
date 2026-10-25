@@ -26,7 +26,7 @@ services:
     container_name: lake-node-a
     hostname: lake-node
     command: ["--domain", "lake.local", "--url", "http://lake-node:7000", "--follow", "http://lake-node-b:7000", "--show-intent-houses"]
-    environment: { LAKE_APPROVALS_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001/owner/", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}" }
+    environment: { LAKE_APPROVALS_URL: "http://${LAKE_PUBLIC_HOST:-localhost}:4001/owner/", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}", LAKE_LOG_URL: "http://log:4798/a2a" }
     volumes: [node:/data]
     ports: ["7000:7000"]
 
@@ -35,7 +35,7 @@ services:
     container_name: lake-node-b
     hostname: lake-node-b
     command: ["--domain", "b.lake.local", "--url", "http://lake-node-b:7000", "--follow", "http://lake-node:7000"]
-    environment: { LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}" }
+    environment: { LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}", LAKE_LOG_URL: "http://log:4798/a2a" }
     volumes: [node-b:/data]
     ports: ["7001:7000"]
     depends_on: [lake-node]
@@ -72,8 +72,19 @@ services:
     hostname: payments
     command: ["payments", "--url", "http://payments:4600"]
     depends_on: [lake-node]
-    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_LOG_URL: "http://log:4798/a2a" }
     volumes: [payments:/data]
+
+  # The transparency log (SPEC §11.8): receipts and the blueprints the nodes publish, on a record anyone can check.
+  # Only the payments agent's key (fetched from its card) may log what counts toward a seller's record.
+  log:
+    build: { context: ., target: specialists }
+    image: ghcr.io/thelakeprotocol/lake-specialists:latest
+    hostname: log
+    command: ["log", "--url", "http://log:4798", "--log-trust", "http://payments:4600/a2a"]
+    depends_on: [lake-node]
+    environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000" }
+    volumes: [log:/data]
 
   # Mortgage offers (usecases/mortgage): the demo bank that signs statements, the register that
   # authorises lenders, and eight lenders whose rules run inside each buyer's house.
@@ -161,4 +172,4 @@ services:
     environment: { LAKE_NODE_URL: "http://lake-node:7000,http://lake-node-b:7000", LAKE_RESET_TOKEN: "${LAKE_RESET_TOKEN:-demo}", LAKE_PACKS: "health,mortgage" }
     volumes: [cli:/root/.lake]   # the agent's keys survive between runs
 
-volumes: { cli: {}, node: {}, node-b: {}, issuer: {}, bank: {}, register: {}, auditor: {}, ethics: {}, payments: {}, guides: {}, stan: {}, strict: {}, research: {} }
+volumes: { cli: {}, node: {}, node-b: {}, issuer: {}, bank: {}, register: {}, auditor: {}, ethics: {}, payments: {}, log: {}, guides: {}, stan: {}, strict: {}, research: {} }

@@ -23,6 +23,8 @@ const { values: a } = parseArgs({
     follow: { type: 'string', default: process.env.LAKE_FOLLOW },
     'sync-ms': { type: 'string', default: '5000' },
     record: { type: 'string', default: process.env.LAKE_RECORD },
+    // A transparency log's A2A endpoint: published blueprints go on its record (SPEC §11.8). Off unless set.
+    'log-url': { type: 'string', default: process.env.LAKE_LOG_URL },
     replay: { type: 'string' },
     speed: { type: 'string', default: '1' },
     loop: { type: 'boolean', default: false },
@@ -48,6 +50,6 @@ function seeds(): string[] {
   const dir = new URL('./blueprints/', import.meta.url).pathname;
   return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.md') && f !== 'README.md').sort().map((f) => readFileSync(join(dir, f), 'utf8')) : [];
 }
-const { server } = await createNode({ id, url: a.url ?? `http://localhost:${port}`, domain: a.domain!, sandbox: !a.production, uiDir, approvalsUrl: a['approvals-url'], quarantineAfter: Number(a['quarantine-after']), feedBatchMs: Number(a['feed-batch-ms']), guildMin: Number(a['guild-min']), intentMin: Number(a['intent-min']), showIntentHouses: a['show-intent-houses'], resetToken: process.env.LAKE_RESET_TOKEN, record: a.record, blueprintsFile: `${a.data}/blueprints.json`, seedBlueprints: seeds(), follow: a.follow?.split(',').map((u) => u.trim()).filter(Boolean), syncMs: Number(a['sync-ms']) });
-keepAliveBehindProxy(server).listen(port, () => console.log(`[node:${a.domain}] Lake node on :${port} · map at http://localhost:${port}/ · ${a.production ? 'production' : 'sandbox'}${a.record ? ` · recording to ${a.record}` : ''}`));
+const { server } = await createNode({ id, url: a.url ?? `http://localhost:${port}`, domain: a.domain!, sandbox: !a.production, uiDir, approvalsUrl: a['approvals-url'], quarantineAfter: Number(a['quarantine-after']), feedBatchMs: Number(a['feed-batch-ms']), guildMin: Number(a['guild-min']), intentMin: Number(a['intent-min']), showIntentHouses: a['show-intent-houses'], resetToken: process.env.LAKE_RESET_TOKEN, record: a.record, blueprintsFile: `${a.data}/blueprints.json`, seedBlueprints: seeds(), follow: a.follow?.split(',').map((u) => u.trim()).filter(Boolean), syncMs: Number(a['sync-ms']) , logUrl: a['log-url'] || undefined });
+keepAliveBehindProxy(server).listen(port, () => console.log(`[node:${a.domain}] Lake node on :${port} · map at http://localhost:${port}/ · ${a.production ? 'production' : 'sandbox'}${a.record ? ` · recording to ${a.record}` : ''}${a['log-url'] ? ` · blueprints logged at ${a['log-url']}` : ''}`));
 }

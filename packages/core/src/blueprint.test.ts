@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { blueprintId, checkBlueprintMessage, parseBlueprint } from './index.js';
+import { blueprintId, blueprintRecord, buildCard, canonicalize, checkBlueprintMessage, checkBlueprintRecord, generateIdentity, parseBlueprint, signCard, signMessage } from './index.js';
 
 // Every blueprint in spec/blueprints must be a valid Lake Blueprint 0.1: agents build apps from them.
 const dir = new URL('../../../spec/blueprints/', import.meta.url);
@@ -27,5 +27,26 @@ describe('spec/blueprints', () => {
       expect.stringMatching(/^name:/), expect.stringMatching(/^version:/), expect.stringMatching(/^tag:/), expect.stringMatching(/^participants.min:/),
       expect.stringMatching(/^body: needs a "## Protocol"/), expect.stringMatching(/^body: needs a "## Validation"/),
     ]));
+  });
+});
+
+describe('a published blueprint on the record', () => {
+  it('logs the author\'s own signature on the exact text, checkable long after the message expired', async () => {
+    const text = readFileSync(new URL('coinflip.md', dir), 'utf8');
+    const id = await generateIdentity();
+    const card = await signCard(buildCard({ name: 'Author', description: 'x', url: 'https://author.example/a2a', skills: [], profile: { role: 'agent', webId: 'https://author.example/#agent', ownerDomain: 'author.example', tags: [] } }, id), id);
+    const signedAt = Date.now() - 86_400_000;
+    const env = await signMessage({ kind: 'blueprint' as const, text }, id, { iss: 'https://author.example/#agent', now: signedAt });
+    const entry = blueprintRecord(card, env);
+    expect(entry).toBe(canonicalize(JSON.parse(entry)));
+    expect(await checkBlueprintRecord(entry)).toMatchObject({ name: 'coinflip', text, author: 'author.example', webId: 'https://author.example/#agent', signedAt: new Date(Math.floor(signedAt / 1000) * 1000).toISOString() });
+    // One character changed after signing: it no longer checks.
+    const r = JSON.parse(entry);
+    r.envelope.payload.text = text.replace('coin', 'Coin');
+    await expect(checkBlueprintRecord(canonicalize(r))).rejects.toThrow(/signature/);
+    // Signed by someone other than the card's holder: refused.
+    const other = await generateIdentity();
+    const forged = blueprintRecord(card, await signMessage({ kind: 'blueprint' as const, text }, other, { iss: 'https://author.example/#agent' }));
+    await expect(checkBlueprintRecord(forged)).rejects.toThrow();
   });
 });

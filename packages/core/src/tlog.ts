@@ -1,6 +1,9 @@
 import { createHash, createPublicKey, verify as nodeVerify } from 'node:crypto';
 import * as jose from 'jose';
-import type { Identity } from './crypto.js';
+import type { AgentCard } from '@a2a-js/sdk';
+import { signMessage, type Identity } from './crypto.js';
+import { verifyLakeData, type LakeData } from './a2a.js';
+import { sendLake } from './agent.js';
 
 /**
  * A transparency log (SPEC §11.8): an append-only Merkle tree of signed things (receipts, rulings, blueprints), so
@@ -9,6 +12,9 @@ import type { Identity } from './crypto.js';
  * with inclusion and consistency proofs as its §2.1.3 and §2.1.4 define them. The log's word for its current size and
  * root is a checkpoint in C2SP's signed-note format (the one Go's checksum database and Sigstore's Rekor v2 use):
  * "<origin>\n<size>\n<base64 root>\n", signed with Ed25519.
+ *
+ * Monitors keep the last checkpoint they accepted from a log and take a later one only with a consistency proof from it
+ * (followCheckpoint), so a log can't rewrite or fork its history without someone who watched noticing.
  *
  * SCITT (the IETF's supply-chain transparency work) puts the same trees behind COSE envelopes; those are still drafts,
  * so entries here stay the Lake's own signed objects.
@@ -119,4 +125,51 @@ export function verifyCheckpoint(note: string, publicJwk: jose.JWK, origin?: str
   const key = createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: String(publicJwk.x) }, format: 'jwk' });
   if (!nodeVerify(null, Buffer.from(body), key, Buffer.from(sig.slice(4)))) throw new Error('the checkpoint signature does not verify');
   return { origin: o, size: Number(size), root: unb64(root) };
+}
+
+/** What a monitor remembers of a log: the last checkpoint it accepted from it (root in base64, so it stores as JSON). */
+export interface SeenCheckpoint { origin: string; size: number; root: string }
+
+/**
+ * One step of watching a log, as RFC 9162's monitors do: checks a newly signed checkpoint against the last one accepted
+ * from the same log, and returns the one to remember now. A log that shows anyone a tree which doesn't extend what it
+ * signed before has rewritten its history, or shows different people different histories (a fork): the signature alone
+ * can't tell, only the consistency proof between the two can. `consistency` is the log's proof from `last.size` to the
+ * new checkpoint's size (`log.consistency { from }`, or `log.find { since }`). Throws, plainly, why the new one can't
+ * be trusted. The first checkpoint seen from a log is taken on its signature (trust on first use).
+ */
+export function followCheckpoint(last: SeenCheckpoint | undefined, note: string, publicJwk: jose.JWK, consistency?: string[] | Uint8Array[]): SeenCheckpoint {
+  const cp = verifyCheckpoint(note, publicJwk, last?.origin);
+  const next = { origin: cp.origin, size: cp.size, root: b64(cp.root) };
+  if (!last || last.size === 0) return next;
+  if (cp.size < last.size) throw new Error(`the log now shows ${cp.size} entries, fewer than the ${last.size} it signed before: it has been rolled back`);
+  if (cp.size === last.size) {
+    if (next.root !== last.root) throw new Error(`the log signed two different trees of size ${cp.size}: it has forked`);
+    return last;
+  }
+  if (!consistency) throw new Error(`no consistency proof from the tree of size ${last.size} it signed before`);
+  const proof = consistency.map((p) => (typeof p === 'string' ? unb64(p) : p));
+  if (!verifyConsistency(last.size, cp.size, unb64(last.root), cp.root, proof)) throw new Error(`the tree of size ${cp.size} does not extend the tree of size ${last.size} it signed before: the log has been rewritten or forked`);
+  return next;
+}
+
+/** The log answered, and said no (too big, too many this hour, a kind it won't take from this sender). */
+export class LogRefused extends Error {}
+
+/**
+ * Puts an entry on a transparency log that runs elsewhere, over A2A, as `me` (`log.add`): the way a node logs the
+ * blueprints published on it, and a payments agent or an arbiter in a process of its own logs what it signs. `kind`
+ * (receipt, capture, void, ruling) is honoured only from senders the log was told to trust; to anyone else it's refused.
+ * The log's inclusion proof is checked under its signed checkpoint before this says where the entry is. Throws why not.
+ */
+export async function addToLog(logUrl: string, entry: string, me: { id: Identity; card: AgentCard; webId: string }, o: { kind?: string; sandbox?: boolean; timeoutMs?: number } = {}): Promise<{ index: number; origin: string; checkpoint: string }> {
+  const envelope = await signMessage({ kind: 'log.add', entry, ...(o.kind ? { entry_kind: o.kind } : {}) }, me.id, { iss: me.webId });
+  const reply = await sendLake(logUrl, { lake: '0.1', card: me.card, envelope: envelope as LakeData['envelope'] }, { me: me.id, timeoutMs: o.timeoutMs ?? 10_000 });
+  const v = await verifyLakeData<Record<string, any>>(reply as LakeData<Record<string, any>>, { sandbox: o.sandbox });
+  if (!v.ok) throw new Error(`the log's reply does not verify: ${v.rejection.why}`);
+  const r = v.payload;
+  if (r.kind !== 'log.added') throw new LogRefused(`the log refused it: ${((r.problems as string[] | undefined) ?? []).join('; ') || r.kind}`);
+  const cp = verifyCheckpoint(String(r.checkpoint ?? ''), v.profile.publicJwk);
+  if (cp.size !== r.size || !verifyInclusion(leafHash(entry), r.index, r.size, ((r.proof as string[] | undefined) ?? []).map(unb64), cp.root)) throw new Error('the log\'s inclusion proof does not check');
+  return { index: r.index, origin: cp.origin, checkpoint: r.checkpoint };
 }

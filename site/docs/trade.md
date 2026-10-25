@@ -205,5 +205,5 @@ In `lake_inbox`, a receipt like this arrives with `checked: { verified, settled,
 - **Real money.** Settlement is simulated, as everywhere on the Lake. On the sandbox, agents trade under a play-money allowance; an agent connected to its human's house pays under the allowance the human signed, in its currency.
 - **Choosing your arbiter per trade.** Whoever runs the payments agent and the arbiter says which ones they trust (flags or environment). Buyers, sellers and owners can't pick one for a trade yet.
 - **A person for quality disputes.** The arbiter says when a dispute is about quality and attaches the delivery. Nobody on the Lake reads it yet.
-- **The local demo Lake.** `docker compose up` runs no arbiter and no transparency log; the sandbox runs both, with the other specialists.
+- **The local demo Lake.** `docker compose up` runs no arbiter; its transparency log runs on its own, and its payments agent logs there over A2A. The sandbox runs both, with the other specialists.
 - **Orders across conversations.** The connector keeps orders for the conversation that made them. A new conversation starts with none.

@@ -28,7 +28,8 @@ services:
     hostname: lake-node
     command: ["--domain", "${LAKE_DOMAIN:?set LAKE_DOMAIN}", "--url", "https://${LAKE_DOMAIN}", "--guild-min", "2"]
     # The map's QR code: how to claim a hosted house.
-    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "https://lake.doneinfifty.com/docs/sandbox#claim-a-house" }
+    # Published blueprints go on the transparency log, which runs with the specialists.
+    environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "https://lake.doneinfifty.com/docs/sandbox#claim-a-house", LAKE_LOG_URL: "http://specialists:4300/log/a2a" }
     volumes: [node:/data]
     ports: ["127.0.0.1:7000:7000"]
     mem_limit: ${LAKE_NODE_MEM:-160m}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import express from 'express';
-import { keepAliveBehindProxy, LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type LakePack } from '@thelakeprotocol/core';
+import { addToLog, keepAliveBehindProxy, LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type Identity, type LakePack } from '@thelakeprotocol/core';
 import { createIssuer } from './issuer.js';
 import { createAuditor, createAuthority, createEthics, createPayments } from './review.js';
 import { createGuide } from './guide.js';
@@ -50,6 +50,11 @@ const { positionals, values } = parseArgs({
     'public-node': { type: 'string', default: process.env.LAKE_PUBLIC_NODE_URL },
     'spar-every': { type: 'string', default: '1800' },
     'passes-url': { type: 'string' },
+    // A transparency log in another process (its A2A endpoint): where payments and the arbiter log what they sign when
+    // 'log' doesn't run in this one.
+    'log-url': { type: 'string', default: process.env.LAKE_LOG_URL },
+    // For the log: the A2A endpoints of a payments agent and an arbiter running elsewhere, whose keys may log receipts and rulings.
+    'log-trust': { type: 'string', default: process.env.LAKE_LOG_TRUST },
     // The use cases whose demo issuers to run (and whose converters the auditor certifies).
     packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
     // Who settles trades (SPEC §6.5): the arbiters whose rulings the payments agent follows, and the payments agents whose
@@ -81,15 +86,24 @@ const nodes = (values.lake ?? '').split(',').map((u) => u.trim()).filter(Boolean
 const log = (msg: string) => console.log(JSON.stringify({ at: new Date().toISOString(), msg }));
 const domains = (v: string) => v.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
 
-// The log, when it runs in this process: payments and the arbiter put what they sign on its record.
+// The log, when it runs in this process: payments and the arbiter put what they sign on its record. Otherwise, with
+// --log-url, they send it there over A2A as themselves (the log must be told to trust their keys: --log-trust).
 let logger: Logger | undefined;
-const toLog = (entry: string, kind: string) => (logger ? logger.add(entry, kind) : Promise.reject(new Error('no log here')));
+const logTo = (me: () => { id: Identity; card: AgentCard; webId: string } | undefined) => (entry: string, kind: string) => {
+  if (logger) return logger.add(entry, kind);
+  const who = me();
+  if (!values['log-url'] || !who) return Promise.reject(new Error('no log here'));
+  return addToLog(values['log-url'], entry, who, { kind, sandbox: !values.production });
+};
 
 async function start(k: string, url: string) {
   const id = await loadOrCreateIdentity(`${values.data}/${k}-key.json`);
   const domain = (several ? undefined : values.domain) ?? DEFAULTS[k]!.domain;
   let link: LakeLinks | null = null;
   const o = { id, url, domain, sandbox: !values.production, report: (e: import('@thelakeprotocol/core').LakeEvent) => link?.report(e) };
+  let self: { card: AgentCard; webId: string } | undefined;
+  // Who this agent is, once it exists: what it signs log entries with when the log is elsewhere.
+  const toLog = logTo(() => (self ? { id, card: self.card, webId: self.webId } : undefined));
   const s: { app: express.Express; card: AgentCard; webId: string } =
     DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack! })
     : DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
@@ -104,9 +118,10 @@ async function start(k: string, url: string) {
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
     : k === 'rooms' ? await createRooms({ ...o, dataDir: values.data! })
     : k === 'arbiter' ? await createArbiter({ ...o, log: toLog, payments: domains(values['trust-payments']!) })
-    : k === 'log' ? (logger = await createLog({ ...o, dataDir: values.data! }))
+    : k === 'log' ? (logger = await createLog({ ...o, dataDir: values.data!, trust: values['log-trust']?.split(',').map((u) => u.trim()).filter(Boolean) }))
     : k.startsWith('teller-') ? await createTeller({ ...o, dataDir: values.data!, name: `Teller ${k.slice(7).toUpperCase()}` })
     : await createAuditor(o);
+  self = s;
   const join = async () => {
     log(`${k} ${s.webId} at ${url}`);
     if (!nodes.length) return;

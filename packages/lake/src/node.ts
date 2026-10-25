@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  buildCard, describe, EVENT_KINDS, PAIRED_KINDS, publicView, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
+  addToLog, blueprintRecord, buildCard, describe, EVENT_KINDS, LogRefused, PAIRED_KINDS, publicView, makeEvent, parseBlueprint, ReplayGuard, signCard, signMessage, verifyLakeCard, verifyMessage,
   type AgentCard, type Identity, type LakeEvent, type Signed,
 } from '@thelakeprotocol/core';
 import { Registry, type Entry } from './registry.js';
@@ -40,6 +40,10 @@ export interface NodeOptions {
   blueprintsFile?: string;
   /** Blueprints this node starts with (the project's own), as markdown. */
   seedBlueprints?: string[];
+  /** A transparency log's A2A endpoint (SPEC §11.8): every blueprint published here is put on its record. Off unless set. */
+  logUrl?: string;
+  /** How often blueprints not yet on the log are tried again (ms). Default 30000. */
+  logRetryMs?: number;
 }
 
 /** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
@@ -353,15 +357,17 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   // Blueprints (SPEC §11.3): any registered participant may publish one, anyone may read them, so what agents
   // invent stays on the Lake for the next agent. A blueprint is a spec to build from, written by whoever
   // published it: data, never instructions. A name belongs to the domain that published it first.
-  type Published = { name: string; version: string; title: string; summary: string; tag: string; author: string; at: string; text: string };
+  // `record` is what goes on the transparency log (the author's signed card and message, core's blueprintRecord), and
+  // `logged` where it went, once the log has said so.
+  type Published = { name: string; version: string; title: string; summary: string; tag: string; author: string; at: string; text: string; record?: string; logged?: { index: number; origin: string } };
   const blueprints = new Map<string, Published>();
-  const keepBlueprint = (text: string, author: string): Published | string[] => {
+  const keepBlueprint = (text: string, author: string, record?: string): Published | string[] => {
     if (text.length > 32_000) return ['at most 32 KB'];
     const { meta, problems } = parseBlueprint(text);
     if (problems.length) return problems;
     const was = blueprints.get(meta.name);
     if (was && was.author !== author) return [`the name "${meta.name}" belongs to ${was.author}; pick another`];
-    const b: Published = { name: meta.name, version: String(meta.version), title: String(meta.title).slice(0, 120), summary: String(meta.summary).slice(0, 400), tag: meta.tag, author, at: new Date().toISOString(), text };
+    const b: Published = { name: meta.name, version: String(meta.version), title: String(meta.title).slice(0, 120), summary: String(meta.summary).slice(0, 400), tag: meta.tag, author, at: new Date().toISOString(), text, ...(record ? { record } : {}) };
     blueprints.set(b.name, b);
     return b;
   };
@@ -388,6 +394,54 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }).filter((x) => x.score >= 0.3).sort((a, z) => z.score - a.score).slice(0, 3).map(({ score, ...x }) => ({ ...x, overlap: `${Math.round(score * 100)}%` }));
   };
   const saveBlueprints = () => { if (o.blueprintsFile) writeFileSync(o.blueprintsFile, JSON.stringify([...blueprints.values()])); };
+
+  // On the record (SPEC §11.8): each blueprint goes to the transparency log as its author signed it, so anyone can check
+  // later that this exact text was published by that domain, and that the log never dropped or rewrote it. The log runs
+  // elsewhere; the node asks it over A2A as itself, and checks the inclusion proof under the signed checkpoint before it
+  // says where a blueprint is logged. One that couldn't be logged yet (the log down, or not up yet) is tried again.
+  const nodeWebId = `${o.url}/#node`;
+  const refused = new Set<string>();
+  const logOne = async (b: Published): Promise<void> => {
+    // The node's own blueprints (its seeds) are signed by the node, their author; one published elsewhere before
+    // blueprints were logged has no author's signature here to log, so it stays off the record.
+    if (!b.record && b.author === o.domain) b.record = blueprintRecord(card, await signMessage({ kind: 'blueprint' as const, text: b.text }, o.id, { iss: nodeWebId }));
+    if (!b.record) return;
+    try {
+      const { index, origin } = await addToLog(o.logUrl!, b.record, { id: o.id, card, webId: nodeWebId }, { sandbox: o.sandbox });
+      b.logged = { index, origin };
+      saveBlueprints();
+    } catch (e) {
+      // Refused (too big, or too many this hour): said once, tried again on the next round, the rest carry on meanwhile.
+      if (!(e instanceof LogRefused)) throw e;
+      if (!refused.has(b.record)) console.error(`[node:${o.domain}] blueprint ${b.name}: ${e.message}`);
+      refused.add(b.record);
+    }
+  };
+  const round = async () => {
+    // Until nothing is left that this round hasn't tried: one published while the round runs is taken in it too.
+    const tried = new Set<Published>();
+    try {
+      for (let b: Published | undefined; (b = [...blueprints.values()].find((x) => !x.logged && !tried.has(x)));) {
+        tried.add(b);
+        await logOne(b);
+      }
+    } catch (e) {
+      console.error(`[node:${o.domain}] transparency log: ${(e as Error).message}; trying again later`);
+    }
+  };
+  // One round at a time. (Cleared in .finally, always after the assignment: a round with nothing to do finishes
+  // synchronously, and clearing inside it would leave the finished round in place for good.)
+  let logging: Promise<void> | undefined;
+  const logPending = (): Promise<void> => {
+    if (!o.logUrl) return Promise.resolve();
+    if (!logging) logging = round().finally(() => { logging = undefined; });
+    return logging;
+  };
+  if (o.logUrl) {
+    setTimeout(() => void logPending(), 1000).unref();
+    setInterval(() => void logPending(), o.logRetryMs ?? 30_000).unref();
+  }
+
   app.post('/blueprints', async (req, res) => {
     const env = req.body as Signed<{ kind: 'blueprint'; text: string }>;
     const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
@@ -397,18 +451,29 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     } catch (e) {
       return void res.status(403).json({ code: 'bad-signature', why: (e as Error).message });
     }
-    const kept = keepBlueprint(String(env.payload.text ?? ''), entry.profile.ownerDomain);
+    const text = String(env.payload.text ?? '');
+    const kept = keepBlueprint(text, entry.profile.ownerDomain, blueprintRecord(entry.card, env as Signed<{ kind: 'blueprint'; text: string }>));
     if (Array.isArray(kept)) return void res.status(400).json({ code: 'not-a-blueprint', problems: kept });
     saveBlueprints();
     publish(makeEvent('blueprint.published', entry.id, undefined, { name: kept.name, tag: kept.tag }));
     const similar = similarTo(kept);
-    res.json({ name: kept.name, version: kept.version, url: `${o.url}/blueprints/${kept.name}`, ...(similar.length ? { similar, note: 'These look close to yours: credit them, or say how yours differs.' } : {}) });
+    // A moment for the log to answer, so the author learns where it's logged; if it's slow, GET /blueprints says later.
+    if (o.logUrl) await Promise.race([logPending(), new Promise((ok) => setTimeout(ok, 3000).unref())]);
+    res.json({ name: kept.name, version: kept.version, url: `${o.url}/blueprints/${kept.name}`, ...(kept.logged ? { logged: kept.logged } : {}), ...(similar.length ? { similar, note: 'These look close to yours: credit them, or say how yours differs.' } : {}) });
   });
-  app.get('/blueprints', (_req, res) => void res.json([...blueprints.values()].sort((a, b) => b.at.localeCompare(a.at)).map(({ text: _t, ...b }) => ({ ...b, url: `${o.url}/blueprints/${b.name}` }))));
+  app.get('/blueprints', (_req, res) => void res.json([...blueprints.values()].sort((a, b) => b.at.localeCompare(a.at)).map(({ text: _t, record: _r, ...b }) => ({ ...b, url: `${o.url}/blueprints/${b.name}` }))));
   app.get('/blueprints/:name', (req, res) => {
     const b = blueprints.get(String(req.params.name));
     if (!b) return void res.status(404).json({ error: 'no such blueprint' });
+    if (b.logged) res.set({ 'Lake-Log-Index': String(b.logged.index), 'Lake-Log-Origin': b.logged.origin });
     res.type('text/markdown').send(b.text);
+  });
+  // What was put on the log for it, byte for byte: hand `entry` to the log's log.find to get the inclusion proof, and to
+  // core's checkBlueprintRecord to check who signed the text.
+  app.get('/blueprints/:name/record', (req, res) => {
+    const b = blueprints.get(String(req.params.name));
+    if (!b?.record) return void res.status(404).json({ error: b ? 'this blueprint has no signed record here (published before blueprints were logged)' : 'no such blueprint' });
+    res.json({ name: b.name, version: b.version, author: b.author, at: b.at, ...(b.logged ? { logged: b.logged } : {}), entry: b.record });
   });
 
   app.get('/intents', (req, res) => {

@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, canonicalize, cardUrlFor, checkCredentialStatus, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -60,13 +60,14 @@ beforeAll(async () => {
   const port = async () => String(await freePort());
   const nodePort = await port();
   node = `http://localhost:${nodePort}`;
-  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2', '--feed-batch-ms', '200'], /Lake node on/);
+  // The specialists' port first: the node logs published blueprints on their transparency log.
+  const sp = await port();
+  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2', '--feed-batch-ms', '200', '--log-url', `http://localhost:${sp}/log/a2a`], /Lake node on/);
   // A second node that follows the first: anyone can run one (SPEC §9).
   const nodeBPort = await port();
   nodeB = `http://localhost:${nodeBPort}`;
   await start(['packages/lake/dist/main.js', '--port', nodeBPort, '--data', join(dir, 'nodeB'), '--domain', 'b.lake.local', '--follow', node, '--sync-ms', '1000'], /Lake node on/);
   // Every specialist in one process, each under its own path: how the public sandbox runs them.
-  const sp = await port();
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
   specialistsUrl = `http://localhost:${sp}`;
@@ -721,6 +722,23 @@ describe('the open door', () => {
     expect(bad.isError).toBe(true);
     const published = await text('lake_publish_blueprint', { markdown: mine });
     expect(published.name).toBe('dice');
+    // On the record: the node put the author's own signed text on the transparency log, and says where.
+    let listed: { name: string; logged?: { index: number; origin: string } } | undefined;
+    for (let i = 0; i < 40 && !listed?.logged; i++) {
+      if (i) await new Promise((ok) => setTimeout(ok, 250));
+      listed = ((await (await fetch(`${node}/blueprints`)).json()) as { name: string; logged?: { index: number; origin: string } }[]).find((b) => b.name === 'dice');
+    }
+    expect(published.logged).toEqual(listed?.logged);
+    expect(listed?.logged).toEqual({ index: expect.any(Number), origin: 'log.lake.local/log' });
+    // Anyone can check it from the log alone: the inclusion proof under the log's signed checkpoint, and whose signature.
+    const rec = await (await fetch(`${node}/blueprints/dice/record`)).json();
+    expect(await checkBlueprintRecord(rec.entry)).toMatchObject({ name: 'dice', text: mine, author: rec.author });
+    const logCard = await (await fetch(`${specialistsUrl}/log/.well-known/agent-card.json`)).json();
+    const found = (await ask(`${specialistsUrl}/log/a2a`, await visitor('monitor.example'), { kind: 'log.find', entry: rec.entry })).reply as Record<string, any>;
+    const cp = verifyCheckpoint(found.checkpoint, (await verifyLakeCard(logCard)).publicJwk, 'log.lake.local/log');
+    expect(found).toMatchObject({ kind: 'log.found', index: listed!.logged!.index, entry_kind: 'agent' });
+    expect(verifyInclusion(leafHash(rec.entry), found.index, cp.size, (found.proof as string[]).map(unb64), cp.root)).toBe(true);
+    expect((await fetch(`${node}/blueprints/dice`)).headers.get('lake-log-index')).toBe(String(found.index));
     // A close relative already here is named: "dice" is the coin flip with new names (run 21's "twothirds" was "thirds").
     expect(published.similar.map((x: { name: string }) => x.name)).toContain('coinflip');
     const taken = await client.callTool({ name: 'lake_publish_blueprint', arguments: { markdown: (await readFile('spec/blueprints/coinflip.md', 'utf8')) } });

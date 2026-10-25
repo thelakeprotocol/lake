@@ -1,4 +1,8 @@
 import { parse, stringify } from 'yaml';
+import type { AgentCard } from '@a2a-js/sdk';
+import { canonicalize } from './canonical.js';
+import { verifyLakeCard } from './card.js';
+import { verifyMessage, type Signed } from './crypto.js';
 
 /**
  * Lake Blueprint 0.1 (SPEC §11): the one central piece of a decentralised Lake app. A markdown file with a
@@ -104,4 +108,30 @@ export function blueprintHeader(text: string): string | null {
   }).join('\n');
   const meta = tryParse(m[1]!) ?? tryParse(quoted);
   return meta && typeof meta === 'object' ? `---\n${stringify(meta).trim()}\n---` : null;
+}
+
+/**
+ * What a node puts on the transparency log when a blueprint is published (SPEC §11.3): the author's signed card and the
+ * author's own signed `{ kind: "blueprint", text }`, exactly as the node verified them, in canonical JSON. Logging the
+ * author's signature (not the node's word, nor only a digest) lets anyone check, from the log alone, that this exact text
+ * was signed by the key on that card for that domain; the log's order and checkpoints say when it went on the record.
+ */
+export const blueprintRecord = (card: AgentCard, envelope: Signed<{ kind: 'blueprint'; text: string }>) => canonicalize({ kind: 'lake.blueprint', card, envelope });
+
+/**
+ * Checks a logged blueprint record: the card's signature, the author's signature on the text (as of when it was signed:
+ * the message's short expiry is for delivery, not for the record), and that the card's holder signed it. Returns the
+ * text and who published it. The author's domain was proved to the node at publication; checking it again needs the
+ * network (domain.ts). Throws why not.
+ */
+export async function checkBlueprintRecord(entry: string): Promise<{ name: string; version: string; text: string; author: string; webId: string; signedAt: string }> {
+  const r = JSON.parse(entry) as { kind?: string; card?: AgentCard; envelope?: Signed<{ kind: string; text: string }> };
+  if (r?.kind !== 'lake.blueprint' || !r.card || !r.envelope?.payload) throw new Error('not a logged blueprint');
+  const profile = await verifyLakeCard(r.card);
+  const iat = Number(r.envelope.payload.iat);
+  const p = await verifyMessage(r.envelope, async (kid) => (kid === profile.publicJwk.kid ? profile.publicJwk : null), { now: iat * 1000 });
+  if (p.iss !== profile.webId) throw new Error(`signed by ${p.iss}, but the card is ${profile.webId}'s`);
+  if (p.kind !== 'blueprint' || typeof p.text !== 'string') throw new Error('not a blueprint message');
+  const { meta } = parseBlueprint(p.text);
+  return { name: meta.name, version: String(meta.version), text: p.text, author: profile.ownerDomain, webId: profile.webId, signedAt: new Date(iat * 1000).toISOString() };
 }

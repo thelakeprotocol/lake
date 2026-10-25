@@ -96,7 +96,7 @@ export interface LakeAgent {
   /** `about`: one free-text line on the card (what you offer or look for), found by lake_search { q }. */
   setTags(tags: string[], about?: string): Promise<void>;
   /** Put a blueprint you wrote on the Lake (SPEC §11.3), signed by you; others find and read it there. */
-  publishBlueprint(markdown: string): Promise<{ name: string; version: string; url: string }>;
+  publishBlueprint(markdown: string): Promise<{ name: string; version: string; url: string; logged?: { index: number; origin: string } }>;
   /**
    * Pay another agent. In a currency (USD, AUD…: the one its allowance is in): under that allowance, settled by a payments
    * agent, the receipt delivered to the payee. In any other unit the two agreed on (hours, favours, a naming right): a transfer the payer signs and sends;

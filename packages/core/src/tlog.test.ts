@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateIdentity } from './crypto.js';
-import { b64, consistencyProof, inclusionProof, leafHash, signCheckpoint, treeRoot, verifyCheckpoint, verifyConsistency, verifyInclusion } from './tlog.js';
+import { b64, consistencyProof, followCheckpoint, inclusionProof, leafHash, signCheckpoint, treeRoot, verifyCheckpoint, verifyConsistency, verifyInclusion } from './tlog.js';
 
 describe('transparency log: RFC 9162 trees and C2SP checkpoints', () => {
   const leaves = (n: number) => Array.from({ length: n }, (_, i) => leafHash(`entry ${i}`));
@@ -44,6 +44,38 @@ describe('transparency log: RFC 9162 trees and C2SP checkpoints', () => {
     expect(() => verifyCheckpoint(note.replace('\n5\n', '\n6\n'), id.publicJwk)).toThrow(/does not verify/);
     const other = await generateIdentity();
     expect(() => verifyCheckpoint(note, other.publicJwk)).toThrow(/another key/);
+  });
+
+  it('watches a log: takes a later checkpoint only with proof it extends the last one, and says plainly when not', async () => {
+    const id = await generateIdentity();
+    const o = 'lake.example/log';
+    const ls = leaves(12);
+    const at = (n: number, l = ls) => signCheckpoint(o, n, treeRoot(l.slice(0, n)), id);
+    // First sight: taken on its signature.
+    const first = followCheckpoint(undefined, await at(5), id.publicJwk);
+    expect(first).toEqual({ origin: o, size: 5, root: b64(treeRoot(ls.slice(0, 5))) });
+    // Grown, with its consistency proof (as base64, the way the log sends it): the newer one is remembered.
+    const later = followCheckpoint(first, await at(12), id.publicJwk, consistencyProof(5, ls).map(b64));
+    expect(later.size).toBe(12);
+    // The same size again, same tree: nothing changes.
+    const twelve = await at(12);
+    expect(followCheckpoint(later, twelve, id.publicJwk)).toBe(later);
+    // Grown, but no proof: refused.
+    expect(() => followCheckpoint(first, twelve, id.publicJwk)).toThrow(/no consistency proof/);
+    // History rewritten: entry 2 replaced, the tree grown. The proof from the new tree can't reach the old root.
+    const rewritten = [...ls.slice(0, 2), leafHash('rewritten'), ...ls.slice(3)];
+    const forked = await at(12, rewritten);
+    expect(() => followCheckpoint(first, forked, id.publicJwk, consistencyProof(5, rewritten).map(b64))).toThrow(/rewritten or forked/);
+    // Two different trees of the same size: a fork.
+    expect(() => followCheckpoint(later, forked, id.publicJwk)).toThrow(/forked/);
+    // Fewer entries than it signed before: rolled back.
+    const seven = await at(7);
+    expect(() => followCheckpoint(later, seven, id.publicJwk)).toThrow(/rolled back/);
+    // Another log's checkpoint, or one signed by another key, is not this log's.
+    const elsewhere = await signCheckpoint('other.example/log', 12, treeRoot(ls), id);
+    expect(() => followCheckpoint(first, elsewhere, id.publicJwk, consistencyProof(5, ls).map(b64))).toThrow(/not lake\.example\/log/);
+    const stranger = (await generateIdentity()).publicJwk;
+    expect(() => followCheckpoint(first, twelve, stranger, consistencyProof(5, ls).map(b64))).toThrow(/another key/);
   });
 });
 
