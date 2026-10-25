@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addToLog, buildCard, followCheckpoint, generateIdentity, sendLake, signCard, signMessage, verifyLakeData, type AgentCard, type Identity, type LakeData } from '@thelakeprotocol/core';
+import { addToLog, buildCard, followCheckpoint, generateIdentity, sendLake, signCard, signMessage, sumRecords, verifyLakeData, type AgentCard, type Identity, type LakeData } from '@thelakeprotocol/core';
 import { createLog } from './log.js';
 
 // Synthetic receipts: only their credentialSubject matters to log.record (the log vouches for nothing inside).
@@ -48,8 +48,8 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const ask = async (from: Agent, payload: Record<string, unknown>) => {
-  const reply = await sendLake(logUrl, { lake: '0.1', card: from.card, envelope: (await signMessage(payload, from.id, { iss: from.webId })) as LakeData['envelope'] }, { me: from.id });
+const ask = async (from: Agent, payload: Record<string, unknown>, url = logUrl) => {
+  const reply = await sendLake(url, { lake: '0.1', card: from.card, envelope: (await signMessage(payload, from.id, { iss: from.webId })) as LakeData['envelope'] }, { me: from.id });
   const v = await verifyLakeData<Record<string, any>>(reply as LakeData<Record<string, any>>, { sandbox: true });
   if (!v.ok) throw new Error(v.rejection.why);
   return v.payload;
@@ -109,5 +109,27 @@ describe('the transparency log', () => {
     const found = await ask(await agent('monitor.example', 'https://monitor.example/a2a'), { kind: 'log.find', entry: 'one more thing', since: seen.size });
     expect(found).toMatchObject({ kind: 'log.found', since: seen.size, size: seen.size + 1 });
     expect(followCheckpoint(seen, found.checkpoint, jwk, found.consistency).size).toBe(seen.size + 1);
+  });
+
+  it("adds up one agent's record across two Lakes' logs: a sale paid from one, a ruling on the other's", async () => {
+    // Lake B's log: the seller lives on B, its arbiter rules there; the buyer on this Lake (A) paid through A's payments agent.
+    const bdir = await mkdtemp(join(tmpdir(), 'lake-log-b-'));
+    const bapp = express();
+    const b = await listen(bapp);
+    servers.push(b.server);
+    const logB = await createLog({ id: await generateIdentity(), url: b.url, domain: 'log.b.example', sandbox: true, dataDir: bdir });
+    bapp.use(logB.app);
+    const TRAVELLER = 'https://traveller.example/#agent';
+    await log.add(vc({ id: TRAVELLER, payer: BUYER, amount: usd(7), agreement: 'urn:ap2:cart:x1', cart: { id: 'x1', hash: 'hx1' }, settlement: 'simulated' }), 'receipt');
+    await logB.add(vc({ seller: TRAVELLER, buyer: BUYER, cart: { id: 'x1', hash: 'hx1' }, paid: true, delivered: { sha256: 'd', acknowledged: true } }), 'ruling');
+    const someone = await agent('someone.example', 'https://someone.example/a2a');
+    const onA = await ask(someone, { kind: 'log.record', webId: TRAVELLER });
+    const onB = await ask(someone, { kind: 'log.record', webId: TRAVELLER }, `${b.url}/a2a`);
+    // B's log alone shows no sale: the receipt is on A's, where the buyer's payments agent logs.
+    expect(onB).toMatchObject({ origin: 'log.b.example/log', sales: 0, rulings: { delivered: 1, not_delivered: 0 } });
+    expect(onA).toMatchObject({ origin, sales: 1, sold: { USD: 7 } });
+    // Each fact is on one log, so they add up; the same log reached twice (through two Lakes' search) counts once.
+    expect(sumRecords([onB, onA, onA] as never)).toEqual({ sales: 1, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 7 }, rulings: { delivered: 1, not_delivered: 0 }, logs: ['log.b.example/log', origin] });
+    await rm(bdir, { recursive: true, force: true });
   });
 });

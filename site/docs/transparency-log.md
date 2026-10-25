@@ -99,13 +99,30 @@ The answer comes back as `on_record`: `{ logged: true, index, of, origin, at, pr
 | `held_now` | payments held for it, not yet captured or voided |
 | `rulings` | arbiter rulings on its deliveries that found the cart paid: `delivered` and `not_delivered` (the arbiter doesn't log a ruling on an unpaid cart) |
 
-Only entries the payments agent and the arbiter logged count; nothing an agent added with `log.add`. `lake_search` shows this record next to every seller's menu. These are counts of signed facts, not a score.
+Only entries the payments agent and the arbiter logged count; nothing an agent added with `log.add`. These are counts of signed facts, not a score.
+
+### Across Lakes
+
+Each payments agent and arbiter logs on its own Lake's log, and a buyer pays through its own Lake's payments agent. So a seller on Lake B that sells to buyers on Lake A has its sales on **A's** log (the buyer's payments agent logged them) and the rulings of B's arbiter on **B's**: B's log alone would show it selling nothing.
+
+`lake_search` therefore asks every log it finds, its own Lake's and those of the Lakes its node follows, and adds the records up:
+
+```json
+"record": { "sales": 2, "sold": { "USD": 2 }, "refunds_given": 0, "held_now": 0,
+            "rulings": { "delivered": 1, "not_delivered": 0 },
+            "logs": ["log.lake-b.localhost/log", "log.lake-a.localhost/log"] }
+```
+
+`logs` names the logs counted. Each fact is on one log, so the counts add up, and a log reached twice counts once. A log that doesn't answer within a few seconds is named in `not_answering`, with `partial: true`: the record is incomplete, not smaller. Each log counts only what its own trusted payments agent and arbiter logged; a peer Lake's log is that Lake's word, as far as your node chose to follow it.
+
+Why not have the payments agent log on the seller's Lake too? The seller's log would have to trust every other Lake's payments agent; a cart can't name whom a log trusts (a seller would name a sham payments agent and pad its own record); and a fact on two logs is counted twice by anyone reading both. Certificate Transparency works the same way: logs hold what was sent to them, and readers check the logs they trust.
 
 ## What doesn't run yet
 
 - **SCITT.** The IETF's supply-chain transparency work puts trees like this behind COSE envelopes. Those are still drafts, so a Lake log's entries are the Lake's own signed objects.
 - **Node events** are not logged. Receipts, captures, voids, rulings, blueprints and what agents add are.
 - **Witnesses.** Nobody else cosigns the log's checkpoints. The connector watches the logs it uses (above), but only for its own session; no standalone monitor ships that keeps checkpoints across restarts or compares them with others'.
+- **Refunds across Lakes.** A plain refund counts only on a log that shows the cart paid to the seller. A cart paid through Lake A's payments agent and paid back through Lake B's isn't counted as a refund (voiding a held cart is: the payments agent holding it voids it, on its own log).
 - **One operator.** On the sandbox, the same operator runs the log, the payments agent and the arbiter. The proofs show the log wasn't rewritten; they can't show it never left something out before logging it.
 - **Separate processes.** The local demo Lake (`docker compose up`) runs its log on its own: its payments agent logs over A2A, and both nodes log their blueprints there. It runs no arbiter. The sandbox and the end-to-end tests run the log, payments and the arbiter in one process.
 - **Blueprints published before** a node knew its log, by someone else, stay off the record: the node didn't keep their author's signature.

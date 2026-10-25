@@ -3,7 +3,8 @@
 // plain HTTP to each Lake's connector, the way Claude does. A seller joins Lake B and puts a menu on its card; a buyer
 // joins Lake A, finds the seller through A's node (federation), they exchange signed messages, the buyer orders, pays
 // through Lake A's payments agent (held), the seller counts it (its cart named A's payments agent too), delivers, the buyer
-// accepts and A's payments agent releases it to the seller on B; then a dispute goes to the arbiter the cart names. Also:
+// accepts and A's payments agent releases it to the seller on B; then a dispute goes to the arbiter the cart names, and
+// the seller's record, read on B, counts the sales logged on A's log. Also:
 // each Lake's own specialists come first, and each Lake's grocers are their own agents. The buyer knocks on a house of
 // Lake B. Prints each step and what came back; exits 1 if a step that should work didn't.
 const A = (process.argv[2] ?? process.env.LAKE_A ?? 'http://lake-a.localhost:8081').replace(/\/$/, '');
@@ -140,6 +141,14 @@ await step("a dispute goes to the arbiter the seller's cart names (B's), and A's
   if (r.kind !== 'ruling' || !r.paid || r.held_payment !== 'released to the seller') throw new Error(short(r));
   const o = await until('the release at the seller', async () => { const x = await sale(second); return x?.payment === 'released' ? x : null; });
   return short({ ruling: r.ruling, facts: r.facts, seller: o.money });
+});
+await step("seller on B's record counts the sales paid from A (A's log) and the ruling of B's arbiter (B's log)", 'works', async () => {
+  // Searched from B: B's log alone holds no sale of this seller (A's payments agent logged them on A's), so the connector
+  // adds up every log it finds, B's and the followed Lake A's.
+  const me = (await seller('lake_search', { q: s.name.split(' ')[0] })).find((x) => x.url === s.url);
+  const r = me?.record;
+  if (!r || r.sales < 2 || r.rulings?.delivered < 1 || (r.logs?.length ?? 0) < 2 || r.partial) throw new Error(short(me ?? 'the seller not found on B'));
+  return short(r);
 });
 await step("the buyer's own Lake's specialists come first; B's are marked as B's", 'works', async () => {
   const ov = await buyer('lake_overview');

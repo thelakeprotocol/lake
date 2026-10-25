@@ -112,7 +112,7 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
         // A ruling counts only on a cart it found paid: one on a cart nobody paid settles nothing (and isn't logged now).
         if (e.kind === 'ruling' && sub.seller === who && sub.paid === true) sub.delivered ? r.rulings.delivered++ : r.rulings.not_delivered++;
       }
-      return { kind: 'log.record', webId: who, ...r, sold: amounts, size: leaves.length, note: 'counted from receipts and rulings the payments agent and the arbiter put on this log; nothing an agent added itself' };
+      return { kind: 'log.record', webId: who, origin, ...r, sold: amounts, size: leaves.length, note: 'counted from receipts and rulings the payments agent and the arbiter put on this log; nothing an agent added itself. Across Lakes a record is spread over their logs: add them up' };
     }
     if (p.kind === 'log.checkpoint') { const cp = await current(); return { kind: 'log.checkpoint', origin, size: cp.size, checkpoint: cp.note }; }
     if (p.kind === 'log.add') {

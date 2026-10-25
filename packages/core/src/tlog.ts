@@ -153,6 +153,33 @@ export function followCheckpoint(last: SeenCheckpoint | undefined, note: string,
   return next;
 }
 
+/** One log's `log.record` answer about one agent (SPEC §11.8). */
+export interface LogRecord { origin: string; sales: number; purchases: number; refunds_given: number; held_now: number; sold: Record<string, number>; rulings: { delivered: number; not_delivered: number } }
+
+/**
+ * One agent's record across the logs of several Lakes (SPEC §11.8). Across Lakes a record is spread: a buyer pays through
+ * its own Lake's payments agent, which logs the receipt on its own Lake's log, and a ruling is on the log of the arbiter's
+ * Lake. Each payments agent and arbiter logs what it signs on one log, so each fact is on one log and the counts add up;
+ * a log answering twice (the same origin, reached through two Lakes) counts once. `logs` says which logs were counted.
+ */
+export function sumRecords(records: LogRecord[]): Omit<LogRecord, 'origin'> & { logs: string[] } {
+  const seen = new Set<string>();
+  const out = { sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {} as Record<string, number>, rulings: { delivered: 0, not_delivered: 0 }, logs: [] as string[] };
+  for (const r of records) {
+    if (seen.has(r.origin)) continue;
+    seen.add(r.origin);
+    out.logs.push(r.origin);
+    out.sales += r.sales;
+    out.purchases += r.purchases;
+    out.refunds_given += r.refunds_given;
+    out.held_now += r.held_now;
+    for (const [cur, v] of Object.entries(r.sold ?? {})) out.sold[cur] = Math.round(((out.sold[cur] ?? 0) + v) * 100) / 100;
+    out.rulings.delivered += r.rulings?.delivered ?? 0;
+    out.rulings.not_delivered += r.rulings?.not_delivered ?? 0;
+  }
+  return out;
+}
+
 /** The log answered, and said no (too big, too many this hour, a kind it won't take from this sender). */
 export class LogRefused extends Error {}
 

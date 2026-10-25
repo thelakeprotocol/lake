@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { followCheckpoint, type SeenCheckpoint } from '@thelakeprotocol/core';
+import { followCheckpoint, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
 import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
@@ -862,12 +862,26 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // "agent" means any agent that isn't a house: visitors, assistants and specialists (run 17 found nothing).
         const me = await agent();
         const found = q.role === 'agent' ? (await me.find({ ...q, role: undefined })).filter((c) => c.role !== 'house') : await me.find(q);
-        // Sellers come with their record from the transparency log: sales released to them, refunds, rulings. Facts, counted.
-        const log = found.some((c) => c.menu) ? (await me.find({ skill: 'log' }))[0] : undefined;
+        // Sellers come with their record from the transparency logs: sales released to them, refunds, rulings. Facts, counted.
+        // Across Lakes a record is spread: a buyer pays through its own Lake's payments agent, which logs on its own Lake's
+        // log, and a ruling is on the arbiter's Lake's. So every log search lists (this Lake's and the followed Lakes') is
+        // asked and the counts added up (SPEC §11.8); a log that doesn't answer is named, so a partial record reads as one.
+        const logs = found.some((c) => c.menu) ? await me.find({ skill: 'log' }) : [];
+        const recordOf = async (webId: string) => {
+          const answers = await Promise.all(logs.map(async (l) => {
+            const r = (await Promise.race([me.ask(l.url, { kind: 'log.record', webId }), new Promise<null>((ok) => setTimeout(ok, 8000, null).unref())]).catch(() => null)) as Record<string, unknown> | null;
+            return r?.kind === 'log.record' ? ({ ...r, origin: typeof r.origin === 'string' ? r.origin : l.url } as unknown as LogRecord) : { missing: l.lake ?? l.url };
+          }));
+          const counted = answers.filter((x): x is LogRecord => 'origin' in x);
+          if (!counted.length) return undefined;
+          const { purchases: _, ...r } = sumRecords(counted);
+          const missing = answers.flatMap((x) => ('missing' in x ? [x.missing] : []));
+          return { ...r, ...(missing.length ? { not_answering: missing, partial: true } : {}) };
+        };
         const withRecord = await Promise.all(found.map(async (c, i) => {
-          if (!c.menu || !log || i >= 10) return c;
-          const r = (await me.ask(log.url, { kind: 'log.record', webId: c.webId }).catch(() => null)) as Record<string, unknown> | null;
-          return r?.kind === 'log.record' ? { ...c, record: { sales: r.sales, sold: r.sold, refunds_given: r.refunds_given, held_now: r.held_now, rulings: r.rulings } } : c;
+          if (!c.menu || !logs.length || i >= 10) return c;
+          const record = await recordOf(c.webId);
+          return record ? { ...c, record } : c;
         }));
         return json(withRecord);
       } catch (e) {
