@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cardUrlFor, checkCart, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
@@ -55,6 +55,17 @@ export interface LakeAgentOptions {
   auditor?: string;
   payments?: string;
   /**
+   * Trade (SPEC §6.5). Payments agents whose receipts this agent, as a seller, also counts as paid besides its own (`payments`),
+   * named in every cart it signs: a buyer pays through its own payments agent, so a seller that takes another Lake's buyers
+   * names that Lake's. A2A addresses without /a2a.
+   */
+  acceptPayments?: string[];
+  /**
+   * The arbiters this agent accepts: the first is named in the carts it signs; a cart it pays may name only these. Without
+   * any, its own Lake's arbiter (the one registered with its node). A2A addresses without /a2a.
+   */
+  arbiters?: string[];
+  /**
    * What this agent may pay other agents (lake_pay), under one Intent Mandate. On a real Lake the human signs it
    * on their own device; a sandbox connector signs a play-money allowance in their place and says so. 0: none.
    */
@@ -83,7 +94,12 @@ export interface LakeAgent {
   webId: string;
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
-  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string }[]>;
+  /** Agents registered with this agent's own node come first; one a peer Lake lists says which (`lake`: that peer node). */
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string; /** Listed by a peer Lake this agent's node follows (SPEC §9): that peer's address. Absent for its own Lake's. */ lake?: string }[]>;
+  /** The payments agent this agent pays through and checks receipts against, pinned by its card's key; null if unreachable. */
+  paymentsAgent(): Promise<CartParty | null>;
+  /** The arbiters this agent accepts (its own first), pinned by key. */
+  arbiters(): Promise<CartParty[]>;
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
@@ -170,6 +186,25 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   await link.register(10);
   if (o.onMessage) link.keepAlive(20_000, o.active, o.until); // an agent that takes messages stays findable
   let allowance: Promise<{ credential: string; card: AgentCard }> | undefined;
+  const paymentsBase = (o.payments ?? 'http://payments:4600').replace(/\/(a2a)?\/?$/, '');
+  // Parties to a trade, from their own signed cards, by address: kept a few minutes (a rotated key shows up after that).
+  const parties = new Map<string, { at: number; party: Promise<CartParty> }>();
+  const partyAt = (base: string) => {
+    const url = `${base.replace(/\/(a2a)?\/?$/, '')}/a2a`;
+    const known = parties.get(url);
+    if (known && Date.now() - known.at < 5 * 60_000) return known.party;
+    const party = (async () => cartParty((await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard))();
+    parties.set(url, { at: Date.now(), party });
+    party.catch(() => parties.delete(url));
+    return party;
+  };
+  const reachable = async (bases: string[]) => (await Promise.all(bases.map((b) => partyAt(b).catch(() => null)))).filter((x): x is CartParty => !!x);
+  // What a seller names in its carts: whose receipts it counts (its own payments agent, and any it also accepts), and its arbiter.
+  const sellerTerms = async () => {
+    const payments = await reachable([paymentsBase, ...(o.acceptPayments ?? [])]);
+    const [arbiter] = await self.arbiters();
+    return { payments, arbiters: arbiter ? [arbiter] : [] };
+  };
   let allowanceSource: (() => Promise<{ credential: string; card: AgentCard; owner?: string; currency?: string } | null>) | undefined;
 
   const self: LakeAgent = {
@@ -179,24 +214,35 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     domain: o.domain,
     async find(q = {}) {
       const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
-      let found: { card: AgentCard; active?: string; until?: string }[] | null = null;
+      let found: { card: AgentCard; active?: string; until?: string; via?: string }[] | null = null;
       for (const node of nodes) {
         try {
-          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard; active?: string; until?: string }[];
+          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard; active?: string; until?: string; via?: string }[];
           break;
         } catch {
           // try the next node
         }
       }
       if (!found) throw new Error('no Lake node reachable');
-      return found.map(({ card, active, until }) => {
+      // A federated node lists its peers' agents too: two Lakes each run a payments agent, an arbiter, a log… Its own Lake's
+      // come first, so a lookup by skill gets the one this agent's Lake runs; a peer's says which Lake it is from.
+      return found.sort((a, b) => Number(!!a.via) - Number(!!b.via)).map(({ card, active, until, via }) => {
         const p = card.capabilities?.extensions?.[0]?.params as { role: string; webId: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
-        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,
     setAllowanceSource(source) { allowanceSource = source; },
+    async paymentsAgent() {
+      return partyAt(paymentsBase).catch(() => null);
+    },
+    async arbiters() {
+      if (o.arbiters?.length) return reachable(o.arbiters);
+      // None configured: its own Lake's arbiter, the one registered with its own node (never one a peer Lake lists).
+      const own = (await self.find({ skill: 'arbiter' }).catch(() => [])).find((x) => x.role === 'specialist' && !x.lake);
+      return own ? reachable([own.url]) : [];
+    },
     async knock(houseUrl, terms) {
       // The house reports the knock; the agent doesn't, or the two reports would pair it with the house (SPEC §8).
       const { reply } = await knock(houseUrl, visitor, terms);
@@ -295,7 +341,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       await self.setTags(lastTags, lastAbout);
     },
     async cart(buyerWebId, items, minutes, brief) {
-      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief });
+      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(await sellerTerms()) });
     },
     async payCart(sellerUrl, cart, hold, releaseAfterHours) {
       const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;
@@ -303,6 +349,18 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const c = await checkCart(cart, seller.publicJwk);
       if (c.seller !== seller.webId) throw new Error(`that cart was signed by ${c.seller}, not by the agent at ${sellerUrl}`);
       if (c.buyer !== visitor.webId) throw new Error('that cart is made out to another buyer');
+      // The seller's terms, checked before any money moves (SPEC §6.5). Its allowance is spent through its own payments agent
+      // (where what it has spent is counted), so that one must be among those the seller counts.
+      const mine = await self.paymentsAgent();
+      if (c.payments.length && mine && !c.payments.some((x) => x.webId === mine.webId && x.jkt === mine.jkt)) {
+        throw new Error(`the seller counts payment for cart ${c.id} only through ${c.payments.map((x) => x.url).join(', ')}; your allowance is spent through ${mine.url}, which it doesn't name, so nothing was paid. Ask the seller to accept your payments agent, or settle another way you both agree on`);
+      }
+      // Whoever the cart names can rule on it, and the payments agent follows that ruling: only arbiters this agent accepts.
+      if (c.arbiters.length) {
+        const accepted = await self.arbiters();
+        const strangers = c.arbiters.filter((x) => !accepted.some((y) => y.webId === x.webId && y.jkt === x.jkt));
+        if (strangers.length) throw new Error(`cart ${c.id} names ${strangers.map((x) => x.url).join(', ')} to rule on it, an arbiter you don't accept (you accept ${accepted.map((x) => x.url).join(', ') || 'none'}), so nothing was paid`);
+      }
       const r = await self.pay(sellerUrl, c.total.value, `cart ${c.id}`, c.total.currency, c.id, { mandate: cart, card: sellerCard, hash: c.hash, detailsId: cart.contents.payment_request.details.id, hold, releaseAfterHours });
       const sub = JSON.parse(Buffer.from(r.receipt.split('.')[1] ?? '', 'base64url').toString()).credentialSubject as { settlement?: string; settlementId?: string; heldUntil?: string } | undefined;
       return { ...r, cart: c.id, ...(sub?.settlement === 'held' ? { hold: { id: String(sub.settlementId), until: String(sub.heldUntil) } } : {}) };

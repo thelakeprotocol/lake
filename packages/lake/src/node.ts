@@ -215,7 +215,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     // An agent whose driver hasn't acted for a quarter of an hour is left out unless asked for (idle=1): run 29's host
     // invited a player sixteen minutes after it had gone. It is still there for messages, just not offered as company.
     const idle = req.query.idle === '1';
-    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}) })));
+    // `via`: the peer node a card was learned from (SPEC §9), so an agent can tell its own Lake's specialists from a peer's.
+    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.via !== 'direct' ? { via: e.via } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));

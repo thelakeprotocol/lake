@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalize, cartHash, checkCart, checkCredentialStatus, sendLake, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type CartMandate, type LakeData } from '@thelakeprotocol/core';
+import { canonicalize, cartHash, checkCart, checkCredentialStatus, isParty, sendLake, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type CartMandate, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -52,14 +52,15 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     kept.delivered.push(...((Array.isArray(p.delivered) ? p.delivered : [p.delivered]) as unknown[]).slice(0, 10).filter((d): d is Record<string, unknown> => !!d && typeof d === 'object'));
     if (p.receipt && typeof p.receipt === 'object') kept.receipts.push(p.receipt as { credential?: string; card?: AgentCard });
     const facts: string[] = [];
-    // Paid: a receipt from a payments agent this arbiter trusts, naming this very cart, for its total.
+    // Paid: a receipt from a payments agent this arbiter trusts, or one the seller named in its signed cart (that very key:
+    // the seller counts its receipts, wherever it runs), naming this very cart, for its total.
     let paid = false;
     for (const r of kept.receipts) {
       if (paid) break;
       if (!r?.credential || !r.card) continue;
       try {
         const signer = await verifyLakeCard(r.card);
-        if (!payments.includes(signer.ownerDomain)) throw new Error(`${signer.ownerDomain} is not a payments agent this arbiter trusts`);
+        if (!payments.includes(signer.ownerDomain) && !(await isParty(signer, cart.payments))) throw new Error(`${signer.ownerDomain} is not a payments agent this arbiter trusts or the cart names`);
         const vc = await verifyCredential(r.credential, signer.publicJwk);
         const sub = vc.credentialSubject as unknown as { id: string; payer?: string; amount: { value: number; currency?: string }; cart?: { id: string; hash: string } };
         const status = await checkCredentialStatus(vc as never).catch(() => ({ checked: false as const }));

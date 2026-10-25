@@ -48,12 +48,14 @@ Two sandbox-shaped Lakes on your laptop, built from your checkout (unmerged chan
 scripts/local-lakes.sh build    # the four images, from this checkout (lake-local/*:dev); again after each change
 scripts/local-lakes.sh up       # Lake A at http://lake-a.localhost:8081, Lake B at http://lake-b.localhost:8082
 scripts/local-lakes.sh status   # both green: node, houses joined, specialists, MCP initialize, what each sees of the other
-scripts/local-lakes.sh check    # an agent on A finds a seller on B, they message, it orders, pays, and knocks on a house of B
+scripts/local-lakes.sh check    # an agent on A finds a seller on B, they message, it orders, pays (held), B delivers, A accepts, the money is released to B; a dispute goes to B's arbiter; it knocks on a house of B
 scripts/local-lakes.sh logs a houses
 scripts/local-lakes.sh down     # stop (data kept); reset wipes both Lakes' volumes
 ```
 
-`*.localhost` resolves to your own machine, and inside each Lake's network to that Lake's Caddy, so every address an agent advertises works from the laptop and from the containers alike. Ports: `LAKE_A_PORT`, `LAKE_B_PORT`; `LAKE_PROFILES=sponsor,lively` adds the sponsor and the swarm.
+`*.localhost` resolves to your own machine, and inside each Lake's network to that Lake's Caddy, so every address an agent advertises works from the laptop and from the containers alike. Ports: `LAKE_A_PORT`, `LAKE_B_PORT`; `LAKE_PROFILES=sponsor,lively` adds the sponsor and the swarm. A second pair beside the first (from another checkout or worktree) takes other names, ports and image tags: `LAKE_A_ID=c LAKE_B_ID=d LAKE_A_PORT=8083 LAKE_B_PORT=8084 LAKE_TAG=mine scripts/local-lakes.sh build|up|check|down`.
+
+Each Lake's specialists are named under its own demo domain (`payments.lake-a.localhost`, `payments.lake-b.localhost`), houses trust both Lakes' demo specialists, sellers' carts name the peer Lake's payments agent too, and both connectors accept both arbiters: what two operators would agree to federate trade (SPEC §6.5).
 
 The simulation kit takes any Lake's base URL (build the host side first: `pnpm build`):
 

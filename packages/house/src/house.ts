@@ -45,6 +45,8 @@ export interface HouseOptions {
   /** With open pairing: a claim lasts this long, then the house resets for the next person. */
   leaseHours?: number;
   domain?: string;
+  /** The demo domain(s) the deployment's demo specialists are named under (default lake.local), its own first. */
+  demoDomains?: string[];
   emit: (e: LakeEvent) => void;
   say: (msg: string) => void;
   /** Hosted houses skip the terminal QR code. */
@@ -69,7 +71,11 @@ export interface House {
 }
 
 // Whose signatures count. A sandbox house with no trust section trusts the demo specialists and its packs' demo issuers, and says so.
-const DEMO_TRUST: Omit<Trust, 'issuers' | 'regulators' | 'tellers'> = { auditors: ['audit.lake.local'], ethics: ['ethics.lake.local'], payments: ['payments.lake.local'] };
+// The demo specialists are named under the deployment's demo domain(s) (LAKE_DEMO_DOMAIN; lake.local by default), so two
+// Lakes on one network don't both claim payments.lake.local. Rules written for the default (the personas) name them under
+// lake.local: a sandbox house reads those as the demo specialists of each demo domain its operator lists.
+const DEMO_AGENTS = { auditors: 'audit', ethics: 'ethics', payments: 'payments' } as const;
+const demoTrust = (demo: string[]) => Object.fromEntries(Object.entries(DEMO_AGENTS).map(([k, agent]) => [k, demo.map((d) => `${agent}.${d}`)])) as Record<keyof typeof DEMO_AGENTS, string[]>;
 
 let appDir: string | undefined | null = null;
 function approvalsApp() {
@@ -89,11 +95,17 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const actor = `house:${o.name}`;
   const demoIssuers = o.packs.map((p) => p.source?.issuer.domain).filter((d): d is string => !!d);
   const demoRegulators = o.packs.map((p) => p.authority?.domain).filter((d): d is string => !!d);
+  const demo = o.demoDomains?.length ? o.demoDomains : ['lake.local'];
+  const DEMO_TRUST = demoTrust(demo);
+  const asDemo = (xs: string[]) => (o.sandbox ? [...new Set(xs.flatMap((x) => {
+    const agent = /^(audit|ethics|payments)\.lake\.local$/i.exec(x)?.[1]?.toLowerCase();
+    return agent ? demo.map((d) => `${agent}.${d}`) : [x];
+  }))] : xs);
   const trustFrom = (rules: Rules): Trust => {
     const t = rules.trust;
     return {
-      issuers: t?.issuers ?? (o.sandbox ? demoIssuers : []), auditors: t?.auditors ?? (o.sandbox ? DEMO_TRUST.auditors : []),
-      ethics: t?.ethics ?? (o.sandbox ? DEMO_TRUST.ethics : []), payments: t?.payments ?? (o.sandbox ? DEMO_TRUST.payments : []),
+      issuers: t?.issuers ?? (o.sandbox ? demoIssuers : []), auditors: t?.auditors ? asDemo(t.auditors) : o.sandbox ? DEMO_TRUST.auditors : [],
+      ethics: t?.ethics ? asDemo(t.ethics) : o.sandbox ? DEMO_TRUST.ethics : [], payments: t?.payments ? asDemo(t.payments) : o.sandbox ? DEMO_TRUST.payments : [],
       regulators: t?.regulators ?? (o.sandbox ? demoRegulators : []),
       // On a sandbox nobody proves a domain, so a teller is trusted by the address its operator gave, never by the name it claims.
       tellers: t?.tellers ?? (o.sandbox ? o.tellerUrls ?? [] : []),

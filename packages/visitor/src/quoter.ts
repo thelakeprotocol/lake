@@ -27,6 +27,14 @@ export interface QuoterOptions {
   keyFile?: string;
   sandbox?: boolean;
   log?: (msg: string) => void;
+  /**
+   * Its WebID. Default: its own address (`<publicUrl>/#agent`), so the same demo quoter run by two deployments is two
+   * agents, not one WebID with two keys (a node keeps one card per WebID: two federated Lakes each saw only their own).
+   * Its domain (ownerDomain) stays the pack's, which is what a register lists.
+   */
+  webId?: string;
+  /** How long to keep asking for the authorisation at start while the authority isn't up yet (ms). Default 3 minutes. */
+  authoriseWithinMs?: number;
 }
 
 export interface Quoter { card: AgentCard; webId: string; quotes: () => number; close: () => Promise<void> }
@@ -36,7 +44,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
   const p = packOf(ex.program.pack);
   if (!p) throw new Error(`no pack ${ex.program.pack} loaded`);
   const id: Identity = o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity();
-  const webId = `https://${ex.domain}/#agent`;
+  const webId = o.webId ?? `${o.publicUrl.replace(/\/$/, '')}/#agent`;
   const card = await signCard(buildCard({
     name: ex.name, description: `Quotes for ${p.title.toLowerCase()} intents. Its program runs inside your house; only you see the result.`,
     url: `${o.publicUrl}/a2a`, skills: [{ id: `${p.id}-quote`, name: `${p.title} quotes`, description: ex.program.title }],
@@ -45,11 +53,12 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
   const me: Visitor = { id, card, webId, domain: ex.domain };
   const log = o.log ?? (() => {});
 
-  // Once: the authority's authorisation, and the auditor's certificate for the program.
-  const authorised = await ask(`${o.authority}/a2a`, me, { kind: 'authorise', pack: ex.program.pack });
+  // Once: the authority's authorisation, and the auditor's certificate for the program. Started together with the
+  // specialists, the authority may not be up yet ("fetch failed"): asked again with backoff, never on a refusal.
+  const authorised = await untilReachable(() => ask(`${o.authority}/a2a`, me, { kind: 'authorise', pack: ex.program.pack }), o.authoriseWithinMs ?? 180_000, (e, wait) => log(`${ex.name}: the authority isn't answering yet (${e.message.slice(0, 80)}); again in ${Math.round(wait / 1000)} s`));
   if (authorised.reply.kind !== 'approved') throw new Error(`${ex.name} not authorised: ${(authorised.reply.problems ?? []).join('; ')}`);
   const authorisation: Attachment = { credential: authorised.reply.credential, card: await cardOf(o.authority) };
-  const certified = await ask(`${o.auditor}/a2a`, me, { kind: 'audit-program', program: ex.program });
+  const certified = await untilReachable(() => ask(`${o.auditor}/a2a`, me, { kind: 'audit-program', program: ex.program }), o.authoriseWithinMs ?? 180_000, () => {});
   if (certified.reply.kind !== 'certified') throw new Error(`${ex.name}'s program not certified: ${(certified.reply.problems ?? []).join('; ')}`);
   const certificate: Attachment = { credential: certified.reply.credential, card: await cardOf(o.auditor) };
 
@@ -156,6 +165,20 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     card, webId, quotes: () => quotes,
     close: async () => { link.stop(); await link.flush(); if (server) await new Promise((ok) => server!.close(ok)); },
   };
+}
+
+/** Retries what fails to reach its peer (a refused connection, a timeout), with backoff, until `withinMs` has passed. */
+async function untilReachable<T>(fn: () => Promise<T>, withinMs: number, onRetry: (e: Error, waitMs: number) => void): Promise<T> {
+  const end = Date.now() + withinMs;
+  for (let wait = 1000; ; wait = Math.min(wait * 2, 15_000)) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (Date.now() + wait > end) throw e;
+      onRetry(e as Error, wait);
+      await new Promise((ok) => setTimeout(ok, wait));
+    }
+  }
 }
 
 const cards = new Map<string, Promise<AgentCard>>();

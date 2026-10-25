@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
 import { followCheckpoint, type SeenCheckpoint } from '@thelakeprotocol/core';
-import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, type CartMandate, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -38,9 +38,10 @@ type Checked = { verified: boolean; why?: string; amount?: number; unit?: string
 /**
  * A message that says "you've been paid" proves nothing by itself: anyone can type { kind: "receipt", amount: 100 }.
  * A receipt counts only if its credential verifies against the payments agent's signed card and names you; a transfer
- * only if the sender itself signed it to you.
+ * only if the sender itself signed it to you. `trusted` says whose receipts are money for a cart (those its seller named,
+ * pinned by key: SPEC §6.5) or otherwise (the payments agent this agent uses); null when that can't be told right now.
  */
-async function checkMoney(p: Record<string, unknown>, from: LakeProfile, me: string, payments?: () => Promise<string | null>): Promise<Checked> {
+async function checkMoney(p: Record<string, unknown>, from: LakeProfile, me: string, trusted?: (cart?: string) => Promise<CartParty[] | null>): Promise<Checked> {
   try {
     const att = (p.kind === 'receipt' ? p.receipt : p.transfer) as { credential?: string; card?: AgentCard } | undefined;
     if (!att?.credential || !att.card) return { verified: false, why: 'no signed credential: a message that only says "paid" proves nothing' };
@@ -52,9 +53,10 @@ async function checkMoney(p: Record<string, unknown>, from: LakeProfile, me: str
     // A held payment settling is news to both sides: its receipt names the buyer (payer) and the seller, whoever it pays.
     const finished = p.kind === 'receipt' && (sub.captures || sub.voids) ? { hold: String(sub.captures ?? sub.voids), to: (sub.captures ? 'captured' : 'voided') as 'captured' | 'voided', ...(sub.why ? { why: String(sub.why).slice(0, 120) } : {}) } : undefined;
     if (sub.id !== me && !(finished && (sub.payer === me || sub.seller === me))) return { verified: false, why: 'made out to someone else' };
-    // Anyone can sign something called a receipt: money moved only if the payments agent this agent uses signed it.
-    const trusted = p.kind === 'receipt' ? await payments?.().catch(() => null) : null;
-    if (trusted && signer.webId !== trusted) return { verified: true, settled: false, signedBy: signer.ownerDomain, why: `signed by ${signer.ownerDomain}, not by the payments agent: no money moved` };
+    // Anyone can sign something called a receipt: money moved only if a payments agent whose receipts count here signed it,
+    // that very key (two Lakes each ran one called payments.lake.local).
+    const counted = p.kind === 'receipt' ? await trusted?.(sub.cart?.id ?? (typeof p.order === 'string' && p.order.startsWith('refund:') ? p.order.slice(7) : undefined)).catch(() => null) : null;
+    if (counted && !(await isParty(signer, counted))) return { verified: true, settled: false, signedBy: signer.ownerDomain, why: `signed by ${signer.ownerDomain} (${signer.webId}), not by a payments agent whose receipts count here (${counted.map((x) => x.url).join(', ')}): no money moved` };
     if (finished) {
       const cart = sub.cart ? `cart ${sub.cart.id}` : 'the cart';
       const why = finished.why ? ` (${finished.why})` : '';
@@ -174,16 +176,26 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     if (inbox.length > 200) inbox.shift();
     wake?.();
   };
-  // The payments agent this agent uses: only its receipts are money (fetched once, from its own card).
-  let paymentsId: Promise<string | null> | undefined;
-  const paymentsWebId = () => (paymentsId ??= (async () => {
-    try {
-      return (await verifyLakeCard((await (await fetch(cardUrlFor(`${o.payments ?? 'http://payments:4600'}/a2a`), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard)).webId;
-    } catch {
-      paymentsId = undefined;
-      return null;
-    }
-  })());
+  // Whose receipts are money (SPEC §6.5): for a cart of this agent's, the payments agents its seller named in it (by key);
+  // otherwise, or for a cart that names none, the payments agent this agent uses.
+  const trustedPayments = async (cart?: string): Promise<CartParty[] | null> => {
+    const x = cart ? orders.get(cart.trim().toLowerCase()) : undefined;
+    const named = x ? cartTerms(x.mandate.contents).payments : [];
+    if (named.length) return named;
+    const own = await (await agent()).paymentsAgent();
+    return own ? [own] : null;
+  };
+  // Where a held payment is: the payments agent that signed its receipt (on another Lake, when the seller counts that
+  // Lake's), reached at this agent's own address for it when that's the one it uses.
+  const holder = async (x: Order) => {
+    const own = `${(o.payments ?? 'http://payments:4600').replace(/\/(a2a)?\/?$/, '')}/a2a`;
+    if (!x.receipt?.card) return own;
+    const signer = await verifyLakeCard(x.receipt.card);
+    const mine = await (await agent()).paymentsAgent();
+    if (mine && mine.webId === signer.webId && (await isParty(signer, [mine]))) return own;
+    if (!(await isParty(signer, cartTerms(x.mandate.contents).payments))) throw new Error(`the receipt for cart ${x.cart} is from ${signer.webId}, which neither you use nor the cart names`);
+    return x.receipt.card.supportedInterfaces[0]!.url;
+  };
 
   // Trade (SPEC §6.5): this conversation's orders, as buyer or seller, each with the signed evidence of every step.
   type Order = {
@@ -250,7 +262,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     }
     const refundOf = typeof p.order === 'string' && p.order.startsWith('refund:') ? orders.get(p.order.slice(7)) : undefined;
     if (p.kind === 'receipt' && refundOf?.role === 'buyer') {
-      const money = await checkMoney(p, m.from, me.webId, paymentsWebId);
+      const money = await checkMoney(p, m.from, me.webId, trustedPayments);
       if (money.verified && money.settled && Math.round((money.amount ?? 0) * 100) === Math.round(refundOf.total.value * 100)) {
         refundOf.status = 'refunded';
         refundOf.evidence.push({ step: 'refunded', at: new Date().toISOString(), signed: m.signed });
@@ -259,7 +271,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     }
     // Ids are matched as the seller wrote them, whatever case they come back in (run 30: an upper-cased id slipped past).
     const o = orders.get(String(p.cart ?? p.order ?? '').trim().toLowerCase());
-    const money = p.kind === 'receipt' && o ? await checkMoney(p, m.from, me.webId, paymentsWebId) : undefined;
+    const money = p.kind === 'receipt' && o ? await checkMoney(p, m.from, me.webId, trustedPayments) : undefined;
     // A held payment settled: the payments agent tells both sides, with its signed receipt (SPEC §6.5).
     if (o && money?.verified && money.hold_settled && money.cart?.id === o.cart && (!o.hold || o.hold === money.hold_settled.hold)) {
       o.hold ??= money.hold_settled.hold;
@@ -337,7 +349,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // acknowledgements move each order along. The message still lands in the inbox, so the model knows.
         const traded = await onTrade(m);
         if (traded?.reply) { pushInbox(m, traded.checked); return traded.reply; }
-        const checked = traded?.checked ?? (m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId, paymentsWebId)
+        const checked = traded?.checked ?? (m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId, trustedPayments)
           : attached.length ? { ...(await verifyEvidence(attached[0])), note: 'evidence inside the message, checked; what the sender says about it is not' }
           : Object.values(m.payload).some((v) => typeof v === 'string' && /^eyJ[\w-]+\.[\w-]+\./.test(v)) ? { verified: false, why: 'a pasted credential with no card to check it against: forward it as { credential, card }' } : undefined);
         pushInbox(m, checked);
@@ -363,7 +375,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const s = await (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/state`)).json();
         const roles: Record<string, number> = {};
         for (const p of s.participants) roles[p.role] = (roles[p.role] ?? 0) + 1;
-        const specialists = (await (await agent()).find({ role: 'specialist' })).map((x) => ({ name: x.name, url: x.url }));
+        // This Lake's specialists: a federated node also lists its peers' (lake_search shows those, with their Lake).
+        const specialists = (await (await agent()).find({ role: 'specialist' })).filter((x) => !x.lake).map((x) => ({ name: x.name, url: x.url }));
         const me = await agent();
         return json({
           you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
@@ -393,19 +406,20 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async () => {
       try {
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
-        const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard; active?: string; until?: string }[];
+        const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard; active?: string; until?: string; via?: string }[];
         const profile = (c: AgentCard) => lakeProfile(c) ?? { role: undefined, tags: [] as string[], menu: undefined };
         const mine = (await agent()).card.supportedInterfaces?.[0]?.url;
         const houses = all.filter(({ card }) => profile(card).role === 'house');
         const interests: Record<string, number> = {};
         for (const { card } of houses) for (const t of profile(card).tags ?? []) interests[t] = (interests[t] ?? 0) + 1;
         const others = all.filter(({ card }) => profile(card).role !== 'house' && card.supportedInterfaces?.[0]?.url !== mine);
-        const whoIs = ({ card, active, until }: (typeof all)[number]) => ({
+        const whoIs = ({ card, active, until, via }: (typeof all)[number]) => ({
           name: card.name, role: profile(card).role, offers: card.description, url: card.supportedInterfaces?.[0]?.url,
-          skills: (card.skills ?? []).map((k) => k.name ?? k.id), tags: profile(card).tags ?? [], ...(profile(card).menu?.length ? { sells: profile(card).menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}),
+          skills: (card.skills ?? []).map((k) => k.name ?? k.id), tags: profile(card).tags ?? [], ...(profile(card).menu?.length ? { sells: profile(card).menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}),
         });
         // Open rooms anyone may join, and listed pledges with how many more each needs, from the specialists that hold them.
-        const at = (name: string) => others.find(({ card }) => profile(card).role === 'specialist' && card.name === name)?.card.supportedInterfaces?.[0]?.url;
+        // This Lake's own first: a peer Lake's Rooms or Tally only if this one runs none.
+        const at = (name: string) => [...others].sort((a, b) => Number(!!a.via) - Number(!!b.via)).find(({ card }) => profile(card).role === 'specialist' && card.name === name)?.card.supportedInterfaces?.[0]?.url;
         const me = await agent();
         const listing = async (name: string, kind: string) => { const url = at(name); return url ? (me.ask(url, { kind }) as Promise<Record<string, any>>).catch(() => null) : null; };
         const [rooms, pledges] = await Promise.all([listing('Rooms', 'room.list'), listing('Tally', 'tally.list')]);
@@ -596,10 +610,25 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     return { evidence: steps, cards, note: 'each step\'s signed: { card: <key in cards>, envelope }; to check one, pass { card: cards[key], envelope } to lake_verify' };
   };
   // What this side holds about one cart, for the arbiter: the cart, the receipt, every signed message, the delivery as sent.
+  // The arbiter is the one the seller named in the cart (the buyer paid those terms, and the payments agent follows its
+  // ruling); a cart that names none goes to this agent's own Lake's arbiter, never just any a peer Lake lists.
+  const arbiterFor = async (x: Order, me: LakeAgent) => {
+    for (const a of cartTerms(x.mandate.contents).arbiters) {
+      try {
+        const card = (await (await fetch(cardUrlFor(a.url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard;
+        if (await isParty(await verifyLakeCard(card), [a])) return { url: a.url, card };
+      } catch {
+        // unreachable, or no longer that key: the next one the cart names
+      }
+    }
+    if (cartTerms(x.mandate.contents).arbiters.length) throw new Error(`none of the arbiters cart ${x.cart} names answers with the key it names`);
+    const own = (await me.find({ skill: 'arbiter' })).find((a) => a.role === 'specialist' && !a.lake);
+    if (!own) throw new Error('no arbiter on this Lake');
+    return { url: own.url, card: (await (await fetch(cardUrlFor(own.url))).json()) as AgentCard };
+  };
   const arbitrate = async (x: Order) => {
     const me = await agent();
-    const arbiter = (await me.find({ skill: 'arbiter' }))[0];
-    if (!arbiter) throw new Error('no arbiter on this Lake');
+    const arbiter = await arbiterFor(x, me);
     const signed = x.evidence.map((e) => e.signed).filter((e): e is { card: AgentCard; envelope: unknown } => !!e && typeof e === 'object' && 'envelope' in (e as object) && 'card' in (e as object));
     const buyerCard = x.role === 'buyer' ? me.card : x.buyerCard ?? (x.with.url ? ((await (await fetch(cardUrlFor(x.with.url))).json()) as AgentCard) : undefined);
     const reply = await me.ask(arbiter.url, { kind: 'arbitrate', cart: x.mandate, seller_card: x.sellerCard, ...(buyerCard ? { buyer_card: buyerCard } : {}), evidence: signed, ...(x.receipt ? { receipt: x.receipt } : {}), ...(x.sentDeliveries?.length ? { delivered: x.sentDeliveries } : {}) });
@@ -609,8 +638,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       // A held payment goes where the ruling says (released if delivered, voided if not); the payments agent checks the
       // ruling itself.
       if (x.hold && x.payment === 'held') {
-        const arbiterCard = (await (await fetch(cardUrlFor(arbiter.url))).json()) as AgentCard;
-        const settled = await me.ask(`${o.payments ?? 'http://payments:4600'}/a2a`, { kind: 'rule', hold: x.hold, ruling: { credential: reply.credential, card: arbiterCard } });
+        const settled = await me.ask(await holder(x), { kind: 'rule', hold: x.hold, ruling: { credential: reply.credential, card: arbiter.card } });
         // Already settled by the other side's filing: the same ruling, so say where the money went.
         const was = String((settled.problems as string[] | undefined)?.[0] ?? '');
         if (settled.kind === 'captured' || /captured already/.test(was)) x.payment = 'released';
@@ -693,7 +721,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           if (x.status === 'refunded') throw new Error(`cart ${x.cart} is refunded already`);
           if (x.hold && x.payment === 'held') {
             // Still held: void it at the payments agent, which sends both sides its signed receipt.
-            const v = await me.ask(`${o.payments ?? 'http://payments:4600'}/a2a`, { kind: 'void', hold: x.hold });
+            const v = await me.ask(await holder(x), { kind: 'void', hold: x.hold });
             if (v.kind !== 'voided') throw new Error((v.problems as string[] | undefined)?.join('; ') ?? 'the payments agent would not void it');
             x.status = 'refunded';
             x.payment = 'voided';
@@ -772,7 +800,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           // A held payment follows the verdict: accepting releases it to the seller; a dispute keeps it held.
           let money: Record<string, unknown> | undefined;
           if (x.hold && x.payment === 'held') {
-            money = await me.ask(`${o.payments ?? 'http://payments:4600'}/a2a`, { kind: verdict === 'accepted' ? 'capture' : 'dispute', hold: x.hold });
+            money = await me.ask(await holder(x), { kind: verdict === 'accepted' ? 'capture' : 'dispute', hold: x.hold });
             if (money.kind === 'captured') x.payment = 'released';
           }
           return json({ [verdict]: x.cart, their_reply: reply, money: moneyLine(x), ...(money ? { held_payment: money.kind === 'captured' ? 'released to the seller' : money.kind === 'disputed' ? 'kept held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules' : money } : {}),

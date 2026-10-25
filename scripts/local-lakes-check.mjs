@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // A cross-Lake check for the two local staging Lakes (scripts/local-lakes.sh check). No build needed: it speaks MCP over
 // plain HTTP to each Lake's connector, the way Claude does. A seller joins Lake B and puts a menu on its card; a buyer
-// joins Lake A, finds the seller through A's node (federation), they exchange signed messages, the buyer orders and pays,
-// and knocks on a house of Lake B. Prints each step and what came back; exits 1 if a step that should work didn't.
+// joins Lake A, finds the seller through A's node (federation), they exchange signed messages, the buyer orders, pays
+// through Lake A's payments agent (held), the seller counts it (its cart named A's payments agent too), delivers, the buyer
+// accepts and A's payments agent releases it to the seller on B; then a dispute goes to the arbiter the cart names. Also:
+// each Lake's own specialists come first, and each Lake's grocers are their own agents. The buyer knocks on a house of
+// Lake B. Prints each step and what came back; exits 1 if a step that should work didn't.
 const A = (process.argv[2] ?? process.env.LAKE_A ?? 'http://lake-a.localhost:8081').replace(/\/$/, '');
 const B = (process.argv[3] ?? process.env.LAKE_B ?? 'http://lake-b.localhost:8082').replace(/\/$/, '');
 
@@ -99,17 +102,56 @@ await step('buyer orders from the menu: a cart signed by the B seller', 'works',
   if (!cart) throw new Error(short(r));
   return short(r);
 });
-await step("buyer pays the cart through A's payments agent (held)", 'works', async () => short(await buyer('lake_buy', { action: 'pay', cart: String(cart).slice(0, 12) })));
-await step("seller on B counts A's receipt as money", 'cross-lake', async () => {
-  const m = await until('the receipt in the seller inbox', async () => {
-    const x = await seller('lake_inbox', { wait_seconds: 10 });
-    return (x.messages ?? x).find?.((y) => /receipt/.test(JSON.stringify(y)));
-  });
-  const checked = m.checked ?? m.payload?.checked ?? JSON.stringify(m).match(/"checked":(\{[^}]*\})/)?.[1];
-  const orders = await seller('lake_sell', { action: 'orders' });
-  const settled = JSON.stringify(checked ?? '').includes('"settled":true') || /"payment":"(held|paid|released)"/.test(JSON.stringify(orders));
-  if (!settled) throw new Error(`receipt checked as ${short(checked ?? m)}; seller's orders: ${short(orders)}`);
-  return short(checked);
+const sale = async (id) => (await seller('lake_sell', { action: 'orders' })).orders.find((x) => x.cart === id);
+const inbox = async (who, pred, what) => until(what, async () => ((await who('lake_inbox', { wait_seconds: 10 })).messages ?? []).find(pred));
+await step("buyer pays the cart through A's payments agent (held)", 'works', async () => {
+  const r = await buyer('lake_buy', { action: 'pay', cart: String(cart).slice(0, 12) });
+  if (!r.hold?.id) throw new Error(short(r));
+  return short({ paid: r.paid, unit: r.unit, hold: r.hold });
+});
+await step("seller on B counts A's held receipt as paid (its cart named A's payments agent, by key)", 'works', async () => {
+  const m = await inbox(seller, (y) => y.message?.kind === 'receipt' && y.message?.cart === cart, 'the receipt in the seller inbox');
+  if (!m.checked?.verified || !m.checked?.held) throw new Error(`receipt checked as ${short(m.checked)}`);
+  const o = await sale(cart);
+  if (o?.payment !== 'held') throw new Error(`seller's order: ${short(o)}`);
+  return short({ checked: m.checked, money: o.money });
+});
+await step('seller (B) delivers; the buyer (A) checks it', 'works', async () => {
+  const r = await seller('lake_sell', { action: 'deliver', cart, content: 'A cup of tea, described: amber, steam, a slice of lemon.' });
+  const d = await inbox(buyer, (y) => y.message?.kind === 'trade.deliver' && y.message?.cart === cart, 'the delivery in the buyer inbox');
+  if (!d.checked?.matches_what_the_seller_signed) throw new Error(short(d));
+  return short({ delivered: r.delivered, sha256: r.sha256 });
+});
+await step("buyer accepts; A's payments agent releases it to the seller on B", 'works', async () => {
+  const r = await buyer('lake_buy', { action: 'accept', cart });
+  if (r.held_payment !== 'released to the seller') throw new Error(short(r));
+  const o = await until('the release at the seller', async () => { const x = await sale(cart); return x?.payment === 'released' ? x : null; });
+  return short({ buyer: r.money, seller: o.money });
+});
+let second;
+await step("a dispute goes to the arbiter the seller's cart names (B's), and A's payments agent follows its ruling", 'works', async () => {
+  second = (await buyer('lake_buy', { action: 'order', seller_url: s.url, sku: 'tea' })).cart;
+  await buyer('lake_buy', { action: 'pay', cart: second });
+  await inbox(seller, (y) => y.message?.kind === 'receipt' && y.message?.cart === second, 'the second receipt');
+  await seller('lake_sell', { action: 'deliver', cart: second, content: 'A second cup: darker, no lemon.' });
+  await inbox(buyer, (y) => y.message?.kind === 'trade.deliver' && y.message?.cart === second, 'the second delivery');
+  await buyer('lake_buy', { action: 'dispute', cart: second, reason: 'it never came' });
+  const r = await buyer('lake_buy', { action: 'arbitrate', cart: second });
+  if (r.kind !== 'ruling' || !r.paid || r.held_payment !== 'released to the seller') throw new Error(short(r));
+  const o = await until('the release at the seller', async () => { const x = await sale(second); return x?.payment === 'released' ? x : null; });
+  return short({ ruling: r.ruling, facts: r.facts, seller: o.money });
+});
+await step("the buyer's own Lake's specialists come first; B's are marked as B's", 'works', async () => {
+  const ov = await buyer('lake_overview');
+  const foreign = ov.specialists.filter((x) => !x.url.startsWith(A));
+  if (foreign.length) throw new Error(`lake_overview lists ${foreign.length} specialists of another Lake: ${short(foreign)}`);
+  const arbiters = await buyer('lake_search', { skill: 'arbiter' });
+  if (!arbiters[0]?.url.startsWith(A) || arbiters.some((x) => x.url.startsWith(B) && x.lake !== B)) throw new Error(short(arbiters));
+  return short(arbiters.map((x) => ({ url: x.url, domain: x.domain, lake: x.lake })));
+});
+await step("each Lake's grocers are their own agents: A's node lists both Lakes' Big Marts", 'works', async () => {
+  const marts = await until("both Lakes' Big Marts", async () => { const x = (await buyer('lake_search', { q: 'Big Mart' })).filter((y) => y.role === 'agent'); return x.length >= 2 && new Set(x.map((y) => y.webId)).size === x.length ? x : null; }, 30_000);
+  return short(marts.map((x) => ({ webId: x.webId, lake: x.lake })));
 });
 const houseB = await fetch(`${A}/cards?role=house`).then((r) => r.json()).then((xs) => xs.map((x) => x.card).find((c) => c.supportedInterfaces[0].url.startsWith(`${B}/t/`))).catch(() => null);
 await step("A's node lists B's houses", 'works', async () => { if (!houseB) throw new Error('none'); return `${houseB.name} ${houseB.supportedInterfaces[0].url}`; });

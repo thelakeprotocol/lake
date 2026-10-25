@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import * as jose from 'jose';
 import { canonicalize } from './canonical.js';
+import type { AgentCard } from '@a2a-js/sdk';
+import { verifyLakeCard, type LakeProfile } from './card.js';
 import type { Identity } from './crypto.js';
 
 /**
@@ -34,6 +36,52 @@ export interface CartMandate { contents: CartContents; merchant_authorization: s
 /** How a Lake cart is paid: the AP2 mandate chain, settled by a payments agent the payer trusts. */
 export const LAKE_PAYMENT_METHOD = 'https://lake.doneinfifty.com/pay/ap2';
 const MAX_ITEMS = 12;
+const MAX_PARTIES = 5;
+
+/**
+ * An agent a seller names in its cart (SPEC §6.5): where it is reached, its WebID, and its key, pinned by its RFC 7638
+ * JWK thumbprint (`jkt`, as DPoP and OAuth's `cnf` pin keys). Pinned, because names collide: two sandbox Lakes both ran a
+ * payments agent called payments.lake.local, and on a sandbox nobody proves a domain.
+ */
+export interface CartParty { url: string; webId: string; jkt: string }
+
+/**
+ * The Lake payment method's data (W3C PaymentRequest `method_data[].data`, method-specific by design): the payments agents
+ * whose receipts the seller counts as this cart paid, and the arbiters whose rulings it accepts on it. Inside the signed
+ * contents, so the buyer pays (and its payment mandate names the hash of) these very terms.
+ */
+export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[] }
+
+/** The thumbprint a cart pins a key by. */
+export const keyThumbprint = (jwk: jose.JWK) => jose.calculateJwkThumbprint(jwk, 'sha256');
+
+/** A party to name in a cart, from its signed card: the card's own A2A address, WebID and key. */
+export async function cartParty(card: AgentCard): Promise<CartParty> {
+  const p = await verifyLakeCard(card);
+  const url = card.supportedInterfaces?.[0]?.url;
+  if (!url) throw new Error(`${card.name}'s card names no address`);
+  return { url, webId: p.webId, jkt: await keyThumbprint(p.publicJwk) };
+}
+
+/** Whether a verified signer is one of these parties: the same WebID and the same key, never the same name alone. */
+export async function isParty(signer: Pick<LakeProfile, 'webId' | 'publicJwk'>, parties: CartParty[] | undefined): Promise<boolean> {
+  if (!parties?.length) return false;
+  const jkt = await keyThumbprint(signer.publicJwk);
+  return parties.some((x) => x.webId === signer.webId && x.jkt === jkt);
+}
+
+const partyProblems = (xs: unknown, what: string): string[] => {
+  if (xs === undefined) return [];
+  if (!Array.isArray(xs) || xs.length > MAX_PARTIES) return [`${what}: a list of at most ${MAX_PARTIES} { url, webId, jkt }`];
+  return xs.some((x: Partial<CartParty>) => typeof x?.url !== 'string' || !/^https?:\/\//.test(x.url) || typeof x.webId !== 'string' || !x.webId || typeof x.jkt !== 'string' || !/^[\w-]{43}$/.test(x.jkt))
+    ? [`${what}: each { url (http or https), webId, jkt (an RFC 7638 sha256 thumbprint) }`] : [];
+};
+
+/** The payments agents and arbiters a cart names, from its Lake payment method (empty when it names none). */
+export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[] } {
+  const data = (contents?.payment_request?.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
+  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [] };
+}
 const MAX_CART_MINUTES = 24 * 60;
 
 /** The hash AP2 puts in the merchant's JWT: sha256 over the canonical JSON (JCS) of the cart's contents. */
@@ -64,6 +112,8 @@ export function menuProblems(menu: unknown): string[] {
 export async function signCart(o: {
   seller: Identity; sellerWebId: string; sellerName: string; buyerWebId: string;
   items: { label: string; amount: PaymentCurrencyAmount }[]; minutes?: number; id?: string; brief?: string;
+  /** The payments agents whose receipts the seller counts, and the arbiters it accepts (SPEC §6.5). */
+  payments?: CartParty[]; arbiters?: CartParty[];
 }): Promise<CartMandate> {
   if (!o.items.length || o.items.length > MAX_ITEMS) throw new Error(`a cart holds 1 to ${MAX_ITEMS} items`);
   const currency = o.items[0]!.amount.currency;
@@ -72,10 +122,13 @@ export async function signCart(o: {
   if (cents < 1) throw new Error('a cart costs at least 0.01');
   const minutes = Math.min(Math.max(o.minutes ?? 30, 1), MAX_CART_MINUTES);
   const id = o.id ?? randomUUID();
+  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}) };
+  const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters')];
+  if (problems.length) throw new Error(problems.join('; '));
   const contents: CartContents = {
     id, user_cart_confirmation_required: false,
     payment_request: {
-      method_data: [{ supported_methods: LAKE_PAYMENT_METHOD }],
+      method_data: [{ supported_methods: LAKE_PAYMENT_METHOD, ...(Object.keys(terms).length ? { data: terms as Record<string, unknown> } : {}) }],
       details: { id: `order-${id}`, display_items: o.items.map((x) => ({ label: x.label.slice(0, 120), amount: { currency, value: x.amount.value } })), total: { label: 'Total', amount: { currency, value: cents / 100 } } },
     },
     cart_expiry: new Date(Date.now() + minutes * 60_000).toISOString(), merchant_name: o.sellerName.slice(0, 80),
@@ -88,8 +141,8 @@ export async function signCart(o: {
   return { contents, merchant_authorization };
 }
 
-/** What a checked cart says: who sells, to whom, the total, and the hash a payment names. */
-export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[] }
+/** What a checked cart says: who sells, to whom, the total, the hash a payment names, and whom the seller named to settle it. */
+export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[] }
 
 /**
  * Checks a cart against the seller's key (from its verified card): the signature, that the JWT's hash is this very
@@ -109,5 +162,8 @@ export async function checkCart(cart: CartMandate, sellerJwk: jose.JWK, now = Da
   if (items.some((x) => x.amount.currency !== total.amount.currency)) throw new Error('the cart mixes currencies');
   if (items.reduce((a, x) => a + Math.round(x.amount.value * 100), 0) !== Math.round(total.amount.value * 100)) throw new Error('the cart\'s lines don\'t add up to its total');
   if (Date.parse(c.cart_expiry) < now) throw new Error(`the cart expired at ${c.cart_expiry}`);
-  return { id: c.id, seller: String(claims.iss), buyer: String(claims.sub), total: total.amount, hash: cartHash(c), expires: c.cart_expiry, items };
+  const data = (c.payment_request.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
+  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters')];
+  if (problems.length) throw new Error(problems.join('; '));
+  return { id: c.id, seller: String(claims.iss), buyer: String(claims.sub), total: total.amount, hash: cartHash(c), expires: c.cart_expiry, items, ...cartTerms(c) };
 }

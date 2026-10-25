@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 // `lake mcp` runs the Lake MCP connector over stdio; every other `lake` command is the visitor CLI.
+// Trade terms (SPEC §6.5): payments agents a seller also accepts besides its own (LAKE_ACCEPT_PAYMENTS), and the arbiters it
+// names in its carts and accepts in others' (LAKE_ARBITERS, its own first). A2A addresses, comma-separated, without /a2a.
+const list = (v?: string) => (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const trade = (env: NodeJS.ProcessEnv) => ({ acceptPayments: list(env.LAKE_ACCEPT_PAYMENTS), arbiters: list(env.LAKE_ARBITERS) });
 if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   // `lake mcp --http 4800 --public-url https://sandbox.example`: the connector over HTTP, one agent per conversation.
   const { parseArgs } = await import('node:util');
@@ -9,7 +13,7 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   const port = Number(a.http);
   const app = lakeMcpHttpApp({
     node: env.LAKE_NODE_URL ?? 'http://lake-node:7000', publicUrl: a['public-url'] ?? `http://localhost:${port}`, packs: env.LAKE_PACKS?.split(',').map((x) => x.trim()).filter(Boolean),
-    ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL,
+    ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL, ...trade(env),
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
     log: (m) => console.log(m),
   });
@@ -25,7 +29,7 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     node: env.LAKE_NODE_URL ?? 'http://lake-node:7000', packs: env.LAKE_PACKS?.split(',').map((x) => x.trim()).filter(Boolean),
     port: Number(env.LAKE_MCP_PORT ?? 4890),
     keyFile: env.LAKE_KEY_FILE,
-    ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL,
+    ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL, ...trade(env),
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
   });
   await server.connect(new StdioServerTransport());

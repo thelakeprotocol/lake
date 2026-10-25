@@ -11,22 +11,29 @@
 #   scripts/local-lakes.sh reset [a|b]      stop and wipe the Lakes' volumes (fresh keys, fresh houses)
 #
 # Env: LAKE_A_PORT (8081), LAKE_B_PORT (8082), LAKE_TENANTS (4 per Lake), LAKE_PROFILES (e.g. "sponsor,lively").
+# A second pair beside the first (another checkout's, say): other names, ports and images, e.g.
+#   LAKE_A_ID=c LAKE_B_ID=d LAKE_A_PORT=8083 LAKE_B_PORT=8084 LAKE_TAG=mybranch scripts/local-lakes.sh build|up|check|down
+# (Lakes then at http://lake-c.localhost:8083 and http://lake-d.localhost:8084; "a" and "b" on the command line still
+# mean the first and the second.)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FILE="$ROOT/deploy/local/docker-compose.yml"
 A_PORT="${LAKE_A_PORT:-8081}"
 B_PORT="${LAKE_B_PORT:-8082}"
+A_ID="${LAKE_A_ID:-a}"
+B_ID="${LAKE_B_ID:-b}"
+export LAKE_TAG="${LAKE_TAG:-dev}"
 NET=lake-local
 
-url() { [ "$1" = a ] && echo "http://lake-a.localhost:$A_PORT" || echo "http://lake-b.localhost:$B_PORT"; }
+url() { [ "$1" = a ] && echo "http://lake-$A_ID.localhost:$A_PORT" || echo "http://lake-$B_ID.localhost:$B_PORT"; }
 compose() {
   local id=$1; shift
-  local port peer peer_port
-  if [ "$id" = a ]; then port=$A_PORT peer=b peer_port=$B_PORT; else port=$B_PORT peer=a peer_port=$A_PORT; fi
+  local me port peer peer_port
+  if [ "$id" = a ]; then me=$A_ID port=$A_PORT peer=$B_ID peer_port=$B_PORT; else me=$B_ID port=$B_PORT peer=$A_ID peer_port=$A_PORT; fi
   local profiles=()
   for p in ${LAKE_PROFILES:+${LAKE_PROFILES//,/ }}; do profiles+=(--profile "$p"); done
-  LAKE_ID=$id LAKE_PORT=$port PEER_ID=$peer PEER_PORT=$peer_port \
-    docker compose -p "lake-local-$id" -f "$FILE" ${profiles[@]+"${profiles[@]}"} "$@"
+  LAKE_ID=$me LAKE_PORT=$port PEER_ID=$peer PEER_PORT=$peer_port \
+    docker compose -p "lake-local-$me" -f "$FILE" ${profiles[@]+"${profiles[@]}"} "$@"
 }
 which_lakes() { case "${1:-}" in a|b) echo "$1" ;; "") echo "a b" ;; *) echo "unknown Lake '$1' (a or b)" >&2; exit 2 ;; esac; }
 
@@ -35,8 +42,8 @@ case "$cmd" in
   build)
     # The same targets CI publishes (.github/workflows/ci.yml), tagged locally; the shared build stage is cached once.
     for t in node:lake-node specialists:lake-specialists house:lake-house cli:lake; do
-      echo "== building ${t%%:*} -> lake-local/${t#*:}:dev"
-      docker build --target "${t%%:*}" -t "lake-local/${t#*:}:dev" "$ROOT"
+      echo "== building ${t%%:*} -> lake-local/${t#*:}:$LAKE_TAG"
+      docker build --target "${t%%:*}" -t "lake-local/${t#*:}:$LAKE_TAG" "$ROOT"
     done
     ;;
   up)
@@ -61,7 +68,7 @@ case "$cmd" in
     ok=0
     for id in a b; do
       U=$(url "$id"); P=$( [ "$id" = a ] && url b || url a )
-      echo "== Lake ${id^^}  $U"
+      echo "== Lake $( [ "$id" = a ] && echo "${A_ID^^}" || echo "${B_ID^^}" )  $U"
       mcp=$(curl -s -o /dev/null -m 15 -w '%{http_code}' -X POST "$U/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"status","version":"0"}}}' || true)
       node --input-type=module - "$U" "$P" "$mcp" "${LAKE_TENANTS:-4}" <<'EOF' || ok=1

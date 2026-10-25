@@ -10,7 +10,14 @@
 # shared network lake-local. So every advertised URL (cards, WebIDs, pods, node --follow) is the same string on the
 # laptop and in every container, and a node can fetch a peer Lake's agents' cards from their own endpoints (SPEC §9).
 #
-# Needs (set by the script): LAKE_ID LAKE_PORT PEER_ID PEER_PORT. Images: lake-local/*:dev (scripts/local-lakes.sh build).
+# Who is who across the two Lakes (SPEC §6.5, §9): each Lake's demo specialists are named under its own demo domain
+# (payments.lake-a.localhost, payments.lake-b.localhost), not both payments.lake.local; houses trust both Lakes' demo
+# specialists (LAKE_DEMO_DOMAIN lists its own first, then the peer's). Sellers' connectors count the peer Lake's payments
+# agent's receipts too (LAKE_ACCEPT_PAYMENTS) and name it in their carts, and both connectors accept both Lakes' arbiters
+# (LAKE_ARBITERS, their own first): a federation agreement between the two operators. Grocers are named by their own
+# addresses (/g/<name>/#agent), so each Lake's BigMart is its own agent.
+#
+# Needs (set by the script): LAKE_ID LAKE_PORT PEER_ID PEER_PORT. Images: lake-local/*:${LAKE_TAG:-dev} (scripts/local-lakes.sh build).
 
 x-small: &small
   restart: unless-stopped
@@ -32,7 +39,7 @@ services:
 
   lake-node:
     <<: *small
-    image: lake-local/lake-node:dev
+    image: lake-local/lake-node:${LAKE_TAG:-dev}
     hostname: lake-node
     # Follows the other Lake's node at its public address: its cards are re-verified here from the agents' own endpoints.
     command: ["--domain", "lake-${LAKE_ID}.localhost", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--guild-min", "2", "--follow", "http://lake-${PEER_ID}.localhost:${PEER_PORT}"]
@@ -44,10 +51,10 @@ services:
 
   specialists:
     <<: *small
-    image: lake-local/lake-specialists:dev
+    image: lake-local/lake-specialists:${LAKE_TAG:-dev}
     hostname: specialists
     command: ["all", "--port", "4300", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s", "--public-node", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--spar-every", "1800", "--packs", "health,shopping"]
-    environment: { NODE_OPTIONS: "--max-old-space-size=160", LAKE_NODE_URL: "http://lake-node:7000" }
+    environment: { NODE_OPTIONS: "--max-old-space-size=160", LAKE_NODE_URL: "http://lake-node:7000", LAKE_DEMO_DOMAIN: "lake-${LAKE_ID}.localhost,lake-${PEER_ID}.localhost" }
     volumes: [specialists:/data]
     depends_on: [caddy, lake-node]
     # The grocers ask the food register for their authorisation once, at start: they wait for this (else "fetch failed").
@@ -57,7 +64,7 @@ services:
 
   houses:
     <<: *small
-    image: lake-local/lake-house:dev
+    image: lake-local/lake-house:${LAKE_TAG:-dev}
     hostname: houses
     command: ["--tenants", "${LAKE_TENANTS:-4}", "--tenant-prefix", "sb-", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--pod-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/pods/", "--open-pairing"]
     environment:
@@ -66,6 +73,7 @@ services:
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       LAKE_PACKS: "health,shopping"
+      LAKE_DEMO_DOMAIN: "lake-${LAKE_ID}.localhost,lake-${PEER_ID}.localhost"
       LAKE_ISSUERS: "health=http://specialists:4300/issuer,shopping=http://specialists:4300/receipts"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
       LAKE_PERSON_URL: "http://specialists:4300/person"
@@ -77,7 +85,7 @@ services:
 
   mcp:
     <<: *small
-    image: lake-local/lake:dev
+    image: lake-local/lake:${LAKE_TAG:-dev}
     hostname: mcp
     command: ["mcp", "--http", "4800", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}"]
     environment:
@@ -86,6 +94,8 @@ services:
       LAKE_ETHICS_URL: "http://specialists:4300/ethics"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
       LAKE_PAYMENTS_URL: "http://specialists:4300/payments"
+      LAKE_ACCEPT_PAYMENTS: "http://lake-${PEER_ID}.localhost:${PEER_PORT}/s/payments"
+      LAKE_ARBITERS: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s/arbiter,http://lake-${PEER_ID}.localhost:${PEER_PORT}/s/arbiter"
       LAKE_PUBLIC_NODE_URL: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}"
       LAKE_PACKS: "health,shopping"
       LAKE_ALLOWANCE_USD: "50"
@@ -95,7 +105,7 @@ services:
 
   grocers:
     <<: *small
-    image: lake-local/lake:dev
+    image: lake-local/lake:${LAKE_TAG:-dev}
     hostname: grocers
     # Unlike the sandbox (http://grocers:4810, reachable only inside its network), a public address under /g, so the
     # peer Lake's node can verify their cards and its agents can reach them.
@@ -108,7 +118,7 @@ services:
   sponsor:
     <<: *small
     profiles: [sponsor]
-    image: lake-local/lake:dev
+    image: lake-local/lake:${LAKE_TAG:-dev}
     hostname: sponsor
     command: ["sponsor", "--every", "900", "--node", "http://lake-node:7000", "--ethics", "http://specialists:4300/ethics", "--auditor", "http://specialists:4300/auditor", "--payments", "http://specialists:4300/payments", "--budget", "1000000"]
     environment: { NODE_OPTIONS: "--max-old-space-size=96" }
@@ -120,7 +130,7 @@ services:
   swarm:
     <<: *small
     profiles: [lively]
-    image: lake-local/lake:dev
+    image: lake-local/lake:${LAKE_TAG:-dev}
     command: ["swarm", "--traders", "3", "--attackers", "1", "--interval", "30000", "--node", "http://lake-node:7000"]
     environment: { NODE_OPTIONS: "--max-old-space-size=64" }
     depends_on: [caddy, houses]

@@ -962,6 +962,66 @@ describe('the open door', () => {
     paymentsProc.kill('SIGTERM');
   }, 90_000);
 
+  it('a trade across two payments agents: the cart names whose receipts the seller counts and its arbiter, pinned by key; the buyer pays through its own (SPEC §6.5)', async () => {
+    // A second payments agent, as another Lake runs one: its own key, its own name, and by configuration it follows only its
+    // own Lake's arbiter (arbiter.lake-b.local), so a ruling here counts with it only because the cart named the arbiter.
+    const pp = String(await freePort());
+    await start(['packages/specialists/dist/main.js', 'payments', '--port', pp, '--url', `http://localhost:${pp}`, '--data', join(dir, 'payments-b'), '--demo-domain', 'lake-b.local'], /payments \S+ at http/);
+    const paymentsB = `http://localhost:${pp}`;
+    expect((await verifyLakeCard(await (await fetch(`${paymentsB}/.well-known/agent-card.json`)).json())).ownerDomain).toBe('payments.lake-b.local');
+    // Two connectors: one whose agents pay through the Lake's payments agent and, as sellers, also count Lake B's; one whose
+    // agents pay through Lake B's.
+    const [p1, p2] = [String(await freePort()), String(await freePort())];
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', p1], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_PAYMENTS_URL: payments, LAKE_ACCEPT_PAYMENTS: paymentsB, LAKE_ALLOWANCE_USD: '20' });
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', p2], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_PAYMENTS_URL: paymentsB, LAKE_ALLOWANCE_USD: '20' });
+    const connect = async (port: string, name: string) => {
+      const c = new Client({ name, version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+      return async (tool: string, args: Record<string, unknown> = {}, ok = true) => {
+        const r = await c.callTool({ name: tool, arguments: args });
+        const text = (r.content as { text: string }[])[0]!.text;
+        expect(!!r.isError, text).toBe(!ok);
+        return ok ? JSON.parse(text) : text;
+      };
+    };
+    const grocer = await connect(p1, 'claude-grocer');
+    const strictBuyer = await connect(p1, 'claude-strict-buyer');
+    const shopper = await connect(p2, 'claude-shopper-b');
+    const strictSeller = await connect(p2, 'claude-strict-seller');
+    // A seller that counts only Lake B's receipts: a buyer paying through another payments agent is refused before any money moves.
+    await strictSeller('lake_sell', { action: 'menu', items: [{ sku: 'riddle', label: 'A riddle about lighthouses', price: 1, currency: 'USD' }] });
+    const [strict] = await strictBuyer('lake_search', { q: 'riddle about lighthouses' });
+    const refused = await strictBuyer('lake_buy', { action: 'order', seller_url: strict.url, sku: 'riddle' });
+    expect(await strictBuyer('lake_buy', { action: 'pay', cart: refused.cart }, false)).toMatch(new RegExp(`counts payment for cart \\S+ only through ${paymentsB}/a2a; your allowance is spent through ${payments}/a2a, which it doesn't name, so nothing was paid`));
+    // The grocer counts both: Lake B's shopper pays through Lake B's payments agent, held, and the grocer counts it as paid.
+    await grocer('lake_sell', { action: 'menu', items: [{ sku: 'sonnet', label: 'A sonnet about rivers', price: 3, currency: 'USD' }] });
+    const [found] = await shopper('lake_search', { q: 'sonnet about rivers' });
+    const order = await shopper('lake_buy', { action: 'order', seller_url: found.url, sku: 'sonnet' });
+    const paid = await shopper('lake_buy', { action: 'pay', cart: order.cart });
+    expect(paid).toMatchObject({ paid: 3, cart: order.cart, remaining: 17, hold: { id: expect.any(String) } });
+    const [, receipt] = (await grocer('lake_inbox', { wait_seconds: 5 })).messages;
+    expect(receipt).toMatchObject({ message: { kind: 'receipt' }, checked: { verified: true, settled: false, held: { id: paid.hold.id }, signedBy: 'payments.lake-b.local' } });
+    expect((await grocer('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ cart: order.cart, status: 'paid', payment: 'held' });
+    await grocer('lake_sell', { action: 'deliver', cart: order.cart, content: 'The river keeps no ledger of its stones' });
+    await shopper('lake_inbox', { wait_seconds: 5 });
+    expect(await shopper('lake_buy', { action: 'accept', cart: order.cart })).toMatchObject({ held_payment: 'released to the seller' });
+    // Lake B's payments agent sends the release to the seller's own address.
+    const sale = async (cart: string) => (await grocer('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === cart);
+    for (let i = 0; i < 20 && (await sale(order.cart)).payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
+    expect(await sale(order.cart)).toMatchObject({ status: 'accepted', payment: 'released', money: 'paid, and released to you' });
+    // A dispute goes to the arbiter the cart names. It counts Lake B's receipt as paid because the cart names that payments
+    // agent, and Lake B's payments agent follows its ruling because the cart names that arbiter: both by key, neither by name.
+    const second = await shopper('lake_buy', { action: 'order', seller_url: found.url, sku: 'sonnet' });
+    await shopper('lake_buy', { action: 'pay', cart: second.cart });
+    await grocer('lake_inbox', { wait_seconds: 3 });
+    await grocer('lake_sell', { action: 'deliver', cart: second.cart, content: 'Where water bends, the willow learns to bow' });
+    await shopper('lake_inbox', { wait_seconds: 5 });
+    await shopper('lake_buy', { action: 'dispute', cart: second.cart, reason: 'it never came' });
+    expect(await shopper('lake_buy', { action: 'arbitrate', cart: second.cart })).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, facts: expect.arrayContaining(['paid: USD 3, receipt signed by payments.lake-b.local']), held_payment: 'released to the seller' });
+    for (let i = 0; i < 20 && (await sale(second.cart)).payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
+    expect(await sale(second.cart)).toMatchObject({ payment: 'released' });
+  }, 120_000);
+
   it("a pick-up game: a room says how many it needs, its lobby talks, it notes who leaves, and starts with fewer at its deadline; agents say how long they'll stay, and leaving drops them from search", async () => {
     const port = String(await freePort());
     await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node });

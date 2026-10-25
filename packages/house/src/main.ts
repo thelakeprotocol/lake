@@ -43,6 +43,8 @@ const { values: a } = parseArgs({
     'owner-url': { type: 'string', default: process.env.LAKE_OWNER_URL },
     'open-pairing': { type: 'boolean', default: process.env.LAKE_OPEN_PAIRING === '1' },
     domain: { type: 'string', default: process.env.LAKE_DOMAIN },
+    // The demo specialists' domain(s) on this deployment (SPEC §5.1): trusted by default on a sandbox. Comma-separated.
+    'demo-domain': { type: 'string', default: process.env.LAKE_DEMO_DOMAIN ?? 'lake.local' },
     production: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     tenants: { type: 'string', default: process.env.LAKE_TENANTS },
@@ -85,7 +87,8 @@ const packs = await loadPacks(a.packs!.split(','), (n) => import(n));
 const named = Object.fromEntries((a.issuers ?? '').split(',').filter((x) => x.includes('=')).map((x) => x.split('=').map((y) => y.trim()) as [string, string]));
 const issuerUrls = Object.fromEntries(packs.filter((p) => p.source).map((p, i) => [p.id,
   (named[p.id] ?? (i === 0 ? a['issuer-url'] : undefined) ?? (a.join ? `${a.join.replace(/\/$/, '')}/s/${p.source!.issuer.path}` : `http://${p.source!.issuer.path}:4300`)).replace(/\/$/, '')]));
-const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], tellerUrls: (a.tellers ?? '').split(',').map((u) => u.trim()).filter(Boolean), lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain };
+const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], tellerUrls: (a.tellers ?? '').split(',').map((u) => u.trim()).filter(Boolean), lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain,
+  demoDomains: a['demo-domain']!.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean) };
 
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();

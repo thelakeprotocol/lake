@@ -16,34 +16,13 @@ import { createRooms } from './room.js';
 import { createArbiter } from './arbiter.js';
 import { createLog, type Logger } from './log.js';
 
-const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
-  auditor: { port: '4400', domain: 'audit.lake.local' },
-  ethics: { port: '4500', domain: 'ethics.lake.local' },
-  payments: { port: '4600', domain: 'payments.lake.local' },
-  guide: { port: '4710', domain: 'guide.lake.local' },
-  inspector: { port: '4720', domain: 'inspector.lake.local' },
-  sparring: { port: '4730', domain: 'sparring.lake.local' },
-  quests: { port: '4740', domain: 'quests.lake.local' },
-  tally: { port: '4750', domain: 'tally.lake.local' },
-  person: { port: '4760', domain: 'person.lake.local' },
-  // Two tellers under different names, so studies have a pair. For real, the two are run by different organisations.
-  'teller-a': { port: '4770', domain: 'teller-a.lake.local' },
-  'teller-b': { port: '4780', domain: 'teller-b.lake.local' },
-  rooms: { port: '4790', domain: 'rooms.lake.local' },
-  // Rules on trades from signed evidence (SPEC §6.5).
-  arbiter: { port: '4796', domain: 'arbiter.lake.local' },
-  // The transparency log: receipts and rulings on the record (SPEC §11.8).
-  log: { port: '4798', domain: 'log.lake.local' },
-  // Anonymous passes for blind pledges (Privacy Pass): a separate party from the tally.
-  passes: { port: '4797', domain: 'passes.lake.local' },
-};
-
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     port: { type: 'string' },
     url: { type: 'string' },
     domain: { type: 'string' },
+    'demo-domain': { type: 'string', default: process.env.LAKE_DEMO_DOMAIN ?? 'lake.local' },
     data: { type: 'string', default: '/data' },
     seed: { type: 'string' },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
@@ -58,12 +37,45 @@ const { positionals, values } = parseArgs({
     // The use cases whose demo issuers to run (and whose converters the auditor certifies).
     packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
     // Who settles trades (SPEC §6.5): the arbiters whose rulings the payments agent follows, and the payments agents whose
-    // receipts the arbiter counts as paid. Domains, comma-separated.
-    'trust-arbiters': { type: 'string', default: process.env.LAKE_TRUST_ARBITERS ?? 'arbiter.lake.local' },
-    'trust-payments': { type: 'string', default: process.env.LAKE_TRUST_PAYMENTS ?? 'payments.lake.local' },
+    // receipts the arbiter counts as paid. Domains, comma-separated. Besides these, each trusts the parties a seller named,
+    // by key, in the cart the buyer paid.
+    // Default: the demo arbiter and payments agent of each demo domain.
+    'trust-arbiters': { type: 'string', default: process.env.LAKE_TRUST_ARBITERS },
+    'trust-payments': { type: 'string', default: process.env.LAKE_TRUST_PAYMENTS },
     production: { type: 'boolean', default: false },
   },
 });
+
+// The demo specialists' names: `<agent>.<demo domain>`, the demo domain chosen per deployment (--demo-domain, or
+// LAKE_DEMO_DOMAIN; lake.local by default), so two Lakes on one network don't both claim payments.lake.local. A list
+// (lake-a.localhost,lake-b.localhost) names this deployment's first and trusts the demo specialists of each by default:
+// federated sandboxes that agreed to. Packs' own organisations (an issuer, a register) keep the names their pack gives them.
+const DEMO = values['demo-domain']!.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
+if (!DEMO.length) DEMO.push('lake.local');
+const named = (agent: string) => `${agent}.${DEMO[0]}`;
+const everyDemo = (agent: string) => DEMO.map((d) => `${agent}.${d}`).join(',');
+
+const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
+  auditor: { port: '4400', domain: named('audit') },
+  ethics: { port: '4500', domain: named('ethics') },
+  payments: { port: '4600', domain: named('payments') },
+  guide: { port: '4710', domain: named('guide') },
+  inspector: { port: '4720', domain: named('inspector') },
+  sparring: { port: '4730', domain: named('sparring') },
+  quests: { port: '4740', domain: named('quests') },
+  tally: { port: '4750', domain: named('tally') },
+  person: { port: '4760', domain: named('person') },
+  // Two tellers under different names, so studies have a pair. For real, the two are run by different organisations.
+  'teller-a': { port: '4770', domain: named('teller-a') },
+  'teller-b': { port: '4780', domain: named('teller-b') },
+  rooms: { port: '4790', domain: named('rooms') },
+  // Rules on trades from signed evidence (SPEC §6.5).
+  arbiter: { port: '4796', domain: named('arbiter') },
+  // The transparency log: receipts and rulings on the record (SPEC §11.8).
+  log: { port: '4798', domain: named('log') },
+  // Anonymous passes for blind pledges (Privacy Pass): a separate party from the tally.
+  passes: { port: '4797', domain: named('passes') },
+};
 
 // `lake-specialist all` (or a list: `guide,inspector`) runs several in one process, each under its own
 // path (/issuer, /guide, …): what a small server can afford.
@@ -108,16 +120,16 @@ async function start(k: string, url: string) {
     DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack! })
     : DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
     : k === 'ethics' ? await createEthics(o)
-    : k === 'payments' ? await createPayments({ ...o, log: toLog, dataDir: values.data!, arbiters: domains(values['trust-arbiters']!), onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
+    : k === 'payments' ? await createPayments({ ...o, log: toLog, dataDir: values.data!, arbiters: domains(values['trust-arbiters'] ?? everyDemo('arbiter')), onSettled: (amount, count) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count })) })
     : k === 'guide' ? await createGuide({ ...o, nodeUrl: nodes[0], publicNodeUrl: values['public-node'] })
     : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
     : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })
     : k === 'quests' ? await createQuests({ ...o, nodeUrl: nodes[0] ?? 'http://localhost:7000', dataDir: values.data! })
-    : k === 'tally' ? await createTally({ ...o, dataDir: values.data!, passesUrl: values['passes-url'] ?? (several && kinds.includes('passes') ? `${base}/passes/a2a` : undefined) })
-    : k === 'passes' ? await createPasses({ ...o, dataDir: values.data! })
+    : k === 'tally' ? await createTally({ ...o, dataDir: values.data!, personCheckers: domains(everyDemo('person')), passesUrl: values['passes-url'] ?? (several && kinds.includes('passes') ? `${base}/passes/a2a` : undefined) })
+    : k === 'passes' ? await createPasses({ ...o, dataDir: values.data!, personCheckers: domains(everyDemo('person')) })
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
     : k === 'rooms' ? await createRooms({ ...o, dataDir: values.data! })
-    : k === 'arbiter' ? await createArbiter({ ...o, log: toLog, payments: domains(values['trust-payments']!) })
+    : k === 'arbiter' ? await createArbiter({ ...o, log: toLog, payments: domains(values['trust-payments'] ?? everyDemo('payments')) })
     : k === 'log' ? (logger = await createLog({ ...o, dataDir: values.data!, trust: values['log-trust']?.split(',').map((u) => u.trim()).filter(Boolean) }))
     : k.startsWith('teller-') ? await createTeller({ ...o, dataDir: values.data!, name: `Teller ${k.slice(7).toUpperCase()}` })
     : await createAuditor(o);

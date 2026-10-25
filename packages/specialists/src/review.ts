@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  packId, checkCart, type CartMandate, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
+  packId, checkCart, isParty, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
@@ -158,6 +158,8 @@ export const HOLD_HOURS = { min: 1, max: 168, default: 24 } as const;
 interface Hold {
   id: string; payer: string; payerUrl?: string; payee: string; payeeUrl?: string; amount: number; currency: string; digest: string;
   cart: { id: string; hash: string }; until: number; status: 'held' | 'captured' | 'voided'; disputed?: boolean; settledAt?: number;
+  /** The arbiters the seller named in the cart (pinned by key): the buyer paid those terms, so their rulings count here. */
+  arbiters?: CartParty[];
 }
 
 /**
@@ -253,6 +255,11 @@ export async function createPayments(o: SpecialistOptions & {
         cart = { ...(await checkCart(c.mandate as CartMandate, seller.publicJwk)), webId: seller.webId };
         if (cart.seller !== seller.webId) throw new Error('the cart was signed for another seller');
         if (cart.buyer !== agentWebId) throw new Error('the cart was made out to another buyer');
+        // The seller says whose receipts it counts as paid. Money held here for a cart whose seller doesn't count this
+        // agent's receipts would sit on a cart the seller sees as unpaid (two Lakes' check found exactly that): refused first.
+        if (cart.payments.length && !(await isParty({ webId: s.webId, publicJwk: o.id.publicJwk }, cart.payments))) {
+          throw new Error(`the seller takes payment for cart ${cart.id} only through ${cart.payments.map((x) => x.url).join(', ')}, not through this payments agent (${s.webId}): nothing was paid`);
+        }
       } catch (e) {
         return { kind: 'refused', problems: [(e as Error).message] };
       }
@@ -294,7 +301,7 @@ export async function createPayments(o: SpecialistOptions & {
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
         const settlementId = randomUUID();
         // Where both sides are reached when it settles: the seller's card came with the cart, the buyer's with this message.
-        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held' });
+        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held', ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}) });
         return {
           payee: c.payee,
           credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash } } : {}), intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
@@ -341,12 +348,12 @@ export async function createPayments(o: SpecialistOptions & {
       await save();
       return { kind: 'disputed', hold: h.id, note: 'held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules' } as never;
     }
-    // A ruling, from an arbiter this payments agent trusts, about this very cart: delivered and acknowledged releases it;
-    // not delivered voids it; anything else leaves it held.
+    // A ruling, from an arbiter this payments agent trusts or one the seller named in the cart the buyer paid (that very
+    // key), about this very cart: delivered and acknowledged releases it; not delivered voids it; anything else leaves it held.
     const r = p.ruling as { credential?: string; card?: AgentCard } | undefined;
     try {
       const signer = await verifyLakeCard(r?.card as AgentCard);
-      if (!arbiters.includes(signer.ownerDomain)) throw new Error(`${signer.ownerDomain} is not an arbiter this payments agent trusts`);
+      if (!arbiters.includes(signer.ownerDomain) && !(await isParty(signer, h.arbiters))) throw new Error(`${signer.ownerDomain} (${signer.webId}) is neither an arbiter this payments agent trusts nor one the cart names`);
       const vc = await verifyCredential(String(r?.credential ?? ''), signer.publicJwk);
       const sub = vc.credentialSubject as unknown as { cart?: { hash: string }; paid?: boolean; delivered?: { acknowledged?: boolean } | null };
       if (!vc.type.includes('LakeRuling') || sub.cart?.hash !== h.cart.hash) throw new Error('not a ruling on this cart');
