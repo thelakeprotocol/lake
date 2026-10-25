@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  accessGrantDraft, agreementFor, aggregateReports, buildCard, discloseTable, questionId, unshardCounts, collectiveCounter, generateIdentity, issueCredential, digestSRI, makeEvent, newVerifyKey, prepareReport, settleReport, shardAnswer, signAgreement, signCard,
+  accessGrantDraft, agreementFor, aggregateReports, buildCard, collectiveCounter, generateIdentity, issueCredential, digestSRI, makeEvent, newVerifyKey, prepareReport, settleReport, shardAnswer, signAgreement, signCard,
   sealLake, signIntentMandate, signMessage, signPaymentMandate, statusEntry, statusListCredential, studyId,
 } from '../packages/core/dist/index.js';
 
@@ -79,28 +79,22 @@ write('status-list.json', { credential: statusList, decoded: decode(statusList) 
 
 const countersignature = await signAgreement(agreement, visitor.id);
 const count = 'run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13';
-write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, length: 8, min: 20, deadline: new Date(Date.now() + 36e5).toISOString(), helper: { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' }, about: { study: sid, question: questionId(study) } }), 'Before any house answers, the visitor opens one count at the Leader teller, naming the Helper and what it counts (every report repeats it, and the tellers remember it, so anyone can find earlier runs); the Leader sets it up with the Helper and a key only the two of them hold (IETF DAP; SPEC §11.5).');
+write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, length: 8, min: 20, deadline: new Date(Date.now() + 36e5).toISOString(), helper: { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' } }), 'Before any house answers, the visitor opens one count at the Leader teller, naming the Helper; the Leader sets it up with the Helper and a key only the two of them hold (IETF DAP; SPEC §11.5).');
 write('5-compute.json', await envelope(visitor, { kind: 'compute', grant, study, countersignature, count }), 'Step 5. The visitor countersigns the agreement and asks the house to run the study inside its pod, naming the count.');
 // The house's true answer (over 60, on drug X, not readmitted: cell 0b011) as one Prio3 report: two shares and a proof.
 const report = await shardAnswer(8, 0b011);
-write('count-report.json', await envelope(house, { kind: 'count.report', id: count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[0], study: sid, question: questionId(study) }), 'Step 6a. What the Leader gets from the house: one share of its answer and the public part of its proof. The Helper gets the other share. Neither share says anything on its own.');
+write('count-report.json', await envelope(house, { kind: 'count.report', id: count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[0] }), 'Step 6a. What the Leader gets from the house: one share of its answer and the public part of its proof. The Helper gets the other share. Neither share says anything on its own.');
 write('6-counted.json', await envelope(house, { kind: 'counted', study: sid, count, tellers: ['teller-a.example', 'teller-b.example'] }), 'Step 6. The house tells the visitor it sent its two shares. Nothing about its owner is in this message.');
 // Two more houses, so the aggregate below is a real (tiny) table; the tellers check each proof together, then aggregate.
 const key = newVerifyKey(8);
 const reports = [report, await shardAnswer(8, 0b111), await shardAnswer(8, 0b011)];
 const leaderPrepared = [];
-const helperPrepared = [];
 for (const r of reports) {
   const a = await prepareReport(8, key, 0, { ...r, share: r.shares[0] });
   const b = await prepareReport(8, key, 1, { ...r, share: r.shares[1] });
-  const message = await settleReport(8, [a.share, b.share]);
-  leaderPrepared.push({ state: a.state, message });
-  helperPrepared.push({ state: b.state, message });
+  leaderPrepared.push({ state: a.state, message: await settleReport(8, [a.share, b.share]) });
 }
-// The tellers swap aggregate shares, add them up, and each signs the table the threshold rule lets out (here k = 3).
-// The exact table has groups of 2 and 1, so it is collapsed: without "readmitted", all three are over 60 and on drug X.
-const released = discloseTable(unshardCounts(8, [aggregateReports(8, leaderPrepared), aggregateReports(8, helperPrepared)], 3), 3);
-write('count-table.json', await envelope(tellerA, { kind: 'count.table', id: count, count: 3, rejected: 0, minCell: 3, kept: released.kept, cells: released.cells }), "After both tellers have checked every answer's proof, they swap aggregate shares, add them up, and each signs the table the threshold rule lets out: no group of 1 to k-1 (here k = 3), questions dropped from the first until none is. Here the exact table had groups of 2 and 1, so the published one keeps only the first two questions. The Helper's copy, sent with count.collect, must be the same table.");
+write('count-share.json', await envelope(tellerA, { kind: 'count.share', id: count, count: 3, rejected: 0, share: aggregateReports(8, leaderPrepared) }), "Each teller publishes one aggregate share, once, after both have checked every answer's proof. The Leader's share alone says nothing; added to the Helper's it gives the exact table.");
 
 const intent = await signIntentMandate(human.id, human.webId, { id: visitor.webId, natural_language_description: study.question, study: sid, budget: { currency: 'USD', amount: 5000 }, intent_expiry: new Date(Date.now() + 7 * 864e5).toISOString(), user_cart_confirmation_required: false });
 write('intent-mandate.json', { credential: intent, card: human.card, decoded: decode(intent) }, 'AP2 Intent Mandate, signed by a human at the visitor\'s organisation: this study, $5,000 at most.');

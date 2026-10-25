@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  agreementDigest, b64, buildCard, canonicalize, cardUrlFor, cellCount, cellLabels, fieldSpec, collectiveCounter, leafHash, makeEvent, questionId, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  buildCard, cardUrlFor, cellCount, cellLabels, unshardCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
   pickTellers, type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type TellerRef, type Study,
 } from '@thelakeprotocol/core';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -56,24 +56,17 @@ export interface StudyRun {
   bloc: { members: number; priceUsd: number; fields: string[] } | null;
   participants: number;
   excluded: { house: string; why: string }[];
-  /**
-   * The table the two tellers published, signed by both: exact counts, every cell 0 or at least `table.minCell` (the
-   * threshold rule), over the questions in `table.kept`. Empty when no table could be published.
-   */
+  /** The exact table, from the two tellers' sums; empty when too few houses answered to publish one. */
   cells: { label: string; count: number }[];
-  /** How the published table was made: its minimum cell, the questions kept and dropped, or why there is none. */
-  table: { minCell: number; kept: string[]; dropped: string[]; withheld?: string } | null;
   answer: { onX: { rate: number; n: number }; notOnX: { rate: number; n: number }; summary: string; reliable: boolean };
   paid: { total: number; houses: number; receiptsFiled: number; refused?: string; notFiled?: string[] } | null;
   seconds: number;
   /** The keys this agent was given, by house. Its own to keep until they expire or are revoked. */
   grants: { house: string; url: string; grant: string }[];
   /**
-   * Everything signed that this study rests on (run 22 asked for it): the ethics approval and audit certificate, the
-   * human's mandate, each house's countersigned agreement, the table as each teller signed it, and the payments agent's
-   * receipts. Each checks on its own; none needs this agent's word. This is the researcher's own record, and it names
-   * every house that took part (an agreement names its assigner, a receipt its payee): to show it to others, use
-   * shareableEvidence, which by default doesn't.
+   * Everything signed that this study rests on, to show anyone (run 22 asked for it): the ethics approval and audit
+   * certificate, the human's mandate, each house's countersigned agreement, both tellers' signed shares (their sum is
+   * the table), and the payments agent's receipts. Each checks on its own; none needs this agent's word.
    */
   evidence: {
     ethics: Attachment; audit: Attachment; mandate?: Attachment;
@@ -243,11 +236,10 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   const [leader, helper] = tellers as [TellerRef, TellerRef];
   const count = `run-${randomUUID()}`;
   if (affordable.length) {
-    // The count says what it counts (the houses repeat it in their reports), so anyone can later find earlier runs of it.
-    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, about: { study: id, question: questionId(study) }, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) });
+    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) });
     if (from.ownerDomain !== leader.domain) throw new Error(`the teller at ${leader.domain} answered as ${from.ownerDomain}`);
     if (reply.kind !== 'count.opened') throw new Error(`${leader.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
-    log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof; the table they publish shows no group smaller than ${reply.minCell ?? '?'}`);
+    log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof`);
   }
   const answered: (Joined & { webId: string })[] = [];
   await pool(affordable, o.concurrency ?? 32, async (j) => {
@@ -308,9 +300,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   // `took` is how many houses answered; `n` is how many the published table comes from (0 when too few to publish).
   let n = 0, took = 0;
   const tellerSigned: StudyRun['evidence']['tellers'] = {};
-  // The published table: its cells over the questions it kept (by index into the study's), or none.
-  let published: { cells: number[]; kept: number[]; minCell: number } | null = null;
-  let table: StudyRun['table'] = null;
+  let cells = Array<number>(cellCount(study)).fill(0);
   let tooFew = walkedAway;
   if (answered.length) {
     const reported = new Set(((await askPatiently(leader.url, o.visitor, { kind: 'count.members', id: count })).reply.members as string[] | undefined) ?? []);
@@ -318,50 +308,33 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
     took = members.length;
     if (members.length < study.privacy.min) tooFew = `${members.length} answered, and no table is published from fewer than ${study.privacy.min} houses`;
     else {
-      // The Leader and Helper check every answer's proof together, add up their aggregate shares between them, and each
-      // signs the table the threshold rule lets out. The two must be the same table.
+      // The Leader and Helper check every answer's proof together and each publish one aggregate share; added, the table.
       const leadAsk = await askPatiently(leader.url, o.visitor, { kind: 'count.close', id: count, members });
       const lead = leadAsk.reply;
       tellerSigned.leader = leadAsk.signed;
-      const helpAsk = lead.kind === 'count.table' ? await askPatiently(helper.url, o.visitor, { kind: 'count.collect', id: count }) : null;
+      const helpAsk = lead.kind === 'count.share' ? await askPatiently(helper.url, o.visitor, { kind: 'count.collect', id: count }) : null;
       const help = helpAsk?.reply ?? lead;
       if (helpAsk) tellerSigned.helper = helpAsk.signed;
-      const same = (x: Record<string, any>) => canonicalize({ count: x.count, minCell: x.minCell, kept: x.kept, cells: x.cells });
-      if (lead.kind !== 'count.table' || help.kind !== 'count.table') tooFew = `the tellers would not publish: ${((lead.kind !== 'count.table' ? lead : help).problems ?? ['no table']).join('; ')}`;
-      else if (same(lead) !== same(help)) tooFew = `the two tellers signed different tables, so neither is published here (both signed copies are in the evidence)`;
+      if (lead.kind !== 'count.share' || help.kind !== 'count.share') tooFew = `the tellers would not publish: ${((lead.kind !== 'count.share' ? lead : help).problems ?? ['no share']).join('; ')}`;
       else {
+        cells = unshardCounts(cellCount(study), [lead.share, help.share], lead.count);
         n = lead.count;
-        const kept = lead.kept as number[];
-        table = { minCell: lead.minCell, kept: kept.map((i) => study.predicates[i]!.name), dropped: study.predicates.filter((_, i) => !kept.includes(i)).map((p) => p.name), ...(lead.withheld ? { withheld: String(lead.withheld) } : {}) };
-        if (lead.cells) published = { cells: lead.cells as number[], kept, minCell: lead.minCell };
         if (lead.rejected) log('count', `${lead.rejected} answer(s) failed their proof and were left out`);
-        if (!published) log('count', `no table: ${lead.withheld}`);
-        else if (table.dropped.length) log('count', `the full table had a group of 1 to ${lead.minCell - 1}, so the tellers published it without ${table.dropped.map((d) => `"${d}"`).join(', ')}`);
       }
     }
   }
-  // Bits: 0 the group (over 60), 1 the exposure (on drug X), 2 the outcome (readmitted). The published table may have
-  // dropped some: a dropped group is everyone; a dropped exposure or outcome leaves nothing to compare.
+  // Bits: 0 the group (over 60), 1 the exposure (on drug X), 2 the outcome (readmitted).
   const [group, exposure, outcome] = study.predicates.map((p) => p.name);
-  // The published cells where each named question has the given answer (questions the table dropped are summed over).
-  const sum = (want: Record<number, 0 | 1>) => !published ? 0 : published.cells.reduce((acc, c, i) => acc + (Object.entries(want).every(([bit, v]) => { const at = published!.kept.indexOf(Number(bit)); return at < 0 || ((i >> at) & 1) === v; }) ? c : 0), 0);
   // With teller noise a small cell can come out below zero: count it as zero for the rates.
   const rate = (readmRaw: number, notRaw: number) => { const readm = Math.max(0, readmRaw), not = Math.max(0, notRaw); return { rate: readm + not > 0 ? readm / (readm + not) : 0, n: Math.round(readm + not) }; };
-  const g = (exposed: 0 | 1, out: 0 | 1) => sum({ 0: 1, 1: exposed, 2: out });
-  const answerable = !!published && published.kept.includes(1) && published.kept.includes(2);
-  const onX = answerable ? rate(g(1, 1), g(1, 0)) : { rate: 0, n: 0 };
-  const notOnX = answerable ? rate(g(0, 1), g(0, 0)) : { rate: 0, n: 0 };
+  const onX = rate(cells[0b111]!, cells[0b011]!);
+  const notOnX = rate(cells[0b101]!, cells[0b001]!);
   // Exact counts: a table from a handful of houses is true, just small.
   const reliable = n >= 50;
   const pct = (x: number) => `${Math.round(x * 100)}%`;
-  const who = published && !published.kept.includes(0) ? `everyone (not only ${group}, which the tellers left out)` : group;
-  // Nobody took part, or nothing could be published: say so, rather than print a rate made of nothing.
-  const summary = n === 0
-    ? (tooFew ? `No table: ${tooFew}.` : 'No answer: no house took part.')
-    : !published ? `No table: ${n} houses answered, and ${table?.withheld}. Nothing smaller than a group of ${table?.minCell} is ever published.`
-    : !answerable ? `The tellers could publish only a table without ${table!.dropped.map((d) => `"${d}"`).join(' and ')} (${n} houses; no group of 1 to ${published.minCell - 1} is shown), so it can't compare ${exposure} with not.`
-    : `${who}, ${exposure}: ${pct(onX.rate)} ${outcome} (${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (${notOnX.n})`;
-  log('answer', n === 0 || !published ? summary : `${summary}. Exact counts from ${n} houses${reliable ? '' : '; a small sample, so read it with care'}`);
+  // Nobody took part: say so, rather than print a rate made of nothing.
+  const summary = n === 0 ? (tooFew ? `No table: ${tooFew}.` : 'No answer: no house took part.') : `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (${notOnX.n})`;
+  log('answer', n === 0 ? summary : `${summary}. Exact counts from ${n} houses${reliable ? '' : '; a small sample, so read it with care'}`);
   // Houses batch their reports for ~150 ms; let theirs land first so the log reads in order.
   await new Promise((r) => setTimeout(r, 400));
   report('study.result', { participants: took, summary });
@@ -369,8 +342,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
 
   return {
     study: id, question: study.question, houses: houses.length, decisions, bloc, participants: took, excluded,
-    cells: published ? cellLabels({ ...study, predicates: published.kept.map((i) => study.predicates[i]!) }).map((label, i) => ({ label, count: published!.cells[i]! })) : [],
-    table,
+    cells: n ? cellLabels(study).map((label, i) => ({ label, count: cells[i]! })) : [],
     answer: { onX, notOnX, summary, reliable }, paid,
     seconds: Math.round((Date.now() - t0) / 100) / 10,
     grants: [...joined.values()].map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
@@ -382,143 +354,8 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   };
 }
 
-/** What a study would meet, found out for free before anything is signed or paid (run 31 asked for it). */
-export interface Preflight {
-  preflight: true;
-  study: string;
-  question: string;
-  questionId: string;
-  houses: number;
-  /** How the houses' standing rules answer the offer, as a preview: nothing signed, filed or issued. */
-  would: Record<string, number>;
-  bloc: { members: number; priceUsd: number; fields: string[] } | null;
-  /** What a run at this price and budget would most likely come to (owners asked to tap Allow not counted). */
-  expected: { houses: number; priceUsd: number; costUsd: number; mayAlsoAsk: number; note: string };
-  /** The table it could publish: how many cells, the smallest group a cell may show, the fewest houses. */
-  table: { cells: number; minCell: number; min: number; warning?: string };
-  /** Earlier counts of this study or this question, as the Lake's tellers remember them (90 days). */
-  earlier: { at: string; houses: number; same: 'study' | 'question'; tellers: string[] }[];
-  free: string;
-}
-
-/**
- * A pre-flight: the same ethics review and audit as a run (both free), then a preview of the offer at every house, which
- * each answers by its owner's standing rules without signing, filing or issuing anything (SPEC §5.4), and the tellers'
- * history of this question. No mandate is signed, no agreement or key exists afterwards, and no house reads its record.
- */
-export async function preflight(o: Omit<DispatchOptions, 'money'> & { budgetUsd?: number }): Promise<Preflight> {
-  const log = o.log ?? (() => {});
-  const study: Study = o.study.privacy.tellers?.length ? o.study : { ...o.study, privacy: { ...o.study.privacy, tellers: await findTellers(o, log) } };
-  const id = studyId(study);
-  const qid = questionId(study);
-  const fields = [...studyFields(study), ...(o.extraFields ?? [])];
-  const budget = o.budgetUsd ?? 0;
-  const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study, purpose: 'research', fields: studyFields(study), retention: 'none' } });
-  if (ethics.reply.kind !== 'approved') throw new Error(`ethics refused: ${(ethics.reply.problems ?? []).join('; ')}`);
-  const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study });
-  if (audit.reply.kind !== 'certified') throw new Error(`auditor refused: ${(audit.reply.problems ?? []).join('; ')}`);
-  const attachments = { ethics: { credential: ethics.reply.credential, card: await cardOf(o.ethics) }, audit: { credential: audit.reply.credential, card: await cardOf(o.auditor) } };
-  log('preflight', 'ethics and audit agree; previewing the offer at every house (nothing is signed or issued)');
-
-  const houses = await discover(o, log);
-  const offer: Offer = { id: randomUUID(), requester: o.visitor.domain, purpose: 'research', fields, retention: 'none', priceUsd: o.priceUsd, study: id, credentials: { ethicsApproved: true, sponsorVerified: true, auditCertified: true } };
-  const would: Record<string, number> = {};
-  const counters: { fields: string[]; priceUsd: number }[] = [];
-  await pool(houses, o.concurrency ?? 32, async (h) => {
-    try {
-      // A preview, never an offer: a house that doesn't know the word refuses it rather than taking it as one.
-      const { reply } = await ask(h.url, o.visitor, { kind: 'preview', offer, study, attachments });
-      const d = reply.kind === 'preview' ? String(reply.decision) : reply.code === 'too-many' ? 'limited' : 'no preview';
-      would[d] = (would[d] ?? 0) + 1;
-      if (d === 'counter' && reply.counter && reply.bloc) counters.push(reply.counter);
-    } catch {
-      would.unreachable = (would.unreachable ?? 0) + 1;
-    }
-  });
-
-  // The same arithmetic a run does: the bloc's terms if the study can take them and the budget pays them, else the offer's.
-  const b = collectiveCounter(counters);
-  const joins = would.join ?? 0;
-  let houses_ = joins, price = o.priceUsd, note = '';
-  if (b) {
-    const missing = studyFields(study).filter((f) => !b.fields.includes(f));
-    if (missing.length) note = `the bloc refuses ${missing.join(', ')}, which the study needs, so only those who join at your price take part`;
-    else if (b.priceUsd * (joins + b.members) > budget) note = `the bloc asks $${b.priceUsd} a house ($${b.priceUsd * (joins + b.members)} in all), over the $${budget} budget, so only those who join at your price take part`;
-    else { houses_ = joins + b.members; price = b.priceUsd; note = `${b.members} house(s) counter as a bloc at $${b.priceUsd}; everyone who joins gets those terms`; }
-  }
-  if (price > 0 && houses_ * price > budget) { houses_ = Math.floor(budget / price); note = `${note ? `${note}; ` : ''}the $${budget} budget pays for ${houses_} at $${price}`; }
-
-  // What the tellers would publish, and whether this question has been counted before. Every teller on the Lake is asked.
-  const tellers = [...new Map([...study.privacy.tellers, ...(await allTellers(o))].map((t) => [t.url, t])).values()];
-  const runs = new Map<string, Preflight['earlier'][number]>();
-  let minCell = 0;
-  await pool(tellers, 8, async (t) => {
-    try {
-      const { reply } = await ask(t.url, o.visitor, { kind: 'count.history', study: id, question: qid });
-      if (reply.kind !== 'count.history') return;
-      if (study.privacy.tellers.some((s) => s.url === t.url)) minCell = Math.max(minCell, Number(reply.minCell) || 0);
-      for (const r of reply.runs as { id: string; at: string; count: number; study?: string; leader: string; helper: string }[]) runs.set(r.id, { at: r.at, houses: r.count, same: r.study === id ? 'study' : 'question', tellers: [r.leader, r.helper] });
-    } catch {
-      // a teller that doesn't answer has nothing to say here
-    }
-  });
-  const cells = cellCount(study);
-  const min = study.privacy.min;
-  const warning = houses_ < min
-    ? `${houses_} house(s) would take part, and no table is published from fewer than ${min}: a run would walk away before signing anything`
-    : minCell && houses_ < minCell * cells
-      ? `a table of ${cells} cells from about ${houses_} houses: the tellers publish no group of 1 to ${minCell - 1}, so expect questions to be dropped from the table (from the first: ${study.predicates.map((p) => `"${p.name}"`).join(', ')}) or no table at all; about ${minCell * cells} houses give the full table a fair chance`
-      : undefined;
-  const earlier = [...runs.values()].sort((x, y) => y.at.localeCompare(x.at));
-  log('preflight', `${houses.length} houses: ${Object.entries(would).map(([k, n]) => `${n} ${k}`).join(' · ')}; about ${houses_} at $${price}${earlier.length ? `; counted ${earlier.length} time(s) before` : ''}`);
-  return {
-    preflight: true, study: id, question: study.question, questionId: qid, houses: houses.length, would, bloc: b ? { members: b.members, priceUsd: b.priceUsd, fields: b.fields } : null,
-    expected: { houses: houses_, priceUsd: price, costUsd: houses_ * price, mayAlsoAsk: would.ask ?? 0, note: note || (houses_ ? `${houses_} join at $${price}` : 'nobody would join at this price') },
-    table: { cells, minCell, min, ...(warning ? { warning } : {}) },
-    earlier,
-    free: 'a preview: nothing was signed, no key or agreement was issued, no owner was asked, and no house read its records',
-  };
-}
-
-/**
- * The evidence of a study run, to show anyone. By default it names no house: each agreement appears only as its digest
- * (a commitment: the agreement shown later to someone entitled to see it checks against the digest), and each receipt
- * only as its leaf hash and place on the transparency log, which proves it was logged without saying to whom it was paid
- * (the log answers `log.find { leaf_hash }` with a proof, not the entry). The table, signed by both tellers, the ethics
- * approval, the audit certificate and the mandate name no house. With `nameHouses`, the agreements and receipts
- * themselves: each names its house (assigner, payee).
- */
-export type ShareableEvidence = Pick<StudyRun['evidence'], 'ethics' | 'audit' | 'mandate' | 'tellers'> & (
-  | { names_houses: true; agreements: SignedAgreement[]; receipts: StudyRun['evidence']['receipts'] }
-  | { names_houses: false; agreements: { count: number; digests: string[] }; receipts: { count: number; logged: { leaf_hash: string; index: number; origin: string }[]; card?: AgentCard } }
-);
-export function shareableEvidence(e: StudyRun['evidence'], o: { nameHouses?: boolean } = {}): ShareableEvidence {
-  const base = { ethics: e.ethics, audit: e.audit, ...(e.mandate ? { mandate: e.mandate } : {}), tellers: e.tellers };
-  if (o.nameHouses) return { ...base, agreements: e.agreements.map((a) => a.agreement), receipts: e.receipts, names_houses: true as const };
-  return {
-    ...base,
-    agreements: { count: e.agreements.length, digests: e.agreements.map((a) => agreementDigest(a.agreement.agreement)).sort() },
-    receipts: { count: e.receipts.length, logged: e.receipts.filter((r) => r.logged).map((r) => ({ leaf_hash: b64(leafHash(r.credential)), ...r.logged! })).sort((x, y) => x.index - y.index), card: e.receipts[0]?.card },
-    names_houses: false as const,
-  };
-}
-
-/** Every teller the Lake's nodes list (their cards say skill `teller`), to ask for history. */
-async function allTellers(o: Pick<DispatchOptions, 'node'>): Promise<TellerRef[]> {
-  const nodes = (Array.isArray(o.node) ? o.node : o.node.split(',')).map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
-  for (const node of nodes) {
-    try {
-      const found = (await (await fetch(`${node}/cards?skill=teller`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
-      return found.map((f) => ({ url: f.card.supportedInterfaces[0]!.url, domain: String((f.card.capabilities?.extensions?.[0]?.params as { ownerDomain?: string } | undefined)?.ownerDomain ?? '') }));
-    } catch {
-      // try the next node
-    }
-  }
-  return [];
-}
-
 /** Two tellers from the Lake, run under different names: what a study needs before anyone approves it. */
-async function findTellers(o: Pick<DispatchOptions, 'node' | 'houseCache'>, log: (step: string, detail: string) => void): Promise<TellerRef[]> {
+async function findTellers(o: DispatchOptions, log: (step: string, detail: string) => void): Promise<TellerRef[]> {
   const nodes = (Array.isArray(o.node) ? o.node : o.node.split(',')).map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
   for (const node of nodes) {
     try {
@@ -545,7 +382,7 @@ async function findTellers(o: Pick<DispatchOptions, 'node' | 'houseCache'>, log:
 }
 
 /** Ask each node in turn; fall back to the houses remembered last time. Nodes are search indexes, not gatekeepers. */
-async function discover(o: Pick<DispatchOptions, 'node' | 'houseCache' | 'study'>, log: (step: string, detail: string) => void): Promise<House[]> {
+async function discover(o: DispatchOptions, log: (step: string, detail: string) => void): Promise<House[]> {
   const nodes = (Array.isArray(o.node) ? o.node : o.node.split(',')).map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
   // Houses advertise one skill per pack they take part in (`health-study`): look for the pack this study reads.
   const pack = studyFields(o.study).map((f) => fieldSpec(f)?.pack.id).find(Boolean);

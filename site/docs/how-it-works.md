@@ -50,7 +50,7 @@ Each joining house signs the final **ODRL Agreement** and stores it in `/agreeme
 
 The study is a declaration, not code: a few yes/no questions about canonical fields. It runs **inside each house**. Before answering, the house re-verifies its chain: a trusted issuer signed the original, the original is unchanged, a trusted auditor certified the converter, the converted record is the housekeeper's signed copy. A tampered house drops out.
 
-Then it reads only the granted fields through its pod's MCP door and works out, truthfully, which cell of the table its owner falls in. That answer leaves only as **two shares with a proof**, one to each of the study's two **tellers** (run by different parties), as in the IETF Distributed Aggregation Protocol with Prio3. Each share on its own says nothing; the proof shows it is one cell and nothing else. The tellers check every proof together and drop invalid answers. Nobody sees a single house's answer, and no house blurs its own. Every computation goes in the house's audit log with `recordsOut: 0`.
+Then it reads only the granted fields through its pod's MCP door and works out, truthfully, which cell of the table its owner falls in. That answer leaves only as **two shares with a proof**, one to each of the study's two **tellers** (run by different parties), as in the IETF Distributed Aggregation Protocol with Prio3. Each share on its own says nothing; the proof shows it is one cell and nothing else. The tellers check every proof together, drop invalid answers, and each publishes one aggregate share, once; the two together are the exact table. Nobody sees a single house's answer, and nothing is blurred. Every computation goes in the house's audit log with `recordsOut: 0`.
 
 ## 9. Pay
 
@@ -58,10 +58,6 @@ The **Payments** agent verifies the mandate chain and settles $5 with each parti
 
 ## 10. Answer
 
-The agent closes the count at the Leader teller. The two tellers swap their aggregate shares, add up the table between them, and each signs the table the **threshold rule** lets out, as statistics offices publish frequency tables: exact counts, but no group of 1 to k-1 (k is 3 on the sandbox). A table with a smaller group is redesigned, not blanked: questions are dropped from the first until every cell is 0 or at least k, or there is no table. The agent gets the same signed table from both tellers and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The price of this: the tellers see the exact table (never one answer), and the researcher doesn't.
-
-Before paying, the agent can run a free **pre-flight**: the same ethics review and audit, then a *preview* of the offer at every house, which each answers by its owner's standing rules without signing, filing or issuing anything. It says how many would join, the bloc's price, what the run would cost, whether the tellers have counted this question before, and what table to expect from that many houses.
-
-The study's evidence (approvals, the tellers' signed table, agreements, receipts) is the researcher's to show; by default the shareable bundle names no house: agreements appear as digests, receipts as their place on the transparency log. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
+The agent closes the count at the Leader teller, collects both aggregate shares, adds them into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
 
 Grants expire after 48 hours, or the moment an owner revokes them.

@@ -31,7 +31,7 @@
           ],
           "publicJwk": {
             "crv": "Ed25519",
-            "x": "Q8RZ-HXdaY6D1j2uWQKykCkcLUuTzeCFRQZ_AGjhpwE",
+            "x": "xGcmtMbKJJBG6WOTJ2hb2v-_VOd9Lzu5gz-yUbtUUXA",
             "kty": "OKP",
             "kid": "house-pods.example",
             "alg": "EdDSA"
@@ -64,7 +64,7 @@
   "signatures": [
     {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-      "signature": "iZUdceTP_QWVGTFXX_Quo25TFzlv4Jd-kSyQg1y5Wo0iibe26sIvaSTpboP2G7mHFKjMMXyPUOZLHvih88H1BQ"
+      "signature": "sGjjdJHmo8fbfBAK3bWyFu-Frsgs9T71X26r12cJUYix8v2P6qNBVv-zJjm-2PIx2FdeLlQxVBUzuv7rumVyAQ"
     }
   ]
 }

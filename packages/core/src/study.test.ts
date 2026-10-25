@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addNoise, discloseTable, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, questionId, studyId, toWire, unshardCounts, type Study } from './index.js';
+import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -126,50 +126,5 @@ describe('trusted attachments', () => {
     expect(await checkAttachment({ credential, card: ox.card }, { ...o, trusted: ['ethics.ox.example'], subject: 'urn:other' })).toMatchObject({ ok: false });
     const fake = await ethicsAgent('ethics.ox.example');
     expect(await checkAttachment({ credential, card: fake.card }, { ...o, trusted: ['ethics.ox.example'] })).toMatchObject({ ok: false });
-  });
-});
-
-describe('what a count may publish (the threshold rule, with table redesign)', () => {
-  it('publishes a table whose every cell is 0 or at least k, as it is', () => {
-    expect(discloseTable([5, 0, 3, 9, 0, 4, 3, 7], 3)).toEqual({ cells: [5, 0, 3, 9, 0, 4, 3, 7], kept: [0, 1, 2] });
-  });
-
-  it('collapses a table with a small group, dropping the first question first, and never shows 1 to k-1', () => {
-    // Cell 0b001 (question 0 yes, 1 and 2 no) holds one answer: without question 0, cells 0b000 and 0b001 merge.
-    const t = discloseTable([4, 1, 3, 5, 3, 6, 4, 3], 3)!;
-    expect(t).toEqual({ cells: [5, 8, 9, 7], kept: [1, 2] });
-    // Nothing is lost from the total: a collapsed table still counts everyone.
-    expect(t.cells.reduce((a, b) => a + b, 0)).toBe(29);
-  });
-
-  it('collapses as far as it must, and publishes no table when nothing passes', () => {
-    // Eight houses, one per cell (run 31's table): only the last question alone shows groups of 3 or more.
-    expect(discloseTable([1, 1, 1, 1, 1, 1, 1, 1], 3)).toEqual({ cells: [4, 4], kept: [2] });
-    expect(discloseTable([1, 1, 0, 0, 0, 0, 0, 0], 3)).toBeNull();
-  });
-
-  it('holds for any table: what comes out has no cell of 1 to k-1, and the same total', () => {
-    const rand = seeded(7);
-    for (let n = 0; n < 500; n++) {
-      const k = 3 + Math.floor(rand() * 8);
-      const cells = Array.from({ length: 2 ** (1 + Math.floor(rand() * 4)) }, () => (rand() < 0.4 ? 0 : Math.floor(rand() * 3 * k)));
-      const t = discloseTable(cells, k);
-      if (!t) continue;
-      expect(t.cells.every((c) => c === 0 || c >= k)).toBe(true);
-      expect(t.cells.reduce((a, b) => a + b, 0)).toBe(cells.reduce((a, b) => a + b, 0));
-      expect(t.cells).toHaveLength(2 ** t.kept.length);
-    }
-  });
-
-  it('a count of options (a vote) is all or nothing; noise at or below zero is an empty cell', () => {
-    expect(discloseTable([4, 0, 7], 3)).toEqual({ cells: [4, 0, 7], kept: [] });
-    expect(discloseTable([4, 2, 7], 3)).toBeNull();
-    expect(discloseTable([5, -1, 4, 3], 3)).toEqual({ cells: [5, -1, 4, 3], kept: [0, 1] });
-  });
-
-  it('a question id is the same whoever counts it', () => {
-    const other = { ...study, privacy: { ...study.privacy, min: 40, tellers: [...study.privacy.tellers].reverse() } };
-    expect(studyId(other)).not.toBe(studyId(study));
-    expect(questionId(other)).toBe(questionId(study));
   });
 });

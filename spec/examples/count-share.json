@@ -34,7 +34,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "euM2uvnkLNApZW6Qi2ERMiXHlX9t6q4p4RAe01RCHWQ",
+              "x": "5ctDTnDRm2NYGdn9vHI4z2_QfT1Q_c4nrdRek-7vxsA",
               "kty": "OKP",
               "kid": "specialist-teller-a.example",
               "alg": "EdDSA"
@@ -56,35 +56,50 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtdGVsbGVyLWEuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "6CZiTs_yzXsbtZVEnMc3L6iIPqF6JpSXuscIklC1BhJcw0WyvJpodEqRg0xXl1Hgae2dUmFTszdAU7kTAhGSCA"
+        "signature": "5MDjjYgi5Y3vIcxOaEsvhQRAvsliNuD4mi-Uo0vwQCgQjTB-eKohYqEAsH_ikVJzTHJ_16lrZ1tZ7I0Szkr5AA"
       }
     ]
   },
   "envelope": {
     "payload": {
-      "kind": "count.table",
+      "kind": "count.share",
       "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
       "count": 3,
       "rejected": 0,
-      "minCell": 3,
-      "kept": [
-        0,
-        1
+      "share": [
+        {
+          "$n": "279830981909763117653458757512653545745"
+        },
+        {
+          "$n": "295602747622928835625840201302827024310"
+        },
+        {
+          "$n": "187289618894238104194110638508312477004"
+        },
+        {
+          "$n": "115827183323894595110854843172807659537"
+        },
+        {
+          "$n": "73806103638300178456958884876065441056"
+        },
+        {
+          "$n": "292512507538988446918151333936799785557"
+        },
+        {
+          "$n": "3750542862192646219652214033848680607"
+        },
+        {
+          "$n": "132149318669191236599978660168933058432"
+        }
       ],
-      "cells": [
-        0,
-        0,
-        0,
-        3
-      ],
-      "nonce": "dc8a2f29-04b6-459f-9df2-8723ec2d17b1",
-      "iat": 1792926094,
-      "exp": 1792926394,
+      "nonce": "e993b546-57f6-48d0-9e2b-113917a9f691",
+      "iat": 1792921637,
+      "exp": 1792921937,
       "iss": "https://teller-a.example/#teller"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InNwZWNpYWxpc3QtdGVsbGVyLWEuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "SVq23KQrD3OdGzIkDQaP16EN7fAs5XmhCGEEQkThOyjyRcK1SEoFkhUJglwoKQuDQ_nK7Qi5uJb3xaZMRTeMBw"
+      "signature": "cTbd9dLUrSxFSZvRX35uy0uO6MULKUL097Jc6F1rdl-VeNwVcXdGrAnGZD8y-IvwfFRTi3JJbIcCcD_PCdQbBw"
     }
   }
 }

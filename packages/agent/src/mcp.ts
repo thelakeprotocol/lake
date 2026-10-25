@@ -10,7 +10,6 @@ await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n
 const SANDBOX_STUDIES = exampleStudies();
 import { ago } from './ago.js';
 import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';
-import { shareableEvidence } from '@thelakeprotocol/visitor';
 
 /**
  * What every assistant that connects is told first. The Lake is a network, not an app, and the way to find out
@@ -445,25 +444,16 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   };
   // Studies run in this conversation: their signed evidence, kept to show anyone (each card once, not per item).
   const bundles = new Map<string, Awaited<ReturnType<LakeAgent['study']>>['evidence']>();
-  // By default the bundle names no house (run 31: it named every participant to whoever it was shown); with nameHouses,
-  // the agreements and receipts themselves, each of which names its house.
-  const compactBundle = (b: Awaited<ReturnType<LakeAgent['study']>>['evidence'], nameHouses = false) => {
+  const compactBundle = (b: Awaited<ReturnType<LakeAgent['study']>>['evidence']) => {
     const cards: Record<string, AgentCard> = {};
     const ref = (c?: AgentCard) => { if (!c) return undefined; const k = lakeProfile(c)?.webId ?? c.name; cards[k] = c; return k; };
     const att = (x?: { credential: string; card: AgentCard }) => x && { credential: x.credential, card: ref(x.card) };
     const msg = (x: unknown) => { const m = x as { card?: AgentCard; envelope?: unknown } | undefined; return m?.envelope ? { card: ref(m.card), envelope: m.envelope } : undefined; };
-    const s = shareableEvidence(b, { nameHouses });
-    const common = { ethics: att(s.ethics), audit: att(s.audit), mandate: att(s.mandate), tellers: { leader: msg(s.tellers.leader), helper: msg(s.tellers.helper) } };
-    if (s.names_houses) {
-      return {
-        ...common, agreements: s.agreements, receipts: s.receipts.map((r) => ({ ...r, card: ref(r.card) })), cards,
-        warning: 'this bundle names every house that took part (each agreement names its house, each receipt its payee): show it only to someone entitled to know who took part',
-        note: 'each { credential, card } or { card, envelope } checks with lake_verify once card is replaced by cards[card]; both tellers signed the same table',
-      };
-    }
     return {
-      ...common, agreements: s.agreements, receipts: { ...s.receipts, card: ref(s.receipts.card) }, cards,
-      note: 'names no house. Each { credential, card } or { card, envelope } checks with lake_verify once card is replaced by cards[card]; both tellers signed the same table, and its count is how many houses answered. agreements.digests commit to each countersigned agreement (shown later to someone entitled, one checks against its digest); each receipt\'s leaf_hash proves on the transparency log (log.find { leaf_hash }) that it was logged, without saying to whom it was paid. With name_houses: true, the agreements and receipts themselves.',
+      ethics: att(b.ethics), audit: att(b.audit), mandate: att(b.mandate), agreements: b.agreements,
+      tellers: { leader: msg(b.tellers.leader), helper: msg(b.tellers.helper) },
+      receipts: b.receipts.map((r) => ({ ...r, card: ref(r.card) })),
+      cards, note: 'each { credential, card } or { card, envelope } checks with lake_verify once card is replaced by cards[card]; the two tellers\' shares add up to the table',
     };
   };
   // Whether something is on the transparency log: the log's answer, with its proof and checkpoint checked here, not taken
@@ -1174,16 +1164,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_dispatch_study',
     {
       description:
-        'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (each answer leaves only as two unreadable pieces, to two tellers), pay under a signed budget, and return the answer. Records moved stays 0. The tellers publish exact counts but no group of 1 to k-1 (k: 3 on a sandbox): with too few houses for the table, questions are dropped from it, or there is no table, and you still pay. So first run it with preflight: true (free, nothing signed): how many houses would join at your price, the bloc\'s price, what it would cost, whether this question was counted before, and what table to expect.',
+        'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (each answer leaves only as two unreadable pieces, to two tellers; you get exact totals), pay under a signed budget, and return the answer. Records moved stays 0.',
       inputSchema: {
         question: z.string().default(SANDBOX_STUDIES[0]!.question).describe(`One of the questions this Lake's auditor certifies: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`),
         price_usd: z.number().optional().describe('Offered per house; default $2, or $0 when the budget is 0'),
         budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid (then it offers $0 and accepts no counter-offer with a price)'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
         wait_seconds: z.number().default(0).describe('How long to wait for owners asked to tap Allow'),
-        preflight: z.boolean().default(false).describe('Free, before paying: preview the offer at every house (nothing signed, no key issued, no owner asked) and say how many would join, the bloc price, the cost, earlier runs of this question, and what table to expect'),
-        evidence_for: z.string().optional().describe('Instead of running a study: the signed evidence bundle of one you ran in this conversation (its study id), to show anyone. It names no house unless name_houses is true'),
-        name_houses: z.boolean().default(false).describe('With evidence_for: include the agreements and receipts themselves, which name every house that took part; only for someone entitled to know who took part'),
+        evidence_for: z.string().optional().describe('Instead of running a study: the signed evidence bundle of one you ran in this conversation (its study id), to show anyone'),
       },
     },
     async (a) => {
@@ -1191,12 +1179,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (a.evidence_for) {
           const kept = bundles.get(a.evidence_for) ?? [...bundles.entries()].find(([k]) => k.includes(a.evidence_for!))?.[1];
           if (!kept) throw new Error('no study of yours with that id in this conversation');
-          return json(compactBundle(kept, a.name_houses));
+          return json(compactBundle(kept));
         }
         const study = SANDBOX_STUDIES.find((x) => x.question.toLowerCase() === a.question.trim().toLowerCase());
         if (!study) throw new Error(`studies here are declarative and certified in advance; pick one of: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`);
         const steps: string[] = [];
-        if (a.preflight) return json({ ...(await (await agent()).preflight(a.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, log: (s, d) => steps.push(`${s}: ${d}`) })), steps });
         const r = await (await agent()).study(a.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
         const { grants: _, evidence, ...result } = r;
         bundles.set(r.study, evidence);
