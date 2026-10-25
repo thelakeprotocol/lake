@@ -48,7 +48,10 @@ const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() =
   writeFileSync(join(run, p.id, 'PROMPT.md'), prompt);
   // `tools` only pre-approves; `deny` takes tools out of a player's sight altogether (a control that mustn't see a door);
   // `model` runs this player on another model (opus, sonnet, haiku, fable), so look-alike agents can differ.
-  const c = spawn('claude', ['-p', prompt, '--mcp-config', join(run, 'mcp.json'), '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
+  // `lake` puts this player on another Lake (cross-Lake runs on the two local staging Lakes): its own connector.
+  const mcp = p.lake ? join(run, `mcp-${p.id}.json`) : join(run, 'mcp.json');
+  if (p.lake) writeFileSync(mcp, JSON.stringify({ mcpServers: { lake: { type: 'http', url: `${p.lake.replace(/\/$/, '')}/mcp` } } }));
+  const c = spawn('claude', ['-p', prompt, '--mcp-config', mcp, '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
     { cwd: join(run, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
   // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
   let rest = '';
