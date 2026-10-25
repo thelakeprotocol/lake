@@ -589,7 +589,7 @@ function panelFor(x: {
         const person = before.people_only ? await stampFor(countContext(issuerWebId, 'passes'), issuerWebId, 'passes') : undefined;
         const pass = (await fetchPasses(issuer.supportedInterfaces[0]!.url, ask, person)).find((p) => p.tally === counter && p.id === id);
         if (!pass) return { kind: 'refused', problems: ['no pass for this pledge: this house may have one already, or it counts people and the house has no person stamp'] };
-        const signed = await signBlind(tally, pass, owner.webId, { sandbox: x.o.sandbox });
+        const signed = await signBlind(tally, pass, owner.webId, { sandbox: x.o.sandbox, me: { identity: x.id, card: x.card } });
         if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') await put(owner, 'wallet/pledges.json', JSON.stringify([...(await blindPledges()), { ...signed, tally, reply: undefined }]), 'application/json');
         return signed.reply;
       }

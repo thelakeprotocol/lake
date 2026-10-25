@@ -1127,7 +1127,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_pledge',
     {
       description:
-        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true, listed: true } (listed: others find it in lake_ask_around, with how many more it needs).',
+        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. On a pledge opened with unveil, signing also deposits your reveal sealed to a drand round just after the deadline: if it fills, the tally opens every signer\'s at the same moment and tells you who is in, so nobody reveals first and you needn\'t call reveal; if it lapses, they are discarded unopened. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true, unveil: true, listed: true } (listed: others find it in lake_ask_around, with how many more it needs).',
       inputSchema: {
         action: z.enum(['sign', 'reveal', 'withdraw', 'count']),
         tally: z.string().describe('The tally\'s address (…/a2a)'),
@@ -1137,7 +1137,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async (a) => {
       try {
         const me = await agent();
-        const key = `${a.tally}|${a.id}`;
+        const slot = `${a.tally}|${a.id}`;
         if (a.action === 'count') return json(await me.ask(a.tally, { kind: 'tally.count', id: a.id }));
         if (a.action === 'sign') {
           const issuer = (await me.find({ skill: 'passes' }))[0];
@@ -1149,15 +1149,15 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const pass = passes.get(`${tallyWebId}|${a.id}`);
           if (!pass) throw new Error('no pass for that pledge: is it blind, open, and do you have one already? (pledges that count people need a house with a person stamp)');
           passes.delete(`${tallyWebId}|${a.id}`);
-          const signed = await signBlind(a.tally, pass, me.webId);
-          if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') pledged.set(key, signed);
+          const signed = await signBlind(a.tally, pass, me.webId, { me: { identity: me.visitor.id, card: me.visitor.card } });
+          if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') pledged.set(slot, signed);
           return json({ ...signed.reply, kept: 'your salt and withdraw secret are kept in this conversation: reveal (once it fills) and withdraw use them' });
         }
-        const s = pledged.get(key);
+        const s = pledged.get(slot);
         if (!s) throw new Error('you have no blind signature on that pledge in this conversation');
         if (a.action === 'reveal') return json(await revealBlind(a.tally, (url, payload) => me.ask(url, payload as { kind: string }), s));
         const r = await withdrawBlind(a.tally, s);
-        if (r.kind === 'tally.withdrawn') pledged.delete(key);
+        if (r.kind === 'tally.withdrawn') pledged.delete(slot);
         return json(r);
       } catch (e) {
         return fail(e);

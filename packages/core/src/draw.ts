@@ -91,10 +91,11 @@ export function pick(randomness: string, label: string, n: number): number {
  * nobody can withhold a reveal once they've seen the others' (run 21's agents asked for it).
  */
 const tlock = createRequire(import.meta.url)('tlock-js') as typeof import('tlock-js');
-const tlockClient = () => {
-  const opts = { ...verifying };
-  return new tlock.HttpChainClient(new tlock.HttpCachingChain(`${DRAND_RELAYS[0]}/${QUICKNET.hash}`, opts), opts);
-};
+type TlockClient = Parameters<typeof tlock.timelockDecrypt>[1];
+// The chain's info is pinned here too (so sealing needs no network); opening fetches the round, checked against its key.
+const tlockClient = () => new tlock.HttpChainClient(pinned(`${DRAND_RELAYS[0]}/${QUICKNET.hash}`) as never, { ...verifying });
+// A client holding one round already fetched (getBeacon tries every relay) or handed over: opening then needs no network.
+const givenClient = (b: Beacon) => ({ options: verifying, chain: () => pinned(''), latest: async () => b, get: async () => b }) as unknown as TlockClient;
 
 /** Seals text until a round: an age-armored ciphertext anyone can open once that round is out. */
 export async function sealUntil(round: number, text: string): Promise<string> {
@@ -102,14 +103,24 @@ export async function sealUntil(round: number, text: string): Promise<string> {
   return tlock.timelockEncrypt(round, tlock.Buffer.from(text), tlockClient());
 }
 
-/** Opens a timelock seal once its round is out; throws, saying when, before. */
-export async function openSeal(ciphertext: string): Promise<string> {
-  const quiet = console.log;
+/** The round a seal opens at, read from its header; undefined if it isn't sealed to this chain. */
+export function sealedRound(ciphertext: string): number | undefined {
+  const body = String(ciphertext).replace(/-----[A-Z ]+-----/g, '').replace(/\s/g, '');
+  const m = /^age-encryption\.org\/v1\n-> tlock (\d+) ([0-9a-f]{64})\n/.exec(Buffer.from(body, 'base64').toString('latin1'));
+  return m && m[2] === QUICKNET.hash ? Number(m[1]) : undefined;
+}
+
+/**
+ * Opens a timelock seal once its round is out; throws, saying when, before. Given the round's beacon, it opens offline: a
+ * beacon that isn't the real round doesn't verify against the pinned key, and the seal stays shut.
+ */
+export async function openSeal(ciphertext: string, beacon?: Beacon): Promise<string> {
+  const [log, error] = [console.log, console.error];
   try {
-    // The library announces every beacon it fetches; it isn't news here.
-    console.log = () => {};
-    return (await tlock.timelockDecrypt(ciphertext, tlockClient())).toString();
+    // The library announces every beacon it fetches, and logs why a forged one fails: neither is news here.
+    console.log = console.error = () => {};
+    return (await tlock.timelockDecrypt(ciphertext, beacon ? givenClient(beacon) : tlockClient())).toString();
   } finally {
-    console.log = quiet;
+    [console.log, console.error] = [log, error];
   }
 }

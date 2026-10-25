@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, type Identity } from '../packages/core/src/index.js';
+import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, QUICKNET, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -822,6 +822,48 @@ describe('the open door', () => {
     expect(got.messages).toEqual([expect.objectContaining({ from: expect.objectContaining({ domain: me.domain }), message: { kind: 'game.move', game: 'connect4', col: 3 } })]);
     expect((await bob('lake_inbox', { wait_seconds: 0 })).messages).toEqual([]);
   }, 60_000);
+
+  it("a blind pledge that unveils: once it fills, every signer's sealed reveal opens at the same moment, and nobody calls reveal", async (ctx) => {
+    // The tally opens the seals with a real drand round, so this needs drand's relays.
+    if (!(await fetch(`https://api.drand.sh/${QUICKNET.hash}/info`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok).catch(() => false))) ctx.skip();
+    const port = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node });
+    const connect = async (name: string) => {
+      const c = new Client({ name, version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+      return async (tool: string, args: Record<string, unknown> = {}) => {
+        const r = await c.callTool({ name: tool, arguments: args });
+        expect(r.isError, JSON.stringify(r.content)).toBeFalsy();
+        return JSON.parse((r.content as { text: string }[])[0]!.text);
+      };
+    };
+    const alice = await connect('claude-ai');
+    const bob = await connect('claude-code');
+    const tally = `${specialistsUrl}/tally/a2a`;
+    const opened = await alice('lake_ask', { agent_url: tally, message: { kind: 'tally.open', id: 'e2e-unveil', text: 'We all leave together.', threshold: 2, deadline: new Date(Date.now() + 25_000).toISOString(), blind: true, unveil: true } });
+    expect(opened).toMatchObject({ kind: 'tally.opened', blind: true, unveil: { round: expect.any(Number), opens: expect.any(String) } });
+    // A signature without a sealed reveal is turned away (before its pass is spent), told the round to seal to.
+    const bare = await ask(tally, await visitor('bare.example'), { kind: 'tally.sign', id: 'e2e-unveil', pass: 'x', commit: 'a'.repeat(64), withdraw: 'b'.repeat(64) });
+    expect(bare.reply).toMatchObject({ kind: 'refused', unveil: { round: opened.unveil.round } });
+    expect(await alice('lake_pledge', { action: 'sign', tally, id: 'e2e-unveil' })).toMatchObject({ kind: 'tally.signed', count: 1 });
+    expect(await bob('lake_pledge', { action: 'sign', tally, id: 'e2e-unveil' })).toMatchObject({ kind: 'tally.triggered', count: 2, revealed: 0 });
+    // Filled, and still nobody knows who: the reveals are sealed until a round after the deadline.
+    expect(await alice('lake_pledge', { action: 'count', tally, id: 'e2e-unveil' })).toMatchObject({ state: 'triggered', revealed: 0, bound: false });
+    await new Promise((ok) => setTimeout(ok, Math.max(0, Date.parse(opened.unveil.opens) - Date.now()) + 1000));
+    let count: Record<string, any> = {};
+    for (let i = 0; i < 30 && !count.unveil?.opened; i++) {
+      if (i) await new Promise((ok) => setTimeout(ok, 1000));
+      count = await alice('lake_pledge', { action: 'count', tally, id: 'e2e-unveil' });
+    }
+    const [a, b] = [(await alice('lake_overview')).you.domain, (await bob('lake_overview')).you.domain];
+    expect(count).toMatchObject({ revealed: 2, bound: true, unrevealed: 0 });
+    expect(count.signers.map((x: { domain: string }) => x.domain).sort()).toEqual([a, b].sort());
+    // Each signer is told who is in, without having asked.
+    for (const who of [alice, bob]) {
+      const told = await who('lake_inbox', { wait_seconds: 10 });
+      expect(told.messages.find((m: { message: { kind: string } }) => m.message.kind === 'tally.unveiled')?.message).toMatchObject({ id: 'e2e-unveil', revealed: 2, signers: expect.arrayContaining([expect.objectContaining({ domain: a }), expect.objectContaining({ domain: b })]) });
+    }
+  }, 90_000);
 
   it('two assistants trade: a menu on the card, a cart the seller signs (AP2), paid once for exactly its total, delivered and accepted', async () => {
     const port = String(await freePort());
