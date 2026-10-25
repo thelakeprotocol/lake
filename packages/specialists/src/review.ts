@@ -93,6 +93,8 @@ export async function createEthics(o: SpecialistOptions): Promise<{ app: express
 
 /** The demo Auditor: certifies declarative studies the Lake can run safely, and reviewed converter packages. */
 export async function createAuditor(o: SpecialistOptions): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
+  // When each study was certified (in memory: a demo auditor's short memory is enough to warn about repeats).
+  const certified = new Map<string, number[]>();
   const s: Specialist = await specialist<Reply>(o, 'Auditor (demo)', 'Certifies studies (exact totals of known questions, counted by two tellers) and converter packages.', 'study-audit', async (p) => {
     if (p.kind === 'audit-study') {
       const study = p.study as Study;
@@ -100,7 +102,11 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
       const audit = auditStudy(study);
       if (!audit.ok) return { kind: 'refused', problems: audit.problems };
       const credential = await s.vc('LakeStudyCertificate', { id: studyId(study), checks: ['declarative study, no code', 'answers split between two tellers run by different parties', 'totals only', `no table from fewer than ${study.privacy.min} houses`] }, 90);
-      return { kind: 'certified', credential, notes: [] };
+      // How often this very study was certified lately: run 31's three researchers each paid $45 for the same table, unaware.
+      const id = studyId(study), week = Date.now() - 7 * 86_400_000;
+      const seen = (certified.get(id) ?? []).filter((t) => t > week);
+      certified.set(id, [...seen, Date.now()]);
+      return { kind: 'certified', credential, notes: seen.length ? [`this exact study was certified ${seen.length} time${seen.length === 1 ? '' : 's'} in the last 7 days: its answer may already exist; ask around before paying for it again`] : [] };
     }
     if (p.kind === 'audit-program') {
       // Quote programs: declarative, bounded, reading only safe fields of a pack here, shown only to the owner.

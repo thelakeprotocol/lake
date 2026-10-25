@@ -6,7 +6,7 @@ import {
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
-import { ask, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
+import { ask, checkStudy, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
 
 
 /** Units a transfer may not use: currency codes and money words. Real money goes through a payments agent. */
@@ -92,6 +92,8 @@ export interface LakeAgent {
   sent: { at: string; to: string; message: Record<string, unknown>; reply: LakeData }[];
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
   study(question: string, o?: StudyOptions): Promise<StudyRun>;
+  /** The free part of a study, before paying: ethics, audit (with how often it was certified lately), how many houses. */
+  checkStudy(question: string, o?: Pick<StudyOptions, 'study' | 'extraFields'>): Promise<Awaited<ReturnType<typeof checkStudy>>>;
   /** Say what you're up for (e.g. game:connect4): same key, same address, a re-signed card, registered again. */
   /** `about`: one free-text line on the card (what you offer or look for), found by lake_search { q }. */
   setTags(tags: string[], about?: string): Promise<void>;
@@ -259,6 +261,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}), ...(cart ? { cart: order } : {}) });
       if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount, unit }));
       return { paid: amount, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
+    },
+    async checkStudy(question, s = {}) {
+      return checkStudy({ visitor, node: nodes, ethics: o.ethics ?? 'http://ethics:4500', auditor: o.auditor ?? 'http://auditor:4400', study: s.study ?? studyFor(question), extraFields: s.extraFields });
     },
     async study(question, s = {}) {
       const budget = s.budgetUsd ?? 0;

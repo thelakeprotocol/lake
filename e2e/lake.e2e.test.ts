@@ -750,7 +750,14 @@ describe('the open door', () => {
     expect(done.paid.total).toBeGreaterThan(0);
     // Everything the study rests on, signed, in one bundle anyone can check (run 22 asked for it).
     expect(done.evidence).toMatchObject({ ethics: true, audit: true, mandate: true, tellers: 2, receipts: done.paid.houses, on_the_log: done.paid.houses });
-    const bundle = await text('lake_dispatch_study', { evidence_for: done.study });
+    // By default it names no house: agreements as digests, receipts as their log entries (run 31's sceptic caught it).
+    const anonymous = await text('lake_dispatch_study', { evidence_for: done.study });
+    expect(anonymous.agreements).toEqual(Array(done.participants).fill(expect.objectContaining({ digest: expect.stringMatching(/^[0-9a-f]{64}$/) })));
+    expect(anonymous.receipts[0]).toEqual({ leaf_hash: expect.any(String), logged: expect.objectContaining({ index: expect.any(Number) }) });
+    expect(JSON.stringify(anonymous)).not.toMatch(/pods\/(stan|strict|research|kai)/);
+    // A free check before paying: the auditor says this very study was certified before.
+    expect(await text('lake_dispatch_study', { question: 'Do over-60s on drug X get readmitted less?', check_only: true })).toMatchObject({ ethics: 'approved', audit: 'certified', notes: [expect.stringMatching(/certified \d+ times? in the last 7 days/)] });
+    const bundle = await text('lake_dispatch_study', { evidence_for: done.study, name_houses: true });
     expect(bundle.agreements.length).toBe(done.participants);
     const leader = bundle.tellers.leader;
     expect(await text('lake_verify', { evidence: { card: bundle.cards[leader.card], envelope: leader.envelope } })).toMatchObject({ verified: true, says: { kind: 'count.share' } });

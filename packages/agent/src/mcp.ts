@@ -444,15 +444,19 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   };
   // Studies run in this conversation: their signed evidence, kept to show anyone (each card once, not per item).
   const bundles = new Map<string, Awaited<ReturnType<LakeAgent['study']>>['evidence']>();
-  const compactBundle = (b: Awaited<ReturnType<LakeAgent['study']>>['evidence']) => {
+  // By default the bundle names no house (run 31: it was shareable with anyone and named every participant): agreements
+  // as digests, receipts as their entries on the transparency log, which prove they were logged without saying who was paid.
+  const compactBundle = (b: Awaited<ReturnType<LakeAgent['study']>>['evidence'], nameHouses = false) => {
     const cards: Record<string, AgentCard> = {};
     const ref = (c?: AgentCard) => { if (!c) return undefined; const k = lakeProfile(c)?.webId ?? c.name; cards[k] = c; return k; };
     const att = (x?: { credential: string; card: AgentCard }) => x && { credential: x.credential, card: ref(x.card) };
     const msg = (x: unknown) => { const m = x as { card?: AgentCard; envelope?: unknown } | undefined; return m?.envelope ? { card: ref(m.card), envelope: m.envelope } : undefined; };
     return {
-      ethics: att(b.ethics), audit: att(b.audit), mandate: att(b.mandate), agreements: b.agreements,
+      ethics: att(b.ethics), audit: att(b.audit), mandate: att(b.mandate),
+      agreements: nameHouses ? b.agreements : b.agreements.map((x) => ({ digest: createHash('sha256').update(canonicalize(x.agreement)).digest('hex') })),
       tellers: { leader: msg(b.tellers.leader), helper: msg(b.tellers.helper) },
-      receipts: b.receipts.map((r) => ({ ...r, card: ref(r.card) })),
+      receipts: nameHouses ? b.receipts.map((r) => ({ ...r, card: ref(r.card) })) : b.receipts.map((r) => ({ leaf_hash: b64(leafHash(r.credential)), ...(r.logged ? { logged: r.logged } : {}) })),
+      ...(nameHouses ? { warning: 'this version names every house that took part: share it only with someone who needs to know' } : { houses: 'not named: agreements are digests, receipts are their transparency-log entries; ask with name_houses: true for the full version' }),
       cards, note: 'each { credential, card } or { card, envelope } checks with lake_verify once card is replaced by cards[card]; the two tellers\' shares add up to the table',
     };
   };
@@ -1171,6 +1175,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid (then it offers $0 and accepts no counter-offer with a price)'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
         wait_seconds: z.number().default(0).describe('How long to wait for owners asked to tap Allow'),
+        check_only: z.boolean().default(false).describe('Free: only the ethics review and the audit (with how often this study was certified lately) and how many houses there are; nothing is offered or paid'),
+        name_houses: z.boolean().default(false).describe('evidence_for: include the agreements and receipts themselves, which name every house that took part'),
         evidence_for: z.string().optional().describe('Instead of running a study: the signed evidence bundle of one you ran in this conversation (its study id), to show anyone'),
       },
     },
@@ -1179,10 +1185,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (a.evidence_for) {
           const kept = bundles.get(a.evidence_for) ?? [...bundles.entries()].find(([k]) => k.includes(a.evidence_for!))?.[1];
           if (!kept) throw new Error('no study of yours with that id in this conversation');
-          return json(compactBundle(kept));
+          return json(compactBundle(kept, a.name_houses));
         }
         const study = SANDBOX_STUDIES.find((x) => x.question.toLowerCase() === a.question.trim().toLowerCase());
         if (!study) throw new Error(`studies here are declarative and certified in advance; pick one of: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`);
+        if (a.check_only) return json(await (await agent()).checkStudy(a.question, { study, extraFields: a.extra_fields }));
         const steps: string[] = [];
         const r = await (await agent()).study(a.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
         const { grants: _, evidence, ...result } = r;

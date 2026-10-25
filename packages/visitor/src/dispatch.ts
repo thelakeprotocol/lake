@@ -130,6 +130,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study });
   if (audit.reply.kind !== 'certified') throw new Error(`auditor refused: ${(audit.reply.problems ?? []).join('; ')}`);
   log('audit', `certified by ${audit.from.ownerDomain}`);
+  for (const n of (audit.reply.notes as string[] | undefined) ?? []) log('audit', n);
   const auditAtt: Attachment = { credential: audit.reply.credential, card: await cardOf(o.auditor) };
   await beat();
 
@@ -419,4 +420,28 @@ function cardOf(agentUrl: string): Promise<AgentCard> {
 async function pool<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => { while (i < items.length) await fn(items[i++]!); }));
+}
+
+/**
+ * The free part of a study, before anything is offered or paid (run 31's researchers each paid $45 for the same table):
+ * the ethics review and the audit (with the auditor's word on how often this very study was certified lately), and how
+ * many houses are on the Lake. Nothing is knocked, nothing leaves any house.
+ */
+export async function checkStudy(o: Pick<DispatchOptions, 'visitor' | 'node' | 'ethics' | 'auditor' | 'study' | 'extraFields'> & { log?: (step: string, detail: string) => void }) {
+  const log = o.log ?? (() => {});
+  // The same tellers a run would pick, so the study checked is the study that would run.
+  const study: Study = o.study.privacy.tellers?.length ? o.study : { ...o.study, privacy: { ...o.study.privacy, tellers: await findTellers(o as DispatchOptions, log) } };
+  const fields = [...new Set([...studyFields(study), ...(o.extraFields ?? [])])];
+  const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study, purpose: 'research', fields: studyFields(study), retention: 'none' } });
+  const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study });
+  const houses = await discover(o as DispatchOptions, log);
+  return {
+    study: studyId(study), question: study.question, fields,
+    ethics: ethics.reply.kind === 'approved' ? 'approved' : `refused: ${((ethics.reply.problems as string[] | undefined) ?? []).join('; ')}`,
+    audit: audit.reply.kind === 'certified' ? 'certified' : `refused: ${((audit.reply.problems as string[] | undefined) ?? []).join('; ')}`,
+    notes: (audit.reply.notes as string[] | undefined) ?? [],
+    houses: houses.length,
+    minimum: study.privacy.min,
+    note: `a table needs at least ${study.privacy.min} houses to answer; exact counts from a few houses are small numbers, read them with care`,
+  };
 }
