@@ -122,7 +122,7 @@ async function loadProviderSecrets(o: { dataDir: string; baseUrl: string }): Pro
   }
 }
 
-async function pool<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
+export async function pool<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => { while (i < items.length) await fn(items[i++]!); }));
 }

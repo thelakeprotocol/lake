@@ -39,7 +39,7 @@ export interface HousekeeperOptions {
 type Decision = 'join' | 'decline' | 'ask' | 'counter';
 export type Reply =
   | { kind: 'rejected'; code: string; why: string }
-  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[]; /** Why it declined, coarsely (SPEC §5): purpose, price, retention, default, rule, repeat, too-many. */ code?: string }
+  | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[]; /** Why it declined, coarsely (SPEC §5): purpose, price, retention, default, rule, repeat, too-many, relabel. */ code?: string }
   | { kind: 'filed'; receipt: string }
   | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'counted'; study: string; count: string; tellers: string[] }
@@ -56,6 +56,13 @@ interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core')
 const DECLINE_QUIET_MS = 86_400_000;
 const MAX_WAITING = 3;
 const HOUR = 3_600_000;
+/** Purposes one visitor may give the same data within an hour; past that it is trying labels, and is blocked (SPEC §5). */
+const MAX_LABELS = 2;
+
+/** The other purposes a visitor gave, within the hour, for any of these fields. */
+export function otherLabels(asked: { purpose: string; fields: string[]; at: number }[], purpose: string, fields: string[], now = Date.now()): string[] {
+  return [...new Set(asked.filter((x) => now - x.at < HOUR && x.purpose !== purpose && x.fields.some((f) => fields.includes(f))).map((x) => x.purpose))];
+}
 
 /**
  * Answers every knock by the owner's rules, in code. A "join" under a standing rule the owner wrote is
@@ -67,6 +74,8 @@ export class Housekeeper {
   readonly replay = new ReplayGuard();
   /** When each visitor was last turned down for each purpose (house manners: one ask per purpose a day). */
   private declinedAt = new Map<string, number>();
+  /** What each visitor asked for, and for what, in the last hour (house manners: one data, not a label per try). */
+  private asked = new Map<string, { purpose: string; fields: string[]; at: number }[]>();
   /** Per pack: the last check, and when the whole chain was last verified. */
   private checks = new Map<string, { check: RecordCheck; fullAt: number }>();
   /** Agreements this house signed, so a countersignature doesn't need a pod read. The pod copy is the record. */
@@ -171,7 +180,7 @@ export class Housekeeper {
     }
     const visitor = `agent:${v.profile.ownerDomain}`;
     if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key);
-    if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor);
+    if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor, key);
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     if ((v.payload.kind as string) === 'withdraw') {
       const id = String((v.payload as { offerId?: string }).offerId ?? '');
@@ -196,6 +205,12 @@ export class Housekeeper {
       return this.reply({ kind: 'rejected', code: 'impersonation', why: `card is for ${domain}, offer claims ${offer.requester}` });
     }
     this.o.emit(makeEvent('knock', this.actor, visitor, { purpose: offer.purpose }));
+    // Every offer heard, whatever came of it: the owner's warning and the block below both read it.
+    const now = Date.now();
+    const asked = (this.asked.get(visitorWebId) ?? []).filter((x) => now - x.at < HOUR);
+    const shopped = otherLabels(asked, offer.purpose, offer.fields, now);
+    this.asked.set(visitorWebId, [...asked, { purpose: offer.purpose, fields: offer.fields, at: now }].slice(-20));
+    if (this.asked.size > 1000) for (const [k, list] of this.asked) if (now - list[list.length - 1]!.at >= HOUR) this.asked.delete(k);
     const notes: string[] = [];
     // Two audiences: the owner's activity gets the whole reason; the visitor hears what it can act on, never the owner's
     // rules ("your rule 2"). `told` is for reasons about the offer itself (an uncertified study), which the visitor can fix.
@@ -255,6 +270,12 @@ export class Housekeeper {
     const lastNo = this.declinedAt.get(declinedKey);
     if (lastNo && Date.now() - lastNo < DECLINE_QUIET_MS) return decide('decline', 'asked again for a purpose this house turned down in the last day', { code: 'repeat' }, `declined: you asked for ${offer.purpose} here in the last day and were turned down; one ask per purpose a day`);
     const waiting = this.o.desk.recentAsks(visitorWebId, 7 * 86_400_000).filter((x) => x.status === 'pending');
+    // Run 32's visitor asked one house for the same health fields as research, care, marketing and insurance in minutes:
+    // a third label for the same data is trying labels. It is blocked, and counted against its key like any attack.
+    if (shopped.length >= MAX_LABELS) {
+      this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why: 'trying-labels', claimed: domain, from: domain, key, verified: true }));
+      return decide('decline', `asked for the same data as ${shopped.join(' and ')} in the last hour: it is trying labels`, { code: 'relabel' }, `declined: you asked this house for the same data as ${shopped.join(' and ')} in the last hour; a purpose isn't a label to try`);
+    }
     if (waiting.length >= MAX_WAITING && !waiting.some((x) => x.purpose === offer.purpose && [...x.fields].sort().join() === [...offer.fields].sort().join())) return decide('decline', `already has ${waiting.length} requests waiting for the owner`, { code: 'too-many' }, `declined: you have ${waiting.length} requests waiting for this owner; withdraw one or wait for an answer`);
 
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain] });
@@ -262,8 +283,7 @@ export class Housekeeper {
     let filed: { offerId: string; asked?: number } | null = null;
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
-      // A visitor that already asked this house for the same fields under another purpose is trying labels: say so.
-      const shopped = [...new Set(this.o.desk.recentAsks(visitorWebId).filter((x) => x.purpose !== offer.purpose && x.fields.some((f) => offer.fields.includes(f))).map((x) => x.purpose))];
+      // A visitor that already asked this house for the same fields under another purpose may be trying labels: say so.
       // Another visitor asking for exactly the same, for the same reason: one of them may not be who it says (run 19 had a
       // second "GP" asking for what the first did).
       const twins = [...new Set(this.o.desk.pendingLike(offer.purpose, offer.fields).filter((x) => x.visitor.webId !== visitorWebId).map((x) => x.visitor.domain))];
@@ -325,13 +345,15 @@ export class Housekeeper {
     return decide('join', d.reason, { grantHours: d.grantHours, grant, agreement });
   }
 
-  private async compute(p: ComputePayload, profile: LakeProfile, visitor: string): Promise<LakeData> {
+  private async compute(p: ComputePayload, profile: LakeProfile, visitor: string, key = ''): Promise<LakeData> {
     const requester = profile.webId;
     const id = p.study ? studyId(p.study) : '';
     const excluded = (why: string) => {
       this.o.emit(makeEvent('decision', this.actor, visitor, { decision: 'excluded', reason: why }));
       return this.reply({ kind: 'excluded', study: id, why });
     };
+    // A key this house never cut, or cut for someone else, is an attack like a forged card: counted against the sender's key.
+    const forged = (why: string) => this.o.emit(makeEvent('attack.blocked', this.actor, key ? `key:${key}` : visitor, { why, claimed: profile.ownerDomain, from: profile.ownerDomain, key, verified: true }));
     // A grant is either the housekeeper's record of a standing rule, or signed live on the owner's device.
     let grant;
     try {
@@ -341,6 +363,7 @@ export class Housekeeper {
         if (!this.o.desk.ownerJwk) throw new Error();
         grant = await verifyCredential(p.grant, this.o.desk.ownerJwk);
       } catch {
+        forged('forged-grant');
         return excluded('that is not a grant this house or its owner issued');
       }
     }
@@ -348,7 +371,7 @@ export class Housekeeper {
     if (!g) return excluded('that is not an access grant');
     if (this.o.desk.isRevoked(g.offer)) return excluded(this.o.desk.grants.get(g.offer)?.spent ? 'this key was for one use, and it has been used' : 'the owner revoked this key');
     const until = (grant as { validUntil?: string }).validUntil;
-    if (g.grantee !== requester || g.owner !== this.o.webId) return excluded('the grant belongs to someone else');
+    if (g.grantee !== requester || g.owner !== this.o.webId) { forged('foreign-grant'); return excluded('the grant belongs to someone else'); }
     if (until && Date.parse(until) < Date.now()) return excluded('the grant has expired');
     if (g.study !== id || !auditStudy(p.study).ok) return excluded('the grant does not cover this study');
     // No study runs before both parties have signed the same terms.

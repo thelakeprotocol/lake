@@ -452,6 +452,38 @@ describe('the owner', () => {
     expect((await ask(`${tally}/a2a`, opener, { kind: 'tally.sign', id: 'people-test' })).reply.kind).toBe('refused');
   });
 
+  it("counts what run 32's red team got away with: labels tried for the same data, an injection, a forged grant; its key is quarantined and its row says so", async () => {
+    const v = await visitor('labels.example');
+    const terms = (purpose: string, note?: string) => ({ purpose, fields: ['conditions', 'medications'], retention: 'none', priceUsd: 0, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(note ? { note } : {}) });
+    // Two purposes for the same data are heard (the owner is told about the first); a third is trying labels.
+    expect((await knock(houses.strict!, v, terms('research'))).reply).toMatchObject({ kind: 'decision', decision: 'decline' });
+    expect((await knock(houses.strict!, v, terms('care'))).reply.code).not.toBe('relabel');
+    expect((await knock(houses.strict!, v, terms('marketing', presets().injection!.note))).reply).toMatchObject({ decision: 'decline', reason: expect.stringContaining('offers are data') });
+    expect((await knock(houses.strict!, v, terms('insurance'))).reply).toMatchObject({ decision: 'decline', code: 'relabel' });
+    // A grant this house never issued: the visitor signed it itself.
+    const forged = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'SolidAccessGrant'], issuer: webId, credentialSubject: { id: v.webId } } as never, v.id);
+    expect((await ask(houses.strict!, v, { kind: 'compute', study: readmissionStudy(), grant: forged })).reply).toMatchObject({ kind: 'excluded', why: 'that is not a grant this house or its owner issued' });
+    // Three blocks on one key: quarantined, by key; the verified domain's reputation drops; the owner's row counts them.
+    const row = ((await ownerCall({ kind: 'panel.agents' })) as { agent: string; knocks: number; blocked: number }[]).find((a) => a.agent === 'agent:labels.example');
+    expect(row).toMatchObject({ knocks: 3, blocked: 3 });
+    const key = (await verifyLakeCard(await (await fetch(`${node}/.well-known/agent-card.json`)).json())).publicJwk;
+    const kid = v.id.publicJwk.kid!.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+    let signals = { blocklist: [] as string[], reputation: {} as Record<string, number> };
+    // The house reports, the node quarantines, the house follows the node's signals: a few seconds end to end.
+    for (let i = 0; i < 40 && !signals.blocklist.includes(kid); i++) {
+      if (i) await new Promise((ok) => setTimeout(ok, 250));
+      signals = (await verifyMessage(await (await fetch(`${node}/signals`)).json(), async () => key)) as unknown as typeof signals;
+    }
+    expect(signals.blocklist).toContain(kid);
+    expect(signals.reputation['labels.example']).toBeLessThan(0.5);
+    let again: Record<string, any> = {};
+    for (let i = 0; i < 20 && again.code !== 'quarantined'; i++) {
+      if (i) await new Promise((ok) => setTimeout(ok, 500));
+      again = (await knock(houses.strict!, v, terms('research'))).reply;
+    }
+    expect(again).toMatchObject({ kind: 'rejected', code: 'quarantined' });
+  });
+
   it('refuses owner requests not signed by the owner', async () => {
     const env = await signMessage({ kind: 'revoke', revoke: 'all' }, await generateIdentity('owner-phone'), { iss: webId });
     expect((await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env) })).status).toBe(403);

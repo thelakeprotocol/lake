@@ -11,7 +11,7 @@ import { Housekeeper } from './housekeeper.js';
 import { OwnerDesk, type PanelProvider } from './owner.js';
 import { Parser } from 'n3';
 import { createPodMcpServer } from './pod-mcp.js';
-import type { OwnerSession } from './pod.js';
+import { pool, type OwnerSession } from './pod.js';
 import { recordPaths } from './packs.js';
 import { convertRecord, fetchConverterCert, fetchRecord, type RecordPaths, type Trust } from './record.js';
 import { packFolders } from './typeindex.js';
@@ -402,27 +402,38 @@ function panelFor(x: {
   const mine = () => { const since = x.desk().claimedAt(); return since ? x.activity.filter((a) => Date.parse(a.at) >= since) : x.activity; };
   // Blind pledges this house signed: the salt reveals it once a pledge fills (kept in the owner's wallet).
   const blindPledges = async (): Promise<BlindSignature[]> => { const r = await owner.fetch(`${owner.podRoot}wallet/pledges.json`).catch(() => null); return r?.ok ? r.json() : []; };
+  // Receipts are read a few at a time and kept a few minutes: run 32's assistant got "fetch failed" six times from a busy
+  // pod read receipt by receipt, all at once, on every look. One that can't be read now is left out, and read next time;
+  // a listing that fails falls back on the receipts already read.
+  const receiptCache = new Map<string, { vc: Record<string, any>; at: number }>();
+  const readReceipts = async (files: string[]) => {
+    const now = Date.now();
+    await pool(files.filter((f) => now - (receiptCache.get(f)?.at ?? 0) >= 5 * 60_000), 8, async (f) => {
+      const r = await owner.fetch(owner.podRoot + f).catch(() => null);
+      const vc = r?.ok ? decode(await r.text().catch(() => '')) : null;
+      if (vc?.credentialSubject) receiptCache.set(f, { vc, at: now });
+    });
+  };
   const money = async () => {
-    const all = (await listContainer(owner, 'receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
+    const all = (await listContainer(owner, 'receipts/').catch(() => [...receiptCache.keys()])).filter((f) => f.endsWith('.receipt.jwt'));
+    await readReceipts(all);
     // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
     const files = all.filter((f) => !/(^|\/)spent-/.test(f));
     const spentFiles = all.filter((f) => /(^|\/)spent-/.test(f));
-    const receipts = (await Promise.all(files.map(async (f) => {
-      const r = await owner.fetch(owner.podRoot + f);
-      const vc = r.ok ? decode(await r.text()) : null;
+    const receipts = files.map((f) => {
+      const vc = receiptCache.get(f)?.vc;
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
-    }))).filter(Boolean) as { amount: number; at: string }[];
+    }).filter(Boolean) as { amount: number; at: string }[];
     // On a leased house, money is counted from this owner's claim: the last owner's earnings were never theirs.
     const since = x.desk().claimedAt();
     if (since) receipts.splice(0, receipts.length, ...receipts.filter((r) => Date.parse(r.at) >= since));
     receipts.sort((a, b) => (a.at < b.at ? 1 : -1));
-    const spent = (await Promise.all(spentFiles.map(async (f) => {
-      const r = await owner.fetch(owner.podRoot + f);
-      const vc = r.ok ? decode(await r.text()) : null;
+    const spent = spentFiles.map((f) => {
+      const vc = receiptCache.get(f)?.vc;
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
-    }))).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
+    }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
     return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
   return {
@@ -469,13 +480,16 @@ function panelFor(x: {
     agents() {
       const by = new Map<string, { agent: string; knocks: number; last: string; lastDecision?: string; blocked: number }>();
       for (const a of [...mine()].reverse()) {
-        if (!a.subject) continue;
-        const e = by.get(a.subject) ?? { agent: a.subject, knocks: 0, last: a.at, blocked: 0 };
+        // A block is reported by key; once the sender's card verified, it lands on the row it knocked under (run 32's
+        // injector showed "blocked: 0" there, its blocks on a separate "unverified key" row).
+        const who = a.kind === 'attack.blocked' && a.data?.verified && (a.data.from ?? a.data.claimed) ? `agent:${a.data.from ?? a.data.claimed}` : a.subject;
+        if (!who) continue;
+        const e = by.get(who) ?? { agent: who, knocks: 0, last: a.at, blocked: 0 };
         if (a.kind === 'knock') e.knocks++;
         if (a.kind === 'decision') e.lastDecision = String(a.data?.decision ?? '');
         if (a.kind === 'attack.blocked') e.blocked++;
         e.last = a.at;
-        by.set(a.subject, e);
+        by.set(who, e);
       }
       const rep = x.signals().reputation;
       return [...by.values()].sort((a, b) => (a.last < b.last ? 1 : -1)).map((e) => ({ ...e, reputation: e.agent.startsWith('agent:') ? rep[e.agent.slice(6)] ?? null : null }));
