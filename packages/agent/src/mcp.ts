@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { allFields, blueprintHeader, canonicalize, checkCart, type CartMandate, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, type CartMandate, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -379,6 +379,23 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
     return body;
+  };
+  // Whether something is on the transparency log: the log's answer, with its proof and checkpoint checked here, not taken
+  // on its word (SPEC §11.8).
+  const onRecord = async (entry: string) => {
+    try {
+      const me = await agent();
+      const log = (await me.find({ skill: 'log' }))[0];
+      if (!log) return { checked: false, why: 'no transparency log on this Lake' };
+      const r = (await me.ask(log.url, { kind: 'log.find', entry })) as Record<string, any>;
+      const card = (await (await fetch(cardUrlFor(log.url))).json()) as AgentCard;
+      const cp = verifyCheckpoint(String(r.checkpoint ?? ''), (await verifyLakeCard(card)).publicJwk);
+      if (r.kind !== 'log.found') return { logged: false, size: cp.size };
+      const ok = cp.size === r.size && verifyInclusion(unb64(r.leaf_hash), r.index, r.size, (r.proof as string[]).map(unb64), cp.root) && b64(leafHash(entry)) === r.leaf_hash;
+      return ok ? { logged: true, index: r.index, of: cp.size, origin: cp.origin, at: r.at, proof: 'checked: RFC 9162 inclusion under the log\'s signed checkpoint' } : { logged: false, why: 'the log\'s proof does not check' };
+    } catch (e) {
+      return { checked: false, why: (e as Error).message.slice(0, 120) };
+    }
   };
   // Spent under the human's allowance: hand the receipt back to their house, so it shows with their money and the order
   // turns paid (run 24: two orders paid, and the house never knew).
@@ -827,10 +844,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_verify',
     {
-      description: 'Check evidence someone showed you: a credential with its issuer\'s card ({ credential, card }: a receipt, an approval, a stamp, a house\'s key; where the credential has a status entry, it also says whether it was revoked) or a signed message with its sender\'s card ({ card, envelope }, from lake_inbox with raw: true). Says whether it verifies, who signed it and what it says. Use it before trusting a forwarded receipt or quote; claims nobody signed prove nothing.',
+      description: 'Check evidence someone showed you: a credential with its issuer\'s card ({ credential, card }: a receipt, an approval, a stamp, a house\'s key; where the credential has a status entry, it also says whether it was revoked) or a signed message with its sender\'s card ({ card, envelope }, from lake_inbox with raw: true). Says whether it verifies, who signed it and what it says, and for a credential whether it is on the Lake\'s transparency log (proof checked here, against the log\'s signed checkpoint). Use it before trusting a forwarded receipt or quote; claims nobody signed prove nothing.',
       inputSchema: { evidence: z.record(z.string(), z.unknown()).describe('{ credential, card } or { card, envelope }') },
     },
-    async (a) => json(await verifyEvidence(a.evidence)),
+    async (a) => {
+      const checked = await verifyEvidence(a.evidence);
+      const credential = typeof a.evidence.credential === 'string' ? a.evidence.credential : undefined;
+      return json(credential && checked.verified ? { ...checked, on_record: await onRecord(credential) } : checked);
+    },
   );
 
   server.registerTool(

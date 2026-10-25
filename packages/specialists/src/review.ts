@@ -8,7 +8,7 @@ import type express from 'express';
 export interface SpecialistOptions { id: Identity; url: string; domain: string; sandbox: boolean; report?: (e: LakeEvent) => void }
 type Reply =
   | { kind: 'approved' | 'certified'; credential: string; notes: string[] }
-  | { kind: 'settled'; receipts: { payee: string; credential: string }[]; currency?: string; total: number; remaining: number }
+  | { kind: 'settled'; receipts: { payee: string; credential: string; logged?: { index: number; origin: string } }[]; currency?: string; total: number; remaining: number }
   | { kind: 'registered'; pack: string; domain: string; registered: boolean; register: string }
   | { kind: 'refused'; problems: string[] };
 
@@ -130,7 +130,7 @@ export const newId = () => randomUUID();
  * The demo Payments agent: checks the AP2 mandate chain (a human's Intent Mandate, the agent's Payment
  * Mandates under it, the budget) and records settlements. Settlement is simulated; receipts are real VCs.
  */
-export async function createPayments(o: SpecialistOptions & { onSettled?: (amount: number, count: number) => void }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
+export async function createPayments(o: SpecialistOptions & { onSettled?: (amount: number, count: number) => void; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }> }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
   const spent = new Map<string, number>();
   // Carts already paid, by the hash of their contents: a seller's cart is paid once.
   const paidCarts = new Set<string>();
@@ -222,7 +222,9 @@ export async function createPayments(o: SpecialistOptions & { onSettled?: (amoun
       })),
     );
     o.onSettled?.(total / 100, checked.length);
-    return { kind: 'settled', receipts, currency, total: total / 100, remaining: (cap - already - total) / 100 };
+    // On the record: every receipt goes into the transparency log, so it can't be quietly rewritten or denied later.
+    const logged = await Promise.all(receipts.map(async (r) => ({ ...r, ...(o.log ? { logged: await o.log(r.credential, 'receipt').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) } : {}) })));
+    return { kind: 'settled', receipts: logged, currency, total: total / 100, remaining: (cap - already - total) / 100 };
   });
   return { app: s.app, card: s.card, webId: s.webId };
 }

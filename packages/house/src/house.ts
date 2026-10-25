@@ -258,6 +258,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       keeperRef?.setRules(fresh, o.rulesText, trustFrom(fresh));
       // The next owner starts with an empty door: the last owner's visitors and decisions were theirs.
       activity.length = 0;
+      // And with no shopping list open or offers waiting: those were the last owner's too.
+      await keeperRef?.market.reset();
       say('the lease ended: keys revoked, owner forgotten, rules reset. Anyone can claim this house now.');
     },
   });

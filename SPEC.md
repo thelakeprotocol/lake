@@ -392,6 +392,10 @@ Agents who need a draw nobody can steer (a coin flip, who goes first, a tie-brea
 
 **Timelock seals.** For a sealed bid or hidden move with no reveal step, a party MAY encrypt its value to a future quicknet round with drand's timelock encryption (tlock, an age-format ciphertext): nobody can open it before the round is published and anyone can after, so nobody can withhold a reveal once it has seen the others'.
 
+### 11.8 Transparency log
+
+A **transparency log** keeps an append-only record of signed things (payment receipts, arbiter rulings, whatever an agent wants on the record), so a receipt or a ruling can't later be rewritten or quietly dropped. It is an RFC 9162 Merkle tree: an entry (a string, or JSON in its canonical form) hashes as SHA-256(0x00 ‖ entry), a node as SHA-256(0x01 ‖ left ‖ right), with the inclusion and consistency proofs of RFC 9162 §2.1.3 and §2.1.4. Its word for its size and root is a **checkpoint** in C2SP's signed-note format (as Go's checksum database and Sigstore's Rekor v2 use): `<origin>\n<size>\n<base64 root>\n`, a blank line, and `— <origin> <base64(key hash ‖ Ed25519 signature)>`, the key hash being the first four bytes of SHA-256(origin ‖ "\n" ‖ 0x01 ‖ public key). Messages: `log.add { entry }` (returns `index`, `leaf_hash`, the inclusion `proof` and the `checkpoint`), `log.find { entry | leaf_hash }`, `log.consistency { from }`, `log.checkpoint`; `GET /checkpoint` serves the latest to monitors. A payments agent and an arbiter SHOULD log every receipt and ruling they sign and return where (`logged: { index, origin }`). A log vouches for nothing inside its entries, only that they were logged in that order. (SCITT puts such trees behind COSE envelopes; those are drafts, so a Lake log's entries are the Lake's own signed objects.)
+
 ## 12. Intents and quotes (offers priced in place)
 
 A study asks many houses one question and gets back only totals. A **quote** is the other way round: one person wants something (a mortgage, insurance, an energy tariff) and many agents compete to offer it, each priced on that person's real data, inside their house, without seeing it.

@@ -14,7 +14,7 @@ interface Signed { card?: AgentCard; envelope?: { payload?: Record<string, unkno
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
-export async function createArbiter(o: SpecialistOptions & { payments?: string[] }) {
+export async function createArbiter(o: SpecialistOptions & { payments?: string[]; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }> }) {
   const payments = o.payments ?? ['payments.lake.local'];
   // A signed message as it was when signed: its sender's card, and the signature checked at its own time (old evidence is
   // still evidence). Returns who said what, or null.
@@ -85,6 +85,8 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
       : delivered.acknowledged ? 'Paid and delivered: the buyer\'s own signed receipt names exactly this content, so a dispute that it did not arrive fails. Whether it is good enough is not a fact this arbiter rules on: the content is attached for a person to read.'
       : 'Paid, and the seller signed a delivery the buyer has not acknowledged: ask the buyer for its signed receipt before ruling that it arrived.';
     const credential = await s.vc('LakeRuling', { id: `urn:ap2:cart:${cart.id}`, cart: { id: cart.id, hash: cartHash((p.cart as CartMandate).contents) }, seller: cart.seller, buyer: cart.buyer, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged } : null, facts, ruling }, 3650);
+    // On the record, so a ruling can't be denied or rewritten later.
+    const logged = await o.log?.(credential, 'ruling').then(({ index, origin }) => ({ index, origin })).catch(() => undefined);
     // Both sides hear it, whoever asked: a ruling one party keeps to itself settles nothing.
     const tellAll = [p.seller_card, p.buyer_card].filter(Boolean) as AgentCard[];
     for (const c of tellAll) {
@@ -95,7 +97,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
         await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }).catch(() => {});
       })();
     }
-    return { kind: 'ruling', cart: cart.id, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
+    return { kind: 'ruling', ...(logged ? { logged } : {}), cart: cart.id, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
   });
   return s;
 }

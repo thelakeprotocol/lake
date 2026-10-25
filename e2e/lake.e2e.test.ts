@@ -157,7 +157,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(19);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(20);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -737,6 +737,8 @@ describe('the open door', () => {
     const paid = await buyer('lake_buy', { action: 'pay', cart: order.cart.slice(0, 8) });
     expect(paid).toMatchObject({ paid: 4, unit: 'USD', cart: order.cart, remaining: 16 });
     expect(await buyer('lake_buy', { action: 'pay', cart: order.cart }, false)).toMatch(/paid already/);
+    // The receipt is on the transparency log: the buyer's connector checks the inclusion proof under the signed checkpoint.
+    expect((await buyer('lake_verify', { evidence: { credential: paid.receipt, card: `${payments}/a2a` } })).on_record).toMatchObject({ logged: true, index: expect.any(Number), origin: 'log.lake.local/log' });
     const sales = (await poet('lake_inbox', { wait_seconds: 5 })).messages;
     expect(sales.map((m: any) => m.message.kind)).toEqual(['trade.order', 'receipt']);
     expect(sales[1].checked).toMatchObject({ verified: true, settled: true, cart: { id: order.cart } });
@@ -1092,6 +1094,10 @@ describe('the weekly shop, priced inside the house', () => {
     const best = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible);
     const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
     expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'order confirmed', order: best.id, outputs: { total: best.result.outputs.total } } });
+    // Found what it was looking for: the request closes, and the order stays on the owner's list.
+    const after = await b.call({ kind: 'panel.market' });
+    expect(after.intents).toEqual([]);
+    expect(after.offers.find((o: any) => o.id === best.id)).toMatchObject({ status: 'accepted' });
     const audit = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit'));
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
     // Not eight weeks of receipts: the list.

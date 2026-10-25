@@ -464,6 +464,11 @@ async function offers(box: HTMLElement) {
         if (r.error) { alert(r.error); go.disabled = false; } else void show();
       };
       blocks.push(h('div', { class: 'card', style: 'max-width:820px' }, h('h3', {}, p.title), h('div', { class: 'grid2', style: 'margin-top:12px' }, ...selects), h('div', { style: 'margin-top:14px' }, go)));
+      // Accepting closes the request; what you took stays here, with whether your agent has paid for it.
+      const taken = m.offers.filter((o) => o.pack === p.id && o.status !== 'open');
+      if (taken.length) blocks.push(h('ul', { class: 'rows', style: 'max-width:820px' }, ...taken.map((o) => { const first = Object.keys(o.result.outputs)[0]!; const lab = o.labels?.[first] ?? { label: first }; return h('li', {},
+        h('div', {}, h('div', { class: 'r-title' }, `${o.quoter.name}: ${fmt(o.result.outputs[first]!, lab.unit)}`), h('div', { class: 'r-meta' }, `${lab.label} · ${o.status === 'paid' ? 'paid by your agent' : 'accepted, not paid yet'}`)),
+        h('span', { class: `chip ${o.status === 'paid' ? 'share' : ''}` }, o.status)); })));
       continue;
     }
     const mine = m.offers.filter((o) => o.pack === p.id);

@@ -129,6 +129,15 @@ export class Market {
     await this.save();
   }
 
+  /** The house is someone else's now: the last owner's intents and offers were theirs, not the next owner's (run 28). */
+  async reset() {
+    this.intents.clear();
+    this.offers.clear();
+    this.programs.clear();
+    await this.publish();
+    await this.save();
+  }
+
   /** Tell the nodes (who keep it privately) and learn how big each group is. */
   private async publish() {
     const groups = await this.c.links()?.intents([...this.intents.values()].map((i) => ({ pack: i.pack, group: i.group })));
@@ -240,6 +249,8 @@ export class Market {
     const released = (rec.pack.release ?? []).length;
     await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, to: offer.quoter.webId, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live', recordsOut: 0 }));
     this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { pack: offer.pack, released }));
+    // Found what they were looking for: stop asking (run 28's grocers quoted the same household again within minutes).
+    await this.close(offer.pack);
     return offer;
   }
 
