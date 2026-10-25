@@ -113,9 +113,12 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       ];
       if (problems.length) return { kind: 'refused', problems };
       const r: Room = { id, mode: p.mode as Room['mode'], topic: String(p.topic ?? '').slice(0, 200), opener: from, invited: invite!, max: MAX_MEMBERS, until: Date.now() + hours * 3_600_000, members: [], said: [], ...(startWith ? { startWith } : {}), ...(startBy ? { startBy, startMin: startMin ?? startWith } : {}) };
+      // In a room, whoever opens it is in it (run 27's opener got "join first" reading its own room). A bubble's opener joins
+      // like anyone, with a fresh key for it.
+      if (r.mode === 'room') r.members.push({ webId: from, handle: from, joinedAt: new Date().toISOString() });
       rooms.set(id, r);
       void save();
-      return { kind: 'room.opened', ...view(r) };
+      return { kind: 'room.opened', ...view(r), ...(r.mode === 'room' ? { joined: true } : {}) };
     }
     if (!['room.join', 'room.say', 'room.read', 'room.leave', 'room.update'].includes(String(p.kind))) return { kind: 'refused', problems: ['send room.list, room.open, room.join, room.say, room.read, room.leave or (its opener) room.update'] };
     const r = rooms.get(id);

@@ -24,7 +24,11 @@ export interface PaymentRequest {
 }
 
 /** AP2 CartContents and CartMandate. */
-export interface CartContents { id: string; user_cart_confirmation_required: boolean; payment_request: PaymentRequest; cart_expiry: string; merchant_name: string }
+export interface CartContents {
+  id: string; user_cart_confirmation_required: boolean; payment_request: PaymentRequest; cart_expiry: string; merchant_name: string;
+  /** The Lake's one addition: the sha256 of what the buyer asked for (its note), so the signed cart says what was ordered (run 27). */
+  lake_brief_sha256?: string;
+}
 export interface CartMandate { contents: CartContents; merchant_authorization: string }
 
 /** How a Lake cart is paid: the AP2 mandate chain, settled by a payments agent the payer trusts. */
@@ -59,7 +63,7 @@ export function menuProblems(menu: unknown): string[] {
  */
 export async function signCart(o: {
   seller: Identity; sellerWebId: string; sellerName: string; buyerWebId: string;
-  items: { label: string; amount: PaymentCurrencyAmount }[]; minutes?: number; id?: string;
+  items: { label: string; amount: PaymentCurrencyAmount }[]; minutes?: number; id?: string; brief?: string;
 }): Promise<CartMandate> {
   if (!o.items.length || o.items.length > MAX_ITEMS) throw new Error(`a cart holds 1 to ${MAX_ITEMS} items`);
   const currency = o.items[0]!.amount.currency;
@@ -75,6 +79,7 @@ export async function signCart(o: {
       details: { id: `order-${id}`, display_items: o.items.map((x) => ({ label: x.label.slice(0, 120), amount: { currency, value: x.amount.value } })), total: { label: 'Total', amount: { currency, value: cents / 100 } } },
     },
     cart_expiry: new Date(Date.now() + minutes * 60_000).toISOString(), merchant_name: o.sellerName.slice(0, 80),
+    ...(o.brief ? { lake_brief_sha256: createHash('sha256').update(o.brief).digest('hex') } : {}),
   };
   const merchant_authorization = await new jose.SignJWT({ cart_hash: cartHash(contents) })
     .setProtectedHeader({ alg: 'EdDSA', kid: o.seller.kid, typ: 'JWT' })

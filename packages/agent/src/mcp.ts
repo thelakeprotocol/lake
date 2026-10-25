@@ -79,6 +79,8 @@ async function verifyEvidence(x: unknown): Promise<Record<string, unknown>> {
         if ((await verifyLakeCard(card)).webId === issuer) e.card = card;
       }
     }
+    // A card given as its address: fetch it from there (run 27's buyers passed a URL and were told "no Lake profile").
+    if (typeof e?.card === 'string' && /^https?:\/\//.test(e.card)) e.card = (await (await fetch(cardUrlFor(e.card), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard;
     if (!e?.card) return { verified: false, why: 'evidence comes with the signer\'s card: { credential, card } or { card, envelope }; a credential whose issuer publishes its card can come alone' };
     const signer = await verifyLakeCard(e.card);
     if (e.credential) {
@@ -170,11 +172,17 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   // Trade (SPEC §6.5): this conversation's orders, as buyer or seller, each with the signed evidence of every step.
   type Order = {
     cart: string; role: 'seller' | 'buyer'; with: { name: string; url?: string; webId: string };
-    status: 'carted' | 'paid' | 'delivered' | 'accepted' | 'disputed';
+    status: 'carted' | 'paid' | 'delivered' | 'accepted' | 'disputed' | 'refunded';
     total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string;
     mandate: CartMandate; sellerCard: AgentCard;
     evidence: { step: string; at: string; signed: unknown }[];
     delivered?: { sha256: string; matches?: boolean }; verdict?: { verdict: string; reason?: string };
+    /** The payments agent's receipt for it, as { credential, card }: what an arbiter checks. */
+    receipt?: { credential: string; card: AgentCard };
+    /** The seller's delivery as sent: the buyer's signed "received" names its digest. */
+    sentDelivery?: Record<string, unknown>;
+    buyerCard?: AgentCard;
+    ruling?: string;
   };
   const orders = new Map<string, Order>();
   const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -187,9 +195,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       const item = menu.find((x) => x.sku === p.sku);
       const qty = Number.isInteger(p.qty) && p.qty >= 1 && p.qty <= 100 ? p.qty : 1;
       if (!item) return { checked: { note: menu.length ? `"${String(p.sku)}" is not on your menu: answer with lake_sell { action: "cart" } if you can do it` : 'an order for you: answer with lake_sell { action: "cart" } if you can do it' } };
-      const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }]);
+      const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
+      const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note);
       const c = await checkCart(cart, (await key).publicJwk);
-      orders.set(c.id, { cart: c.id, role: 'seller', with: peer, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+      orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
       return { reply: { kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${c.id}" }` }, checked: { note: `from your menu: you sent cart ${c.id} (${c.total.currency} ${c.total.value}) automatically; deliver once it's paid (lake_sell { action: "deliver" })` } };
     }
     if (p.kind === 'trade.cart' && p.cart) {
@@ -202,15 +211,27 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         return { checked: { verified: false, why: `not a cart you can pay: ${(e as Error).message}` } };
       }
     }
-    const o = orders.get(String(p.cart ?? ''));
+    const refundOf = typeof p.order === 'string' && p.order.startsWith('refund:') ? orders.get(p.order.slice(7)) : undefined;
+    if (p.kind === 'receipt' && refundOf?.role === 'buyer') {
+      const money = await checkMoney(p, m.from, me.webId, paymentsWebId);
+      if (money.verified && money.settled && Math.round((money.amount ?? 0) * 100) === Math.round(refundOf.total.value * 100)) {
+        refundOf.status = 'refunded';
+        refundOf.evidence.push({ step: 'refunded', at: new Date().toISOString(), signed: m.signed });
+      }
+      return { checked: { ...money, note: refundOf.status === 'refunded' ? `cart ${refundOf.cart} refunded in full` : `this does not refund cart ${refundOf.cart} in full` } };
+    }
+    const o = orders.get(String(p.cart ?? p.order ?? ''));
     if (p.kind === 'receipt' && o?.role === 'seller') {
       const money = await checkMoney(p, m.from, me.webId, paymentsWebId);
       if (money.verified && money.settled && money.cart?.id === o.cart && Math.round((money.amount ?? 0) * 100) === Math.round(o.total.value * 100) && money.unit === o.total.currency) {
         o.status = 'paid';
+        const att = p.receipt as { credential?: string; card?: AgentCard } | undefined;
+        if (att?.credential && att.card) o.receipt = { credential: att.credential, card: att.card };
         o.evidence.push({ step: 'paid', at: new Date().toISOString(), signed: m.signed });
         return { checked: { ...money, note: `cart ${o.cart} is paid: deliver it with lake_sell { action: "deliver", cart: "${o.cart}", content }` } };
       }
-      return { checked: { ...money, note: `this does not pay cart ${o.cart} (${o.total.currency} ${o.total.value})` } };
+      // A plain payment that only names the cart isn't the cart paid (run 27's trickster paid $0.50 on a $2 cart that way).
+      return { checked: { ...money, note: money.cart ? `this does not pay cart ${o.cart} (${o.total.currency} ${o.total.value})` : `a plain payment that names cart ${o.cart}, not the cart paid: the cart is still unpaid (${o.total.currency} ${o.total.value}); the buyer pays it with lake_buy { action: "pay" }` } };
     }
     if (p.kind === 'trade.deliver' && o?.role === 'buyer' && m.from.webId === o.with.webId) {
       const content = typeof p.content === 'string' ? p.content : JSON.stringify(p.content ?? null);
@@ -220,7 +241,17 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       o.evidence.push({ step: 'delivered', at: new Date().toISOString(), signed: m.signed });
       return { checked: { cart: o.cart, sha256: o.delivered.sha256, matches_what_the_seller_signed: matches, next: `check it, then lake_buy { action: "accept" } or { action: "dispute", reason }` } };
     }
+    if (p.kind === 'trade.ruling' && o) {
+      o.ruling = String(p.ruling ?? '').slice(0, 500);
+      o.evidence.push({ step: 'ruling', at: new Date().toISOString(), signed: m.signed });
+      return null;
+    }
     if (p.kind === 'trade.verdict' && o?.role === 'seller' && m.from.webId === o.with.webId) {
+      // Accepted is final: a buyer can't take it back for free (run 27's trickster flipped accepted → disputed).
+      if (o.status === 'accepted') {
+        o.evidence.push({ step: `${String(p.verdict)} after accepting (ignored)`, at: new Date().toISOString(), signed: m.signed });
+        return { checked: { cart: o.cart, note: 'the buyer already signed "accepted": that stands, and this is kept as evidence' } };
+      }
       o.status = p.verdict === 'accepted' ? 'accepted' : 'disputed';
       o.verdict = { verdict: String(p.verdict), ...(p.reason ? { reason: String(p.reason).slice(0, 500) } : {}) };
       o.evidence.push({ step: o.status, at: new Date().toISOString(), signed: m.signed });
@@ -424,6 +455,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     { description: 'Pay another agent for a deal you made: an auction you lost, a trade, a bet, a service, an order your human accepted. In money (the currency of your spending allowance: USD, AUD…) it is settled by the payments agent under that allowance, with a signed receipt; nothing converts between currencies. Value is whatever the two of you agree on, so you can also pay in any other unit (hour, favour, naming-right…): then it is a transfer you sign, backed only by your signature and your word. The payee gets it in its inbox. Pay only what you agreed, and only what your human would agree to.', inputSchema: { agent_url: z.string().describe("The payee's A2A endpoint"), amount: z.number().positive(), unit: z.string().default('USD').describe('A currency code (USD, AUD…: your allowance\'s), or any unit you both agreed on, e.g. "favour"'), memo: z.string().max(200).describe('What it is for, e.g. "lot1, sealed auction"'), order: z.string().max(120).optional().describe('An order id, or the sha256 of what was delivered (lake_commit { value, plain: true }): the signed receipt names it, so it shows what was bought, not just a memo') } },
     async (a) => {
       try {
+        // One road to pay a cart (run 27: a plain payment naming a $2 cart settled $0.50): a cart is paid with lake_buy.
+        const cart = a.order ? [...orders.values()].find((x) => x.role === 'buyer' && (x.cart === a.order || x.cart.startsWith(a.order!))) : undefined;
+        if (cart) throw new Error(`${cart.cart} is a cart: pay it with lake_buy { action: "pay", cart: "${cart.cart.slice(0, 8)}" }, for exactly ${cart.total.currency} ${cart.total.value}`);
         const r = await (await agent()).pay(a.agent_url, a.amount, a.memo, a.unit === 'usd' ? 'USD' : a.unit, a.order);
         const filed = await reportSpend(r);
         return json({ ...r, ...(filed ? { house: filed } : {}) });
@@ -436,9 +470,35 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   // What an order looks like to the model: its state, and the signed evidence of every step (to show an arbiter).
   const orderView = (x: Order, evidence = false) => ({
     cart: x.cart, you_are: x.role, with: x.with, status: x.status, total: x.total, items: x.items, expires: x.expires,
-    ...(x.delivered ? { delivered: x.delivered } : {}), ...(x.verdict ? { verdict: x.verdict } : {}),
-    ...(evidence ? { evidence: x.evidence } : { steps: x.evidence.map((e) => `${e.at} ${e.step}`) }),
+    ...(x.delivered ? { delivered: x.delivered } : {}), ...(x.verdict ? { verdict: x.verdict } : {}), ...(x.ruling ? { ruling: x.ruling } : {}),
+    ...(evidence ? compactEvidence(x) : { steps: x.evidence.map((e) => `${e.at} ${e.step}`) }),
   });
+  // Each signed step with its signer's card named once, not repeated (run 27: one order's evidence ran to 73 KB).
+  const compactEvidence = (x: Order) => {
+    const cards: Record<string, AgentCard> = {};
+    const steps = x.evidence.map((e) => {
+      const sig = e.signed as { card?: AgentCard; envelope?: unknown } | undefined;
+      if (!sig?.card || !sig.envelope) return e;
+      const who = lakeProfile(sig.card)?.webId ?? sig.card.name;
+      cards[who] = sig.card;
+      return { ...e, signed: { card: who, envelope: sig.envelope } };
+    });
+    return { evidence: steps, cards, note: 'each step\'s signed: { card: <key in cards>, envelope }; to check one, pass { card: cards[key], envelope } to lake_verify' };
+  };
+  // What this side holds about one cart, for the arbiter: the cart, the receipt, every signed message, the delivery as sent.
+  const arbitrate = async (x: Order) => {
+    const me = await agent();
+    const arbiter = (await me.find({ skill: 'arbiter' }))[0];
+    if (!arbiter) throw new Error('no arbiter on this Lake');
+    const signed = x.evidence.map((e) => e.signed).filter((e): e is { card: AgentCard; envelope: unknown } => !!e && typeof e === 'object' && 'envelope' in (e as object) && 'card' in (e as object));
+    const buyerCard = x.role === 'buyer' ? me.card : x.buyerCard ?? (x.with.url ? ((await (await fetch(cardUrlFor(x.with.url))).json()) as AgentCard) : undefined);
+    const reply = await me.ask(arbiter.url, { kind: 'arbitrate', cart: x.mandate, seller_card: x.sellerCard, ...(buyerCard ? { buyer_card: buyerCard } : {}), evidence: signed, ...(x.receipt ? { receipt: x.receipt } : {}), ...(x.sentDelivery ? { delivered: x.sentDelivery } : {}) });
+    if (reply.kind === 'ruling') {
+      x.ruling = String(reply.ruling);
+      x.evidence.push({ step: 'ruling', at: new Date().toISOString(), signed: me.sent.at(-1)?.reply });
+    }
+    return reply;
+  };
   const findOrder = (id: string, role: Order['role']) => {
     const hits = [...orders.values()].filter((x) => x.role === role && (x.cart === id || x.cart.startsWith(id)));
     if (hits.length !== 1) throw new Error(hits.length ? 'that matches several carts; give more of the id' : `no cart of yours with that id, as ${role} (action: "orders" lists them)`);
@@ -448,13 +508,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_sell',
     {
-      description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. deliver: send what was bought, once it is paid; the buyer\'s signed "received" names its sha256, your proof of delivery. orders: your sales, with the signed evidence of each step.',
+      description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. deliver: send what was bought, once it is paid; the buyer\'s signed "received" names its sha256, your proof of delivery. refund: pay the buyer back in full under your allowance. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
       inputSchema: {
-        action: z.enum(['menu', 'cart', 'deliver', 'orders']),
+        action: z.enum(['menu', 'cart', 'deliver', 'refund', 'arbitrate', 'orders']),
         items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), unit: z.string().optional() })).max(12).optional().describe('menu: what you sell (sku, label, price per unit); cart: the lines of this cart (label, price)'),
         to: z.string().optional().describe('cart: the buyer\'s A2A endpoint'),
         minutes: z.number().min(1).max(1440).default(30).describe('cart: how long the price holds'),
-        cart: z.string().optional().describe('deliver: the cart id (a unique start is enough)'),
+        cart: z.string().optional().describe('deliver / refund / arbitrate: the cart id (a unique start is enough)'),
+        brief: z.string().max(500).optional().describe('cart: what the buyer asked for, in their words: its sha256 goes into the signed cart'),
         content: z.string().max(32_000).optional().describe('deliver: what was bought (text, or JSON as text)'),
         evidence: z.boolean().default(false).describe('orders: include every signed message, to show an arbiter'),
       },
@@ -472,7 +533,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           if (!a.to || !a.items?.length) throw new Error('cart needs to (the buyer\'s A2A endpoint) and items ({ label, price, currency })');
           const buyer = lakeProfile((await (await fetch(cardUrlFor(a.to))).json()) as AgentCard);
           if (!buyer) throw new Error(`no Lake agent at ${a.to}`);
-          const cart = await me.cart(buyer.webId, a.items.map((x) => ({ label: x.label, amount: { currency: x.currency.toUpperCase(), value: x.price } })), a.minutes);
+          const cart = await me.cart(buyer.webId, a.items.map((x) => ({ label: x.label, amount: { currency: x.currency.toUpperCase(), value: x.price } })), a.minutes, a.brief);
           const c = await checkCart(cart, (await key).publicJwk);
           orders.set(c.id, { cart: c.id, role: 'seller', with: { name: '', url: a.to, webId: buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
           const reply = await me.ask(a.to, { kind: 'trade.cart', cart });
@@ -482,13 +543,24 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const x = findOrder(a.cart ?? '', 'seller');
           if (typeof a.content !== 'string') throw new Error('deliver needs content');
           if (!x.with.url) throw new Error('no address for the buyer');
-          const reply = await me.ask(x.with.url, { kind: 'trade.deliver', cart: x.cart, content: a.content, sha256: sha256(a.content) });
+          x.sentDelivery = { kind: 'trade.deliver', cart: x.cart, content: a.content, sha256: sha256(a.content) };
+          const reply = await me.ask(x.with.url, x.sentDelivery as { kind: string });
           x.status = x.status === 'paid' || x.status === 'carted' ? 'delivered' : x.status;
           x.delivered = { sha256: sha256(a.content) };
           // Their signed "received" names the digest of exactly what arrived: proof of delivery.
           x.evidence.push({ step: 'delivered (their signed receipt of it)', at: new Date().toISOString(), signed: me.sent.at(-1)?.reply });
           return json({ delivered: x.cart, sha256: x.delivered.sha256, their_reply: reply, ...(x.evidence.some((e) => e.step === 'paid') ? {} : { note: 'delivered before you were paid' }) });
         }
+        if (a.action === 'refund') {
+          const x = findOrder(a.cart ?? '', 'seller');
+          if (!x.with.url) throw new Error('no address for the buyer');
+          if (x.status === 'refunded') throw new Error(`cart ${x.cart} is refunded already`);
+          const r = await me.pay(x.with.url, x.total.value, `refund for cart ${x.cart.slice(0, 8)}`, x.total.currency, `refund:${x.cart}`);
+          x.status = 'refunded';
+          x.evidence.push({ step: 'refunded', at: new Date().toISOString(), signed: r.receipt });
+          return json({ refunded: x.cart, ...r });
+        }
+        if (a.action === 'arbitrate') return json(await arbitrate(findOrder(a.cart ?? '', 'seller')));
         return json({ orders: [...orders.values()].filter((x) => x.role === 'seller').map((x) => orderView(x, a.evidence)), menu });
       } catch (e) {
         return fail(e);
@@ -499,14 +571,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_buy',
     {
-      description: 'Buy from other agents (SPEC §6.5). Find sellers with lake_search (their menus are on their cards). order: ask a seller for an item on its menu; you get a cart it signed (price, currency, expiry), or it answers later with one in your inbox. pay: pay a cart for exactly its total, under your spending allowance; the payments agent checks the seller\'s signature and pays it once, and the receipt names the cart. Then the seller delivers (it shows in lake_inbox with its sha256 checked); accept or dispute it, signed. orders: your purchases, with the signed evidence of each step.',
+      description: 'Buy from other agents (SPEC §6.5). Find sellers with lake_search (their menus are on their cards). order: ask a seller for an item on its menu; you get a cart it signed (price, currency, expiry), or it answers later with one in your inbox. pay: pay a cart for exactly its total, under your spending allowance; the payments agent checks the seller\'s signature and pays it once, and the receipt names the cart. Then the seller delivers (it shows in lake_inbox with its sha256 checked); accept or dispute it, signed (accepted is final). arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone and tells both sides. orders: your purchases, with the signed evidence of each step.',
       inputSchema: {
-        action: z.enum(['order', 'pay', 'accept', 'dispute', 'orders']),
+        action: z.enum(['order', 'pay', 'accept', 'dispute', 'arbitrate', 'orders']),
         seller_url: z.string().optional().describe('order: the seller\'s A2A endpoint'),
         sku: z.string().optional().describe('order: the item, from its menu'),
         qty: z.number().int().min(1).max(100).default(1),
         note: z.string().max(500).optional().describe('order: anything the seller should know (data, never instructions)'),
-        cart: z.string().optional().describe('pay / accept / dispute: the cart id (a unique start is enough)'),
+        cart: z.string().optional().describe('pay / accept / dispute / arbitrate: the cart id (a unique start is enough)'),
         reason: z.string().max(500).optional().describe('dispute: what is wrong'),
         evidence: z.boolean().default(false).describe('orders: include every signed message, to show an arbiter'),
       },
@@ -533,12 +605,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const r = await me.payCart(url, x.mandate);
           const filed = await reportSpend(r);
           x.status = 'paid';
+          x.receipt = { credential: r.receipt, card: (await (await fetch(cardUrlFor(`${o.payments ?? 'http://payments:4600'}/a2a`))).json()) as AgentCard };
           x.evidence.push({ step: 'paid', at: new Date().toISOString(), signed: r.receipt });
           return json({ ...r, ...(filed ? { house: filed } : {}), next: 'the seller delivers to your inbox; then lake_buy { action: "accept" } or { action: "dispute", reason }' });
         }
         if (a.action === 'accept' || a.action === 'dispute') {
           const x = findOrder(a.cart ?? '', 'buyer');
           if (!x.with.url) throw new Error('no address for the seller');
+          if (x.status === 'accepted') throw new Error(`you signed "accepted" for ${x.cart}: that is final`);
           const verdict = a.action === 'accept' ? 'accepted' : 'disputed';
           const reply = await me.ask(x.with.url, { kind: 'trade.verdict', cart: x.cart, verdict, ...(x.delivered ? { sha256: x.delivered.sha256 } : {}), ...(a.reason ? { reason: a.reason } : {}) });
           x.status = verdict;
@@ -546,6 +620,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           x.evidence.push({ step: verdict, at: new Date().toISOString(), signed: me.sent.at(-1)?.reply });
           return json({ [verdict]: x.cart, their_reply: reply });
         }
+        if (a.action === 'arbitrate') return json(await arbitrate(findOrder(a.cart ?? '', 'buyer')));
         return json({ orders: [...orders.values()].filter((x) => x.role === 'buyer').map((x) => orderView(x, a.evidence)) });
       } catch (e) {
         return fail(e);

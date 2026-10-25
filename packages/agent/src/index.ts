@@ -112,7 +112,7 @@ export interface LakeAgent {
   /** What this agent sells (SPEC §6.5): on its signed card, so search finds it and nobody can change a price in transit. */
   setMenu(menu: MenuItem[]): Promise<void>;
   /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
-  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number): Promise<CartMandate>;
+  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string): Promise<CartMandate>;
   /**
    * Where this agent's spending allowance comes from, once it's connected to its human's house: the allowance the human
    * signed there (SPEC §6.2), in its currency. Without one, USD payments use the sandbox's play-money allowance, if any.
@@ -285,8 +285,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       menu = items;
       await self.setTags(lastTags, lastAbout);
     },
-    async cart(buyerWebId, items, minutes) {
-      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes });
+    async cart(buyerWebId, items, minutes, brief) {
+      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief });
     },
     async payCart(sellerUrl, cart) {
       const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;

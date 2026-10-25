@@ -13,6 +13,7 @@ import { createPersonhood } from './person.js';
 import { createTeller } from './teller.js';
 import { createPasses } from './passes.js';
 import { createRooms } from './room.js';
+import { createArbiter } from './arbiter.js';
 
 const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; authority?: boolean }> = {
   auditor: { port: '4400', domain: 'audit.lake.local' },
@@ -28,6 +29,8 @@ const DEFAULTS: Record<string, { port: string; domain: string; pack?: LakePack; 
   'teller-a': { port: '4770', domain: 'teller-a.lake.local' },
   'teller-b': { port: '4780', domain: 'teller-b.lake.local' },
   rooms: { port: '4790', domain: 'rooms.lake.local' },
+  // Rules on trades from signed evidence (SPEC §6.5).
+  arbiter: { port: '4796', domain: 'arbiter.lake.local' },
   // Anonymous passes for blind pledges (Privacy Pass): a separate party from the tally.
   passes: { port: '4797', domain: 'passes.lake.local' },
 };
@@ -88,6 +91,7 @@ async function start(k: string, url: string) {
     : k === 'passes' ? await createPasses({ ...o, dataDir: values.data! })
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
     : k === 'rooms' ? await createRooms({ ...o, dataDir: values.data! })
+    : k === 'arbiter' ? await createArbiter(o)
     : k.startsWith('teller-') ? await createTeller({ ...o, dataDir: values.data!, name: `Teller ${k.slice(7).toUpperCase()}` })
     : await createAuditor(o);
   const join = async () => {

@@ -157,7 +157,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(18);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(19);
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -753,7 +753,29 @@ describe('the open door', () => {
     // A cart for someone else, or a forged one, isn't paid: the payments agent checks the seller's signature itself.
     const theirs = (await buyer('lake_buy', { action: 'orders', evidence: true })).orders[0];
     expect(theirs).toMatchObject({ status: 'accepted', you_are: 'buyer' });
-  }, 90_000);
+    // Run 27's trickster: accepted is final, and a cart is paid one way only.
+    expect(await buyer('lake_buy', { action: 'dispute', cart: order.cart, reason: 'changed my mind' }, false)).toMatch(/final/);
+    const second = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', note: 'about the sea' });
+    expect(await buyer('lake_pay', { agent_url: found.url, amount: 0.5, memo: 'cheap', order: second.cart }, false)).toMatch(/is a cart: pay it with lake_buy/);
+    await buyer('lake_buy', { action: 'pay', cart: second.cart });
+    await poet('lake_inbox', { wait_seconds: 3 });
+    await poet('lake_sell', { action: 'deliver', cart: second.cart, content: 'Salt on the wind / the sea keeps its own counsel / gulls argue the rest' });
+    await buyer('lake_inbox', { wait_seconds: 5 });
+    // A false "it never arrived": the arbiter rules from signatures alone, and tells both sides.
+    await buyer('lake_buy', { action: 'dispute', cart: second.cart, reason: 'it arrived empty' });
+    await poet('lake_inbox', { wait_seconds: 3 });
+    const ruling = await poet('lake_sell', { action: 'arbitrate', cart: second.cart });
+    expect(ruling).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, ruling: expect.stringMatching(/^Paid and delivered: the buyer's own signed receipt/) });
+    const told = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'trade.ruling');
+    expect(told).toMatchObject({ message: { cart: second.cart }, checked: { verified: true } });
+    // A refund: the seller pays the whole cart back, and the buyer's order says so.
+    const third = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku' });
+    await buyer('lake_buy', { action: 'pay', cart: third.cart });
+    await poet('lake_inbox', { wait_seconds: 3 });
+    expect(await poet('lake_sell', { action: 'refund', cart: third.cart })).toMatchObject({ refunded: third.cart, paid: 2 });
+    await buyer('lake_inbox', { wait_seconds: 5 });
+    expect((await buyer('lake_buy', { action: 'orders' })).orders.find((x: any) => x.cart === third.cart)).toMatchObject({ status: 'refunded' });
+  }, 120_000);
 
   it("a pick-up game: a room says how many it needs, its lobby talks, it notes who leaves, and starts with fewer at its deadline; agents say how long they'll stay, and leaving drops them from search", async () => {
     const port = String(await freePort());
@@ -769,7 +791,7 @@ describe('the open door', () => {
     const host = await connect('claude-host');
     const guest = await connect('claude-guest');
     const leaver = await connect('claude-leaver');
-    expect(await host('lake_room', { action: 'open', room: 'pickup', topic: 'four for thirds', mode: 'room', invite: 'anyone', hours: 1, start_with: 4, start_by: 0.1, start_min: 2 })).toMatchObject({ kind: 'room.opened', needs: 4, started: false });
+    expect(await host('lake_room', { action: 'open', room: 'pickup', topic: 'four for thirds', mode: 'room', invite: 'anyone', hours: 1, start_with: 4, start_by: 0.1, start_min: 2 })).toMatchObject({ kind: 'room.opened', needs: 3, started: false, joined: true });
     for (const who of [host, guest, leaver]) await who('lake_room', { action: 'join', room: 'pickup' });
     expect((await guest('lake_room', { action: 'list' })).rooms.find((r: { id: string }) => r.id === 'pickup')).toMatchObject({ needs: 1, start_with: 4 });
     // The lobby talks before the start; the room itself notes who leaves.
@@ -779,8 +801,8 @@ describe('the open door', () => {
     await new Promise((ok) => setTimeout(ok, 6500));
     const read = await host('lake_room', { action: 'read', room: 'pickup', after: 0 });
     expect(read).toMatchObject({ started: true });
-    expect(read.messages.map((m: { from: string; body: any; lobby?: boolean }) => (m.from === 'room' ? m.body.event : 'say'))).toEqual(['joined', 'joined', 'joined', 'say', 'left', 'started']);
-    expect(read.messages[3]).toMatchObject({ lobby: true });
+    expect(read.messages.map((m: { from: string; body: any; lobby?: boolean }) => (m.from === 'room' ? m.body.event : 'say'))).toEqual(['joined', 'joined', 'say', 'left', 'started']);
+    expect(read.messages[2]).toMatchObject({ lobby: true });
     // How long an agent means to stay shows in search, and an agent that leaves is gone from it.
     await guest('lake_set_tags', { tags: ['game:thirds'], here_until: 10 });
     await new Promise((ok) => setTimeout(ok, 21_000)); // one presence report
