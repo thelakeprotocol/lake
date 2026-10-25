@@ -1,6 +1,10 @@
 # The public sandbox Lake: synthetic data, simulated money, real signatures, open to anyone's agent.
-# Sized for a small shared server (1 GB RAM): every container has a hard memory cap and no swap, so if
-# something misbehaves Docker restarts it rather than starving whatever else runs on the machine.
+# Sized by default for a small shared server (1 GB RAM): every container has a hard memory cap and no swap, so if
+# something misbehaves Docker restarts it rather than starving whatever else runs on the machine. Keep the caps'
+# sum below the machine's RAM with room for the OS: on 1 GB, ten houses plus the grocers didn't fit (the host
+# swapped until it stopped answering). Each cap is an env var (LAKE_<SERVICE>_MEM, LAKE_HOUSES_HEAP, LAKE_MCP_HEAP);
+# on a 2 GB server: houses 700m (heap 448), mcp 260m (heap 200), specialists 240m, node 180m, sponsor 120m,
+# grocers 110m, swarm 100m.
 #
 #   LAKE_DOMAIN=sandbox.lake.example docker compose -f deploy/docker-compose.sandbox.yml up -d
 #
@@ -27,8 +31,8 @@ services:
     environment: { NODE_OPTIONS: "--max-old-space-size=96", LAKE_APPROVALS_URL: "https://lake.doneinfifty.com/docs/sandbox#claim-a-house" }
     volumes: [node:/data]
     ports: ["127.0.0.1:7000:7000"]
-    mem_limit: 160m
-    memswap_limit: 160m
+    mem_limit: ${LAKE_NODE_MEM:-160m}
+    memswap_limit: ${LAKE_NODE_MEM:-160m}
 
   specialists:
     <<: *small
@@ -39,8 +43,8 @@ services:
     volumes: [specialists:/data]
     ports: ["127.0.0.1:4300:4300"]
     depends_on: [lake-node]
-    mem_limit: 200m
-    memswap_limit: 200m
+    mem_limit: ${LAKE_SPECIALISTS_MEM:-200m}
+    memswap_limit: ${LAKE_SPECIALISTS_MEM:-200m}
 
   # A handful of hosted houses, so there's someone to knock on from minute one.
   houses:
@@ -50,7 +54,7 @@ services:
     # --pod-url: the houses' storage at a public HTTPS address, so their WebIDs and signatures can be checked by anyone.
     command: ["--tenants", "${LAKE_TENANTS:-6}", "--tenant-prefix", "sb-", "--public-url", "https://${LAKE_DOMAIN}", "--pod-url", "https://${LAKE_DOMAIN}/pods/", "--open-pairing"]
     environment:
-      NODE_OPTIONS: "--max-old-space-size=256"
+      NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-256}"
       # Two houses start at a time: ten pods starting together overloaded the 1 GB droplet after deploys (run 28).
       LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
       LAKE_NODE_URL: "http://lake-node:7000"
@@ -78,8 +82,8 @@ services:
     environment: { NODE_OPTIONS: "--max-old-space-size=96" }
     volumes: [cli:/root/.lake]
     depends_on: [houses]
-    mem_limit: 140m
-    memswap_limit: 140m
+    mem_limit: ${LAKE_SPONSOR_MEM:-140m}
+    memswap_limit: ${LAKE_SPONSOR_MEM:-140m}
 
   # Claude (or any MCP client) as a Lake agent, over HTTP: add https://<domain>/mcp as a custom connector.
   # Every conversation gets its own key and card, served from here at /mcp/a/<id>/.
@@ -89,7 +93,7 @@ services:
     hostname: mcp
     command: ["mcp", "--http", "4800", "--public-url", "https://${LAKE_DOMAIN}"]
     environment:
-      NODE_OPTIONS: "--max-old-space-size=128"
+      NODE_OPTIONS: "--max-old-space-size=${LAKE_MCP_HEAP:-128}"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ETHICS_URL: "http://specialists:4300/ethics"
       LAKE_AUDITOR_URL: "http://specialists:4300/auditor"
@@ -99,8 +103,8 @@ services:
       LAKE_ALLOWANCE_USD: "50"
     ports: ["127.0.0.1:4800:4800"]
     depends_on: [houses]
-    mem_limit: 180m
-    memswap_limit: 180m
+    mem_limit: ${LAKE_MCP_MEM:-180m}
+    memswap_limit: ${LAKE_MCP_MEM:-180m}
 
   # Three demo grocers (shopping@1): they price households' weekly shops inside their houses.
   grocers:
@@ -110,8 +114,8 @@ services:
     command: ["quoters", "--packs", "shopping", "--port", "4810", "--public-url", "http://grocers:4810", "--node", "http://lake-node:7000", "--auditor", "http://specialists:4300/auditor", "--authority", "http://specialists:4300/foodregister", "--payments", "http://specialists:4300/payments"]
     environment: { NODE_OPTIONS: "--max-old-space-size=64" }
     depends_on: [specialists]
-    mem_limit: 100m
-    memswap_limit: 100m
+    mem_limit: ${LAKE_GROCERS_MEM:-100m}
+    memswap_limit: ${LAKE_GROCERS_MEM:-100m}
 
   # Background traders (mostly marketing, which rules decline) and an attacker now and then.
   # Off by default: on a 1 GB server the houses need the room. --profile lively turns it on.
@@ -122,8 +126,8 @@ services:
     command: ["swarm", "--traders", "3", "--attackers", "1", "--interval", "30000", "--node", "http://lake-node:7000"]
     environment: { NODE_OPTIONS: "--max-old-space-size=64" }
     depends_on: [houses]
-    mem_limit: 100m
-    memswap_limit: 100m
+    mem_limit: ${LAKE_SWARM_MEM:-100m}
+    memswap_limit: ${LAKE_SWARM_MEM:-100m}
 
   caddy:
     profiles: [caddy]
