@@ -84,8 +84,11 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     const revision = (d: Record<string, unknown>) => (Number.isInteger(d.revision) && Number(d.revision) > 1 ? Number(d.revision) : 1);
     let delivered: { sha256: string; content: string; acknowledged: boolean; signedBySeller: boolean; revision: number } | null = null;
     const shown = new Set<string>();
+    let empty = false;
     for (const d of deliveries) {
       const content = typeof d.content === 'string' ? d.content : JSON.stringify(d.content ?? null);
+      // Nothing is not a delivery, however well signed (run 36: "it arrived (0 characters)" released a disputed payment).
+      if (!content.trim() || content === 'null') { empty = true; continue; }
       // Arrived: the buyer's connector signed that exactly this came, or the buyer itself filed the seller's signed delivery.
       const acknowledged = acks.some((a) => a!.payload.digest === sha256(canonicalize(d))) || heldByBuyer.has(sha256(canonicalize(d)));
       const signedBySeller = fromSeller.some((x) => x!.payload === d);
@@ -97,6 +100,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     const size = (c: string) => `${c.length} character${c.length === 1 ? '' : 's'}, ${c.split('\n').length} line${c.split('\n').length === 1 ? '' : 's'}`;
     if (delivered) facts.push(delivered.acknowledged ? `delivered: it reached the buyer, as signed (content sha256 ${delivered.sha256}; ${size(delivered.content)})` : `the seller signed this delivery (content sha256 ${delivered.sha256}; ${size(delivered.content)}); nothing shows it reached the buyer`);
     else facts.push('no delivery shown that the seller signed or the buyer acknowledged');
+    if (empty) facts.push('an empty delivery was shown: an empty delivery is not a delivery');
     if (delivered && shown.size > 1) facts.push(`${shown.size} different deliveries of this cart shown (a first and its revisions): the facts above are about revision ${delivered.revision}`);
     const verdicts = evidence.filter((x) => x?.by === cart.buyer && x.payload.kind === 'trade.verdict' && x.payload.cart === cart.id).sort((a, b) => String(a!.at).localeCompare(String(b!.at)));
     const firstAccept = verdicts.find((v) => v!.payload.verdict === 'accepted');

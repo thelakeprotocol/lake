@@ -154,7 +154,21 @@ export function followCheckpoint(last: SeenCheckpoint | undefined, note: string,
 }
 
 /** One log's `log.record` answer about one agent (SPEC §11.8). */
-export interface LogRecord { origin: string; sales: number; purchases: number; refunds_given: number; held_now: number; sold: Record<string, number>; rulings: { delivered: number; not_delivered: number } }
+export interface LogRecord {
+  origin: string; sales: number; purchases: number; refunds_given: number; held_now: number; sold: Record<string, number>;
+  /** Held sales, by how the money was released: the buyer accepted, nobody answered in time, or a ruling that it arrived. */
+  released: { accepted: number; review_expired: number; ruling: number };
+  /**
+   * Disputes of this agent's deliveries and how each ended (a revision is the good sign); changes a buyer asked for are
+   * counted apart, as they aren't disputes. A ruling's "delivered" was never a merit (run 36), so rulings aren't counted.
+   */
+  disputes: { against: number; ended: { revision: number; refund: number; ruling: number; accepted: number }; changes_requested: number };
+  /** Disputes this agent raised as a buyer: a serial disputer shows too. */
+  disputes_raised: number;
+}
+
+/** A record with nothing on it. */
+export const emptyRecord = (): Omit<LogRecord, 'origin'> => ({ sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {}, released: { accepted: 0, review_expired: 0, ruling: 0 }, disputes: { against: 0, ended: { revision: 0, refund: 0, ruling: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0 });
 
 /**
  * One agent's record across the logs of several Lakes (SPEC §11.8). Across Lakes a record is spread: a buyer pays through
@@ -164,7 +178,7 @@ export interface LogRecord { origin: string; sales: number; purchases: number; r
  */
 export function sumRecords(records: LogRecord[]): Omit<LogRecord, 'origin'> & { logs: string[] } {
   const seen = new Set<string>();
-  const out = { sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {} as Record<string, number>, rulings: { delivered: 0, not_delivered: 0 }, logs: [] as string[] };
+  const out = { ...emptyRecord(), logs: [] as string[] };
   for (const r of records) {
     if (seen.has(r.origin)) continue;
     seen.add(r.origin);
@@ -174,8 +188,11 @@ export function sumRecords(records: LogRecord[]): Omit<LogRecord, 'origin'> & { 
     out.refunds_given += r.refunds_given;
     out.held_now += r.held_now;
     for (const [cur, v] of Object.entries(r.sold ?? {})) out.sold[cur] = Math.round(((out.sold[cur] ?? 0) + v) * 100) / 100;
-    out.rulings.delivered += r.rulings?.delivered ?? 0;
-    out.rulings.not_delivered += r.rulings?.not_delivered ?? 0;
+    for (const k of ['accepted', 'review_expired', 'ruling'] as const) out.released[k] += r.released?.[k] ?? 0;
+    for (const k of ['revision', 'refund', 'ruling', 'accepted'] as const) out.disputes.ended[k] += r.disputes?.ended?.[k] ?? 0;
+    out.disputes.against += r.disputes?.against ?? 0;
+    out.disputes.changes_requested += r.disputes?.changes_requested ?? 0;
+    out.disputes_raised += r.disputes_raised ?? 0;
   }
   return out;
 }

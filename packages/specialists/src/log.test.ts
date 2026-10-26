@@ -61,22 +61,27 @@ describe('the transparency log', () => {
     // A cart sold and paid at once; one held and captured; one held and voided (a refund).
     await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(2), agreement: 'urn:ap2:cart:c1', cart: cart('c1'), settlement: 'simulated' }), 'receipt');
     await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(4), agreement: 'urn:ap2:cart:c2', cart: cart('c2'), settlement: 'held' }), 'receipt');
-    await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(4), agreement: 'urn:ap2:cart:c2', cart: cart('c2'), seller: SELLER, settlement: 'simulated', captures: 'h2' }), 'capture');
+    // Each held payment's end says how, and each dispute and how it ended (run 36): c2 was disputed, revised, then
+    // accepted after changes asked for; c3 was disputed and the seller refunded.
+    await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(4), agreement: 'urn:ap2:cart:c2', cart: cart('c2'), seller: SELLER, settlement: 'simulated', captures: 'h2', how: 'accepted', disputes: [{ code: 'not_as_described', ended: 'revision' }, { code: 'changes_requested', ended: 'revision' }] }), 'capture');
     await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(3), agreement: 'urn:ap2:cart:c3', cart: cart('c3'), settlement: 'held' }), 'receipt');
-    await log.add(vc({ id: BUYER, payer: BUYER, amount: usd(3), agreement: 'urn:ap2:cart:c3', cart: cart('c3'), seller: SELLER, settlement: 'voided', voids: 'h3' }), 'void');
+    await log.add(vc({ id: BUYER, payer: BUYER, amount: usd(3), agreement: 'urn:ap2:cart:c3', cart: cart('c3'), seller: SELLER, settlement: 'voided', voids: 'h3', how: 'seller_void', disputes: [{ code: 'not_received', ended: 'refund' }] }), 'void');
     // The seller pays back cart c1 in full: a refund it gave, not a sale to the buyer nor a purchase by the seller.
     await log.add(vc({ id: BUYER, payer: SELLER, amount: usd(2), agreement: 'urn:lake:order:refund:c1', settlement: 'simulated' }), 'receipt');
     // A plain payment for no cart (a tip, a memo): not a sale.
     await log.add(vc({ id: SELLER, payer: BUYER, amount: usd(1), agreement: 'urn:lake:memo:thanks', settlement: 'simulated' }), 'receipt');
-    // Run 33: a "refund" of a cart nobody paid, a second refund of c1, and rulings on a cart nobody paid don't count.
+    // Run 33: a "refund" of a cart nobody paid, a second refund of c1, and rulings don't count (run 36: a "delivered"
+    // ruling on junk looked like a win).
     await log.add(vc({ id: BUYER, payer: SELLER, amount: usd(2), agreement: 'urn:lake:order:refund:c9', settlement: 'simulated' }), 'receipt');
     await log.add(vc({ id: BUYER, payer: SELLER, amount: usd(2), agreement: 'urn:lake:order:refund:c1', settlement: 'simulated', settlementId: 'again' }), 'receipt');
     await log.add(vc({ id: 'urn:ap2:cart:c9', cart: cart('c9'), seller: SELLER, buyer: BUYER, paid: false, delivered: null }), 'ruling');
     await log.add(vc({ id: 'urn:ap2:cart:c9', cart: cart('c9'), seller: SELLER, buyer: BUYER, paid: false, delivered: { sha256: 'x', acknowledged: true } }), 'ruling');
     await log.add(vc({ id: 'urn:ap2:cart:c2', cart: cart('c2'), seller: SELLER, buyer: BUYER, paid: true, delivered: { sha256: 'y', acknowledged: true } }), 'ruling');
     const someone = await agent('someone.example', 'https://someone.example/a2a');
-    expect(await ask(someone, { kind: 'log.record', webId: SELLER })).toMatchObject({ sales: 2, purchases: 0, refunds_given: 2, held_now: 0, sold: { USD: 6 }, rulings: { delivered: 1, not_delivered: 0 } });
-    expect(await ask(someone, { kind: 'log.record', webId: BUYER })).toMatchObject({ sales: 0, purchases: 2, refunds_given: 0, sold: {} });
+    const seller = await ask(someone, { kind: 'log.record', webId: SELLER });
+    expect(seller).toMatchObject({ sales: 2, purchases: 0, refunds_given: 2, held_now: 0, sold: { USD: 6 }, released: { accepted: 1, review_expired: 0, ruling: 0 }, disputes: { against: 2, ended: { revision: 1, refund: 1, ruling: 0, accepted: 0 }, changes_requested: 1 }, disputes_raised: 0 });
+    expect(seller.rulings).toBeUndefined();
+    expect(await ask(someone, { kind: 'log.record', webId: BUYER })).toMatchObject({ sales: 0, purchases: 2, refunds_given: 0, sold: {}, disputes_raised: 2 });
   });
 
   it('takes a kind that counts only from a key it was told to trust, over A2A', async () => {
@@ -111,8 +116,9 @@ describe('the transparency log', () => {
     expect(followCheckpoint(seen, found.checkpoint, jwk, found.consistency).size).toBe(seen.size + 1);
   });
 
-  it("adds up one agent's record across two Lakes' logs: a sale paid from one, a ruling on the other's", async () => {
-    // Lake B's log: the seller lives on B, its arbiter rules there; the buyer on this Lake (A) paid through A's payments agent.
+  it("adds up one agent's record across two Lakes' logs: a sale paid through each Lake's payments agent", async () => {
+    // Lake B's log: the seller lives on B, and a buyer there paid through B's payments agent; a buyer on this Lake (A) paid
+    // through A's.
     const bdir = await mkdtemp(join(tmpdir(), 'lake-log-b-'));
     const bapp = express();
     const b = await listen(bapp);
@@ -121,15 +127,15 @@ describe('the transparency log', () => {
     bapp.use(logB.app);
     const TRAVELLER = 'https://traveller.example/#agent';
     await log.add(vc({ id: TRAVELLER, payer: BUYER, amount: usd(7), agreement: 'urn:ap2:cart:x1', cart: { id: 'x1', hash: 'hx1' }, settlement: 'simulated' }), 'receipt');
-    await logB.add(vc({ seller: TRAVELLER, buyer: BUYER, cart: { id: 'x1', hash: 'hx1' }, paid: true, delivered: { sha256: 'd', acknowledged: true } }), 'ruling');
+    await logB.add(vc({ id: TRAVELLER, payer: BUYER, amount: usd(3), agreement: 'urn:ap2:cart:x2', cart: { id: 'x2', hash: 'hx2' }, seller: TRAVELLER, settlement: 'simulated', captures: 'hb', how: 'ruling', disputes: [{ code: 'not_received', ended: 'ruling' }] }), 'capture');
     const someone = await agent('someone.example', 'https://someone.example/a2a');
     const onA = await ask(someone, { kind: 'log.record', webId: TRAVELLER });
     const onB = await ask(someone, { kind: 'log.record', webId: TRAVELLER }, `${b.url}/a2a`);
-    // B's log alone shows no sale: the receipt is on A's, where the buyer's payments agent logs.
-    expect(onB).toMatchObject({ origin: 'log.b.example/log', sales: 0, rulings: { delivered: 1, not_delivered: 0 } });
+    // Each log shows the sale paid through its own Lake's payments agent.
+    expect(onB).toMatchObject({ origin: 'log.b.example/log', sales: 1, released: { ruling: 1 }, disputes: { against: 1, ended: { ruling: 1 } } });
     expect(onA).toMatchObject({ origin, sales: 1, sold: { USD: 7 } });
     // Each fact is on one log, so they add up; the same log reached twice (through two Lakes' search) counts once.
-    expect(sumRecords([onB, onA, onA] as never)).toEqual({ sales: 1, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 7 }, rulings: { delivered: 1, not_delivered: 0 }, logs: ['log.b.example/log', origin] });
+    expect(sumRecords([onB, onA, onA] as never)).toEqual({ sales: 2, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 10 }, released: { accepted: 0, review_expired: 0, ruling: 1 }, disputes: { against: 1, ended: { revision: 0, refund: 0, ruling: 1, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0, logs: ['log.b.example/log', origin] });
     await rm(bdir, { recursive: true, force: true });
   });
 });

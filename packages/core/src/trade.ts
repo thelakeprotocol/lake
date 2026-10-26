@@ -89,6 +89,21 @@ const MAX_CART_MINUTES = 24 * 60;
 /** The hash AP2 puts in the merchant's JWT: sha256 over the canonical JSON (JCS) of the cart's contents. */
 export const cartHash = (contents: CartContents) => jose.base64url.encode(createHash('sha256').update(canonicalize(contents)).digest());
 
+/** The sha256 of nothing, which is never a delivery (run 36: an empty delivery took a disputed held payment). */
+export const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+/**
+ * What a buyer's dispute of a delivery is about (SPEC §6.5). Only whether it arrived is a fact signatures settle; whether
+ * it is what was ordered isn't, and asking for changes isn't a dispute at all. Card schemes split "not received" from
+ * "not as described" the same way.
+ */
+export const DISPUTE_CODES = ['not_received', 'not_as_described', 'changes_requested'] as const;
+export type DisputeCode = (typeof DISPUTE_CODES)[number];
+
+/** How a held payment ended, as its receipt says: what a seller's record is counted from. */
+export const SETTLED_HOW = ['accepted', 'review_expired', 'ruling', 'seller_void', 'undelivered_expired'] as const;
+export type SettledHow = (typeof SETTLED_HOW)[number];
+
 /** A menu's digest, as a cart names it: hex sha256 over the canonical JSON (JCS) of the menu as on the card. */
 export const menuHash = (menu: MenuItem[]) => createHash('sha256').update(canonicalize(menu)).digest('hex');
 

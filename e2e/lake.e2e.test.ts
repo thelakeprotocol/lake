@@ -943,40 +943,51 @@ describe('the open door', () => {
     expect(order).toMatchObject({ total: { currency: 'USD', value: 4 }, items: [{ label: '2 × A haiku on any topic' }] });
     // The cart says which menu it was ordered from (run 31): the item's sku and the menu's digest, signed by the seller.
     expect(order.ordered_from).toEqual({ sku: 'haiku', menu_sha256: menuHash(found.menu), current: true });
-    // Paid under the buyer's allowance, for exactly the cart, once; the receipt names the cart. The buyer says when the hold
-    // releases by itself, within the payments agent's bounds (1 to 168 hours).
+    // Paid under the buyer's allowance, for exactly the cart, once; the receipt names the cart. The buyer says how long it
+    // has to answer a delivery before the hold releases by itself, within the payments agent's bounds (1 to 168 hours);
+    // until a delivery, the seller's clock runs: nothing delivered in 24 hours goes back to the buyer.
     expect(await buyer('lake_buy', { action: 'pay', cart: order.cart, release_after_hours: 500 }, false)).toMatch(/release_after_hours: 1 to 168 hours/);
     expect(await buyer('lake_buy', { action: 'pay', cart: order.cart, release_after_hours: 0.5 }, false)).toMatch(/release_after_hours: 1 to 168 hours/);
     const paid = await buyer('lake_buy', { action: 'pay', cart: order.cart.slice(0, 8), release_after_hours: 2 });
     expect(paid).toMatchObject({ paid: 4, unit: 'USD', cart: order.cart, remaining: 16, hold: { id: expect.any(String) } });
-    expect(Math.abs(Date.parse(paid.hold.until) - Date.now() - 2 * 3_600_000)).toBeLessThan(120_000);
+    expect(Math.abs(Date.parse(paid.hold.until) - Date.now() - 24 * 3_600_000)).toBeLessThan(120_000);
     expect(await buyer('lake_buy', { action: 'pay', cart: order.cart }, false)).toMatch(/paid already/);
     // The receipt is on the transparency log: the buyer's connector checks the inclusion proof under the signed checkpoint.
     expect((await buyer('lake_verify', { evidence: { credential: paid.receipt, card: `${payments}/a2a` } })).on_record).toMatchObject({ logged: true, index: expect.any(Number), origin: 'log.lake.local/log' });
     const sales = (await poet('lake_inbox', { wait_seconds: 5 })).messages;
     expect(sales.map((m: any) => m.message.kind)).toEqual(['trade.order', 'receipt']);
-    // Held by default: set aside for the seller, released when the buyer accepts. The seller is told it is paid, and held
-    // for it (run 31: sellers read "delivered before you were paid").
-    const heldFor = /^paid, held for you until the buyer accepts \(or until \S+ with no dispute\)/;
-    expect(sales[1].checked).toMatchObject({ verified: true, settled: false, held: { id: expect.any(String), until: paid.hold.until }, cart: { id: order.cart }, note: expect.stringMatching(new RegExp(`^cart ${order.cart} is paid, held for you until the buyer accepts`)) });
+    // Held by default: set aside for the seller, released when the buyer accepts a delivery. The seller is told it is paid,
+    // held for it, and by when to deliver (run 31: sellers read "delivered before you were paid").
+    const deliverBy = /^paid, held for you: deliver by \S+, or it goes back to the buyer/;
+    const heldFor = /^paid, held for you until the buyer accepts \(or until \S+ with no answer\)/;
+    expect(sales[1].checked).toMatchObject({ verified: true, settled: false, held: { id: expect.any(String), until: paid.hold.until }, cart: { id: order.cart }, note: expect.stringMatching(new RegExp(`^cart ${order.cart} is paid, held for you: deliver by`)) });
     // Once checked, the payments agent's card shows by name, domain and address (lake_verify fetches it from there); raw
     // has it whole, to forward anywhere.
     expect(sales[1].message.receipt.card).toEqual({ name: 'Payments (demo)', domain: 'payments.lake.local', url: `${payments}/a2a` });
     expect(await poet('lake_verify', { evidence: sales[1].message.receipt })).toMatchObject({ verified: true, signedBy: 'payments.lake.local' });
     expect((await poet('lake_inbox', { again: true, raw: true })).messages[1].message.receipt.card.supportedInterfaces).toBeDefined();
-    expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ cart: order.cart, status: 'paid', payment: 'held', money: expect.stringMatching(heldFor), held_until: paid.hold.until });
-    // Delivered with its sha256; the buyer's connector checks it, and the buyer signs that it accepts.
+    expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ cart: order.cart, status: 'paid', payment: 'held', money: expect.stringMatching(deliverBy), held_until: paid.hold.until });
+    // Run 36: an accept before anything came released the money and locked delivery out; an empty delivery took a disputed
+    // payment. An answer is about one delivery, and nothing is not a delivery.
+    expect(await buyer('lake_buy', { action: 'accept', cart: order.cart }, false)).toMatch(/nothing delivered for \S+ yet: if nothing comes by \S+, the held payment comes back to you by itself/);
+    expect(await poet('lake_sell', { action: 'deliver', cart: order.cart, content: '  ' }, false)).toMatch(/an empty delivery is not a delivery/);
+    // Delivered with its sha256 (the note rides beside it, unhashed); the payments agent is told of it, and the buyer's time
+    // to answer starts. The buyer's connector checks it, and the buyer signs that it accepts exactly that delivery.
     const poem = 'Grey heron stands still / the river forgets the hour / one fish, then the next';
-    const delivered = await poet('lake_sell', { action: 'deliver', cart: order.cart, content: poem });
-    expect(delivered).toMatchObject({ delivered: order.cart, their_reply: { kind: 'received' }, money: expect.stringMatching(heldFor) });
+    const delivered = await poet('lake_sell', { action: 'deliver', cart: order.cart, content: poem, note: 'thanks for the order!' });
+    expect(delivered).toMatchObject({ delivered: order.cart, their_reply: { kind: 'received' }, money: expect.stringMatching(heldFor), held_payment: expect.stringMatching(/^told of this delivery: released when the buyer accepts it, or at \S+ with no answer/) });
+    expect(Math.abs(Date.parse(/at (\S+) with no answer/.exec(delivered.held_payment)![1]!) - Date.now() - 2 * 3_600_000)).toBeLessThan(120_000);
     expect(delivered.note).toBeUndefined();
     expect(await poet('lake_sell', { action: 'deliver', cart: order.cart, content: poem }, false)).toMatch(/delivered cart \S+ already: to send a new version, lake_sell \{ action: "revise"/);
     const [delivery] = (await buyer('lake_inbox', { wait_seconds: 5 })).messages;
-    expect(delivery.checked).toMatchObject({ cart: order.cart, matches_what_the_seller_signed: true });
+    expect(delivery.checked).toMatchObject({ cart: order.cart, matches_what_the_seller_signed: true, seller_note: 'thanks for the order!' });
     await buyer('lake_buy', { action: 'accept', cart: order.cart });
     const [sale] = (await poet('lake_sell', { action: 'orders', evidence: true })).orders;
     expect(sale).toMatchObject({ status: 'accepted', verdict: { verdict: 'accepted' } });
-    expect(sale.evidence.map((e: { step: string }) => e.step).slice(0, 5)).toEqual(['ordered', 'cart signed', 'paid (held)', 'delivered (their signed receipt of it)', 'accepted']);
+    // The buyer's connector releases the hold before it tells the seller (a refused release tells the seller nothing), so
+    // the release receipt may arrive before the verdict.
+    expect(sale.evidence.map((e: { step: string }) => e.step).slice(0, 4)).toEqual(['ordered', 'cart signed', 'paid (held)', 'delivered (their signed receipt of it)']);
+    expect(sale.evidence.map((e: { step: string }) => e.step)).toContain('accepted');
     // Accepting released the held payment: the payments agent sends the seller the capture receipt.
     for (let i = 0; i < 20 && (await poet('lake_sell', { action: 'orders' })).orders[0].payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
     expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ payment: 'released', money: 'paid, and released to you' });
@@ -1001,7 +1012,7 @@ describe('the open door', () => {
     await poet('lake_sell', { action: 'deliver', cart: second.cart, content: 'Salt on the wind / the sea keeps its own counsel / gulls argue the rest' });
     await buyer('lake_inbox', { wait_seconds: 5 });
     // A false "it never arrived": the arbiter rules from signatures alone, and tells both sides.
-    await buyer('lake_buy', { action: 'dispute', cart: second.cart, reason: 'it arrived empty' });
+    await buyer('lake_buy', { action: 'dispute', cart: second.cart, code: 'not_received', reason: 'it never arrived' });
     await poet('lake_inbox', { wait_seconds: 3 });
     // Whoever files first, the ruling is the same: it rules on everything either side has filed (run 30 got two).
     const first = await buyer('lake_buy', { action: 'arbitrate', cart: second.cart });
@@ -1030,7 +1041,7 @@ describe('the open door', () => {
     expect(await poet('lake_sell', { action: 'revise', cart: fourth.cart, content: 'too soon' }, false)).toMatch(/nothing delivered .* yet: deliver it first/);
     await poet('lake_sell', { action: 'deliver', cart: fourth.cart, content: 'Rain on the tin roof / the gutters sing all evening / the cat does not care' });
     await buyer('lake_inbox', { wait_seconds: 5 });
-    expect(await buyer('lake_buy', { action: 'dispute', cart: fourth.cart, reason: 'I asked for snow' })).toMatchObject({ held_payment: expect.stringMatching(/^kept held until you accept/) });
+    expect(await buyer('lake_buy', { action: 'dispute', cart: fourth.cart, reason: 'I asked for snow' })).toMatchObject({ held_payment: expect.stringMatching(/^held until the seller revises it and you accept, or the seller refunds/) });
     const disputed = (await poet('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'trade.verdict');
     expect(disputed.checked).toMatchObject({ verdict: { verdict: 'disputed' }, money: expect.stringMatching(/^paid, held for you: the buyer disputed it/), next: expect.stringMatching(/lake_sell \{ action: "revise"/) });
     const revised = await poet('lake_sell', { action: 'revise', cart: fourth.cart, content: 'Snow on the doorstep / the postman\'s boots write a line / then the snow erases it' });
@@ -1044,9 +1055,9 @@ describe('the open door', () => {
     // The Arbiter, if asked later, sees every version: it rules on the revision the buyer accepted.
     const closed = await poet('lake_sell', { action: 'arbitrate', cart: fourth.cart });
     expect(closed).toMatchObject({ paid: true, delivered: { acknowledged: true, revision: 2 }, ruling: expect.stringMatching(/^Paid, delivered and accepted/), facts: expect.arrayContaining([expect.stringMatching(/^2 different deliveries of this cart/)]) });
-    // The seller's record, counted from what the payments agent and the arbiter put on the log: three held sales released,
-    // one refund, two rulings.
-    const record = { sales: 3, refunds_given: 1, held_now: 0, rulings: { delivered: 2, not_delivered: 0 }, sold: { USD: 8 } };
+    // The seller's record, counted from the payments agent's receipts on the log: three held sales released (two accepted,
+    // one by a ruling that it arrived), one refund, two disputes (one ended by a revision, one by the ruling).
+    const record = { sales: 3, refunds_given: 1, held_now: 0, sold: { USD: 8 }, released: { accepted: 2, review_expired: 0, ruling: 1 }, disputes: { against: 2, ended: { revision: 1, refund: 0, ruling: 1, accepted: 0 }, changes_requested: 0 } };
     const [again] = await buyer('lake_search', { q: 'haiku' });
     expect(again.record).toMatchObject(record);
     // Run 33: a cart nobody paid. Nothing to refund; rulings on it ("not delivered", then "delivered" from a delivery
@@ -1064,6 +1075,25 @@ describe('the open door', () => {
     expect(farmed.logged).toBeUndefined();
     const [after] = await buyer('lake_search', { q: 'haiku' });
     expect(after.record).toMatchObject(record);
+    // "Not what I ordered" is not a fact signatures settle: no ruling moves it, it stays held until a revision is accepted
+    // or the seller refunds. Asking for changes isn't a dispute. A refunded cart is closed (run 36 refunded one twice).
+    const fifth = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', note: 'about owls' });
+    await buyer('lake_buy', { action: 'pay', cart: fifth.cart });
+    await poet('lake_inbox', { wait_seconds: 3 });
+    await poet('lake_sell', { action: 'deliver', cart: fifth.cart, content: 'An owl, I suppose / or a hat on a fence post / the dusk will decide' });
+    await buyer('lake_inbox', { wait_seconds: 5 });
+    expect(await buyer('lake_buy', { action: 'changes', cart: fifth.cart, reason: 'less unsure, please' })).toMatchObject({ changes: fifth.cart, held_payment: expect.stringMatching(/^held while the seller revises it/) });
+    expect((await poet('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'trade.verdict').checked).toMatchObject({ code: 'changes_requested', money: expect.stringMatching(/the buyer asked for changes/) });
+    await poet('lake_sell', { action: 'revise', cart: fifth.cart, content: 'The owl on the fence / turns its whole face to the moon / and the moon looks back' });
+    await buyer('lake_inbox', { wait_seconds: 5 });
+    await buyer('lake_buy', { action: 'dispute', cart: fifth.cart, code: 'not_as_described', reason: 'still not what I wanted' });
+    expect(await buyer('lake_buy', { action: 'arbitrate', cart: fifth.cart })).toMatchObject({ kind: 'ruling', paid: true, held_payment: 'still held' });
+    expect(await poet('lake_sell', { action: 'refund', cart: fifth.cart })).toMatchObject({ refunded: fifth.cart, voided: true });
+    expect(await poet('lake_sell', { action: 'refund', cart: fifth.cart }, false)).toMatch(/refunded already/);
+    for (let i = 0; i < 20 && (await buyer('lake_buy', { action: 'orders' })).orders.find((x: any) => x.cart === fifth.cart).payment !== 'voided'; i++) await new Promise((r) => setTimeout(r, 250));
+    expect(await buyer('lake_buy', { action: 'accept', cart: fifth.cart }, false)).toMatch(/was refunded: it is closed/);
+    const [last] = await buyer('lake_search', { q: 'haiku' });
+    expect(last.record).toMatchObject({ refunds_given: 2, disputes: { against: 3, ended: { revision: 1, refund: 1, ruling: 1 }, changes_requested: 1 } });
     // Away (run 31): past the here_until the seller set, its menu signs no cart; the order waits in its inbox. Once the
     // seller acts again, its menu answers again.
     const orderCount = (await poet('lake_sell', { action: 'orders' })).orders.length;
@@ -1179,7 +1209,7 @@ describe('the open door', () => {
     await grocer('lake_inbox', { wait_seconds: 3 });
     await grocer('lake_sell', { action: 'deliver', cart: second.cart, content: 'Where water bends, the willow learns to bow' });
     await shopper('lake_inbox', { wait_seconds: 5 });
-    await shopper('lake_buy', { action: 'dispute', cart: second.cart, reason: 'it never came' });
+    await shopper('lake_buy', { action: 'dispute', cart: second.cart, code: 'not_received', reason: 'it never came' });
     expect(await shopper('lake_buy', { action: 'arbitrate', cart: second.cart })).toMatchObject({ kind: 'ruling', paid: true, delivered: { acknowledged: true }, facts: expect.arrayContaining(['paid: USD 3, receipt signed by payments.lake-b.local']), held_payment: 'released to the seller' });
     for (let i = 0; i < 20 && (await sale(second.cart)).payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
     expect(await sale(second.cart)).toMatchObject({ payment: 'released' });

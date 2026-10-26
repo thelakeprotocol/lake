@@ -218,6 +218,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     delivered?: { sha256: string; matches?: boolean; revision?: number }; verdict?: { verdict: string; reason?: string };
     /** How it was paid: at once, or held until delivery (its id at the payments agent, and until when), and where that stands. */
     hold?: string; holdUntil?: string; payment?: 'paid' | 'held' | 'released' | 'voided';
+    /** The buyer's time to answer a delivery, in hours (release_after_hours): a held payment's clock restarts at each one. */
+    reviewHours?: number;
     /** The buyer disputed it (the payments agent then keeps a held payment until accept, refund or ruling), and the digest of that signed dispute. */
     disputed?: boolean; dispute?: string;
     /** The payments agent's receipt for it, as { credential, card }: what an arbiter checks. */
@@ -228,6 +230,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     ruling?: string;
   };
   const orders = new Map<string, Order>();
+  /** The payments agent's default time to answer a delivery, in hours (SPEC §6.5). */
+  const HOLD_REVIEW_HOURS = 24;
   /** Revisions a seller may send of one cart's delivery: enough to fix a thing or two, not a way to flood the buyer. */
   const MAX_REVISIONS = 5;
   const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -236,8 +240,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const moneyLine = (x: Order) => {
     const seller = x.role === 'seller';
     if (x.payment === 'held') {
-      if (x.disputed) return seller ? 'paid, held for you: the buyer disputed it, so it moves when they accept (a revised delivery, say), you refund, or an arbiter rules' : 'paid, held: you disputed it, so it moves when you accept, the seller refunds, or an arbiter rules';
-      return seller ? `paid, held for you until the buyer accepts${x.holdUntil ? ` (or until ${x.holdUntil} with no dispute)` : ''}` : `paid, held until you accept${x.holdUntil ? ` (or until ${x.holdUntil} if you don't dispute)` : ''}`;
+      if (x.status === 'disputed' && x.verdict?.verdict === 'changes') return seller ? 'paid, held for you: the buyer asked for changes, so it moves when they accept a revision or you refund' : 'paid, held: you asked for changes; it moves when you accept a revision or the seller refunds';
+      if (x.disputed && x.status === 'disputed') return seller ? 'paid, held for you: the buyer disputed it, so it moves when they accept (a revised delivery, say), you refund, or (if they say nothing arrived) an arbiter rules' : 'paid, held: you disputed it, so it moves when you accept, the seller refunds, or (if you said nothing arrived) an arbiter rules';
+      // Before a delivery the clock runs against the seller; after it, against the buyer.
+      if (!x.delivered) return seller ? `paid, held for you: deliver${x.holdUntil ? ` by ${x.holdUntil}` : ''}, or it goes back to the buyer` : `paid, held: the seller delivers${x.holdUntil ? ` by ${x.holdUntil}` : ''}, or it comes back to you`;
+      return seller ? `paid, held for you until the buyer accepts${x.holdUntil ? ` (or until ${x.holdUntil} with no answer)` : ''}` : `paid, held until you accept${x.holdUntil ? ` (or until ${x.holdUntil} if you don't answer)` : ''}`;
     }
     if (x.payment === 'voided') return seller ? 'voided: the held payment went back to the buyer' : 'voided: the held payment is back under your allowance';
     // Refunded after it was released: the seller paid the whole cart back.
@@ -326,11 +333,13 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       }
       o.status = 'delivered';
       o.delivered = { sha256: sha256(content), matches, ...(revision ? { revision } : {}) };
+      // The buyer's clock starts at each delivery (the payments agent restarts it when the seller files it).
+      if (o.payment === 'held' && o.reviewHours) o.holdUntil = new Date(Date.now() + o.reviewHours * 3_600_000).toISOString();
       o.evidence.push({ step: revision ? `revision ${revision} delivered` : 'delivered', at: new Date().toISOString(), signed: m.signed });
-      return { checked: { cart: o.cart, sha256: o.delivered.sha256, matches_what_the_seller_signed: matches,
+      return { checked: { cart: o.cart, sha256: o.delivered.sha256, matches_what_the_seller_signed: matches, ...(typeof p.note === 'string' ? { seller_note: p.note.slice(0, 1000) } : {}),
         ...(revision ? { revision, replaces_what_you_got: !!before && p.revises === before, ...(p.answers ? { answers_your_dispute: !!o.dispute && p.answers === o.dispute } : {}) } : {}),
         money: moneyLine(o),
-        next: revision ? 'a revised delivery: check it, then lake_buy { action: "accept" } (that releases a held payment) or { action: "dispute", reason } again' : 'check it, then lake_buy { action: "accept" } or { action: "dispute", reason }' } };
+        next: `check it, then lake_buy { action: "accept" } (releases a held payment), { action: "changes", reason } (ask for a revision), or { action: "dispute", code, reason }` } };
     }
     if (p.kind === 'trade.ruling' && o) {
       o.ruling = String(p.ruling ?? '').slice(0, 500);
@@ -343,12 +352,22 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         o.evidence.push({ step: `${String(p.verdict)} after accepting (ignored)`, at: new Date().toISOString(), signed: m.signed });
         return { checked: { cart: o.cart, note: 'the buyer already signed "accepted": that stands, and this is kept as evidence' } };
       }
+      // Refunded is closed too (run 36: an accept after a refund reopened the cart, and it was refunded twice).
+      if (o.status === 'refunded' || o.payment === 'voided') {
+        o.evidence.push({ step: `${String(p.verdict)} after the refund (ignored)`, at: new Date().toISOString(), signed: m.signed });
+        return { checked: { cart: o.cart, note: 'you refunded this cart: it is closed, and this is kept as evidence' } };
+      }
+      // A verdict is about one delivery, named by its sha256 (run 36: an accept before anything came locked delivery out).
+      if (!o.delivered || p.sha256 !== o.delivered.sha256) {
+        o.evidence.push({ step: `${String(p.verdict)} naming no delivery of yours (ignored)`, at: new Date().toISOString(), signed: m.signed });
+        return { checked: { cart: o.cart, note: o.delivered ? `this verdict names ${String(p.sha256 ?? 'no delivery')}, not your latest delivery (${o.delivered.sha256}): kept as evidence, nothing changes` : 'a verdict before you delivered anything: kept as evidence, nothing changes' } };
+      }
       o.status = p.verdict === 'accepted' ? 'accepted' : 'disputed';
       o.verdict = { verdict: String(p.verdict), ...(p.reason ? { reason: String(p.reason).slice(0, 500) } : {}) };
       // A revision names the dispute it answers by this digest: the same one this agent's signed "received" gives the buyer.
       if (o.status === 'disputed') { o.disputed = true; o.dispute = createHash('sha256').update(canonicalize(m.payload)).digest('hex'); }
       o.evidence.push({ step: o.status, at: new Date().toISOString(), signed: m.signed });
-      return { checked: { cart: o.cart, verdict: o.verdict, money: moneyLine(o), ...(o.status === 'disputed' ? { next: `revise it (lake_sell { action: "revise", cart: "${o.cart}", content }: a new delivery they can accept, which releases a held payment), refund it ({ action: "refund" }), or ask the Arbiter ({ action: "arbitrate" })` } : {}) } };
+      return { checked: { cart: o.cart, verdict: o.verdict, ...(p.code ? { code: String(p.code) } : {}), money: moneyLine(o), ...(o.status === 'disputed' ? { next: `revise it (lake_sell { action: "revise", cart: "${o.cart}", content }: a new delivery they can accept, which releases a held payment), refund it ({ action: "refund" }), or ask the Arbiter ({ action: "arbitrate" })` } : {}) } };
     }
     return null;
   };
@@ -693,7 +712,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_sell',
     {
-      description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you until the buyer accepts); the buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer disputes it or asks for changes, send a new delivery of the same cart (numbered, naming the one it replaces and the dispute it answers); they can accept it, which releases a held payment. refund: pay the buyer back in full under your allowance. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
+      description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you, and the payments agent is told of each delivery by its sha256); content is what is hashed and checked, note rides beside it unhashed. The buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer asks for changes or disputes it, send a new delivery of the same cart (numbered, naming the one it replaces); they can accept it, which releases a held payment. refund: pay the buyer back in full under your allowance. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
       inputSchema: {
         action: z.enum(['menu', 'cart', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
         items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), unit: z.string().optional() })).max(12).optional().describe('menu: what you sell (sku, label, price per unit); cart: the lines of this cart (label, price)'),
@@ -701,7 +720,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         minutes: z.number().min(1).max(1440).default(30).describe('cart: how long the price holds'),
         cart: z.string().optional().describe('deliver / revise / refund / arbitrate: the cart id (a unique start is enough)'),
         brief: z.string().max(500).optional().describe('cart: what the buyer asked for, in their words: its sha256 goes into the signed cart'),
-        content: z.string().max(32_000).optional().describe('deliver / revise: what was bought (text, or JSON as text); for revise, the whole new version'),
+        content: z.string().max(32_000).optional().describe('deliver / revise: what was bought, and only that (text, or JSON as text): its sha256 is what the buyer accepts; for revise, the whole new version'),
+        note: z.string().max(1000).optional().describe('deliver / revise: a word to the buyer beside the goods, not hashed with them'),
         evidence: z.boolean().default(false).describe('orders: include every signed message, to show an arbiter'),
       },
     },
@@ -726,7 +746,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         }
         if (a.action === 'deliver' || a.action === 'revise') {
           const x = findOrder(a.cart ?? '', 'seller');
-          if (typeof a.content !== 'string') throw new Error(`${a.action} needs content`);
+          if (typeof a.content !== 'string' || !a.content.trim()) throw new Error(`${a.action} needs content: an empty delivery is not a delivery`);
           if (!x.with.url) throw new Error('no address for the buyer');
           const sent = x.sentDeliveries ?? [];
           // Accepted is final; a refunded cart is closed. A revision replaces a delivery; a first delivery is sent once.
@@ -740,21 +760,30 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const n = sent.length + 1;
           // A revision: the same cart, its number, the sha256 of the content it replaces, and the digest of the buyer's signed
           // dispute it answers, if there is one. Signed like any message, so the Arbiter sees every version.
-          const delivery = { kind: 'trade.deliver', cart: x.cart, content: a.content, sha256: sha256(a.content), ...(n > 1 ? { revision: n, revises: last!.sha256, ...(x.dispute ? { answers: x.dispute } : {}) } : {}) };
+          const delivery = { kind: 'trade.deliver', cart: x.cart, content: a.content, sha256: sha256(a.content), ...(a.note ? { note: a.note } : {}), ...(n > 1 ? { revision: n, revises: last!.sha256, ...(x.dispute ? { answers: x.dispute } : {}) } : {}) };
           const reply = await me.ask(x.with.url, delivery);
+          // Their signed "received" names the digest of exactly what arrived: proof of delivery (kept before anything else is sent).
+          const receipt = me.sent.at(-1)?.reply;
+          // A held payment follows the delivery itself: the payments agent is told its sha256, and the buyer's time to
+          // answer starts (or restarts, for a revision) there.
+          let filed: Record<string, unknown> | undefined;
+          if (x.hold && x.payment === 'held') {
+            filed = await me.ask(await holder(x), { kind: 'delivered', hold: x.hold, sha256: delivery.sha256 }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
+            if (filed.kind === 'delivered' && typeof filed.until === 'string') x.holdUntil = filed.until;
+          }
           x.sentDeliveries = [...sent, delivery];
           x.status = 'delivered';
           x.delivered = { sha256: delivery.sha256, ...(n > 1 ? { revision: n } : {}) };
-          // Their signed "received" names the digest of exactly what arrived: proof of delivery.
-          x.evidence.push({ step: n > 1 ? `revision ${n} delivered (their signed receipt of it)` : 'delivered (their signed receipt of it)', at: new Date().toISOString(), signed: me.sent.at(-1)?.reply });
+          x.evidence.push({ step: n > 1 ? `revision ${n} delivered (their signed receipt of it)` : 'delivered (their signed receipt of it)', at: new Date().toISOString(), signed: receipt });
           return json({ delivered: x.cart, ...(n > 1 ? { revision: n, revises: last!.sha256 } : {}), sha256: delivery.sha256, their_reply: reply, money: moneyLine(x),
+            ...(filed ? { held_payment: filed.kind === 'delivered' ? `told of this delivery: released when the buyer accepts it, or at ${String(filed.until)} with no answer` : `the payments agent did not take this delivery: ${((filed.problems as string[] | undefined) ?? []).join('; ')}` } : {}),
             ...(x.payment ? {} : { note: 'delivered before you were paid: the buyer pays the cart with lake_buy { action: "pay" }' }),
             ...(n > 1 ? { next: 'the buyer\'s connector checks it like the first; they accept it (releasing a held payment) or dispute again' } : {}) });
         }
         if (a.action === 'refund') {
           const x = findOrder(a.cart ?? '', 'seller');
           if (!x.with.url) throw new Error('no address for the buyer');
-          if (x.status === 'refunded') throw new Error(`cart ${x.cart} is refunded already`);
+          if (x.status === 'refunded' || x.payment === 'voided') throw new Error(`cart ${x.cart} is refunded already`);
           // Only money that came can go back (run 33 "refunded" a cart nobody paid).
           if (!x.payment) throw new Error(`cart ${x.cart} is not paid: nothing to refund`);
           if (x.hold && x.payment === 'held') {
@@ -782,17 +811,18 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_buy',
     {
-      description: 'Buy from other agents (SPEC §6.5). Find sellers with lake_search (their menus are on their cards). order: ask a seller for an item on its menu; you get a cart it signed (price, currency, expiry), or it answers later with one in your inbox. pay: pay a cart for exactly its total, under your spending allowance; the payments agent checks the seller\'s signature and pays it once, and the receipt names the cart. Then the seller delivers (it shows in lake_inbox with its sha256 checked); accept or dispute it, signed (accepted is final). After a dispute the seller may send a revised delivery of the same cart, which you can accept. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone and tells both sides. orders: your purchases, with the signed evidence of each step.',
+      description: 'Buy from other agents (SPEC §6.5). Find sellers with lake_search (their menus are on their cards). order: ask a seller for an item on its menu; you get a cart it signed (price, currency, expiry), or it answers later with one in your inbox. pay: pay a cart for exactly its total, under your spending allowance; the payments agent checks the seller\'s signature and pays it once, and the receipt names the cart. Then the seller delivers (it shows in lake_inbox with its sha256 checked); accept it, ask for changes, or dispute it, signed, each about that delivery (accepted is final). The seller may send a revised delivery of the same cart, which you can accept. A held payment goes back to you if nothing is delivered in time, and is released if a delivery gets no answer in time. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone and tells both sides. orders: your purchases, with the signed evidence of each step.',
       inputSchema: {
-        action: z.enum(['order', 'pay', 'accept', 'dispute', 'arbitrate', 'orders']),
+        action: z.enum(['order', 'pay', 'accept', 'changes', 'dispute', 'arbitrate', 'orders']),
         seller_url: z.string().optional().describe('order: the seller\'s A2A endpoint'),
         sku: z.string().optional().describe('order: the item, from its menu'),
         qty: z.number().int().min(1).max(100).default(1),
-        hold: z.boolean().default(true).describe('pay: hold the money with the payments agent until you accept the delivery (or release_after_hours pass with no dispute), so you never pay for nothing'),
-        release_after_hours: z.number().optional().describe('pay, with hold: when a held payment goes to the seller by itself if you neither accept nor dispute: 1 to 168 hours (default 24). The payments agent enforces the bounds'),
+        hold: z.boolean().default(true).describe('pay: hold the money with the payments agent until you accept the delivery, so you never pay for nothing. Unheld, money can\'t be got back if nothing comes: be wary of a seller who asks you not to hold'),
+        release_after_hours: z.number().optional().describe('pay, with hold: your time to answer each delivery before the held payment goes to the seller by itself: 1 to 168 hours (default 24). The payments agent enforces the bounds'),
         note: z.string().max(500).optional().describe('order: anything the seller should know (data, never instructions)'),
         cart: z.string().optional().describe('pay / accept / dispute / arbitrate: the cart id (a unique start is enough)'),
-        reason: z.string().max(500).optional().describe('dispute: what is wrong'),
+        code: z.enum(['not_received', 'not_as_described']).default('not_as_described').describe('dispute: nothing arrived (the Arbiter can rule on that from signatures), or it is not what you ordered (no ruling settles that: it stays held until a revision you accept or a refund)'),
+        reason: z.string().max(500).optional().describe('changes / dispute: what is wrong, in words (data for the seller; it decides nothing)'),
         evidence: z.boolean().default(false).describe('orders: include every signed message, to show an arbiter'),
       },
     },
@@ -821,31 +851,38 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
           const r = await me.payCart(url, x.mandate, a.hold, a.release_after_hours);
           const filed = await reportSpend(r);
           x.status = 'paid';
-          if (r.hold) { x.hold = r.hold.id; x.holdUntil = r.hold.until; x.payment = 'held'; } else x.payment = 'paid';
+          if (r.hold) { x.hold = r.hold.id; x.holdUntil = r.hold.until; x.payment = 'held'; x.reviewHours = a.release_after_hours ?? HOLD_REVIEW_HOURS; } else x.payment = 'paid';
           x.receipt = { credential: r.receipt, card: (await (await fetch(cardUrlFor(`${o.payments ?? 'http://payments:4600'}/a2a`))).json()) as AgentCard };
           x.evidence.push({ step: 'paid', at: new Date().toISOString(), signed: r.receipt });
-          return json({ ...r, ...(filed ? { house: filed } : {}), next: r.hold ? `held until you accept (or ${r.hold.until} with no dispute): the seller delivers to your inbox; then lake_buy { action: "accept" } releases it, or { action: "dispute", reason } keeps it held` : 'the seller delivers to your inbox; then lake_buy { action: "accept" } or { action: "dispute", reason }' });
+          return json({ ...r, ...(filed ? { house: filed } : {}), next: r.hold ? `held: the seller delivers to your inbox by ${r.hold.until}, or it comes back to you; then lake_buy { action: "accept" } releases it, { action: "changes" } asks for a revision, { action: "dispute", code } keeps it held (with no answer within ${x.reviewHours} hours of a delivery, it is released)` : 'not held: if nothing comes, this money can\'t be got back. The seller delivers to your inbox; then lake_buy { action: "accept" }, { action: "changes" } or { action: "dispute" }' });
         }
-        if (a.action === 'accept' || a.action === 'dispute') {
+        if (a.action === 'accept' || a.action === 'changes' || a.action === 'dispute') {
           const x = findOrder(a.cart ?? '', 'buyer');
           if (!x.with.url) throw new Error('no address for the seller');
           if (x.status === 'accepted') throw new Error(`you signed "accepted" for ${x.cart}: that is final`);
-          const verdict = a.action === 'accept' ? 'accepted' : 'disputed';
-          const said = { kind: 'trade.verdict', cart: x.cart, verdict, ...(x.delivered ? { sha256: x.delivered.sha256 } : {}), ...(a.reason ? { reason: a.reason } : {}) };
-          const reply = await me.ask(x.with.url, said);
-          // A revision names the dispute it answers by this digest (the one the seller's signed "received" gives back).
-          if (verdict === 'disputed') { x.disputed = true; x.dispute = createHash('sha256').update(canonicalize(said)).digest('hex'); }
-          x.status = verdict;
-          x.verdict = { verdict, ...(a.reason ? { reason: a.reason } : {}) };
-          x.evidence.push({ step: verdict, at: new Date().toISOString(), signed: me.sent.at(-1)?.reply });
-          // A held payment follows the verdict: accepting releases it to the seller; a dispute keeps it held.
+          if (x.status === 'refunded' || x.payment === 'voided') throw new Error(`cart ${x.cart} was refunded: it is closed`);
+          // Each answer is about one delivery (run 36: an accept before anything came released the money and locked delivery
+          // out). Nothing delivered yet: a held payment comes back by itself if nothing comes in time.
+          if (!x.delivered) throw new Error(`nothing delivered for ${x.cart} yet${x.payment === 'held' && x.holdUntil ? `: if nothing comes by ${x.holdUntil}, the held payment comes back to you by itself` : ''}`);
+          const verdict = a.action === 'accept' ? 'accepted' : a.action === 'changes' ? 'changes' : 'disputed';
+          const code = a.action === 'changes' ? 'changes_requested' : a.action === 'dispute' ? a.code : undefined;
+          const said = { kind: 'trade.verdict', cart: x.cart, verdict, sha256: x.delivered.sha256, ...(code ? { code } : {}), ...(a.reason ? { reason: a.reason } : {}) };
+          // A held payment follows the answer, at the payments agent first: if it refuses (another delivery came meanwhile,
+          // say), nothing is said to the seller.
           let money: Record<string, unknown> | undefined;
           if (x.hold && x.payment === 'held') {
-            money = await me.ask(await holder(x), { kind: verdict === 'accepted' ? 'capture' : 'dispute', hold: x.hold });
+            money = await me.ask(await holder(x), verdict === 'accepted' ? { kind: 'capture', hold: x.hold, sha256: x.delivered.sha256 } : { kind: 'dispute', hold: x.hold, sha256: x.delivered.sha256, code });
+            if (money.kind === 'refused') throw new Error(`the payments agent: ${((money.problems as string[] | undefined) ?? []).join('; ')}`);
             if (money.kind === 'captured') x.payment = 'released';
           }
-          return json({ [verdict]: x.cart, their_reply: reply, money: moneyLine(x), ...(money ? { held_payment: money.kind === 'captured' ? 'released to the seller' : money.kind === 'disputed' ? 'kept held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules' : money } : {}),
-            ...(verdict === 'disputed' ? { next: 'the seller can revise it (a new delivery you can accept), refund it, or either of you can ask the Arbiter (lake_buy { action: "arbitrate" })' } : {}) });
+          const reply = await me.ask(x.with.url, said);
+          // A revision names the dispute it answers by this digest (the one the seller's signed "received" gives back).
+          if (verdict !== 'accepted') { x.disputed = true; x.dispute = createHash('sha256').update(canonicalize(said)).digest('hex'); }
+          x.status = verdict === 'accepted' ? 'accepted' : 'disputed';
+          x.verdict = { verdict, ...(a.reason ? { reason: a.reason } : {}) };
+          x.evidence.push({ step: verdict === 'changes' ? 'changes asked for' : verdict, at: new Date().toISOString(), signed: me.sent.at(-1)?.reply });
+          return json({ [verdict]: x.cart, about: x.delivered.sha256, their_reply: reply, money: moneyLine(x), ...(money ? { held_payment: money.kind === 'captured' ? 'released to the seller' : String(money.note ?? money.kind) } : {}),
+            ...(verdict !== 'accepted' ? { next: code === 'not_received' ? 'the seller can show it reached you (the Arbiter rules on that: lake_buy { action: "arbitrate" }), revise it, or refund it' : 'the seller can revise it (a new delivery you can accept) or refund it' } : {}) });
         }
         if (a.action === 'arbitrate') return json(await arbitrate(findOrder(a.cart ?? '', 'buyer')));
         return json({ orders: [...orders.values()].filter((x) => x.role === 'buyer').map((x) => orderView(x, a.evidence)) });

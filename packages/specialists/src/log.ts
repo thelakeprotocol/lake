@@ -1,5 +1,5 @@
 import { appendFile, readFile } from 'node:fs/promises';
-import { b64, canonicalize, cardUrlFor, consistencyProof, inclusionProof, leafHash, signCheckpoint, treeRoot, verifyLakeCard, type AgentCard } from '@thelakeprotocol/core';
+import { b64, canonicalize, emptyRecord, cardUrlFor, consistencyProof, inclusionProof, leafHash, signCheckpoint, treeRoot, verifyLakeCard, type AgentCard } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -88,8 +88,7 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
     if (p.kind === 'log.record') {
       const who = String(p.webId ?? '');
       if (!who) return { kind: 'refused', problems: ['webId: whose record'] };
-      const r = { sales: 0, purchases: 0, refunds_given: 0, held_now: 0, rulings: { delivered: 0, not_delivered: 0 } };
-      const amounts: Record<string, number> = {};
+      const { sold: amounts, ...r } = emptyRecord();
       // Carts paid to this agent, with their buyers: a plain refund counts only for one of them, paid back to its buyer,
       // once (run 33 had a "refund" on a cart nobody paid).
       const sold = new Map<string, string>();
@@ -109,10 +108,17 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
         if (e.kind === 'receipt' && sub.settlement === 'held' && sub.id === who) r.held_now++;
         if ((e.kind === 'capture' || e.kind === 'void') && sub.seller === who) r.held_now = Math.max(0, r.held_now - 1);
         if (e.kind === 'void' && sub.seller === who) r.refunds_given++;
-        // A ruling counts only on a cart it found paid: one on a cart nobody paid settles nothing (and isn't logged now).
-        if (e.kind === 'ruling' && sub.seller === who && sub.paid === true) sub.delivered ? r.rulings.delivered++ : r.rulings.not_delivered++;
+        // How a held payment ended, as the payments agent's receipt says: how the money moved, and each dispute.
+        if (e.kind === 'capture' && sub.seller === who && (sub.how === 'accepted' || sub.how === 'review_expired' || sub.how === 'ruling')) r.released[sub.how as 'accepted']++;
+        for (const d of (e.kind === 'capture' || e.kind === 'void') && Array.isArray(sub.disputes) ? sub.disputes : []) {
+          if (sub.seller === who) {
+            if (d.code === 'changes_requested') r.disputes.changes_requested++;
+            else { r.disputes.against++; if (d.ended in r.disputes.ended) r.disputes.ended[d.ended as 'revision']++; }
+          }
+          if (sub.payer === who && d.code !== 'changes_requested') r.disputes_raised++;
+        }
       }
-      return { kind: 'log.record', webId: who, origin, ...r, sold: amounts, size: leaves.length, note: 'counted from receipts and rulings the payments agent and the arbiter put on this log; nothing an agent added itself. Across Lakes a record is spread over their logs: add them up' };
+      return { kind: 'log.record', webId: who, origin, ...r, sold: amounts, size: leaves.length, note: 'counted from the receipts the payments agent put on this log (how each held payment ended, and each dispute); nothing an agent added itself. Across Lakes a record is spread over their logs: add them up' };
     }
     if (p.kind === 'log.checkpoint') { const cp = await current(); return { kind: 'log.checkpoint', origin, size: cp.size, checkpoint: cp.note }; }
     if (p.kind === 'log.add') {

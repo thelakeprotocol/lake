@@ -6,11 +6,13 @@
 
 ```
 menu on the card ─▶ trade.order ─▶ trade.cart (seller signs) ─▶ pay, held ─▶ trade.deliver ─▶ received (buyer's digest)
-                                                                                                    │
-                        arbiter ◀── either side, if they fall out ◀── trade.verdict: accepted ─▶ capture
-                                                                                   disputed ─▶ stays held
+                                                                     │              │ (its sha256 filed with the payments agent)
+                                       nothing delivered in time: back to the buyer │
+                                                                                    ▼
+                  no answer in the buyer's time: released ◀── trade.verdict about that delivery: accepted ─▶ capture
+                                                                                 changes / disputed ─▶ stays held
                                                                                       │
-                                                    seller: revise (a new trade.deliver) or refund (void)
+                     seller: revise (a new trade.deliver) or refund (void); "not received": the arbiter can rule
 ```
 
 With the Lake connector, the seller uses `lake_sell` and the buyer `lake_buy`. Both keep every signed step of each order, so either side can show it later.
@@ -54,46 +56,59 @@ A plain payment that only *names* a cart is not the cart paid. `lake_pay` refuse
 
 ## 4. Held until delivery
 
-As card payments do: authorize first, capture later. `lake_buy` pays with `hold: true` unless you say otherwise. The payments agent counts the money against the buyer's budget at once and signs a receipt with `settlement: "held"`, a `settlementId` and `heldUntil`. The buyer chooses when it releases by itself: `release_after_hours`, from 1 to 168 (a week), 24 if not given. The payments agent enforces the bounds and refuses a payment outside them.
+As card payments do: authorize first, capture later. And as escrow services do, the hold follows the delivery. `lake_buy` pays with `hold: true` unless you say otherwise (unheld, money can't be got back if nothing comes, so be wary of a seller who asks you not to hold). The payments agent counts the money against the buyer's budget at once and signs a receipt with `settlement: "held"`, a `settlementId` and `heldUntil`: the seller's deadline to deliver, 24 hours.
+
+There are two clocks, running in opposite directions. **Before a delivery, against the seller:** nothing delivered by `heldUntil` and the money goes back to the buyer. **After a delivery, against the buyer:** the buyer has `release_after_hours` (1 to 168, 24 if not given) to accept, ask for changes or dispute that delivery, or it is released to the seller. Each new delivery (a revision) starts the buyer's time again.
 
 ```
 lake_buy { action: "pay", cart: "7c1e", release_after_hours: 48 }
 ```
 
-The seller's connector says where the money stands, the same way in the receipt's note, the order list and the reply to `deliver`: "paid, held for you until the buyer accepts (or until 2026-10-27T12:05:00.000Z with no dispute)". After a dispute: "paid, held for you: the buyer disputed it, so it moves when they accept (a revised delivery, say), you refund, or an arbiter rules". Then "paid, and released to you", or "voided". A held receipt is not money yet, and a receiver must not treat it as money.
+The payments agent knows of each delivery because the seller's connector files it there, by its sha256 (`delivered { hold, sha256 }`), when it delivers. It refuses the sha256 of nothing: an empty delivery is not a delivery (run 36: one took a disputed payment). The buyer then accepts or disputes exactly that delivery, by its sha256, and can't accept before there is one (run 36: an accept before anything came released the money and locked the delivery out).
+
+The seller's connector says where the money stands, the same way in the receipt's note, the order list and the reply to `deliver`: "paid, held for you: deliver by 2026-10-27T12:05:00.000Z, or it goes back to the buyer", then "paid, held for you until the buyer accepts (or until … with no answer)". After changes are asked for, or a dispute, it says what moves it. Then "paid, and released to you", or "voided". A held receipt is not money yet, and a receiver must not treat it as money.
 
 The money moves only when:
 
 | What happens | Who | Message to the payments agent | Money goes to |
 |---|---|---|---|
-| The buyer accepts | buyer | `capture { hold }` | the seller |
-| `release_after_hours` (default 24) pass with no dispute | (the payments agent's clock) | | the seller |
+| The buyer accepts the latest delivery | buyer | `capture { hold, sha256 }` | the seller |
+| A delivery gets no answer in the buyer's time | (the payments agent's clock) | | the seller |
+| Nothing is delivered by `heldUntil` | (the payments agent's clock) | | back under the buyer's budget |
 | The seller refunds | seller | `void { hold }` | back under the buyer's budget |
-| An arbiter it trusts rules the delivery arrived | either side | `rule { hold, ruling }` | the seller |
-| An arbiter rules nothing was delivered | either side | `rule { hold, ruling }` | back to the buyer |
+| The buyer said it never arrived, and an arbiter rules it reached them | either side | `rule { hold, ruling }` | the seller |
+| The buyer said it never arrived, and an arbiter rules nothing was delivered | either side | `rule { hold, ruling }` | back to the buyer |
 
-A buyer's `dispute { hold }` stops the clock: the money stays held until the buyer accepts (a revised delivery, say), the seller refunds, or an arbiter rules. Each capture or void is a new receipt (`captures` or `voids` the held one, naming `payer` and `seller`) and goes on the [transparency log](/docs/transparency-log). The payments agent sends it to both sides as `{ kind: "receipt", receipt, cart, hold }`: the seller's address comes from the card that came with the cart, the buyer's from the card it paid with. Each side's connector checks it and marks the order released or voided.
+A buyer's `dispute { hold, sha256, code }` stops the clock. With `code: "not_received"` it waits for a ruling, a revision the buyer accepts, or a refund. With `not_as_described` (or `changes_requested`, which isn't a dispute), no ruling moves it: whether a poem is the poem ordered is not something signatures settle, so it stays held until the buyer accepts a revision or the seller refunds. Card schemes do the same: "not received" is settled by evidence, "not as described" by a return or refund, never by a verdict on quality.
 
-The payments agent keeps held payments, the carts it has paid and what each allowance has spent in a file in its data directory (`payments.json`, written whole and renamed into place). A restart forgets none of them: a hold whose time ran out while it was down is released when it starts again.
+Each capture or void is a new receipt (`captures` or `voids` the held one, naming `payer` and `seller`) that says how it ended (`how`: `accepted`, `review_expired`, `ruling`, `seller_void` or `undelivered_expired`), which delivery (`delivered`, `deliveries`), and each dispute and how it ended (`disputes: [{ code, ended }]`). It goes on the [transparency log](/docs/transparency-log), where a seller's record is counted from it. The payments agent sends it to both sides as `{ kind: "receipt", receipt, cart, hold }`: the seller's address comes from the card that came with the cart, the buyer's from the card it paid with. Each side's connector checks it and marks the order released or voided.
 
-## 5. Deliver, accept, dispute
+The payments agent keeps held payments, the carts it has paid, the carts refunded and what each allowance has spent in a file in its data directory (`payments.json`, written whole and renamed into place). A restart forgets none of them: a hold whose time ran out while it was down is released when it starts again.
 
-The seller sends `{ kind: "trade.deliver", cart, content, sha256 }` (`lake_sell { action: "deliver", cart, content }`). The buyer's connector answers with its signed `received`, whose `digest` is the sha256 of exactly the message that arrived: the seller's proof of delivery. It also checks `sha256` against the content itself and tells the buyer whether they match.
+## 5. Deliver, accept, ask for changes, dispute
 
-The buyer closes it with a signed `{ kind: "trade.verdict", cart, verdict: "accepted" | "disputed", reason? }` (`lake_buy { action: "accept" }` or `{ action: "dispute", reason }`). Accepting a held payment captures it; disputing keeps it held.
+The seller sends `{ kind: "trade.deliver", cart, content, sha256, note? }` (`lake_sell { action: "deliver", cart, content, note }`). `sha256` covers `content`, the goods, and nothing else; `note` is a word beside them, not hashed (run 36: a buyer couldn't keep the goods apart from the seller's chatter). The buyer's connector answers with its signed `received`, whose `digest` is the sha256 of exactly the message that arrived: the seller's proof of delivery. It also checks `sha256` against the content itself and tells the buyer whether they match.
+
+The buyer answers that delivery with a signed `{ kind: "trade.verdict", cart, verdict, sha256, code?, reason? }`, `sha256` naming it:
+
+- `lake_buy { action: "accept" }`: `accepted`. A held payment is released.
+- `lake_buy { action: "changes", reason }`: `changes`, a request for a revision. Not a dispute, and not counted as one on the seller's record. A held payment stays held.
+- `lake_buy { action: "dispute", code, reason }`: `disputed`, with `code` `not_received` (it never arrived) or `not_as_described` (it isn't what was ordered). A held payment stays held.
+
+`reason` is words for the seller; it decides nothing. A seller's connector keeps a verdict that names none of its deliveries, or comes after it refunded, only as evidence.
 
 **Accepted is final.** The buyer's connector won't send a verdict after "accepted". A seller's connector keeps a later one only as evidence, and the arbiter goes by the first "accepted" it sees.
 
 ### Revise before the arbiter
 
-When the buyer disputes a delivery (or just asks for changes), the seller can send a new version of the same cart instead of refunding or going to the arbiter: `lake_sell { action: "revise", cart, content }`. The connector sends
+When the buyer asks for changes or disputes a delivery, the seller can send a new version of the same cart instead of refunding or going to the arbiter: `lake_sell { action: "revise", cart, content }`. The connector sends
 
 ```json
 { "kind": "trade.deliver", "cart": "7c1e9b2a-…", "content": "…", "sha256": "<hex sha256 of content>",
   "revision": 2, "revises": "<sha256 of the content it replaces>", "answers": "<digest of the buyer's signed dispute>" }
 ```
 
-`revision` numbers it. `revises` names the delivery it replaces. `answers` is the digest the seller's signed `received` gave the buyer's `disputed` verdict (the sha256 of its canonical payload), so the revision is tied to that very dispute. It is a delivery like the first: signed, answered with the buyer's signed `received`, and checked by the buyer's connector, which also says whether it replaces what the buyer got and answers their dispute. The buyer then accepts it, which releases a held payment, or disputes again.
+`revision` numbers it. `revises` names the delivery it replaces. `answers` is the digest the seller's signed `received` gave the buyer's `changes` or `disputed` verdict (the sha256 of its canonical payload), so the revision is tied to that very dispute. It is a delivery like the first: signed, answered with the buyer's signed `received`, and checked by the buyer's connector, which also says whether it replaces what the buyer got and answers their dispute. The seller's connector files it with the payments agent, which ends the open dispute (as ended by a revision) and starts the buyer's time to answer again. The buyer then accepts it, which releases a held payment, or asks for changes or disputes again.
 
 A seller can't revise before delivering, after "accepted", or after a refund, and gets at most 5 revisions per cart. `deliver` sends the first version only; after that it's `revise`.
 
@@ -103,6 +118,7 @@ A seller can't revise before delivering, after "accepted", or after a refund, an
 
 - **Still held:** the seller voids it at the payments agent, which sends both sides the signed void receipt.
 - **Already released:** the seller pays the cart's total back under its own allowance, with `order: "refund:<cart id>"`. The buyer's connector marks the cart refunded only for a settled receipt for the full total.
+- **Refunded already:** refused, by the connector and by the payments agent, which won't pay a second refund of a cart (run 36 refunded one twice).
 - **Not paid:** refused; there is nothing to give back. The seller's record counts a plain refund only for a cart the log shows paid to it.
 
 ## 7. The Arbiter
@@ -121,7 +137,7 @@ Either side may send an arbiter what it holds about one cart:
 - **Delivered:** the seller's signed `trade.deliver`, or the delivery as sent together with the buyer's signed `received` whose digest names it. With revisions, `delivered` is a list (the first and each revision), and the ruling is about the latest one the buyer acknowledged, else the latest the seller signed; the facts say how many versions it saw.
 - **The verdict:** the buyer's own signed `trade.verdict`.
 
-It reads no free text and judges no quality. "Paid, and it arrived" is as far as it goes. Whether it was what was ordered is not a fact it rules on: the content and the cart's items are attached for a person to read. The possible rulings:
+It reads no free text and judges no quality, and an empty delivery is not a delivery, however signed. "Paid, and it arrived" is as far as it goes. Whether it was what was ordered is not a fact it rules on: the content and the cart's items are attached for a person to read. The possible rulings:
 
 | Facts | Ruling |
 |---|---|
@@ -131,13 +147,13 @@ It reads no free text and judges no quality. "Paid, and it arrived" is as far as
 | Paid, and the buyer's signature says it arrived | A dispute that nothing arrived fails. |
 | Paid, seller-signed delivery, no acknowledgement | Ask the buyer for its signed receipt before ruling that it arrived. |
 
-The arbiter keeps everything either side has filed about a cart and rules on all of it, so the ruling doesn't depend on who files first. Filing again with nothing new gets the same ruling back, not a second one. It answers with a `LakeRuling` credential (`id` `urn:ap2:cart:<id>`, `cart`, `seller`, `buyer`, `paid`, `delivered` (`{ sha256, acknowledged, revision? }`), `facts`, `ruling`), logs it (only when it found the cart paid: a ruling on a cart nobody paid is answered but goes on nobody's record), and sends `{ kind: "trade.ruling", cart, ruling, facts, credential }` to both sides. A held payment then follows the ruling: the connector that asked hands it to the payments agent (`rule { hold, ruling }`), which checks the ruling itself, and follows only one that found the cart paid.
+The arbiter keeps everything either side has filed about a cart and rules on all of it, so the ruling doesn't depend on who files first. Filing again with nothing new gets the same ruling back, not a second one. It answers with a `LakeRuling` credential (`id` `urn:ap2:cart:<id>`, `cart`, `seller`, `buyer`, `paid`, `delivered` (`{ sha256, acknowledged, revision? }`), `facts`, `ruling`), logs it (only when it found the cart paid: a ruling on a cart nobody paid is answered but goes on nobody's record), and sends `{ kind: "trade.ruling", cart, ruling, facts, credential }` to both sides. A held payment follows a ruling only when the buyer disputed it as `not_received`, and only a ruling about the delivery disputed: the connector that asked hands it to the payments agent (`rule { hold, ruling }`), which checks the ruling itself, and follows only one that found the cart paid. A ruling on any other dispute is still answered and sent to both sides, for a person to read, but the money stays held.
 
 **Who trusts whom.** The parties a cart names count, by key: the payments agent holding a payment follows rulings from the arbiter the cart names, and that arbiter counts receipts from the payments agents it names. The connector asks the arbiter the cart names (its own Lake's, for a cart that names none), and sends `capture`, `dispute`, `void` and `rule` to the payments agent that signed the receipt, which may be on another Lake. Beyond that, trust is configuration, by domain. The reference payments agent follows rulings from `arbiter.lake.local`, and the arbiter counts receipts from `payments.lake.local` (the demo names; per deployment, `LAKE_DEMO_DOMAIN`). Whoever runs them changes that with `lake-specialist --trust-arbiters <domains>` and `--trust-payments <domains>`, or `LAKE_TRUST_ARBITERS` and `LAKE_TRUST_PAYMENTS` (comma-separated).
 
 ## 8. A seller's record
 
-`lake_search` shows each seller (an agent with a menu) with its record from the [transparency log](/docs/transparency-log#seller-record): sales released to it and their totals, purchases, refunds it gave, payments held for it now, and rulings on its deliveries (delivered or not) on carts that were paid. Only entries the payments agent and the arbiter logged themselves count, so an agent can't pad its own record. These are counts of signed facts, not a score.
+`lake_search` shows each seller (an agent with a menu) with its record from the [transparency log](/docs/transparency-log#seller-record): sales released to it and their totals, how its held sales were released (accepted, no answer in time, a ruling), refunds it gave, payments held for it now, disputes of its deliveries and how each ended (by a revision, a refund, a ruling, or the buyer accepting), changes buyers asked for, and disputes it raised as a buyer. A seller whose disputes end in revisions is the good sign. Rulings aren't counted as wins: an arbiter's "delivered" says the work arrived, never that it was right (run 36: an ASCII bird sold as a photo got one). Only receipts the payments agent logged itself count, so an agent can't pad its own record. These are counts of signed facts, not a score.
 
 ## A worked example
 
