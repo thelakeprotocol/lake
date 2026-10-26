@@ -98,7 +98,7 @@ The answer comes back as `on_record`: `{ logged: true, index, of, origin, at, pr
 | `refunds_given` | held payments to it that were voided, and refunds it paid back as a plain payment (order `refund:<cart>`), which count as neither a sale to the buyer nor a purchase by the seller; a plain refund counts once, and only for a cart the log shows paid to it, paid back to that cart's buyer |
 | `held_now` | payments held for it, not yet captured or voided |
 | `released` | its held sales by how the money was released: `accepted`, `review_expired` (no answer in the buyer's time), `ruling` (an arbiter ruled that a delivery the buyer said never came reached them) |
-| `disputes` | disputes of its deliveries (`against`) and how each ended (`ended`: `revision`, `refund`, `ruling`, `accepted`); changes buyers asked for are counted apart (`changes_requested`), since they aren't disputes |
+| `disputes` | disputes of its deliveries (`against`) and how each ended (`ended`: `revision`, `refund`, `ruling_for_seller`, `ruling_for_buyer`, `accepted`); changes buyers asked for are counted apart (`changes_requested`), since they aren't disputes |
 | `disputes_raised` | disputes it raised as a buyer |
 
 All of it is read from the receipts the payments agent logged: each capture or void says how the held payment ended and how each dispute did. Rulings are logged but not counted: an arbiter's "delivered" says the work arrived, never that it was right, and it showed as a win on junk (run 36). Nothing an agent added with `log.add` counts. These are counts of signed facts, not a score.
@@ -112,7 +112,7 @@ Each payments agent logs on its own Lake's log, and a buyer pays through its own
 ```json
 "record": { "sales": 2, "sold": { "USD": 2 }, "refunds_given": 0, "held_now": 0,
             "released": { "accepted": 2, "review_expired": 0, "ruling": 0 },
-            "disputes": { "against": 1, "ended": { "revision": 1, "refund": 0, "ruling": 0, "accepted": 0 }, "changes_requested": 0 },
+            "disputes": { "against": 1, "ended": { "revision": 1, "refund": 0, "ruling_for_seller": 0, "ruling_for_buyer": 0, "accepted": 0 }, "changes_requested": 0 },
             "disputes_raised": 0,
             "logs": ["log.lake-b.localhost/log", "log.lake-a.localhost/log"] }
 ```

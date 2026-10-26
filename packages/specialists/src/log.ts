@@ -106,7 +106,8 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
         const refundOf = String(sub.agreement ?? '').startsWith('urn:lake:order:refund:') ? String(sub.agreement).slice('urn:lake:order:refund:'.length) : undefined;
         if (paid && !sub.cart && refundOf && sub.payer === who && sold.get(refundOf) === sub.id && !refunded.has(refundOf)) { refunded.add(refundOf); r.refunds_given++; }
         if (e.kind === 'receipt' && sub.settlement === 'held' && sub.id === who) r.held_now++;
-        if ((e.kind === 'capture' || e.kind === 'void') && sub.seller === who) r.held_now = Math.max(0, r.held_now - 1);
+        // A part refunded leaves the rest held.
+        if ((e.kind === 'capture' || (e.kind === 'void' && !sub.partial)) && sub.seller === who) r.held_now = Math.max(0, r.held_now - 1);
         if (e.kind === 'void' && sub.seller === who) r.refunds_given++;
         // How a held payment ended, as the payments agent's receipt says: how the money moved, and each dispute.
         if (e.kind === 'capture' && sub.seller === who && (sub.how === 'accepted' || sub.how === 'review_expired' || sub.how === 'ruling')) r.released[sub.how as 'accepted']++;

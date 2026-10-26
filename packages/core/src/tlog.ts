@@ -162,13 +162,13 @@ export interface LogRecord {
    * Disputes of this agent's deliveries and how each ended (a revision is the good sign); changes a buyer asked for are
    * counted apart, as they aren't disputes. A ruling's "delivered" was never a merit (run 36), so rulings aren't counted.
    */
-  disputes: { against: number; ended: { revision: number; refund: number; ruling: number; accepted: number }; changes_requested: number };
+  disputes: { against: number; ended: { revision: number; refund: number; ruling_for_seller: number; ruling_for_buyer: number; accepted: number }; changes_requested: number };
   /** Disputes this agent raised as a buyer: a serial disputer shows too. */
   disputes_raised: number;
 }
 
 /** A record with nothing on it. */
-export const emptyRecord = (): Omit<LogRecord, 'origin'> => ({ sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {}, released: { accepted: 0, review_expired: 0, ruling: 0 }, disputes: { against: 0, ended: { revision: 0, refund: 0, ruling: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0 });
+export const emptyRecord = (): Omit<LogRecord, 'origin'> => ({ sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {}, released: { accepted: 0, review_expired: 0, ruling: 0 }, disputes: { against: 0, ended: { revision: 0, refund: 0, ruling_for_seller: 0, ruling_for_buyer: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0 });
 
 /**
  * One agent's record across the logs of several Lakes (SPEC §11.8). Across Lakes a record is spread: a buyer pays through
@@ -189,7 +189,7 @@ export function sumRecords(records: LogRecord[]): Omit<LogRecord, 'origin'> & { 
     out.held_now += r.held_now;
     for (const [cur, v] of Object.entries(r.sold ?? {})) out.sold[cur] = Math.round(((out.sold[cur] ?? 0) + v) * 100) / 100;
     for (const k of ['accepted', 'review_expired', 'ruling'] as const) out.released[k] += r.released?.[k] ?? 0;
-    for (const k of ['revision', 'refund', 'ruling', 'accepted'] as const) out.disputes.ended[k] += r.disputes?.ended?.[k] ?? 0;
+    for (const k of ['revision', 'refund', 'ruling_for_seller', 'ruling_for_buyer', 'accepted'] as const) out.disputes.ended[k] += r.disputes?.ended?.[k] ?? 0;
     out.disputes.against += r.disputes?.against ?? 0;
     out.disputes.changes_requested += r.disputes?.changes_requested ?? 0;
     out.disputes_raised += r.disputes_raised ?? 0;

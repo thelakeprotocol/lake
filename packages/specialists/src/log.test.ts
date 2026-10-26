@@ -79,7 +79,7 @@ describe('the transparency log', () => {
     await log.add(vc({ id: 'urn:ap2:cart:c2', cart: cart('c2'), seller: SELLER, buyer: BUYER, paid: true, delivered: { sha256: 'y', acknowledged: true } }), 'ruling');
     const someone = await agent('someone.example', 'https://someone.example/a2a');
     const seller = await ask(someone, { kind: 'log.record', webId: SELLER });
-    expect(seller).toMatchObject({ sales: 2, purchases: 0, refunds_given: 2, held_now: 0, sold: { USD: 6 }, released: { accepted: 1, review_expired: 0, ruling: 0 }, disputes: { against: 2, ended: { revision: 1, refund: 1, ruling: 0, accepted: 0 }, changes_requested: 1 }, disputes_raised: 0 });
+    expect(seller).toMatchObject({ sales: 2, purchases: 0, refunds_given: 2, held_now: 0, sold: { USD: 6 }, released: { accepted: 1, review_expired: 0, ruling: 0 }, disputes: { against: 2, ended: { revision: 1, refund: 1, ruling_for_seller: 0, ruling_for_buyer: 0, accepted: 0 }, changes_requested: 1 }, disputes_raised: 0 });
     expect(seller.rulings).toBeUndefined();
     expect(await ask(someone, { kind: 'log.record', webId: BUYER })).toMatchObject({ sales: 0, purchases: 2, refunds_given: 0, sold: {}, disputes_raised: 2 });
   });
@@ -127,15 +127,15 @@ describe('the transparency log', () => {
     bapp.use(logB.app);
     const TRAVELLER = 'https://traveller.example/#agent';
     await log.add(vc({ id: TRAVELLER, payer: BUYER, amount: usd(7), agreement: 'urn:ap2:cart:x1', cart: { id: 'x1', hash: 'hx1' }, settlement: 'simulated' }), 'receipt');
-    await logB.add(vc({ id: TRAVELLER, payer: BUYER, amount: usd(3), agreement: 'urn:ap2:cart:x2', cart: { id: 'x2', hash: 'hx2' }, seller: TRAVELLER, settlement: 'simulated', captures: 'hb', how: 'ruling', disputes: [{ code: 'not_received', ended: 'ruling' }] }), 'capture');
+    await logB.add(vc({ id: TRAVELLER, payer: BUYER, amount: usd(3), agreement: 'urn:ap2:cart:x2', cart: { id: 'x2', hash: 'hx2' }, seller: TRAVELLER, settlement: 'simulated', captures: 'hb', how: 'ruling', disputes: [{ code: 'not_received', ended: 'ruling_for_seller' }] }), 'capture');
     const someone = await agent('someone.example', 'https://someone.example/a2a');
     const onA = await ask(someone, { kind: 'log.record', webId: TRAVELLER });
     const onB = await ask(someone, { kind: 'log.record', webId: TRAVELLER }, `${b.url}/a2a`);
     // Each log shows the sale paid through its own Lake's payments agent.
-    expect(onB).toMatchObject({ origin: 'log.b.example/log', sales: 1, released: { ruling: 1 }, disputes: { against: 1, ended: { ruling: 1 } } });
+    expect(onB).toMatchObject({ origin: 'log.b.example/log', sales: 1, released: { ruling: 1 }, disputes: { against: 1, ended: { ruling_for_seller: 1 } } });
     expect(onA).toMatchObject({ origin, sales: 1, sold: { USD: 7 } });
     // Each fact is on one log, so they add up; the same log reached twice (through two Lakes' search) counts once.
-    expect(sumRecords([onB, onA, onA] as never)).toEqual({ sales: 2, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 10 }, released: { accepted: 0, review_expired: 0, ruling: 1 }, disputes: { against: 1, ended: { revision: 0, refund: 0, ruling: 1, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0, logs: ['log.b.example/log', origin] });
+    expect(sumRecords([onB, onA, onA] as never)).toEqual({ sales: 2, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 10 }, released: { accepted: 0, review_expired: 0, ruling: 1 }, disputes: { against: 1, ended: { revision: 0, refund: 0, ruling_for_seller: 1, ruling_for_buyer: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0, logs: ['log.b.example/log', origin] });
     await rm(bdir, { recursive: true, force: true });
   });
 });

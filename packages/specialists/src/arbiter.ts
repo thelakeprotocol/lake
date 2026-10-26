@@ -105,11 +105,15 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     const verdicts = evidence.filter((x) => x?.by === cart.buyer && x.payload.kind === 'trade.verdict' && x.payload.cart === cart.id).sort((a, b) => String(a!.at).localeCompare(String(b!.at)));
     const firstAccept = verdicts.find((v) => v!.payload.verdict === 'accepted');
     if (firstAccept) facts.push(`the buyer signed "accepted" at ${firstAccept.at}`);
+    // What the buyer's latest dispute is about, in its own signed words: whether it arrived, or whether it is what was ordered.
+    const disputeCode = [...verdicts].reverse().find((v) => v!.payload.verdict === 'disputed')?.payload.code;
+    if (disputeCode) facts.push(`the buyer's dispute: ${String(disputeCode)}`);
     // The ruling: only what the signatures settle.
     const ruling = !paid ? 'Not shown paid: the seller owes nothing on this cart.'
       : !delivered ? 'Paid, not shown delivered: the seller should deliver or refund.'
       : firstAccept ? 'Paid, delivered and accepted: the trade is closed. A later dispute does not reopen it.'
-      : delivered.acknowledged ? `Paid, and it arrived (${size(delivered.content)}): a dispute that nothing arrived fails. Whether it is what was ordered is not a fact this arbiter rules on: the content and the cart's items are attached for a person to read.`
+      : delivered.acknowledged ? (disputeCode === 'not_received' || !disputeCode ? `Paid, and it arrived (${size(delivered.content)}): a dispute that nothing arrived fails. Whether it is what was ordered is not a fact this arbiter rules on: the content and the cart's items are attached for a person to read.`
+        : `Paid, and it arrived (${size(delivered.content)}). The buyer's dispute is that it isn't what was ordered: not a fact this arbiter rules on, so this ruling moves no money. The content and the cart's items are attached for a person to read.`)
       : 'Paid, and the seller signed a delivery the buyer has not acknowledged: ask the buyer for its signed receipt before ruling that it arrived.';
     // Nothing new since the last ruling on this cart: the same ruling, not a second one on the record.
     const key = JSON.stringify({ paid, delivered: delivered && { sha256: delivered.sha256, acknowledged: delivered.acknowledged }, facts, ruling });

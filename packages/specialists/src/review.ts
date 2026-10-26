@@ -351,8 +351,9 @@ export async function createPayments(o: SpecialistOptions & {
     if (h.status !== 'held') return { kind: 'refused', problems: [`it was ${h.status} already`] };
     h.status = to;
     h.settledAt = Date.now();
+    // A ruling's end says which way it went: a lost "nothing arrived" claim isn't a mark against the seller (run 37).
     const open = openDispute(h);
-    if (open) open.ended = how === 'seller_void' ? 'refund' : how;
+    if (open) open.ended = how === 'seller_void' ? 'refund' : how === 'ruling' ? (to === 'captured' ? 'ruling_for_seller' : 'ruling_for_buyer') : how;
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
     await save();
     const story = { how, ...(h.delivered ? { delivered: h.delivered.sha256, deliveries: h.delivered.revision } : {}), ...(h.disputes?.length ? { disputes: h.disputes.map((d) => ({ code: d.code, ended: d.ended })) } : {}) };
@@ -405,7 +406,24 @@ export async function createPayments(o: SpecialistOptions & {
       if (wrong) return { kind: 'refused', problems: [wrong] };
       return (await finish(h, 'captured', 'accepted', 'the buyer accepted')) as never;
     }
-    if (p.kind === 'void') return from === h.payee ? (await finish(h, 'voided', 'seller_void', 'the seller refunded it')) as never : { kind: 'refused', problems: ['only the seller voids it (a refund)'] };
+    if (p.kind === 'void') {
+      if (from !== h.payee) return { kind: 'refused', problems: ['only the seller voids it (a refund)'] };
+      if (p.amount === undefined) return (await finish(h, 'voided', 'seller_void', 'the seller refunded it')) as never;
+      // Part of it back (run 37: a "not what I ordered" dispute froze the money, and a whole refund was the seller's only
+      // way out): the rest stays held, for the buyer to accept, as marketplaces settle such disputes with a partial refund.
+      const part = Math.round(Number(p.amount) * 100);
+      if (!Number.isInteger(part) || part < 1 || part >= h.amount) return { kind: 'refused', problems: [`amount: part of the ${h.currency} ${h.amount / 100} held, at least 0.01; leave it out to refund it all`] };
+      h.amount -= part;
+      spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - part));
+      await save();
+      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.payee, intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
+      const logged = o.log ? await o.log(credential, 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
+      const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: part / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `part refunded: ${h.currency} ${part / 100}; ${h.currency} ${h.amount / 100} still held` };
+      for (const url of new Set([h.payeeUrl, h.payerUrl].filter((u): u is string => !!u))) {
+        void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
+      }
+      return { kind: 'voided', partial: true, hold: h.id, cart: h.cart.id, refunded: part / 100, still_held: h.amount / 100, credential, ...(logged ? { logged } : {}) } as never;
+    }
     if (p.kind === 'dispute') {
       if (from !== h.payer) return { kind: 'refused', problems: ['only the buyer disputes it'] };
       if (!filed) {
@@ -415,10 +433,12 @@ export async function createPayments(o: SpecialistOptions & {
       }
       const code = (p.code ?? 'not_as_described') as DisputeCode;
       if (!DISPUTE_CODES.includes(code)) return { kind: 'refused', problems: [`code: one of ${DISPUTE_CODES.join(', ')}`] };
-      const wrong = latest();
+      // "It never arrived" can't name what never came: it is about the latest delivery the seller filed here.
+      if (code === 'not_received' && !sha && !h.delivered) return { kind: 'refused', problems: [`the seller has filed no delivery: if nothing comes by ${new Date(h.until).toISOString()}, it goes back to the buyer by itself`] };
+      const wrong = code === 'not_received' && !sha ? null : latest();
       if (wrong) return { kind: 'refused', problems: [wrong] };
       if (openDispute(h)) return { kind: 'refused', problems: ['that delivery is disputed already: it stays held until a revision, your accept, or a refund'] };
-      (h.disputes ??= []).push({ code, sha256: sha, at: Date.now() });
+      (h.disputes ??= []).push({ code, sha256: sha || h.delivered!.sha256, at: Date.now() });
       await save();
       return { kind: 'disputed', hold: h.id, code, note: code === 'changes_requested' ? 'held while the seller revises it: a revision restarts your time to answer'
         : code === 'not_received' ? 'held: the seller can show it reached you (the Arbiter rules on that), revise, or refund'
