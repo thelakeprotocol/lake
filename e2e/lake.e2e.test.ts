@@ -452,7 +452,7 @@ describe('the owner', () => {
     // A note at the door: words for the owner, nothing asked of the pod; the owner sees it (and an assistant hears of it).
     const neighbour = await visitor('neighbour.example');
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Could you take in a parcel for me at 3 pm? Happy to return the favour.' })).reply).toMatchObject({ kind: 'noted' });
-    expect((await ownerCall({ kind: 'list' })).notes[0]).toMatchObject({ from: { domain: 'neighbour.example' }, text: expect.stringMatching(/^Could you take in a parcel/) });
+    expect((await ownerCall({ kind: 'list' })).notes[0]).toMatchObject({ from: { domain: 'neighbour.example', checked: false }, text: expect.stringMatching(/^Could you take in a parcel/) });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: '' })).reply).toMatchObject({ kind: 'rejected' });
     const pay = async (amount: number, currency = 'USD') => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test', currency })] })).reply;
     // Nothing converts: dollars signed for are spent in dollars.

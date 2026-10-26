@@ -28,8 +28,8 @@ const ask = async (from: Agent, payload: Record<string, unknown>) => {
   return v.payload;
 };
 // A held payment for a fresh $2 cart (with the seller's delivery terms, if any): its hold id.
-const payHeld = async (delivery?: DeliveryTerms, extra: Record<string, unknown> = {}) => {
-  const cart: CartMandate = await signCart({ seller: seller.id, sellerWebId: seller.webId, sellerName: 'Seller', buyerWebId: buyer.webId, items: [{ label: 'A haiku', amount: { currency: 'USD', value: 2 } }], delivery });
+const payHeld = async (delivery?: DeliveryTerms, extra: Record<string, unknown> = {}, given?: CartMandate) => {
+  const cart: CartMandate = given ?? await signCart({ seller: seller.id, sellerWebId: seller.webId, sellerName: 'Seller', buyerWebId: buyer.webId, items: [{ label: 'A haiku', amount: { currency: 'USD', value: 2 } }], delivery });
   const payment = await signPaymentMandate(buyer.id, buyer.webId, { payee: seller.webId, amount: 2, intentMandate: intent, agreement: `urn:ap2:cart:${cart.contents.id}`, cart: { detailsId: cart.contents.payment_request.details.id, hash: cartHash(cart.contents) } });
   const r = await ask(buyer, { kind: 'settle', intent: { credential: intent, card: human.card }, payments: [payment], cart: { mandate: cart, card: seller.card }, hold: true, ...extra });
   if (r.kind !== 'settled') throw new Error(r.problems.join('; '));
@@ -89,7 +89,10 @@ describe('a held payment follows the delivery (SPEC §6.5)', () => {
     expect(refunded).toMatchObject({ kind: 'voided' });
     expect(JSON.parse(Buffer.from(refunded.credential.split('.')[1], 'base64url').toString()).credentialSubject).toMatchObject({ how: 'ruling', disputes: [{ code: 'not_as_described', ended: 'ruling_for_buyer' }] });
     // A buyer can't pick other hours than the cart's.
-    await expect(payHeld({ review_hours: 3 }, { release_after_hours: 5 })).rejects.toThrow(/the cart's terms give you 3 hours to answer each delivery/);
+    // A buyer can't pick other hours than the cart's, and asking doesn't spend the cart: the same cart pays after (run 41).
+    const strict = await signCart({ seller: seller.id, sellerWebId: seller.webId, sellerName: 'Seller', buyerWebId: buyer.webId, items: [{ label: 'Cool packs', amount: { currency: 'USD', value: 2 } }], delivery: { review_hours: 3 } });
+    await expect(payHeld(undefined, { release_after_hours: 5 }, strict)).rejects.toThrow(/the cart's terms give you 3 hours to answer each delivery/);
+    await expect(payHeld(undefined, {}, strict)).resolves.toMatchObject({ hold: expect.any(String) });
   });
 
   it('lets an arbiter settle "never arrived" only, about the delivery disputed, and says which way it went', async () => {

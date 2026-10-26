@@ -311,9 +311,9 @@ export class OwnerDesk {
 
   /** What one agent asked this house lately, any purpose: lets the owner see a visitor trying another label. */
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: { name: string; domain: string; webId: string; url?: string }; text: string; at: string }[] = [];
+  notes: { id: string; from: { name: string; domain: string; webId: string; url?: string; checked: boolean }; text: string; at: string }[] = [];
   /** Keeps a note, tells the assistants; false when its sender has sent too many this hour. */
-  addNote(n: { from: { name: string; domain: string; webId: string; url?: string }; text: string }): boolean {
+  addNote(n: { from: { name: string; domain: string; webId: string; url?: string; checked: boolean }; text: string }): boolean {
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return false;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);

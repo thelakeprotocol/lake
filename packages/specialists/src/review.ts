@@ -324,6 +324,14 @@ export async function createPayments(o: SpecialistOptions & {
         return { kind: 'refused', problems: ['a Payment Mandate is not signed by the agent under this Intent Mandate'] };
       }
     }
+    const hold = !!cart && p.hold === true;
+    // The cart's signed delivery terms, where it has them, set the clocks and the revisions: the buyer paid those terms.
+    // Checked before anything is counted (run 41: a refusal here had already marked the cart paid, so it never could be).
+    const d = cart?.delivery;
+    if (hold && d?.review_hours !== undefined) {
+      if (p.release_after_hours !== undefined && Number(p.release_after_hours) !== d.review_hours) return { kind: 'refused', problems: [`the cart's terms give you ${d.review_hours} hours to answer each delivery: leave release_after_hours out, or ask the seller for another cart`] };
+      holdMs = d.review_hours * 3_600_000;
+    }
     // Counted in cents, so a budget never drifts by a rounding error.
     const total = checked.reduce((a, c) => a + c.amount, 0);
     const already = spent.get(digest) ?? 0;
@@ -334,13 +342,6 @@ export async function createPayments(o: SpecialistOptions & {
     spent.set(digest, already + total);
     if (cart) paidCarts.add(cart.hash);
     for (const c of checked) if (c.agreement?.startsWith('urn:lake:order:refund:')) refunded.add(c.agreement.slice('urn:lake:order:refund:'.length));
-    const hold = !!cart && p.hold === true;
-    // The cart's signed delivery terms, where it has them, set the clocks and the revisions: the buyer paid those terms.
-    const d = cart?.delivery;
-    if (hold && d?.review_hours !== undefined) {
-      if (p.release_after_hours !== undefined && Number(p.release_after_hours) !== d.review_hours) return { kind: 'refused', problems: [`the cart's terms give you ${d.review_hours} hours to answer each delivery: leave release_after_hours out, or ask the seller for another cart`] };
-      holdMs = d.review_hours * 3_600_000;
-    }
     // Held: the seller's clock first. The buyer's (holdMs) starts at each delivery.
     const until = Date.now() + (hold ? (d?.within_hours ?? DELIVER_HOURS) * 3_600_000 : holdMs);
     const receipts = await Promise.all(

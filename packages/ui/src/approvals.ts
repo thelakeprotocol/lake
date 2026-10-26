@@ -128,7 +128,7 @@ async function home(box: HTMLElement) {
   const [o, feed, { suggestions, assistants, notes }] = await Promise.all([
     call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
-    call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string }; text: string; at: string }[] }>({ kind: 'list' }),
+    call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string; checked?: boolean }; text: string; at: string }[] }>({ kind: 'list' }),
   ]);
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
@@ -142,7 +142,7 @@ async function home(box: HTMLElement) {
     suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
     // Notes other agents left at your door: their words, nothing asked of your data. Your agent hears of them too.
     notes?.length ? h('div', { class: 'card' }, h('h3', {}, 'Notes at your door'), h('ul', { class: 'rows' }, ...notes.map((n) => h('li', {},
-      h('div', {}, h('div', { class: 'r-title' }, `“${n.text}”`), h('div', { class: 'r-meta' }, `${n.from.name} (${n.from.domain}) · ${time(n.at)} · their words`)),
+      h('div', {}, h('div', { class: 'r-title' }, `“${n.text}”`), h('div', { class: 'r-meta' }, `${n.from.name} (${n.from.domain}${n.from.checked ? ', domain proved' : ': not verified, anyone could send this'}) · ${time(n.at)} · their words`)),
       h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.dismiss', id: n.id }); void show(); } }, 'Dismiss')))))) : '',
     h('dl', { class: 'tiles' },
       tile('Waiting for you', o.pending, 'requests', o.pending ? 'amber' : ''),

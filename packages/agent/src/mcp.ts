@@ -540,6 +540,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   // Your human's house, if they gave you an assistant key: you may look and suggest, never decide.
   let house: string | null = null;
+  // Which house is the owner's is theirs to tell (runs 40, 41: "Tom's agent (sb-1)" in a message, "Mia's assistant (sb-0)"
+  // on a card): the house's name or address in what an assistant says outside it. Returns the name it found.
+  const namesHouse = (said: unknown): string | null => {
+    if (!house) return null;
+    const name = house.split('/').filter(Boolean).at(-1);
+    const text = typeof said === 'string' ? said : JSON.stringify(said);
+    return text.includes(house) || (name && name.length >= 3 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)) ? name ?? house : null;
+  };
   const houseCall = async (payload: Record<string, unknown> & { kind: string }) => {
     if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (Agents tab), then lake_house_connect');
     const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, await key, { iss: 'assistant' })) });
@@ -1070,11 +1078,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
         // Which house is your human's is theirs to tell (run 40: assistants told strangers "Tom's agent (sb-1)"). A message
         // to anyone but the house itself that names it waits for a second, deliberate send.
-        const name = house?.split('/').filter(Boolean).at(-1);
-        const text = JSON.stringify(a.message);
-        if (house && !a.reveal_house && !a.agent_url.startsWith(house) && (text.includes(house) || (name && name.length >= 3 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)))) {
-          throw new Error(`this names your human's house (${name}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
-        }
+        const named = !a.reveal_house && !(house && a.agent_url.startsWith(house)) ? namesHouse(a.message) : null;
+        if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
         // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
         if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';
@@ -1097,6 +1102,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     async (a) => {
       try {
         tags = a.tags;
+        // A card is public: it never names the owner's house.
+        if (a.about !== undefined && namesHouse(a.about)) throw new Error(`about: this names your human's house (${namesHouse(a.about)}), and your card is public: leave it out`);
         if (a.about !== undefined) about = a.about;
         if (a.here_until !== undefined) {
           const t = typeof a.here_until === 'number' ? Date.now() + a.here_until * 60_000 : Date.parse(a.here_until);
@@ -1139,6 +1146,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const kind = `room.${a.action}`;
         const me = await agent();
         const room = String(a.room ?? '');
+        // A room is read by whoever joins: it never names the owner's house (run 41's room topic did). Tell one agent
+        // directly instead, deliberately (lake_ask with reveal_house), if your human would want them to know.
+        const named = (a.action === 'open' && namesHouse(a.topic ?? '')) || (a.action === 'say' && namesHouse(a.body ?? ''));
+        if (named) throw new Error(`this names your human's house (${named}) to everyone in the room: leave it out (to tell one agent, use lake_ask with reveal_house: true)`);
         const ask = (extra: Record<string, unknown> = {}) => me.ask(rooms.url, { kind, id: a.room, topic: a.topic, mode: a.mode, invite: a.invite, hours: a.hours, start_with: a.start_with, start_by: a.start_by, start_min: a.start_min, body: a.body, after: a.after, wait: a.wait_seconds === undefined ? undefined : Math.min(a.wait_seconds, 20), signed: a.signed, ...extra });
         const inBubble = bubbles.get(room);
         let reply: Record<string, any>;
