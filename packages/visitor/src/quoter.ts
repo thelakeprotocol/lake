@@ -91,7 +91,14 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     if (m.kind === 'accept' && house) return reply(await accepted(m, v.profile.webId, house));
     // Paid for an order: the payment's receipt arrives like any message; acknowledge it, naming the order.
     if (m.kind === 'receipt') return reply({ kind: 'received', note: `payment received${m.order ? ` for order ${String(m.order)}` : ''}; thank you` });
-    return reply({ kind: 'rejected', code: 'malformed', why: 'send an intent, an authorisation request, or an acceptance' });
+    // A question before accepting (run 24: "do you do halal beef?"): the answer is the certified program itself, which is
+    // public: what it reads, what it says when it can't serve you, what the owner sees. Facts it stands behind, not chat.
+    if (m.kind === 'question' || m.kind === 'note') {
+      const pr = ex.program as typeof ex.program & { notes?: { say: string }[]; labels?: Record<string, { label: string; unit?: string }> };
+      return reply({ kind: 'answer', from: ex.name, program: { title: pr.title, reads: pr.inputs, terms: pr.terms ?? [], says_when_it_cannot: (pr.notes ?? []).map((n) => n.say), shows: Object.fromEntries(Object.entries(pr.labels ?? {}).map(([k, v]) => [k, v.label + (v.unit ? ` (${v.unit})` : '')])) },
+        note: 'what we offer is this certified program, run in your house on your data: it answers for us. Anything it doesn\'t say, it doesn\'t promise.' });
+    }
+    return reply({ kind: 'rejected', code: 'malformed', why: 'send an intent, an authorisation request, an acceptance, or a question (answered with our certified program)' });
   }, id, { replay });
 
   // A few quotes at a time, and another try for a house that was busy: a hundred homes asking at once is normal.

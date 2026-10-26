@@ -84,12 +84,14 @@ export class Registry {
    * specialist registered here directly with that very key (the node's own list of issuers, like a trust anchor's trust
    * mark issuers); and the claims in its own words that look like someone else's (approval words, other agents' names).
    */
-  claimsOf(e: Entry): { vouched?: Vouch[]; own_words?: string[] } {
+  claimsOf(e: Entry): { vouched?: Vouch[]; own_words?: string[]; same_name_as?: string[] } {
     const issuers = new Map([...this.entries.values()].filter((x) => x.via === 'direct' && x.profile.role === 'specialist').map((x) => [x.url, x]));
     const vouched = (e.vouched ?? []).map((b) => ({ by: b.by, says: b.says, listed: issuers.get(b.issuer)?.jkt === b.jkt }));
     // The node's own specialists describe the Lake's services in its words (run 40 flagged the Tally for naming the pass issuer).
     const own = e.via === 'direct' && e.profile.role === 'specialist' ? [] : ownWordClaims({ name: e.card.name, description: e.card.description, menu: e.profile.menu }, [...this.entries.values()].filter((x) => x !== e).map((x) => x.card.name));
-    return { ...(vouched.length ? { vouched } : {}), ...(own.length ? { own_words: own } : {}) };
+    // Names are the agents' own and can be shared (two Atlases in runs 40 and 41): say which other domains use this one.
+    const same = [...this.entries.values()].filter((x) => x !== e && x.card.name.trim().toLowerCase() === e.card.name.trim().toLowerCase()).map((x) => x.profile.ownerDomain);
+    return { ...(vouched.length ? { vouched } : {}), ...(own.length ? { own_words: own } : {}), ...(same.length ? { same_name_as: [...new Set(same)].slice(0, 5) } : {}) };
   }
   /** Badges are checked again now and then: an issuer may have revoked one, or it may have expired. */
   async recheck(maxAgeMs = 30 * 60_000) {

@@ -1025,7 +1025,8 @@ describe('the open door', () => {
     // Once checked, the payments agent's card shows by name, domain and address (lake_verify fetches it from there); raw
     // has it whole, to forward anywhere.
     expect(sales[1].message.receipt.card).toEqual({ name: 'Payments (demo)', domain: 'payments.lake.local', url: `${payments}/a2a` });
-    expect(await poet('lake_verify', { evidence: sales[1].message.receipt })).toMatchObject({ verified: true, signedBy: 'payments.lake.local' });
+    expect(await poet('lake_verify', { evidence: sales[1].message.receipt })).toMatchObject({ verified: true, signedBy: 'payments.lake.local', pays_you: true, for_cart: order.cart });
+    expect(await buyer('lake_verify', { evidence: sales[1].message.receipt })).toMatchObject({ verified: true, pays_you: false, for_cart: order.cart });
     expect((await poet('lake_inbox', { again: true, raw: true })).messages[1].message.receipt.card.supportedInterfaces).toBeDefined();
     expect((await poet('lake_sell', { action: 'orders' })).orders[0]).toMatchObject({ cart: order.cart, status: 'paid', payment: 'held', money: expect.stringMatching(deliverBy), held_until: paid.hold.until });
     // Run 36: an accept before anything came released the money and locked delivery out; an empty delivery took a disputed
@@ -1675,6 +1676,11 @@ describe('the weekly shop, priced inside the house', () => {
   it('accepting sends only the shopping list to that one grocer, and it confirms the order', async () => {
     const b = buyers[0]!;
     const best = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible);
+    // A question first (run 24: "do you do halal beef?"): answered with the grocer's certified program, its own facts.
+    const { reply: answer } = await ask(best.quoter.url, await visitor('asking.example'), { kind: 'question', text: 'Do you do halal beef?' });
+    expect(answer).toMatchObject({ kind: 'answer', program: { reads: expect.arrayContaining(['dietary_needs']), says_when_it_cannot: expect.any(Array) } });
+    // Where its maker answers, and whether the owner's assistant may pay it (no allowance here: not said).
+    expect(best.quoter.at).toMatch(/^localhost:\d+$/);
     const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
     expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'order confirmed', order: best.id, outputs: { total: best.result.outputs.total } } });
     // Found what it was looking for: no more quotes are asked for, but the house still counts in its group for a day, so a

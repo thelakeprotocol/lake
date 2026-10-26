@@ -384,6 +384,8 @@ const decode = (jws: string) => {
 };
 
 /** Everything the owner's control panel shows and changes. Every call arrives signed by the owner's key. */
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
+
 function panelFor(x: {
   o: HouseOptions; owner: OwnerSession; id: Identity; actor: string; activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
   note: (kind: string, text: string) => void;
@@ -603,7 +605,13 @@ function panelFor(x: {
       return {
         // Each with why it has no offers yet, if it hasn't: who was told, who was turned away, a record that can't price it.
         intents: await Promise.all([...m.intents.values()].map(async (i) => ({ ...i, ...(await m.status(i.pack)) }))),
-        offers: [...m.offers.values()].sort((a, b) => Number(b.result.eligible) - Number(a.result.eligible) || (a.result.outputs.rate ?? 99) - (b.result.outputs.rate ?? 99)),
+        // Each with where its maker answers (one grocer's name on two Lakes is two offers: run 40 paid the other one), and
+        // whether the owner's assistant may pay it under an allowance in its currency.
+        offers: [...m.offers.values()].sort((a, b) => Number(b.result.eligible) - Number(a.result.eligible) || (a.result.outputs.rate ?? 99) - (b.result.outputs.rate ?? 99)).map((o) => {
+          const price = m.priceOf(o.id);
+          const caps = [...x.desk().allowances.values()].filter((a) => a.currency === price?.currency && Date.parse(a.until) > Date.now()).map((a) => a.amount);
+          return { ...o, quoter: { ...o.quoter, at: hostOf(o.quoter.url) }, ...(price && caps.length ? { payable_by_assistant: caps.some((c) => c >= price.amount) } : {}) };
+        }),
         packs: x.records.filter((r) => r.pack.intent).map((r) => ({ id: packId(r.pack), title: r.pack.title, terms: r.pack.intent!.terms })),
       };
     },

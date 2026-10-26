@@ -421,6 +421,8 @@ export class OwnerDesk {
           // An assistant that got something wrong takes its own note back; an empty text with replaces just withdraws it.
           const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
           if (q.replaces && !old) return void res.status(404).json({ error: 'no note of yours with that id' });
+          // An answered question stays answered (run 41 asked the owner twice): ask a new one if something changed.
+          if (old?.ask?.answered) return void res.status(409).json({ error: `your human already answered that: "${old.ask.answered}"` });
           if (old) this.suggestions = this.suggestions.filter((x) => x !== old);
           if (!text) return void (old ? res.json({ ok: true, withdrawn: old.id }) : res.status(400).json({ error: 'suggest something: text' }));
           // A note about a request must point at a real one: a unique prefix is enough, anything else is refused.

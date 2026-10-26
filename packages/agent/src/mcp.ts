@@ -94,7 +94,7 @@ async function checkMoney(p: Record<string, unknown>, from: LakeProfile, me: str
  * Lake message with its sender's signed card and envelope. Says who signed it and what it says; checked at the time it
  * was signed, so old evidence still verifies. Claims nobody signed prove nothing.
  */
-async function verifyEvidence(x: unknown): Promise<Record<string, unknown>> {
+async function verifyEvidence(x: unknown, me?: string): Promise<Record<string, unknown>> {
   const e = x as { credential?: string; card?: AgentCard; envelope?: { payload?: { iat?: number; exp?: number } } };
   try {
     // A bare credential names its issuer: fetch the issuer's card from its own address, as anyone checking would.
@@ -118,7 +118,10 @@ async function verifyEvidence(x: unknown): Promise<Record<string, unknown>> {
       const sub = vc.credentialSubject as Record<string, unknown>;
       // A credential that names a bit on its issuer's status list can be checked for revocation by anyone.
       const status = await checkCredentialStatus(vc).catch((err: Error) => ({ checked: false as const, why: err.message }));
-      return { verified: true, what: 'credential', type: vc.type.filter((t: string) => t !== 'VerifiableCredential'), signedBy: signer.ownerDomain, signer: e.card.name, about: sub.id, says: sub, validUntil: (vc as { validUntil?: string }).validUntil,
+      // A receipt, said plainly for whoever checks it: whether it pays them, and for which cart (run 37's sellers caught a
+      // forwarded receipt for another cart only by reading its fields).
+      const receipt = vc.type.includes('LakeReceipt') && me ? { pays_you: sub.id === me || (!!sub.cart && sub.seller === me && !sub.voids), for_cart: (sub.cart as { id?: string } | undefined)?.id ?? null } : {};
+      return { verified: true, what: 'credential', type: vc.type.filter((t: string) => t !== 'VerifiableCredential'), signedBy: signer.ownerDomain, signer: e.card.name, about: sub.id, ...receipt, says: sub, validUntil: (vc as { validUntil?: string }).validUntil,
         ...(status.checked ? { revoked: status.revoked } : 'why' in status ? { revoked: 'unknown', statusProblem: status.why } : {}) };
     }
     if (e.envelope) {
@@ -292,6 +295,12 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       if ((hereUntil && now > hereUntil && lastActive <= hereUntil) || now - lastActive > AWAY_AFTER_MS) {
         return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: 'the seller is away; your order is in its inbox' },
           checked: { note: 'an order from your menu came while you were away, so no cart was signed: answer with lake_sell { action: "cart" } if you still want to sell it' } };
+      }
+      // The buyer says which currency it can pay in; nothing converts, so a menu price in another one would sign a cart
+      // nobody can pay (runs 34b, 41: a dead AUD cart, a manual reissue). The order waits for the seller to answer.
+      if (typeof p.pays_in === 'string' && /^[A-Z]{3}$/.test(p.pays_in) && p.pays_in !== item.price.currency) {
+        return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), note: `the menu prices this in ${item.price.currency}; the seller may answer with a cart in ${p.pays_in}` },
+          checked: { note: `an order for "${item.label}" from a buyer who pays in ${p.pays_in}, not ${item.price.currency}: if you'll take ${p.pays_in}, answer with lake_sell { action: "cart", to: "${peer.url}", items: [{ label, price, currency: "${p.pays_in}" }] }` } };
       }
       const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
       const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note, item.sku);
@@ -897,7 +906,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const me = await agent();
         if (a.action === 'order') {
           if (!a.seller_url || !a.sku) throw new Error('order needs seller_url and sku');
-          const reply = await me.ask(a.seller_url, { kind: 'trade.order', sku: a.sku, qty: a.qty, ...(a.note ? { note: a.note } : {}) });
+          // The currency this agent can pay in, so the seller doesn't sign a cart in another.
+          const paysIn = (house ? ((await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { currency?: string } | null)?.currency : undefined) ?? (o.allowanceUsd ? 'USD' : undefined);
+          const reply = await me.ask(a.seller_url, { kind: 'trade.order', sku: a.sku, qty: a.qty, ...(a.note ? { note: a.note } : {}), ...(paysIn ? { pays_in: paysIn } : {}) });
           if (reply.kind !== 'trade.cart') return json({ reply, note: 'no cart yet: the seller may answer with one in your inbox' });
           const sellerCard = (await (await fetch(cardUrlFor(a.seller_url))).json()) as AgentCard;
           const seller = await verifyLakeCard(sellerCard);
@@ -1126,6 +1137,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       inputSchema: {
         action: z.enum(['list', 'open', 'update', 'join', 'say', 'read', 'leave']),
         room: z.string().optional().describe('The room id'),
+        at: z.string().optional().describe('A room on another Lake: its rooms agent, the at its list entry gives'),
         topic: z.string().max(200).optional(),
         mode: z.enum(['room', 'bubble']).optional(),
         invite: z.union([z.literal('anyone'), z.array(z.string())]).optional().describe('"anyone", or the webIds (or urls) of the agents you invite'),
@@ -1141,8 +1153,16 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     },
     async (a) => {
       try {
-        const rooms = (await (await agent()).find({ skill: 'room' }))[0];
-        if (!rooms) throw new Error('no rooms agent on this Lake');
+        // Each Lake keeps its own rooms; the Lakes this one follows list theirs too (run 41: a room on the other Lake was
+        // invisible). Its own Lake's first; `at` picks another's.
+        const all = (await (await agent()).find({ skill: 'room' })).filter((r) => r.role === 'specialist');
+        const rooms = a.at ? all.find((r) => r.url === a.at) : all.find((r) => !r.lake) ?? all[0];
+        if (!rooms) throw new Error(a.at ? `no rooms agent at ${a.at} (lake_room { action: "list" } shows each room's at)` : 'no rooms agent on this Lake');
+        if (a.action === 'list' && !a.at) {
+          const lists = await Promise.all(all.map(async (r) => ({ r, reply: await (await agent()).ask(r.url, { kind: 'room.list' }).catch(() => null) })));
+          const listed = lists.flatMap(({ r, reply }) => ((reply?.rooms as Record<string, unknown>[] | undefined) ?? []).map((x) => ({ ...x, ...(r.lake ? { lake: r.lake, at: r.url } : {}) })));
+          return json({ kind: 'room.list', rooms: listed, ...(all.some((r) => r.lake) ? { note: 'a room on another Lake carries its at: pass it with join, say, read or leave' } : {}) });
+        }
         const kind = `room.${a.action}`;
         const me = await agent();
         const room = String(a.room ?? '');
@@ -1213,7 +1233,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       inputSchema: { evidence: z.record(z.string(), z.unknown()).describe('{ credential, card } or { card, envelope }') },
     },
     async (a) => {
-      const checked = await verifyEvidence(a.evidence);
+      const checked = await verifyEvidence(a.evidence, (await agent()).webId);
       const credential = typeof a.evidence.credential === 'string' ? a.evidence.credential : undefined;
       return json(credential && checked.verified ? { ...checked, on_record: await onRecord(credential) } : checked);
     },

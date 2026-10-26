@@ -267,7 +267,7 @@ export class Housekeeper {
       const auth = await checkAttachment(p.attachments?.authorisation, { trusted: this.o.trust.regulators, type: 'LakeAuthorisation', subject: visitorWebId, sandbox: this.o.sandbox });
       if (auth.ok && auth.vc.credentialSubject.pack === packId(pk)) continue;
       const why = `asks for ${packId(pk)} fields without ${pk.authority!.name}'s authorisation (${auth.ok ? 'it is for another pack' : auth.why})${p.study ? ', in a study' : ''}`;
-      this.declinedAt.set(`${visitorWebId}|${offer.purpose}`, Date.now());
+      // Not a no to the purpose: an ask without those fields is heard (run 41's responder, corrected, was refused as a repeat).
       return decide('decline', why, { code: 'unauthorised' }, `declined: ${fields.join(', ')} belong to ${packId(pk)}, and only agents on ${pk.authority!.name} may ask for them: attach its authorisation (attachments.authorisation)${pk.authority!.studies ? ', or ask through a certified study that reads them' : `; ${packId(pk)} lets no study read them`}`);
     }
 
