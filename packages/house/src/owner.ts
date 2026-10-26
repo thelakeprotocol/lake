@@ -40,6 +40,10 @@ export interface PanelProvider {
   overview(tzOffset?: number): Promise<unknown>;
   rules(): Promise<{ text: string; rules: unknown }>;
   setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** The house's door (SPEC §9.0): open or not, its line, the address to give out, and its A2A address. */
+  door?(): { open: boolean; about?: string; name?: string; address: string; a2a: string };
+  /** Opens or closes it, written into the owner's rules like any other setting. */
+  setDoor?(d: { open: boolean; about?: string; name?: string }): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Newest first; with `since` (a seq from an earlier look, or a time), only what came after it. */
   activity(since?: number | string): { seq: number }[];
   agents(): unknown[];
@@ -585,6 +589,8 @@ export class OwnerDesk {
         const answer = await ({
           'panel.overview': () => panel.overview(Number((q as { tz_offset?: number }).tz_offset)),
           'panel.rules': () => panel.rules(),
+          'panel.door': async () => panel.door?.() ?? { error: 'this house has no door' },
+          'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}) }) ?? { error: 'this house has no door' },
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity((q as { since?: number | string }).since),
           'panel.agents': async () => panel.agents(),

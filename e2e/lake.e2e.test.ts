@@ -401,6 +401,13 @@ describe('the owner', () => {
     expect((await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).name).toBe('Stan Example (house)');
     expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ndoor: { name: "" }\n` })).toMatchObject({ ok: false });
     expect(await ownerCall({ kind: 'panel.rules.set', text })).toEqual({ ok: true });
+    // The panel's door switch writes the same setting into the owner's rules, and gives the address to hand out.
+    expect(await ownerCall({ kind: 'panel.door' })).toMatchObject({ open: false, address: houses.strict });
+    expect(await ownerCall({ kind: 'panel.door.set', open: true, about: 'Ask about talks.' })).toEqual({ ok: true });
+    expect(await ownerCall({ kind: 'panel.door' })).toMatchObject({ open: true, about: 'Ask about talks.' });
+    expect((await ownerCall({ kind: 'panel.rules' })).text).toMatch(/door:\s*\n\s*about: Ask about talks\./);
+    expect(await ownerCall({ kind: 'panel.door.set', open: false })).toEqual({ ok: true });
+    expect(await ownerCall({ kind: 'panel.door' })).toMatchObject({ open: false });
     expect((await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).name).toBe('House strict');
   });
 

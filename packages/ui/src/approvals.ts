@@ -1,5 +1,6 @@
 import './approvals.css';
 import { stringify } from 'yaml';
+import QRCode from 'qrcode';
 import { loadKey, signCredential, signEnvelope } from './owner-crypto';
 
 // The control panel that comes with every house (open source). Served by the house at /owner/; every
@@ -426,6 +427,39 @@ function chipsEditor(values: string[], placeholder: string, onChange: (v: string
   return h('div', {}, ...values.map((v) => h('button', { type: 'button', class: 'chip', title: 'Remove', onclick: () => onChange(values.filter((x) => x !== v)) }, v, ' ✕')), input);
 }
 
+/**
+ * Your door (SPEC §9.0): open it to give your house's address out, in a signature or as a QR code, so people's AI can knock
+ * or leave a note. The address is the identifier; a name only if you add one. Saved in your rules, like any setting.
+ */
+function doorCard(): HTMLElement {
+  const box = h('div', { class: 'card', style: 'max-width:820px;margin-bottom:18px' }, h('p', { class: 'muted' }, 'Your door…'));
+  void (async () => {
+    const d = await call<{ open: boolean; about?: string; name?: string; address: string; error?: string }>({ kind: 'panel.door' }).catch(() => ({ error: 'no door' }) as never);
+    if (d.error) return void box.remove();
+    const about = h('input', { type: 'text', maxlength: '200', placeholder: 'One line, e.g. "Ask my agent about work, or about meeting up."', value: d.about ?? '', style: 'width:100%' }) as HTMLInputElement;
+    const name = h('input', { type: 'text', maxlength: '60', placeholder: 'Optional: the address is enough', value: d.name ?? '', style: 'width:100%' }) as HTMLInputElement;
+    const msg = h('span', { class: 'muted' });
+    const save = async (open: boolean) => {
+      const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.value, name: name.value });
+      if (!r.ok) return void (msg.textContent = r.error ?? 'not saved');
+      draft = null;
+      void show();
+    };
+    const qr = d.open ? h('img', { alt: 'A QR code of your house address', width: '150', height: '150', src: await QRCode.toDataURL(d.address, { margin: 1, width: 300 }) }) : '';
+    box.replaceChildren(
+      h('h3', {}, d.open ? 'Your door is open' : 'Your door is closed'),
+      h('p', { class: 'muted' }, d.open
+        ? 'Give this address out, in your signature or as this QR code. Anyone\'s AI can knock there or leave a note, and your rules answer; opened in a browser, it shows people how.'
+        : 'Open it to give your house\'s address out, in your signature or as a QR code, so people can reach you through their AI. Nobody finds you by name unless you add one, and your rules still answer everything.'),
+      d.open ? h('div', { style: 'display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:10px 0' }, h('div', { style: 'flex:1;min-width:220px' }, h('code', { style: 'overflow-wrap:anywhere' }, d.address), h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard?.writeText(d.address) }, 'Copy'))), qr) : '',
+      h('div', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door'), about),
+      h('div', { class: 'field' }, h('span', { class: 'lab' }, 'A name to show'), name),
+      h('div', {}, h('button', { class: 'btn primary small', type: 'button', onclick: () => void save(true) }, d.open ? 'Save' : 'Open my door'), ' ', d.open ? h('button', { class: 'btn small', type: 'button', onclick: () => void save(false) }, 'Close it') : '', ' ', msg),
+    );
+  })();
+  return box;
+}
+
 function renderRules(message?: { ok: boolean; text: string }) {
   const r = draft!;
   const trust = (r.trust ??= {});
@@ -438,6 +472,7 @@ function renderRules(message?: { ok: boolean; text: string }) {
     renderRules(res.ok ? { ok: true, text: 'Saved in your pod. Your housekeeper uses these rules from now on.' } : { ok: false, text: res.error ?? 'not saved' });
   };
   boxFor('rules').replaceChildren(
+    doorCard(),
     h('p', { class: 'lede' }, 'Your housekeeper follows these, top to bottom; the first rule that fits decides. They run as code, and nothing an agent writes can change them.'),
     ...r.rules.map((rule, i) => ruleCard(rule, i, r.rules)),
     h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn', type: 'button', onclick: () => { r.rules.push({ match: { purpose: 'research' }, decision: 'ask' }); renderRules(); } }, '+ Add a rule')),

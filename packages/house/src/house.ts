@@ -10,6 +10,7 @@ import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
 import { OwnerDesk, type PanelProvider } from './owner.js';
 import { Parser } from 'n3';
+import { parseDocument } from 'yaml';
 import { createPodMcpServer } from './pod-mcp.js';
 import { pool, type OwnerSession } from './pod.js';
 import { recordPaths } from './packs.js';
@@ -511,6 +512,18 @@ function panelFor(x: {
       // The fields the owner can name in rules: every pack's, plus the identifying ones packs warn about.
       const fields = [...allFields().map((f) => ({ name: f, label: fieldSpec(f)!.label, pack: fieldSpec(f)!.pack.id })), ...identifyingFields().map((f) => ({ name: f, label: f.replace(/_/g, ' '), pack: 'identifying' }))];
       return { text: x.keeper().rulesText, rules: x.keeper().rules, fields, purposes: Object.entries(PURPOSES).map(([name, p]) => ({ name, label: p.label, within: p.within })) };
+    },
+    door() {
+      const d = x.keeper().rules.door;
+      return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
+    },
+    // Written into the owner's rules (comments and all kept): the door is one of their settings, saved in their pod.
+    async setDoor(d) {
+      const doc = parseDocument(x.keeper().rulesText);
+      if (!d.open) doc.delete('door');
+      else doc.set('door', { ...(d.about?.trim() ? { about: d.about.trim() } : {}), ...(d.name?.trim() ? { name: d.name.trim() } : {}) });
+      if (d.open && !d.about?.trim() && !d.name?.trim()) doc.set('door', true);
+      return this.setRules(String(doc));
     },
     async setRules(text: string) {
       let rules: Rules;
