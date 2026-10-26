@@ -109,11 +109,18 @@ export function droppedConnection(e: unknown): boolean {
  * on with the reply it gave the first time (SPEC §3), so it is acted on at most once. A timeout is not retried.
  */
 export async function sendLake(agentUrl: string, data: LakeData, opts: { me: Identity; timeoutMs?: number; retries?: number; onRetry?: (e: unknown, attempt: number) => void }): Promise<LakeData | null> {
+  let lookedAgain = false;
   for (let attempt = 0; ; attempt++) {
     try {
       const { card } = await clientFor(agentUrl);
       const part = await postLakePart(agentUrl, await sealLake(data, card), opts);
-      return isSealed(part) ? openLake(part, opts.me).catch(() => null) : null;
+      const opened = isSealed(part) ? await openLake(part, opts.me).catch(() => null) : null;
+      if (opened || lookedAgain) return opened;
+      // Nothing it could open: the agent may have restarted with a new key since its card was cached here (run 38: houses
+      // sealed for grocers' old keys after both restarted). Its card is fetched again, and the same message sent once more.
+      lookedAgain = true;
+      clients.delete(agentUrl.replace(/\/$/, ''));
+      attempt--;
     } catch (e) {
       if (attempt >= (opts.retries ?? 2) || !droppedConnection(e)) throw e;
       opts.onRetry?.(e, attempt + 1);

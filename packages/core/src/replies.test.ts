@@ -118,6 +118,28 @@ describe('a message sent twice is acted on once (SPEC §3)', () => {
     await expect(sendLake(c.url, next, { me: me.id, retries: 0 })).rejects.toSatisfy(droppedConnection);
   });
 
+  it('an agent that restarted with a new key is looked up again: its card, cached by the sender, is fetched afresh (run 38)', async () => {
+    const outer = express();
+    const server = outer.listen(0);
+    servers.push(server);
+    await new Promise((ok) => server.once('listening', ok));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/a2a`;
+    const start = async () => {
+      const me = await agent('restarts', url);
+      return lakeAgentApp(me.card, async () => ({ lake: '0.1', card: me.card, envelope: (await signMessage({ kind: 'hello', kid: me.id.kid }, me.id, { iss: me.webId })) as LakeData['envelope'] }), me.id);
+    };
+    let app = await start();
+    outer.use((req, res, next) => app(req, res, next));
+    const sender = await agent('sender');
+    const say = async () => payloadOf(await sendLake(url, { lake: '0.1', card: sender.card, envelope: (await signMessage({ kind: 'hi' }, sender.id, { iss: sender.webId })) as LakeData['envelope'] }, { me: sender.id }));
+    const first = await say();
+    // Restarted with a new key at the same address: the first try is sealed for the old key and can't be opened there.
+    app = await start();
+    const second = await say();
+    expect(second.kind).toBe('hello');
+    expect(second.kid).not.toBe(first.kid);
+  });
+
   it('tells a dropped connection from a timeout or an answer', () => {
     expect(droppedConnection(Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) }))).toBe(true);
     expect(droppedConnection(Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) }))).toBe(true);
