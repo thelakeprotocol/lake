@@ -172,6 +172,8 @@ interface Hold {
   arbiters?: CartParty[];
   /** The buyer's time to answer each delivery. Holds made before deliveries were filed here have none, nor the fields below. */
   reviewMs?: number;
+  /** Deliveries it takes: the first and the revisions the cart promises (all six if it promises none). */
+  maxDeliveries?: number;
   /** The latest delivery the seller filed: its sha256 and number (1, then each revision). */
   delivered?: { sha256: string; revision: number; at: number };
   /** Each dispute, about one delivery, and how it ended. */
@@ -322,14 +324,20 @@ export async function createPayments(o: SpecialistOptions & {
     if (cart) paidCarts.add(cart.hash);
     for (const c of checked) if (c.agreement?.startsWith('urn:lake:order:refund:')) refunded.add(c.agreement.slice('urn:lake:order:refund:'.length));
     const hold = !!cart && p.hold === true;
+    // The cart's signed delivery terms, where it has them, set the clocks and the revisions: the buyer paid those terms.
+    const d = cart?.delivery;
+    if (hold && d?.review_hours !== undefined) {
+      if (p.release_after_hours !== undefined && Number(p.release_after_hours) !== d.review_hours) return { kind: 'refused', problems: [`the cart's terms give you ${d.review_hours} hours to answer each delivery: leave release_after_hours out, or ask the seller for another cart`] };
+      holdMs = d.review_hours * 3_600_000;
+    }
     // Held: the seller's clock first. The buyer's (holdMs) starts at each delivery.
-    const until = Date.now() + (hold ? DELIVER_HOURS * 3_600_000 : holdMs);
+    const until = Date.now() + (hold ? (d?.within_hours ?? DELIVER_HOURS) * 3_600_000 : holdMs);
     const receipts = await Promise.all(
       checked.map(async (c) => {
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
         const settlementId = randomUUID();
         // Where both sides are reached when it settles: the seller's card came with the cart, the buyer's with this message.
-        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held', reviewMs: holdMs, ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}) });
+        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}) });
         return {
           payee: c.payee,
           credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash } } : {}), intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
@@ -391,7 +399,8 @@ export async function createPayments(o: SpecialistOptions & {
       if (!/^[0-9a-f]{64}$/.test(sha)) return { kind: 'refused', problems: ['sha256: the hex sha256 of what you delivered'] };
       if (sha === EMPTY_SHA256) return { kind: 'refused', problems: ['that is the sha256 of nothing: an empty delivery is not a delivery'] };
       if (h.delivered?.sha256 === sha) return { kind: 'refused', problems: ['that delivery is filed already'] };
-      if ((h.delivered?.revision ?? 0) >= MAX_DELIVERIES) return { kind: 'refused', problems: [`${MAX_DELIVERIES} deliveries filed: refund it, or the buyer accepts one`] };
+      const most = h.maxDeliveries ?? MAX_DELIVERIES;
+      if ((h.delivered?.revision ?? 0) >= most) return { kind: 'refused', problems: [`${most} ${most === 1 ? 'delivery' : 'deliveries'} filed, all the cart promises: refund it, or the buyer accepts one`] };
       // A new delivery answers an open dispute (a revision), and the buyer's clock starts again for it.
       const open = openDispute(h);
       if (open) open.ended = 'revision';
@@ -450,15 +459,22 @@ export async function createPayments(o: SpecialistOptions & {
     // delivered stays held: no signature says a poem is the poem ordered.
     const open = openDispute(h);
     if (filed && !open) return { kind: 'refused', problems: ['nothing is disputed: it is released when the buyer accepts, or when the buyer\'s time to answer runs out'] };
-    if (open && open.code !== 'not_received') return { kind: 'refused', problems: [`the dispute is "${open.code}": about what was delivered, not whether it arrived. No signature settles that, so no ruling moves it: it stays held until the buyer accepts a revision or the seller refunds`] };
+    // About what was delivered, only a count the cart's signed terms name is a fact (run 36): a ruling that the disputed
+    // delivery misses one refunds it; nothing else does, and meeting the counts proves nothing about quality.
+    const counted = open?.code === 'not_as_described';
+    if (open && open.code !== 'not_received' && !counted) return { kind: 'refused', problems: [`the dispute is "${open.code}": no ruling moves it: it stays held until the buyer accepts a revision or the seller refunds`] };
     const r = p.ruling as { credential?: string; card?: AgentCard } | undefined;
     try {
       const signer = await verifyLakeCard(r?.card as AgentCard);
       if (!arbiters.includes(signer.ownerDomain) && !(await isParty(signer, h.arbiters))) throw new Error(`${signer.ownerDomain} (${signer.webId}) is neither an arbiter this payments agent trusts nor one the cart names`);
       const vc = await verifyCredential(String(r?.credential ?? ''), signer.publicJwk);
-      const sub = vc.credentialSubject as unknown as { cart?: { hash: string }; paid?: boolean; delivered?: { sha256?: string; acknowledged?: boolean } | null };
+      const sub = vc.credentialSubject as unknown as { cart?: { hash: string }; paid?: boolean; delivered?: { sha256?: string; acknowledged?: boolean; meets_terms?: boolean } | null };
       if (!vc.type.includes('LakeRuling') || sub.cart?.hash !== h.cart.hash) throw new Error('not a ruling on this cart');
       if (sub.paid !== true) throw new Error('a ruling that found the cart unpaid: ask the arbiter again, with the receipt');
+      if (counted) {
+        if (sub.delivered?.sha256 === open!.sha256 && sub.delivered.meets_terms === false) return (await finish(h, 'voided', 'ruling', 'an arbiter ruled the delivery misses the cart\'s signed terms')) as never;
+        return { kind: 'refused', problems: [sub.delivered?.meets_terms === true ? 'the delivery meets the counts the cart names, and whether it is what was ordered beyond them is not something signatures settle: it stays held until the buyer accepts a revision or the seller refunds' : 'the dispute is "not_as_described": no signature settles that unless the cart names counts the delivery misses; it stays held until the buyer accepts a revision or the seller refunds'] };
+      }
       if (sub.delivered?.acknowledged && (!filed || sub.delivered.sha256 === open!.sha256)) return (await finish(h, 'captured', 'ruling', 'an arbiter ruled it reached the buyer')) as never;
       if (!sub.delivered) return (await finish(h, 'voided', 'ruling', 'an arbiter ruled it not delivered')) as never;
       return { kind: 'refused', problems: [filed && sub.delivered?.acknowledged ? 'the ruling is about another delivery than the one disputed: it stays held' : 'the ruling settles neither way: it stays held'] };

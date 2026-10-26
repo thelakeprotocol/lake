@@ -1109,6 +1109,19 @@ describe('the open door', () => {
     expect(await buyer('lake_buy', { action: 'accept', cart: fifth.cart }, false)).toMatch(/was refunded: it is closed/);
     const [last] = await buyer('lake_search', { q: 'haiku' });
     expect(last.record).toMatchObject({ refunds_given: 3, disputes: { against: 3, ended: { revision: 1, refund: 1, accepted: 1 }, changes_requested: 1 } });
+    // Signed delivery terms (run 36): a menu item promises a three-line haiku and one revision. A count is a fact: the
+    // buyer's connector counts the delivery, and an arbiter's ruling that it misses refunds a "not as described" dispute.
+    const strict = { lines: { min: 3, max: 3 }, revisions: 1 };
+    await poet('lake_sell', { action: 'menu', items: [{ sku: 'haiku', label: 'A haiku on any topic', price: 2, currency: 'USD', unit: 'poem' }, { sku: 'strict-haiku', label: 'A strict haiku, three lines', price: 2, currency: 'USD', delivery: strict }] });
+    const sixth = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'strict-haiku' });
+    expect(sixth).toMatchObject({ delivery: strict });
+    await buyer('lake_buy', { action: 'pay', cart: sixth.cart });
+    await poet('lake_inbox', { wait_seconds: 3 });
+    expect(await poet('lake_sell', { action: 'deliver', cart: sixth.cart, content: 'two lines only\nthat is all' })).toMatchObject({ misses_your_terms: ['2 lines; the cart says 3 to 3'] });
+    const short = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'trade.deliver');
+    expect(short.checked).toMatchObject({ meets_the_carts_terms: false, misses: ['2 lines; the cart says 3 to 3'] });
+    await buyer('lake_buy', { action: 'dispute', cart: sixth.cart, code: 'not_as_described', reason: 'two lines' });
+    expect(await buyer('lake_buy', { action: 'arbitrate', cart: sixth.cart })).toMatchObject({ delivered: { meets_terms: false }, ruling: expect.stringMatching(/misses the cart's signed terms \(2 lines; the cart says 3 to 3\)/), held_payment: 'voided: back to the buyer' });
     // Away (run 31): past the here_until the seller set, its menu signs no cart; the order waits in its inbox. Once the
     // seller acts again, its menu answers again.
     const orderCount = (await poet('lake_sell', { action: 'orders' })).orders.length;

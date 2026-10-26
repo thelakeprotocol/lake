@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCard, signCard } from './card.js';
 import { generateIdentity } from './crypto.js';
-import { cartHash, cartParty, cartTerms, checkCart, isParty, keyThumbprint, LAKE_PAYMENT_METHOD, menuHash, menuProblems, signCart } from './trade.js';
+import { cartHash, cartParty, cartTerms, checkCart, deliveryMisses, deliveryProblems, isParty, keyThumbprint, LAKE_PAYMENT_METHOD, menuHash, menuProblems, signCart } from './trade.js';
 
 describe('trade: AP2 carts the seller signs', () => {
   const make = async (minutes = 30) => {
@@ -38,6 +38,23 @@ describe('trade: AP2 carts the seller signs', () => {
     const other = structuredClone(cart);
     other.contents.lake_menu_sha256 = menuHash([]);
     await expect(checkCart(other, seller.publicJwk)).rejects.toThrow(/changed after the seller signed/);
+  });
+
+  it('carries the seller\'s delivery terms, signed, and counts a delivery against them (run 36)', async () => {
+    const seller = await generateIdentity();
+    const delivery = { within_hours: 2, review_hours: 4, revisions: 1, words: { min: 90, max: 110 }, lines: { max: 12 } };
+    const cart = await signCart({ seller, sellerWebId: 'https://poet.example/#agent', sellerName: 'Poet', buyerWebId: 'https://buyer.example/#agent', items: [{ label: 'A fact sheet', amount: { currency: 'USD', value: 3 } }], delivery });
+    expect(await checkCart(cart, seller.publicJwk)).toMatchObject({ delivery });
+    // Part of what the buyer pays for: changing a term breaks the seller's signature.
+    const looser = structuredClone(cart);
+    (looser.contents.payment_request.method_data[0]!.data as { delivery: { revisions: number } }).delivery.revisions = 5;
+    await expect(checkCart(looser, seller.publicJwk)).rejects.toThrow(/changed after the seller signed/);
+    // Counts, not quality: 124 words for a ~100-word sheet misses; a haiku in two lines misses a three-line term.
+    expect(deliveryMisses(Array(124).fill('heron').join(' '), delivery)).toEqual(['124 words; the cart says 90 to 110']);
+    expect(deliveryMisses(Array(100).fill('heron').join(' '), delivery)).toEqual([]);
+    expect(deliveryMisses('an old pond\n\na frog jumps in', { lines: { min: 3, max: 3 } })).toEqual(['2 lines; the cart says 3 to 3']);
+    expect(deliveryProblems({ revisions: 9, words: { min: 5, max: 2 }, speed: 'fast' })).toHaveLength(3);
+    await expect(signCart({ seller, sellerWebId: 'a', sellerName: 'a', buyerWebId: 'b', items: [{ label: 'x', amount: { currency: 'USD', value: 1 } }], delivery: { within_hours: 0 } })).rejects.toThrow(/within_hours/);
   });
 
   it('holds one currency, and menus are checked before they go on a card', async () => {

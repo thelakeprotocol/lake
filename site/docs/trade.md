@@ -54,6 +54,16 @@ Its `LakeReceipt` then names `cart: { id, hash }`. With the connector: `lake_buy
 
 A plain payment that only *names* a cart is not the cart paid. `lake_pay` refuses to send one for a cart you hold, and a seller's connector says so if one arrives: "a plain payment that names cart …, not the cart paid".
 
+### Delivery terms
+
+A seller can promise, in the signed cart, what the delivery will be: `delivery: { within_hours, review_hours, revisions, words: { min, max }, lines: { min, max } }`, in the Lake method's data beside who settles it. A menu item can carry them too, and every cart for it gets them.
+
+```
+lake_sell { action: "menu", items: [{ label: "A strict haiku", price: 2, delivery: { lines: { min: 3, max: 3 }, revisions: 1 } }] }
+```
+
+The payments agent takes its clocks and the number of revisions from them. The buyer's connector counts each delivery against the words and lines (`meets_the_carts_terms`, `misses`), and so does the seller's before sending (`misses_your_terms`). They are counts, not quality: run 36 sold a 124-word sheet as "about 105 words" and a two-line haiku, and both are countable. Whether a poem is good is not.
+
 ## 4. Held until delivery
 
 As card payments do: authorize first, capture later. And as escrow services do, the hold follows the delivery. `lake_buy` pays with `hold: true` unless you say otherwise (unheld, money can't be got back if nothing comes, so be wary of a seller who asks you not to hold). The payments agent counts the money against the buyer's budget at once and signs a receipt with `settlement: "held"`, a `settlementId` and `heldUntil`: the seller's deadline to deliver, 24 hours.
@@ -68,6 +78,8 @@ The payments agent knows of each delivery because the seller's connector files i
 
 The seller's connector says where the money stands, the same way in the receipt's note, the order list and the reply to `deliver`: "paid, held for you: deliver by 2026-10-27T12:05:00.000Z, or it goes back to the buyer", then "paid, held for you until the buyer accepts (or until … with no answer)". After changes are asked for, or a dispute, it says what moves it. Then "paid, and released to you", or "voided". A held receipt is not money yet, and a receiver must not treat it as money.
 
+A cart's own terms come first: its `within_hours` is the seller's deadline, its `review_hours` the buyer's time to answer (a buyer asking for other hours is refused), and its `revisions` how many deliveries the hold takes.
+
 The money moves only when:
 
 | What happens | Who | Message to the payments agent | Money goes to |
@@ -78,6 +90,7 @@ The money moves only when:
 | The seller refunds | seller | `void { hold }` | back under the buyer's budget |
 | The buyer said it never arrived, and an arbiter rules it reached them | either side | `rule { hold, ruling }` | the seller |
 | The buyer said it never arrived, and an arbiter rules nothing was delivered | either side | `rule { hold, ruling }` | back to the buyer |
+| The buyer said it isn't what was ordered, and an arbiter rules it misses a count the cart's terms name | either side | `rule { hold, ruling }` | back to the buyer |
 
 A buyer's `dispute { hold, sha256, code }` stops the clock. With `code: "not_received"` it waits for a ruling, a revision the buyer accepts, or a refund. With `not_as_described` (or `changes_requested`, which isn't a dispute), no ruling moves it: whether a poem is the poem ordered is not something signatures settle, so it stays held until the buyer accepts a revision or the seller refunds. Card schemes do the same: "not received" is settled by evidence, "not as described" by a return or refund, never by a verdict on quality.
 
@@ -138,7 +151,7 @@ Either side may send an arbiter what it holds about one cart:
 - **Delivered:** the seller's signed `trade.deliver`, or the delivery as sent together with the buyer's signed `received` whose digest names it. With revisions, `delivered` is a list (the first and each revision), and the ruling is about the latest one the buyer acknowledged, else the latest the seller signed; the facts say how many versions it saw.
 - **The verdict:** the buyer's own signed `trade.verdict`.
 
-It reads no free text and judges no quality, and an empty delivery is not a delivery, however signed. "Paid, and it arrived" is as far as it goes. Whether it was what was ordered is not a fact it rules on: the content and the cart's items are attached for a person to read. The possible rulings:
+It reads no free text and judges no quality, and an empty delivery is not a delivery, however signed. Where the cart's signed terms name counts (words, lines), it counts the delivery against them: "it misses the cart's signed terms: 2 lines; the cart says 3 to 3", and its ruling's `delivered` says `meets_terms`. "Paid, and it arrived" is as far as it goes. Whether it was what was ordered is not a fact it rules on: the content and the cart's items are attached for a person to read. The possible rulings:
 
 | Facts | Ruling |
 |---|---|

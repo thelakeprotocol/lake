@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalize, cartHash, checkCart, checkCredentialStatus, isParty, sendLake, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type CartMandate, type LakeData } from '@thelakeprotocol/core';
+import { canonicalize, cartHash, checkCart, deliveryMisses, checkCredentialStatus, isParty, sendLake, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type CartMandate, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -101,6 +101,10 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
     if (delivered) facts.push(delivered.acknowledged ? `delivered: it reached the buyer, as signed (content sha256 ${delivered.sha256}; ${size(delivered.content)})` : `the seller signed this delivery (content sha256 ${delivered.sha256}; ${size(delivered.content)}); nothing shows it reached the buyer`);
     else facts.push('no delivery shown that the seller signed or the buyer acknowledged');
     if (empty) facts.push('an empty delivery was shown: an empty delivery is not a delivery');
+    // The counts the cart's signed terms name are facts too (run 36): words and lines, never quality.
+    const counts = !!(cart.delivery?.words || cart.delivery?.lines);
+    const misses = delivered && counts ? deliveryMisses(delivered.content, cart.delivery) : [];
+    if (delivered && counts) facts.push(misses.length ? `it misses the cart's signed terms: ${misses.join('; ')}` : 'it meets the counts the cart\'s signed terms name');
     if (delivered && shown.size > 1) facts.push(`${shown.size} different deliveries of this cart shown (a first and its revisions): the facts above are about revision ${delivered.revision}`);
     const verdicts = evidence.filter((x) => x?.by === cart.buyer && x.payload.kind === 'trade.verdict' && x.payload.cart === cart.id).sort((a, b) => String(a!.at).localeCompare(String(b!.at)));
     const firstAccept = verdicts.find((v) => v!.payload.verdict === 'accepted');
@@ -113,12 +117,13 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
       : !delivered ? 'Paid, not shown delivered: the seller should deliver or refund.'
       : firstAccept ? 'Paid, delivered and accepted: the trade is closed. A later dispute does not reopen it.'
       : delivered.acknowledged ? (disputeCode === 'not_received' || !disputeCode ? `Paid, and it arrived (${size(delivered.content)}): a dispute that nothing arrived fails. Whether it is what was ordered is not a fact this arbiter rules on: the content and the cart's items are attached for a person to read.`
-        : `Paid, and it arrived (${size(delivered.content)}). The buyer's dispute is that it isn't what was ordered: not a fact this arbiter rules on, so this ruling moves no money. The content and the cart's items are attached for a person to read.`)
+        : misses.length ? `Paid, and it arrived (${size(delivered.content)}), but it misses the cart's signed terms (${misses.join('; ')}): the buyer's dispute stands on that.`
+        : `Paid, and it arrived (${size(delivered.content)}). The buyer's dispute is that it isn't what was ordered: ${counts ? 'it meets the counts the cart names, and beyond them that' : 'that'} is not a fact this arbiter rules on, so this ruling moves no money. The content and the cart's items are attached for a person to read.`)
       : 'Paid, and the seller signed a delivery the buyer has not acknowledged: ask the buyer for its signed receipt before ruling that it arrived.';
     // Nothing new since the last ruling on this cart: the same ruling, not a second one on the record.
     const key = JSON.stringify({ paid, delivered: delivered && { sha256: delivered.sha256, acknowledged: delivered.acknowledged }, facts, ruling });
     if (kept.last?.key === key) return kept.last.reply as never;
-    const credential = await s.vc('LakeRuling', { id: `urn:ap2:cart:${cart.id}`, cart: { id: cart.id, hash: cartHash((p.cart as CartMandate).contents) }, seller: cart.seller, buyer: cart.buyer, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}) } : null, facts, ruling }, 3650);
+    const credential = await s.vc('LakeRuling', { id: `urn:ap2:cart:${cart.id}`, cart: { id: cart.id, hash: cartHash((p.cart as CartMandate).contents) }, seller: cart.seller, buyer: cart.buyer, paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}), ...(counts ? { meets_terms: !misses.length } : {}) } : null, facts, ruling }, 3650);
     // On the record, so a ruling can't be denied or rewritten later; but only for a cart that was paid. A ruling on a cart
     // nobody paid settles nothing (run 33 farmed "not delivered" marks, and a "delivered" one from unsolicited content,
     // on carts nobody paid): it is answered, and goes on nobody's record.
@@ -133,7 +138,7 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
         await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }).catch(() => {});
       })();
     }
-    const reply = { kind: 'ruling', ...(logged ? { logged } : {}), ...(paid ? {} : { note: 'not on the record: no payment shown for this cart' }), cart: cart.id, items: cart.items.map((i) => i.label), paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}), content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
+    const reply = { kind: 'ruling', ...(logged ? { logged } : {}), ...(paid ? {} : { note: 'not on the record: no payment shown for this cart' }), cart: cart.id, items: cart.items.map((i) => i.label), paid, delivered: delivered ? { sha256: delivered.sha256, acknowledged: delivered.acknowledged, ...(delivered.revision > 1 ? { revision: delivered.revision } : {}), ...(counts ? { meets_terms: !misses.length } : {}), content: delivered.content.slice(0, 4000) } : null, facts, ruling, credential };
     kept.last = { key, reply };
     return reply;
   });

@@ -15,7 +15,7 @@ import type { Identity } from './crypto.js';
  */
 
 /** One thing an agent sells, on its card (signed with it). Prices are per unit. */
-export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; unit?: string }
+export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; unit?: string; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
 
 /** W3C Payment Request API, as AP2 uses it (only what a Lake cart needs). */
 export interface PaymentCurrencyAmount { currency: string; value: number }
@@ -52,7 +52,55 @@ export interface CartParty { url: string; webId: string; jkt: string }
  * whose receipts the seller counts as this cart paid, and the arbiters whose rulings it accepts on it. Inside the signed
  * contents, so the buyer pays (and its payment mandate names the hash of) these very terms.
  */
-export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[] }
+export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms }
+
+/**
+ * What the seller promises about the delivery, signed in the cart (SPEC §6.5): how soon, how long the buyer has to answer
+ * each one, how many revisions, and what can be counted about it. Counts, not quality (run 36: a 124-word "105-word"
+ * sheet and a two-line haiku could have been caught by a count; whether a poem is good can't be).
+ */
+export interface DeliveryTerms {
+  /** Hours the seller has to deliver, once paid (1 to 168). */
+  within_hours?: number;
+  /** Hours the buyer has to answer each delivery before a held payment is released (1 to 168). */
+  review_hours?: number;
+  /** Revisions the seller will make (0 to 5). */
+  revisions?: number;
+  /** Words in the content (counted between spaces), and lines (those with anything on them). */
+  words?: { min?: number; max?: number };
+  lines?: { min?: number; max?: number };
+}
+
+/** What's wrong with delivery terms, if anything. */
+export function deliveryProblems(d: unknown): string[] {
+  if (d === undefined) return [];
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return ['delivery: { within_hours?, review_hours?, revisions?, words?: { min?, max? }, lines?: { min?, max? } }'];
+  const t = d as Record<string, unknown>;
+  const out: string[] = [];
+  const int = (v: unknown, lo: number, hi: number) => v === undefined || (Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi);
+  for (const k of Object.keys(t)) if (!['within_hours', 'review_hours', 'revisions', 'words', 'lines'].includes(k)) out.push(`delivery: no term called ${k}`);
+  if (!int(t.within_hours, 1, 168)) out.push('delivery.within_hours: 1 to 168 hours');
+  if (!int(t.review_hours, 1, 168)) out.push('delivery.review_hours: 1 to 168 hours');
+  if (!int(t.revisions, 0, 5)) out.push('delivery.revisions: 0 to 5');
+  for (const [k, hi] of [['words', 10_000], ['lines', 1_000]] as const) {
+    const r = t[k] as { min?: unknown; max?: unknown } | undefined;
+    if (r === undefined) continue;
+    if (!r || typeof r !== 'object' || (r.min === undefined && r.max === undefined) || !int(r.min, 1, hi) || !int(r.max, 1, hi) || (r.min !== undefined && r.max !== undefined && (r.min as number) > (r.max as number))) out.push(`delivery.${k}: { min?, max? }, whole numbers 1 to ${hi}, min no more than max`);
+  }
+  return out;
+}
+
+/** How a delivery measures against the cart's terms: each count it misses, in words (none: it meets them). */
+export function deliveryMisses(content: string, d: DeliveryTerms | undefined): string[] {
+  const counts = { words: content.trim().split(/\s+/).filter(Boolean).length, lines: content.split('\n').filter((l) => l.trim()).length };
+  const out: string[] = [];
+  for (const k of ['words', 'lines'] as const) {
+    const r = d?.[k];
+    if (!r) continue;
+    if ((r.min !== undefined && counts[k] < r.min) || (r.max !== undefined && counts[k] > r.max)) out.push(`${counts[k]} ${k}; the cart says ${r.min ?? 1} to ${r.max ?? 'any number of'}`);
+  }
+  return out;
+}
 
 /** The thumbprint a cart pins a key by. */
 export const keyThumbprint = (jwk: jose.JWK) => jose.calculateJwkThumbprint(jwk, 'sha256');
@@ -80,9 +128,9 @@ const partyProblems = (xs: unknown, what: string): string[] => {
 };
 
 /** The payments agents and arbiters a cart names, from its Lake payment method (empty when it names none). */
-export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[] } {
+export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms } {
   const data = (contents?.payment_request?.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [] };
+  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}) };
 }
 const MAX_CART_MINUTES = 24 * 60;
 
@@ -120,6 +168,7 @@ export function menuProblems(menu: unknown): string[] {
     if (typeof m?.label !== 'string' || !m.label.trim() || m.label.length > 120) problems.push(`menu[${i}].label: what it is, 1 to 120 characters`);
     if (!/^[A-Z]{3}$/.test(String(m?.price?.currency)) || !(Number(m?.price?.value) >= 0.01) || Math.abs(Number(m?.price?.value) * 100 - Math.round(Number(m?.price?.value) * 100)) > 1e-6) problems.push(`menu[${i}].price: { currency: "USD", value: at least 0.01, in whole cents }`);
     if (m?.unit !== undefined && (typeof m.unit !== 'string' || m.unit.length > 30)) problems.push(`menu[${i}].unit: a short word, like "poem" or "hour"`);
+    problems.push(...deliveryProblems(m?.delivery).map((x) => `menu[${i}].${x}`));
   });
   return problems;
 }
@@ -136,6 +185,8 @@ export async function signCart(o: {
   menu?: { items: MenuItem[]; sku: string };
   /** The payments agents whose receipts the seller counts, and the arbiters it accepts (SPEC §6.5). */
   payments?: CartParty[]; arbiters?: CartParty[];
+  /** What the seller promises about the delivery. */
+  delivery?: DeliveryTerms;
 }): Promise<CartMandate> {
   if (!o.items.length || o.items.length > MAX_ITEMS) throw new Error(`a cart holds 1 to ${MAX_ITEMS} items`);
   const currency = o.items[0]!.amount.currency;
@@ -144,8 +195,8 @@ export async function signCart(o: {
   if (cents < 1) throw new Error('a cart costs at least 0.01');
   const minutes = Math.min(Math.max(o.minutes ?? 30, 1), MAX_CART_MINUTES);
   const id = o.id ?? randomUUID();
-  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}) };
-  const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters')];
+  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}) };
+  const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters'), ...deliveryProblems(terms.delivery)];
   if (problems.length) throw new Error(problems.join('; '));
   const contents: CartContents = {
     id, user_cart_confirmation_required: false,
@@ -165,7 +216,7 @@ export async function signCart(o: {
 }
 
 /** What a checked cart says: who sells, to whom, the total, the hash a payment names, and whom the seller named to settle it. */
-export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[] }
+export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms }
 
 /**
  * Checks a cart against the seller's key (from its verified card): the signature, that the JWT's hash is this very
@@ -186,7 +237,7 @@ export async function checkCart(cart: CartMandate, sellerJwk: jose.JWK, now = Da
   if (items.reduce((a, x) => a + Math.round(x.amount.value * 100), 0) !== Math.round(total.amount.value * 100)) throw new Error('the cart\'s lines don\'t add up to its total');
   if (Date.parse(c.cart_expiry) < now) throw new Error(`the cart expired at ${c.cart_expiry}`);
   const data = (c.payment_request.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters')];
+  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery)];
   if (problems.length) throw new Error(problems.join('; '));
   return { id: c.id, seller: String(claims.iss), buyer: String(claims.sub), total: total.amount, hash: cartHash(c), expires: c.cart_expiry, items, ...cartTerms(c) };
 }
