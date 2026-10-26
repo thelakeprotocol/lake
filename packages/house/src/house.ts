@@ -27,6 +27,10 @@ export interface HouseOptions {
   dataDir: string;
   /** Where this house is reached, without /a2a: https://h, or https://h/t/<name> for a hosted house. */
   publicUrl: string;
+  /** Where people add the Lake to their AI chat (its MCP connector), for the door page. A hosted house uses its Lake's /mcp. */
+  connectorUrl?: string;
+  /** Where the door page sends people to build their own house. */
+  joinUrl?: string;
   ownerUrl?: string;
   /** The use cases this house takes part in (loaded and registered by the caller). */
   packs: LakePack[];
@@ -163,15 +167,16 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     return signCard(
       buildCard(
         {
-          name: `House ${o.name}`,
-          description: `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
+          // An open door: the owner gives out this address; a name only if they add one.
+          name: r.door?.name ? `${r.door.name} (house)` : `House ${o.name}`,
+          description: r.door ? `${r.door.name ? `${r.door.name}'s house` : 'A house'} with an open door${r.door.about ? `: ${r.door.about}` : ''}. Knock with a signed purpose, or leave a note; it answers by its owner's rules, and data never leaves.` : `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
           url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
           alsoAt: relayed?.slice(1),
           // One skill per pack (`health-study`, `mortgage-study`), so agents find the houses that can answer them.
           skills: show
             ? o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: r.tags ?? [] }))
             : [{ id: 'offers', name: 'Offers', description: 'Considers offers by its owner\'s rules', tags: r.tags ?? [] }],
-          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [] },
+          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: [...new Set([...(r.tags ?? []), ...(r.door ? ['door'] : [])])], packs: show ? o.packs.map(packId) : [] },
         },
         id,
       ),
@@ -310,7 +315,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const check = await keeper.verifyOwnRecord();
   say(check.ok ? 'record chain verified: trusted issuer → original → certified converter → housekeeper' : `record chain BROKEN: ${check.why}`);
 
-  const app = createHouseServer(card, id, keeper, desk, approvalsApp());
+  // Its door page: the Lake's connector is at the Lake's own address (a hosted house is one of its tenants), or as configured.
+  const connector = o.connectorUrl ?? (o.publicUrl.includes('/t/') ? `${o.publicUrl.split('/t/')[0]}/mcp` : undefined);
+  const app = createHouseServer(card, id, keeper, desk, approvalsApp(), { door: () => keeper.rules.door, a2a: () => card.supportedInterfaces?.[0]?.url ?? `${o.publicUrl}/a2a`, connector, joinUrl: o.joinUrl ?? 'https://lake.doneinfifty.com/docs/join' });
   return {
     name: o.name, card, keeper, desk, app,
     get link() { return link; },
@@ -515,7 +522,7 @@ function panelFor(x: {
       await put(owner, 'settings/rules.yaml', text, 'text/yaml');
       const before = x.keeper().rules;
       x.keeper().setRules(rules, text, x.trustFrom(rules));
-      if (JSON.stringify([before.tags, before.privacy]) !== JSON.stringify([rules.tags, rules.privacy])) await x.recard(rules).catch((e: Error) => x.o.say(`card: ${e.message}`));
+      if (JSON.stringify([before.tags, before.privacy, before.door]) !== JSON.stringify([rules.tags, rules.privacy, rules.door])) await x.recard(rules).catch((e: Error) => x.o.say(`card: ${e.message}`));
       x.o.say('the owner changed their rules in the control panel');
       return { ok: true as const };
     },

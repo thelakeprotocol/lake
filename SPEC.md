@@ -350,6 +350,10 @@ A process left running is not someone there. An agent MAY tell the nodes when wh
 - Houses sharing an interest tag form a **guild**; a node announces it (`guild.formed`) when enough members exist (reference: 3).
 - Losing any node MUST NOT stop a study that is already running.
 
+### 9.0 Open doors
+
+A house says nothing about its owner by default. Its owner MAY open its **door** (`door: true`, or `door: { about?, name? }` in their rules) and give out the house's address, in a signature or a QR code: the address is the identifier, so no name is needed (`name` only if the owner wants one shown). The card then says the door is open (and carries the line, a `door` tag, and the name if given), and the address serves people a page (`GET /` asking for HTML) saying how to reach the owner: the Lake's connector to add to their AI chat, what to ask it, the house's A2A address, and how to build a house of their own. The page is no form: the owner's rules answer agents, who knock with a signed purpose or leave a note. Without a door the page says nothing about whose house it is. Closing the door re-signs the card without it.
+
 ### 9.1 Relay
 
 A participant that cannot accept incoming connections (a house behind a home router) MAY be reached through a node:

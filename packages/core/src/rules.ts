@@ -24,6 +24,12 @@ export interface Rules {
   intents?: { pack: string; terms: Record<string, string | number> }[];
   /** What the house's public card says. show_packs: false keeps it from naming the kinds of data it holds (health…). */
   privacy?: { show_packs?: boolean };
+  /**
+   * An open door (SPEC §9.0): the owner gives out the house's address (a signature, a QR code) for people's agents to
+   * reach them by. The address is the identifier; a name is only there if the owner adds one. Its page says how to reach
+   * the owner through an agent. Without it, a house says nothing at its address.
+   */
+  door?: { name?: string; about?: string };
 }
 
 export interface Rule {
@@ -72,6 +78,14 @@ export function parseRules(text: string): Rules {
     if (k !== 'show_packs') throw new RulesError(`privacy: unknown setting "${k}" (allowed: show_packs)`);
   }
   if (raw.privacy?.show_packs !== undefined && typeof raw.privacy.show_packs !== 'boolean') throw new RulesError('privacy.show_packs must be true or false');
+  if ((raw.door as unknown) === true) raw.door = {};
+  if (raw.door !== undefined) {
+    const d = raw.door as { name?: unknown; about?: unknown };
+    if (!d || typeof d !== 'object') throw new RulesError('door: true, or { about?, name? }');
+    if (d.name !== undefined && (typeof d.name !== 'string' || !d.name.trim() || d.name.length > 60)) throw new RulesError('door.name: a name to show, 1 to 60 characters (or leave it out: the address is enough)');
+    if (d.about !== undefined && (typeof d.about !== 'string' || d.about.length > 200)) throw new RulesError('door.about: one line, up to 200 characters');
+    for (const k of Object.keys(d)) if (k !== 'name' && k !== 'about') throw new RulesError(`door: unknown setting "${k}" (allowed: name, about)`);
+  }
   for (const [i, x] of (raw.intents ?? []).entries()) {
     if (!x || typeof x.pack !== 'string' || !x.terms || typeof x.terms !== 'object') throw new RulesError(`intents ${i + 1}: needs a pack and its terms`);
   }

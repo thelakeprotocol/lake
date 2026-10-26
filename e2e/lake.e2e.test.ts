@@ -386,6 +386,22 @@ describe('the owner', () => {
     expect(await packsOnCard()).toEqual([]);
     expect(await ownerCall({ kind: 'panel.rules.set', text })).toEqual({ ok: true });
     expect(await packsOnCard()).toEqual(['health@1']);
+    // An open door (SPEC §9.0): the owner gives out the house's address; the address is the identifier, no name needed.
+    // A person opening it learns how to reach the owner through an agent; closed, it says nothing about whose house it is.
+    const page = async () => (await fetch(houses.strict!, { headers: { accept: 'text/html' } })).text();
+    expect(await page()).toMatch(/hasn't opened its door/);
+    expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ndoor: { about: "Ask my agent about talks." }\n` })).toEqual({ ok: true });
+    const card = await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json();
+    expect(card).toMatchObject({ name: 'House strict', description: expect.stringMatching(/^A house with an open door: Ask my agent about talks\./) });
+    expect(card.capabilities.extensions[0].params.tags).toContain('door');
+    expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*To reach its owner, ask your AI[\s\S]*Knock on the house at /);
+    expect(await (await fetch(houses.strict!, { headers: { accept: 'application/json' } })).json()).toMatchObject({ door: { about: 'Ask my agent about talks.' } });
+    // A name only if the owner adds one.
+    expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ndoor: { name: Stan Example }\n` })).toEqual({ ok: true });
+    expect((await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).name).toBe('Stan Example (house)');
+    expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ndoor: { name: "" }\n` })).toMatchObject({ ok: false });
+    expect(await ownerCall({ kind: 'panel.rules.set', text })).toEqual({ ok: true });
+    expect((await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).name).toBe('House strict');
   });
 
   it("gives the owner's own AI agent a key that can look and suggest, never decide", async () => {
