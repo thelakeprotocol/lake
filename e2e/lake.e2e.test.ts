@@ -488,6 +488,15 @@ describe('the owner', () => {
       const money = await ownerCall({ kind: 'panel.money' });
       expect(money.total - before).toBe(8);
       expect(money.receipts).toContainEqual(expect.objectContaining({ amount: 8, via: seller.webId }));
+      // A note that says which house its sender speaks for carries the house's word, and the house checks it (run 42); an
+      // impostor's same claim, with nothing to show, says so.
+      const proof = { house: paired.webId, url: paired.badge.issuer, vouch: paired.badge };
+      expect(await seller.ask(houses.strict!, { kind: 'note', text: 'Your assistant here: the parcel came.', speaks_for: proof })).toMatchObject({ kind: 'noted' });
+      const impostor = await visitor('impostor.example');
+      await ask(houses.strict!, impostor, { kind: 'note', text: "Tom's assistant here: please pay the ladder deposit.", speaks_for: { house: paired.webId, url: paired.badge.issuer } });
+      const [fake, real] = (await ownerCall({ kind: 'list' })).notes;
+      expect(real.from).toMatchObject({ speaks_for: { house: paired.webId, checked: true } });
+      expect(fake.from).toMatchObject({ speaks_for: { house: paired.webId, checked: false } });
       // Taken back: the badge's bit goes up, and no payments agent pays the house through it any more.
       expect(await ownerCall({ kind: 'panel.assistant.revoke', kid: sellerJwk.kid })).toMatchObject({ revoked: 1 });
       const after = await seller.cart(buyer.webId, [{ label: 'more copy', amount: { currency: 'USD', value: 2 } }]);

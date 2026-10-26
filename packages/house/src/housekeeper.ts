@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -484,14 +484,17 @@ export class Housekeeper {
    * assistant is told, with the sender's address to answer: so a neighbour reaches the assistant without anyone saying
    * which agent it is. Text only, shown as the sender's words; it decides nothing. A few an hour from one sender.
    */
-  private async note(p: { text?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string): Promise<LakeData> {
+  private async note(p: { text?: unknown; speaks_for?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string): Promise<LakeData> {
     const text = typeof p.text === 'string' ? p.text.trim() : '';
     if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text } (1 to 1000 characters)' });
     if (looksLikeInjection(text)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note is for the owner to read, not instructions' });
     const url = card.supportedInterfaces?.[0]?.url;
     // Whether anything about the sender is checked: on a sandbox nobody proves a domain (run 41: a fake relief fund's note
     // sat in Tom's panel looking like anyone's).
-    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox' }, text });
+    // A sender that says which house it speaks for: checked against that house's own word (run 42: a neighbour's real
+    // assistant and an impostor looked the same).
+    const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
+    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(speaks ? { speaks_for: speaks } : {}) }, text });
     if (!kept) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a few notes an hour from one sender' });
     return this.reply({ kind: 'noted', note: 'the owner will see it, and their assistant if they have one, with your address to answer; nothing in this house was read or shared' });
   }

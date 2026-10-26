@@ -89,6 +89,8 @@ export interface Allowance { kid: string; credential: string; statusId: string; 
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
   id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note. */ pledge?: { tally: string; id: string };
+  /** A note at the door it is about. */
+  note?: string;
   /** What the assistant advises on the request, offer or pledge it names, as a field: nobody (no panel, no bot) reads it out of the words (run 39). */
   advice?: Advice;
   /** A question for the owner, with the choices to tap (a neighbour's favour, say); the house tells the assistant the answer. */
@@ -96,6 +98,8 @@ export interface Suggestion {
   at: string;
 }
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
+/** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
+export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
@@ -311,9 +315,9 @@ export class OwnerDesk {
 
   /** What one agent asked this house lately, any purpose: lets the owner see a visitor trying another label. */
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: { name: string; domain: string; webId: string; url?: string; checked: boolean }; text: string; at: string }[] = [];
+  notes: { id: string; from: NoteSender; text: string; at: string }[] = [];
   /** Keeps a note, tells the assistants; false when its sender has sent too many this hour. */
-  addNote(n: { from: { name: string; domain: string; webId: string; url?: string; checked: boolean }; text: string }): boolean {
+  addNote(n: { from: NoteSender; text: string }): boolean {
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return false;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);
@@ -448,7 +452,10 @@ export class OwnerDesk {
             pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
           }
           if (q.advice !== undefined && !ADVICE.includes(q.advice as Advice)) return void res.status(400).json({ error: `advice: one of ${ADVICE.join(', ')}` });
-          if (q.advice !== undefined && !request && !offer && !pledge) return void res.status(400).json({ error: 'advice is about a request, an offer or a pledge: name it' });
+          // Or about a note at the door (run 42: "don't answer this one" had nowhere to go).
+          const aboutNote = typeof (q as { note?: unknown }).note === 'string' ? this.notes.find((n) => n.id === (q as { note: string }).note)?.id : undefined;
+          if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id' });
+          if (q.advice !== undefined && !request && !offer && !pledge && !aboutNote) return void res.status(400).json({ error: 'advice is about a request, an offer, a pledge or a note: name it' });
           let ask: Suggestion['ask'];
           if (q.ask) {
             // Refused, not cut (run 40 stored "…return fa"): the assistant shortens its own words.
@@ -457,7 +464,7 @@ export class OwnerDesk {
             const r = Number(q.ask.recommend);
             ask = { choices, ...(Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }

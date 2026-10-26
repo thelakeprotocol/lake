@@ -92,3 +92,19 @@ export function ownWordClaims(card: { name: string; description?: string; menu?:
   }
   return [...out];
 }
+
+/**
+ * An agent's claim that it speaks for a house (SPEC §6.5), carried in a message it chose to send so: the house, its
+ * address, and the house's `LakeAssistantKey` for this agent. Shown only to whom the agent tells (run 42: real assistants
+ * couldn't prove to each other which house they spoke for, and an impostor's claim looked the same as theirs).
+ */
+export interface SpeaksFor { house: string; url: string; vouch: Badge }
+
+/** Whether a sender's claim to speak for a house checks: the house's own word, for the sender's key, unrevoked. */
+export async function checkSpeaksFor(sender: LakeProfile, claim: unknown, opts: { sandbox?: boolean } = {}): Promise<{ house: string; checked: boolean; why?: string }> {
+  const c = claim as Partial<SpeaksFor> | undefined;
+  const house = String(c?.house ?? '');
+  if (!house || !c?.vouch?.credential || !c.vouch.issuer) return { house, checked: false, why: 'a claim with no word from the house: just words' };
+  const ok = (await checkBadges({ ...sender, badges: [c.vouch] }, opts)).some((b) => b.type === 'LakeAssistantKey' && b.issuerWebId === house);
+  return ok ? { house, checked: true } : { house, checked: false, why: 'the word it carries doesn\'t check: not from that house, for this agent, or taken back' };
+}

@@ -85,8 +85,10 @@ export class Registry {
    * mark issuers); and the claims in its own words that look like someone else's (approval words, other agents' names).
    */
   claimsOf(e: Entry): { vouched?: Vouch[]; own_words?: string[]; same_name_as?: string[] } {
-    const issuers = new Map([...this.entries.values()].filter((x) => x.via === 'direct' && x.profile.role === 'specialist').map((x) => [x.url, x]));
-    const vouched = (e.vouched ?? []).map((b) => ({ by: b.by, says: b.says, listed: issuers.get(b.issuer)?.jkt === b.jkt }));
+    // By key: a specialist's badge names the address it was asked at, which may be the Lake's inside one (run 42 showed
+    // the Lake's own register as not listed).
+    const issuers = new Set([...this.entries.values()].filter((x) => x.via === 'direct' && x.profile.role === 'specialist').map((x) => x.jkt));
+    const vouched = (e.vouched ?? []).map((b) => ({ by: b.by, says: b.says, listed: issuers.has(b.jkt) }));
     // The node's own specialists describe the Lake's services in its words (run 40 flagged the Tally for naming the pass issuer).
     const own = e.via === 'direct' && e.profile.role === 'specialist' ? [] : ownWordClaims({ name: e.card.name, description: e.card.description, menu: e.profile.menu }, [...this.entries.values()].filter((x) => x !== e).map((x) => x.card.name));
     // Names are the agents' own and can be shared (two Atlases in runs 40 and 41): say which other domains use this one.

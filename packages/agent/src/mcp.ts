@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
 import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
-import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -441,7 +441,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const checked = traded?.checked ?? (m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId, trustedPayments)
           : attached.length ? { ...(await verifyEvidence(attached[0])), note: 'evidence inside the message, checked; what the sender says about it is not' }
           : Object.values(m.payload).some((v) => typeof v === 'string' && /^eyJ[\w-]+\.[\w-]+\./.test(v)) ? { verified: false, why: 'a pasted credential with no card to check it against: forward it as { credential, card }' } : undefined);
-        pushInbox(m, checked);
+        // A sender that says it speaks for a house: checked against that house's own word (SPEC §6.5).
+        if (m.payload.speaks_for) pushInbox(m, { ...(checked ?? {}), speaks_for: await checkSpeaksFor(m.from, m.payload.speaks_for, { sandbox: o.sandbox ?? true }) });
+        else pushInbox(m, checked);
         // The sender's proof of delivery: this agent's signed word that exactly this arrived (its sha256), kept by the
         // sender with the reply (lake_inbox history). Run 21's buyers and sellers asked for "I got your order X".
         // And whether anyone is reading: when this agent last acted and read its inbox, and how much is waiting unread.
@@ -549,6 +551,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   // Your human's house, if they gave you an assistant key: you may look and suggest, never decide.
   let house: string | null = null;
+  // The house's word that this agent is its owner's assistant, to show whoever the assistant chooses to tell (SPEC §6.5).
+  let speaksFor: SpeaksFor | null = null;
   // Which house is the owner's is theirs to tell (runs 40, 41: "Tom's agent (sb-1)" in a message, "Mia's assistant (sb-0)"
   // on a card): the house's name or address in what an assistant says outside it. Returns the name it found.
   const namesHouse = (said: unknown): string | null => {
@@ -646,7 +650,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
         house = base;
         // The house's word that this agent sells for it goes on its card: carts it signs from now on name the house as payee.
-        if (body.badge?.credential && body.badge.issuer) await me.sellFor({ webId: String(body.webId), url: String(body.badge.issuer), vouch: body.badge });
+        if (body.badge?.credential && body.badge.issuer) {
+          await me.sellFor({ webId: String(body.webId), url: String(body.badge.issuer), vouch: body.badge });
+          speaksFor = { house: String(body.webId), url: String(body.badge.issuer), vouch: body.badge };
+        }
         // From now on, money is spent under the allowance your human signed in this house, if they gave you one.
         me.setAllowanceSource(async () => {
           const r = (await houseCall({ kind: 'assistant.allowance' })) as { intent?: { credential: string; card: AgentCard; owner?: string } | null; currency?: string };
@@ -678,10 +685,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_suggest',
-    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking (name it with offer: they get an Accept button on your note), a pledge worth signing (name it with pledge: they get a Sign button). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer or pledge you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
+    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking (name it with offer: they get an Accept button on your note), a pledge worth signing (name it with pledge: they get a Sign button). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), note: z.string().optional().describe('A note at their door (from lake_house { view: "requests" } notes) this is about'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer, pledge or note you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
     async (a) => {
       try {
-        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
+        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
       } catch (e) {
         return fail(e);
       }
@@ -1081,7 +1088,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       inputSchema: {
         agent_url: z.string().describe("The agent's A2A endpoint, from lake_overview or lake_search"),
         message: z.record(z.string(), z.unknown()).describe('The payload; must have a "kind"'),
-        reveal_house: z.boolean().default(false).describe('Send it even though it names your human\'s house (which tells the other agent which house is theirs)'),
+        reveal_house: z.boolean().default(false).describe('Tell the other agent which house is your human\'s, deliberately: the message then carries the house\'s word that you speak for it, which their side checks'),
       },
     },
     async (a) => {
@@ -1091,6 +1098,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // to anyone but the house itself that names it waits for a second, deliberate send.
         const named = !a.reveal_house && !(house && a.agent_url.startsWith(house)) ? namesHouse(a.message) : null;
         if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
+        // Told deliberately, it comes with the house's word, so the other side can check it (run 42: neighbours couldn't).
+        if (a.reveal_house && speaksFor) a.message = { ...a.message, speaks_for: speaksFor };
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
         // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
         if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';
