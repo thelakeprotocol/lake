@@ -87,7 +87,8 @@ export class Registry {
   claimsOf(e: Entry): { vouched?: Vouch[]; own_words?: string[] } {
     const issuers = new Map([...this.entries.values()].filter((x) => x.via === 'direct' && x.profile.role === 'specialist').map((x) => [x.url, x]));
     const vouched = (e.vouched ?? []).map((b) => ({ by: b.by, says: b.says, listed: issuers.get(b.issuer)?.jkt === b.jkt }));
-    const own = ownWordClaims({ name: e.card.name, description: e.card.description, menu: e.profile.menu }, [...this.entries.values()].filter((x) => x !== e).map((x) => x.card.name));
+    // The node's own specialists describe the Lake's services in its words (run 40 flagged the Tally for naming the pass issuer).
+    const own = e.via === 'direct' && e.profile.role === 'specialist' ? [] : ownWordClaims({ name: e.card.name, description: e.card.description, menu: e.profile.menu }, [...this.entries.values()].filter((x) => x !== e).map((x) => x.card.name));
     return { ...(vouched.length ? { vouched } : {}), ...(own.length ? { own_words: own } : {}) };
   }
   /** Badges are checked again now and then: an issuer may have revoked one, or it may have expired. */

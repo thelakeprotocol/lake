@@ -44,7 +44,8 @@ export type Reply =
   | { kind: 'busy'; why: string; retryAfterMs: number }
   | { kind: 'counted'; study: string; count: string; tellers: string[] }
   | { kind: 'excluded'; study: string; why: string }
-  | { kind: 'quoted'; ref: string };
+  | { kind: 'quoted'; ref: string }
+  | { kind: 'noted'; note: string };
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment; authorisation?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string; count?: string }
@@ -190,8 +191,9 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
+    if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
-    return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a compute request, a quote, or status / withdraw for a request you made' });
+    return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a note (text for the owner, nothing asked), a compute request, a quote, or status / withdraw for a request you made' });
   }
 
   private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {
@@ -474,6 +476,22 @@ export class Housekeeper {
     await this.file(offerId, { ...signed, signatures: [...signed.signatures, { by: visitor.webId, jws }] });
     this.o.emit(makeEvent('agreement.signed', this.actor, `agent:${visitor.ownerDomain}`, {}));
     return { ok: true };
+  }
+
+  /**
+   * A note for the owner (SPEC §5.1): a neighbour's favour, an invite, nothing asked of the pod (run 40: houses turned
+   * every one away as malformed, and neighbours guessed for 8 minutes which agent was whose). The owner sees it, and their
+   * assistant is told, with the sender's address to answer: so a neighbour reaches the assistant without anyone saying
+   * which agent it is. Text only, shown as the sender's words; it decides nothing. A few an hour from one sender.
+   */
+  private async note(p: { text?: unknown }, from: LakeProfile, card: AgentCard): Promise<LakeData> {
+    const text = typeof p.text === 'string' ? p.text.trim() : '';
+    if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text } (1 to 1000 characters)' });
+    if (looksLikeInjection(text)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note is for the owner to read, not instructions' });
+    const url = card.supportedInterfaces?.[0]?.url;
+    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}) }, text });
+    if (!kept) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a few notes an hour from one sender' });
+    return this.reply({ kind: 'noted', note: 'the owner will see it, and their assistant if they have one, with your address to answer; nothing in this house was read or shared' });
   }
 
   /** A receipt from a payments agent the owner trusts goes in /receipts/. */

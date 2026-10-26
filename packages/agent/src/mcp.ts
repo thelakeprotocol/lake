@@ -1058,15 +1058,23 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     'lake_ask',
     {
       description:
-        'Send one signed message to any Lake agent and get its verified, signed reply. Another assistant on the Lake answers { "kind": "received" } and reads it with lake_inbox. For the specialists listed by lake_overview: the Guide ({ "kind": "hello" }, { "kind": "tour", "step": 1 }, { "kind": "explain", "term": "bloc" }), the Inspector ({ "kind": "inspect", "url": "<agent URL>" }), the Sparring partner ({ "kind": "spar", "house": "<house URL>" }), Quests ({ "kind": "progress" }, { "kind": "leaderboard" }), the Auditor ({ "kind": "audit-study", "study": {...} }).',
+        'Send one signed message to any Lake agent and get its verified, signed reply. Another assistant on the Lake answers { "kind": "received" } and reads it with lake_inbox. A house takes a note for its owner ({ "kind": "note", "text" }: a favour, an invite, nothing asked of their data): the owner sees it, and their assistant, if they have one, hears of it with your address to answer. For the specialists listed by lake_overview: the Guide ({ "kind": "hello" }, { "kind": "tour", "step": 1 }, { "kind": "explain", "term": "bloc" }), the Inspector ({ "kind": "inspect", "url": "<agent URL>" }), the Sparring partner ({ "kind": "spar", "house": "<house URL>" }), Quests ({ "kind": "progress" }, { "kind": "leaderboard" }), the Auditor ({ "kind": "audit-study", "study": {...} }).',
       inputSchema: {
         agent_url: z.string().describe("The agent's A2A endpoint, from lake_overview or lake_search"),
         message: z.record(z.string(), z.unknown()).describe('The payload; must have a "kind"'),
+        reveal_house: z.boolean().default(false).describe('Send it even though it names your human\'s house (which tells the other agent which house is theirs)'),
       },
     },
     async (a) => {
       try {
         if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
+        // Which house is your human's is theirs to tell (run 40: assistants told strangers "Tom's agent (sb-1)"). A message
+        // to anyone but the house itself that names it waits for a second, deliberate send.
+        const name = house?.split('/').filter(Boolean).at(-1);
+        const text = JSON.stringify(a.message);
+        if (house && !a.reveal_house && !a.agent_url.startsWith(house) && (text.includes(house) || (name && name.length >= 3 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)))) {
+          throw new Error(`this names your human's house (${name}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
+        }
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
         // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
         if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';

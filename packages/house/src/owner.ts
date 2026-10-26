@@ -310,6 +310,17 @@ export class OwnerDesk {
   }
 
   /** What one agent asked this house lately, any purpose: lets the owner see a visitor trying another label. */
+  /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
+  notes: { id: string; from: { name: string; domain: string; webId: string; url?: string }; text: string; at: string }[] = [];
+  /** Keeps a note, tells the assistants; false when its sender has sent too many this hour. */
+  addNote(n: { from: { name: string; domain: string; webId: string; url?: string }; text: string }): boolean {
+    if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return false;
+    const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
+    this.notes = [note, ...this.notes].slice(0, 50);
+    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, at: note.at, reply: 'their own words; answer the sender at from.url if your human would want you to' });
+    return true;
+  }
+
   recentAsks(visitorWebId: string, withinMs = 3_600_000): PendingRequest[] {
     return [...this.pending.values()].filter((x) => x.visitor.webId === visitorWebId && Date.now() - Date.parse(x.requestedAt) < withinMs);
   }
@@ -438,8 +449,9 @@ export class OwnerDesk {
           if (q.advice !== undefined && !request && !offer && !pledge) return void res.status(400).json({ error: 'advice is about a request, an offer or a pledge: name it' });
           let ask: Suggestion['ask'];
           if (q.ask) {
-            const choices = Array.isArray(q.ask.choices) ? q.ask.choices.map((c) => String(c).trim().slice(0, 40)).filter(Boolean) : [];
-            if (choices.length < 2 || choices.length > 4) return void res.status(400).json({ error: 'ask: { choices: 2 to 4 short answers, recommend?: the index of the one you advise }' });
+            // Refused, not cut (run 40 stored "…return fa"): the assistant shortens its own words.
+            const choices = Array.isArray(q.ask.choices) ? q.ask.choices.map((c) => String(c).trim()).filter(Boolean) : [];
+            if (choices.length < 2 || choices.length > 4 || choices.some((c) => c.length > 80)) return void res.status(400).json({ error: 'ask: { choices: 2 to 4 answers of up to 80 characters, recommend?: the index of the one you advise }' });
             const r = Number(q.ask.recommend);
             ask = { choices, ...(Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
@@ -540,6 +552,11 @@ export class OwnerDesk {
         this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), answer: sug.ask.answered });
         return void res.json({ ok: true, answered: sug.ask.answered });
       }
+      if (p.kind === 'panel.note.dismiss') {
+        const id = String((p as unknown as { id?: string }).id ?? '');
+        this.notes = this.notes.filter((x) => x.id !== id);
+        return void res.json({ ok: true });
+      }
       if (p.kind === 'panel.assistant.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
         this.suggestions = this.suggestions.filter((x) => x.id !== id);
@@ -611,6 +628,7 @@ export class OwnerDesk {
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
+      notes: this.notes,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };
   }
