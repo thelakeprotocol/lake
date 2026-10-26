@@ -11,7 +11,18 @@ import type { RecordPaths, Trust } from './record.js';
  * owner's own data and keeps the result for the owner. The agent learns only that its quote was delivered.
  * Nothing leaves until the owner taps Accept, and then only the files the pack names, to that one agent.
  */
-export interface Intent { pack: string; terms: Record<string, string | number>; group: string; members: number; openedAt: string }
+export interface Intent {
+  pack: string; terms: Record<string, string | number>; group: string; members: number; openedAt: string;
+  /**
+   * When the owner accepted an offer for it: no more quotes are asked for, but the house still counts in its group for a
+   * day, as group buying locks the price for the window (run 39: the last neighbour to decide was priced at a group of 2).
+   */
+  acceptedAt?: string;
+}
+
+/** How long a house that accepted still counts in its group. */
+const COUNTS_AFTER_ACCEPT_MS = 24 * 3_600_000;
+const open = (i: Intent) => !i.acceptedAt;
 
 export interface StoredOffer {
   id: string;
@@ -90,10 +101,14 @@ export class Market {
    */
   async refresh() {
     this.refreshedAt = Date.now();
+    // An accepted intent counts in its group for a day, then goes.
+    const done = [...this.intents.values()].filter((i) => i.acceptedAt && Date.now() - Date.parse(i.acceptedAt) > COUNTS_AFTER_ACCEPT_MS);
+    for (const i of done) this.intents.delete(i.pack);
+    if (done.length) await this.save();
     const before = new Map([...this.intents.values()].map((i) => [i.pack, i.members]));
     await this.publish();
     for (const i of this.intents.values()) {
-      if (i.members === before.get(i.pack)) continue;
+      if (!open(i) || i.members === before.get(i.pack)) continue;
       await this.save();
       await this.reprice(i);
     }
@@ -101,7 +116,7 @@ export class Market {
     // mustn't leave the owner without its offer. One that has an open offer here isn't asked again (it would replace it).
     if (Date.now() - this.announcedAt > 60_000 && this.intents.size) {
       this.announcedAt = Date.now();
-      for (const i of this.intents.values()) {
+      for (const i of [...this.intents.values()].filter(open)) {
         const p = packOf(i.pack);
         if (p) void this.announce(p, i, new Set([...this.offers.values()].filter((o) => o.pack === i.pack && o.status === 'open').map((o) => o.quoter.url)));
       }
@@ -273,6 +288,7 @@ export class Market {
   async quote(q: { program: QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number; currency?: string }, profile: LakeProfile, card: AgentCard): Promise<Record<string, unknown>> {
     const p = q.program;
     const intent = p ? this.intents.get(p.pack) : undefined;
+    if (intent?.acceptedAt) return { kind: 'rejected', code: 'no-intent', why: 'my owner has accepted an offer already' };
     if (!intent) return { kind: 'rejected', code: 'no-intent', why: 'my owner is not looking for that right now' };
     const url = card.supportedInterfaces[0]!.url;
     // The agent hears why; so does the owner, next to the intent: it's why their board is empty. A stranger this house
@@ -316,6 +332,14 @@ export class Market {
     return { kind: 'quoted', ref: offer.id };
   }
 
+  /** What accepting an offer costs the owner, where its program names a price output, in the offer's currency. */
+  priceOf(offerId: string): { amount: number; currency: string } | undefined {
+    const offer = this.offers.get(offerId);
+    const p = this.programs.get(offerId);
+    const amount = p?.price ? offer?.result.outputs?.[p.price] : undefined;
+    return offer && typeof amount === 'number' ? { amount, currency: offer.currency ?? 'USD' } : undefined;
+  }
+
   /** The owner tapped Accept: send that one agent the files the pack names, and nothing else. */
   async accept(offerId: string): Promise<StoredOffer> {
     const offer = this.offers.get(offerId);
@@ -337,8 +361,10 @@ export class Market {
     const released = (rec.pack.release ?? []).length;
     await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, to: offer.quoter.webId, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live', recordsOut: 0 }));
     this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { pack: offer.pack, released }));
-    // Found what they were looking for: stop asking (run 28's grocers quoted the same household again within minutes).
-    await this.close(offer.pack);
+    // Found what they were looking for: stop asking (run 28's grocers quoted the same household again within minutes),
+    // but still count in the group for a day, so a neighbour who decides later gets the street's price too.
+    const i = this.intents.get(offer.pack);
+    if (i) { i.acceptedAt = new Date().toISOString(); this.heard.delete(offer.pack); await this.save(); await this.publish(); }
     return offer;
   }
 
@@ -382,7 +408,7 @@ export class Market {
   /** After a restart, or once the house has joined: tell the nodes and the agents again. */
   async resume() {
     await this.publish();
-    for (const i of this.intents.values()) {
+    for (const i of [...this.intents.values()].filter(open)) {
       const p = packOf(i.pack);
       if (p) void this.announce(p, i);
     }

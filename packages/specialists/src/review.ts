@@ -293,12 +293,12 @@ export async function createPayments(o: SpecialistOptions & {
         return { kind: 'refused', problems: [(e as Error).message] };
       }
       if (paidCarts.has(cart.hash)) return { kind: 'refused', problems: [`cart ${cart.id} is paid already`] };
-      // Paid to another than its seller only on that payee's word (SPEC §6.5): the seller's card carries the house's
-      // LakeAssistantKey badge, checked against the house's own card and status list.
+      // Paid to another than its seller only on that payee's word (SPEC §6.5): the house's LakeAssistantKey for this seller,
+      // carried in the cart, checked as a badge would be (the house's own card, the seller's key, expiry, status list).
       if (cart.payee) {
         const seller = await verifyLakeCard(c!.card as AgentCard);
-        const ok = (await checkBadges(seller, { sandbox: o.sandbox })).some((b) => b.type === ASSISTANT_KEY_TYPE && b.issuerWebId === cart!.payee!.webId && (b.subject.may as string[] | undefined)?.includes('sell'));
-        if (!ok) return { kind: 'refused', problems: [`cart ${cart.id} names ${cart.payee.webId} as payee, but the seller's card carries no word from it that the seller sells for it: nothing was paid`] };
+        const ok = (await checkBadges({ ...seller, badges: [cart.payee.vouch] }, { sandbox: o.sandbox })).some((b) => b.type === ASSISTANT_KEY_TYPE && b.issuerWebId === cart!.payee!.webId && (b.subject.may as string[] | undefined)?.includes('sell'));
+        if (!ok) return { kind: 'refused', problems: [`cart ${cart.id} names ${cart.payee.webId} as payee, but carries no word from it that the seller sells for it: nothing was paid`] };
       }
       if (payments.length !== 1) return { kind: 'refused', problems: ['one payment per cart'] };
     }

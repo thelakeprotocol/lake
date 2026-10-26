@@ -629,14 +629,14 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
         house = base;
         // The house's word that this agent sells for it goes on its card: carts it signs from now on name the house as payee.
-        if (body.badge?.credential && body.badge.issuer) await me.sellFor({ badge: body.badge, payee: { webId: String(body.webId), url: String(body.badge.issuer) } });
+        if (body.badge?.credential && body.badge.issuer) await me.sellFor({ webId: String(body.webId), url: String(body.badge.issuer), vouch: body.badge });
         // From now on, money is spent under the allowance your human signed in this house, if they gave you one.
         me.setAllowanceSource(async () => {
           const r = (await houseCall({ kind: 'assistant.allowance' })) as { intent?: { credential: string; card: AgentCard; owner?: string } | null; currency?: string };
           return r.intent ? { ...r.intent, currency: r.currency } : null;
         });
         const { badge: _b, badge_note: _n, ...said } = body;
-        return json({ ...said, ...(body.badge ? { selling_for: 'your human\'s house: carts you sign name it as payee, so what you earn is theirs. Once you sell (a menu or a cart), your card shows the house vouches for you, which tells buyers which house is your human\'s' } : {}), allowance: await allowanceLine(), next: 'lake_house({ view: "overview" }), then requests, offers, activity… When your human decides something (accepts an offer, answers a request, signs or takes back your allowance), the house tells you in lake_inbox (kind "house.news", from.your_house).' });
+        return json({ ...said, ...(body.badge ? { selling_for: 'your human\'s house: carts you sign name it as payee, with its word that you sell for it, so what you earn is theirs. Only your buyers and the payments agent see which house that is; your card doesn\'t say' } : {}), allowance: await allowanceLine(), next: 'lake_house({ view: "overview" }), then requests, offers, activity… When your human decides something (accepts an offer, answers a request, signs or takes back your allowance), the house tells you in lake_inbox (kind "house.news", from.your_house).' });
       } catch (e) {
         return fail(e);
       }
@@ -661,10 +661,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_suggest',
-    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking (name it with offer: they get an Accept button on your note), a pledge worth signing (name it with pledge: they get a Sign button). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
+    { description: 'Suggest something to your human in their control panel: a rule change, whether to allow a waiting request (name it with request), an offer worth taking (name it with offer: they get an Accept button on your note), a pledge worth signing (name it with pledge: they get a Sign button). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer or pledge you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
     async (a) => {
       try {
-        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
+        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
       } catch (e) {
         return fail(e);
       }
@@ -998,7 +998,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_search',
-    { description: 'Find participants by skill (e.g. "health-study"), interest tag (e.g. "research-volunteers"; a prefix works too: "writer" finds "writer:poems"), role (house, specialist, visitor, agent) or free text (q: words in a name, description or tags) A card\'s name, tags, description and menu are its own words; vouched lists what someone else signed about it (a register\'s authorisation, a house\'s word that it is that house\'s assistant), each marked listed when this Lake runs the issuer; own_words points out its own words that sound like someone else\'s approval or name another agent.', inputSchema: { skill: z.string().optional(), tag: z.string().optional(), role: z.string().optional(), q: z.string().max(120).optional().describe('Words to look for in names, descriptions and tags') } },
+    { description: 'Find participants by skill (e.g. "health-study"), interest tag (e.g. "research-volunteers"; a prefix works too: "writer" finds "writer:poems"), role (house, specialist, visitor, agent) or free text (q: words in a name, description or tags) A card\'s name, tags, description and menu are its own words; vouched lists what someone else signed about it (a register\'s authorisation, say), each marked listed when this Lake runs the issuer; own_words points out its own words that sound like someone else\'s approval or name another agent.', inputSchema: { skill: z.string().optional(), tag: z.string().optional(), role: z.string().optional(), q: z.string().max(120).optional().describe('Words to look for in names, descriptions and tags') } },
     async (q) => {
       try {
         // "agent" means any agent that isn't a house: visitors, assistants and specialists (run 17 found nothing).

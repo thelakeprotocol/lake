@@ -46,7 +46,7 @@ No offers yet? Your panel says why, in plain facts, and so does `lake_house { vi
 
 ## 6. Ask together, pay less
 
-As more households join your group, your house learns the new size and runs the lenders' programs again itself: most of them take a little off when three or more of you ask together. The discount is written into each certified program, the same for everyone in the group, so nobody has to be asked again and nothing leaves your house.
+As more households join your group, your house learns the new size and runs the lenders' programs again itself: most of them take a little off when three or more of you ask together. The discount is written into each certified program, the same for everyone in the group, so nobody has to be asked again and nothing leaves your house. A household that has accepted an offer still counts in the group for a day, so a neighbour who decides later isn't priced for a smaller group.
 
 ## 7. Accept, and only then share
 

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type Badge, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
@@ -134,10 +134,10 @@ export interface LakeAgent {
   /** What this agent sells (SPEC §6.5): on its signed card, so search finds it and nobody can change a price in transit. */
   setMenu(menu: MenuItem[]): Promise<void>;
   /**
-   * Sell for a house (SPEC §6.5): its badge (its word that this agent is its owner's assistant) goes on this card, and carts
-   * this agent signs name the house as payee. null: sell for itself again.
+   * Sell for a house (SPEC §6.5): carts this agent signs name the house as payee, with the house's word that this agent
+   * is its owner's assistant (shown only to the buyer and the payments agent, never on the card). null: sell for itself.
    */
-  sellFor(house: { badge: Badge; payee: CartPayee } | null): Promise<void>;
+  sellFor(house: CartPayee | null): Promise<void>;
   /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
   cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string, sku?: string, delivery?: DeliveryTerms): Promise<CartMandate>;
   /**
@@ -166,13 +166,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const quietMe = () => !!(lakeProfile(visitor.card)?.tags ?? []).includes('quiet');
   // Same identity, a card that also lists what this agent is up for.
   let menu: MenuItem[] = [];
-  let badges: Badge[] = [];
   let sellingFor: CartPayee | undefined;
-  // The house's word, kept until this agent sells: on its card it says which house is its human's, so it goes there only
-  // with a menu or a cart (run 34b's assistant wouldn't tell a stranger which house was Mia's; a shopfront has to).
-  let houseBadge: Badge | undefined;
   let lastTags: string[] = o.tags ?? [], lastAbout: string | undefined;
-  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags, ...(menu.length ? { menu } : {}), ...(badges.length ? { badges } : {}) } }, id), id);
+  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags, ...(menu.length ? { menu } : {}) } }, id), id);
   if (o.tags?.length) visitor.card = await tagged(o.tags);
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
@@ -353,18 +349,12 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const problems = menuProblems(items);
       if (problems.length) throw new Error(problems.join('; '));
       menu = items;
-      if (houseBadge) badges = menu.length ? [houseBadge] : [];
       await self.setTags(lastTags, lastAbout);
     },
     async sellFor(house) {
-      houseBadge = house?.badge;
-      sellingFor = house?.payee;
-      const shown = house && menu.length ? [house.badge] : [];
-      if (JSON.stringify(shown) !== JSON.stringify(badges)) { badges = shown; await self.setTags(lastTags, lastAbout); }
+      sellingFor = house ?? undefined;
     },
     async cart(buyerWebId, items, minutes, brief, sku, delivery) {
-      // Selling for the house: its word goes on the card now, where the payments agent checks it.
-      if (houseBadge && !badges.length) { badges = [houseBadge]; await self.setTags(lastTags, lastAbout); }
       // Ordered from the menu: the cart names it (its digest, as on this card) and the item, inside what the seller signs,
       // with the item's delivery terms unless this cart gives its own.
       const item = sku ? menu.find((m) => m.sku === sku) : undefined;

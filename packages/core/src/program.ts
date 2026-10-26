@@ -27,6 +27,8 @@ export interface QuoteProgram {
   eligible: string;
   /** What the owner sees: CEL expressions of type double. */
   outputs: Record<string, string>;
+  /** The output the owner pays on accepting, when there is one (a basket's total): the house checks it against what the owner's assistant may spend. */
+  price?: string;
   /** Plain-English labels and units for the outputs, for the owner's panel. */
   labels?: Record<string, { label: string; unit?: string }>;
   /**
@@ -108,6 +110,7 @@ export function auditProgram(p: QuoteProgram): { ok: boolean; problems: string[]
   if (lets.length > LIMITS.lets) problems.push(`at most ${LIMITS.lets} intermediate values`);
   const outputs = Object.entries(p.outputs ?? {});
   if (outputs.length < 1 || outputs.length > LIMITS.outputs) problems.push(`1 to ${LIMITS.outputs} outputs`);
+  if (p.price !== undefined && !(p.price in (p.outputs ?? {}))) problems.push(`price: the name of one of its outputs`);
   const typed = (where: string, e: unknown, want?: string[]): string | null => {
     if (typeof e !== 'string') { problems.push(`${where}: a CEL expression, as a string`); return null; }
     const c = env.check(e);

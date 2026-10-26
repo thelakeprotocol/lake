@@ -43,6 +43,7 @@ export function grocerProgram(title: string, r: GrocerRules): QuoteProgram {
       total: '(basket + diet_extra) * (1.0 - group_off / 100.0) + delivery_fee',
     },
     eligible: [`region in ${list(r.regions)}`, `dietary_needs.all(d, d in ${list(r.serves)})`].join(' && '),
+    price: 'total',
     outputs: {
       total: 'round(total, 2)',
       delivery_fee: 'delivery_fee',

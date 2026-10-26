@@ -53,6 +53,8 @@ export interface PanelProvider {
   openIntent(pack: string, terms: Record<string, string | number>): Promise<unknown>;
   closeIntent(pack: string): Promise<unknown>;
   acceptOffer(id: string): Promise<unknown>;
+  /** What accepting an offer costs, where its program names a price. */
+  offerPrice?(id: string): { amount: number; currency: string } | undefined;
   /** One person, one house (SPEC §6.4): ask the person checker for a stamp, with the owner's signed consent. */
   requestPersonhood(consent: unknown, ownerJwk: JWK): Promise<unknown>;
   /** Sign a pledge on a blind tally, from this house, with its person stamp. */
@@ -85,7 +87,16 @@ export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: s
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
-export interface Suggestion { id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note. */ pledge?: { tally: string; id: string }; at: string }
+export interface Suggestion {
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note. */ pledge?: { tally: string; id: string };
+  /** What the assistant advises on the request, offer or pledge it names, as a field: nobody (no panel, no bot) reads it out of the words (run 39). */
+  advice?: Advice;
+  /** A question for the owner, with the choices to tap (a neighbour's favour, say); the house tells the assistant the answer. */
+  ask?: { choices: string[]; recommend?: number; answered?: string };
+  at: string;
+}
+export const ADVICE = ['do', 'dont', 'your_call'] as const;
+export type Advice = (typeof ADVICE)[number];
 const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
@@ -394,7 +405,7 @@ export class OwnerDesk {
       if (assistant) {
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         if (p.kind === 'assistant.suggest') {
-          const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string } };
+          const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown } };
           const text = String(q.text ?? '').trim().slice(0, 1500);
           // An assistant that got something wrong takes its own note back; an empty text with replaces just withdraws it.
           const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
@@ -423,7 +434,16 @@ export class OwnerDesk {
             if (!/^https?:\/\/\S+$/.test(tally) || !q.pledge.id) return void res.status(400).json({ error: 'pledge: { tally: the tally\'s address, id: the pledge\'s id }' });
             pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), at: new Date().toISOString() };
+          if (q.advice !== undefined && !ADVICE.includes(q.advice as Advice)) return void res.status(400).json({ error: `advice: one of ${ADVICE.join(', ')}` });
+          if (q.advice !== undefined && !request && !offer && !pledge) return void res.status(400).json({ error: 'advice is about a request, an offer or a pledge: name it' });
+          let ask: Suggestion['ask'];
+          if (q.ask) {
+            const choices = Array.isArray(q.ask.choices) ? q.ask.choices.map((c) => String(c).trim().slice(0, 40)).filter(Boolean) : [];
+            if (choices.length < 2 || choices.length > 4) return void res.status(400).json({ error: 'ask: { choices: 2 to 4 short answers, recommend?: the index of the one you advise }' });
+            const r = Number(q.ask.recommend);
+            ask = { choices, ...(Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
+          }
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
@@ -510,6 +530,16 @@ export class OwnerDesk {
         this.news({ about: 'allowance', revoked: true, note: 'your human took your spending allowance back' }, a.kid);
         return void res.json({ revoked: true, note: 'its bit is set on your house\'s status list: payments refuse it from now on' });
       }
+      if (p.kind === 'panel.assistant.answer') {
+        // The owner taps one of the choices a question offered; the assistants hear it (run 39's parcel favour waited
+        // 17 minutes with no way to answer).
+        const q = p as unknown as { id?: string; choice?: string };
+        const sug = this.suggestions.find((x) => x.id === q.id && x.ask);
+        if (!sug?.ask || !sug.ask.choices.includes(String(q.choice))) return void res.status(400).json({ error: 'answer a question with one of its choices' });
+        sug.ask.answered = String(q.choice);
+        this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), answer: sug.ask.answered });
+        return void res.json({ ok: true, answered: sug.ask.answered });
+      }
       if (p.kind === 'panel.assistant.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
         this.suggestions = this.suggestions.filter((x) => x.id !== id);
@@ -539,7 +569,17 @@ export class OwnerDesk {
           'panel.market': () => panel.market(),
           'panel.intent.open': () => panel.openIntent(String(q.pack ?? ''), q.terms ?? {}),
           'panel.intent.close': () => panel.closeIntent(String(q.pack ?? '')),
-          'panel.offer.accept': () => panel.acceptOffer(String(q.offer ?? '')),
+          'panel.offer.accept': async () => {
+            // Accepting releases the owner's facts at once; a price no assistant may pay leaves them out with nothing bought
+            // (run 39: A$157.14 against an A$150 allowance). Said first; the owner may still go ahead.
+            const price = panel.offerPrice?.(String(q.offer ?? ''));
+            const caps = [...this.allowances.values()].filter((a) => a.currency === price?.currency && Date.parse(a.until) > Date.now() && !this.isRevoked(a.statusId)).map((a) => a.amount);
+            // Only where the owner has an assistant pay in that currency: an owner with none pays themselves.
+            if (price && caps.length && !(q as { even_over_allowance?: boolean }).even_over_allowance && caps.every((c) => c < price.amount)) {
+              return { error: `${price.currency} ${price.amount} is more than your assistant may spend (${price.currency} ${Math.max(...caps)}): raise its allowance first, or accept even so (even_over_allowance) and pay it yourself`, code: 'over_allowance', price };
+            }
+            return panel.acceptOffer(String(q.offer ?? ''));
+          },
           'panel.person.request': () => panel.requestPersonhood((q as { consent?: unknown }).consent, this.ownerJwk!),
           'panel.pledge.sign': () => panel.signPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
           'panel.pledge.reveal': () => panel.revealPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
@@ -547,7 +587,7 @@ export class OwnerDesk {
         if (answer !== undefined && p.kind === 'panel.offer.accept' && !(answer as { error?: string }).error) {
           // The assistant that suggested it is the one to pay: what was accepted, from whom, and the quoter's answer (its order).
           const x = answer as { id: string; title: string; quoter: { name: string; url: string }; result: { outputs: Record<string, number> }; labels?: Record<string, { label: string; unit?: string }>; currency?: string; answer?: Record<string, unknown> };
-          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer' });
+          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer: pay it with lake_pay, naming the order. That pays outright: an accepted offer is no cart, so nothing holds the money, and the delivery itself happens outside the Lake (run 39: assistants promised "held until delivery")' });
         }
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }

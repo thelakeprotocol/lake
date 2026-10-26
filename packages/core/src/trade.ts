@@ -56,9 +56,11 @@ export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]
 
 /**
  * Who is paid, when not the seller who signs the cart (SPEC §6.5): an owner's assistant sells for its owner's house, so
- * the house is paid. A payments agent pays it only if the seller's card carries the house's `LakeAssistantKey` badge.
+ * the house is paid. `vouch` is the house's `LakeAssistantKey` for the seller, with the house's address: it travels in
+ * the cart, shown only to whoever must check it (the buyer, the payments agent), never on the seller's public card (run
+ * 39: on the card, it told a stranger which house was Mia's). A payments agent pays the payee only if it checks.
  */
-export interface CartPayee { webId: string; url: string }
+export interface CartPayee { webId: string; url: string; vouch: { credential: string; issuer: string } }
 
 /**
  * What the seller promises about the delivery, signed in the cart (SPEC §6.5): how soon, how long the buyer has to answer
@@ -77,7 +79,8 @@ export interface DeliveryTerms {
   lines?: { min?: number; max?: number };
 }
 
-const payeeOk = (p: unknown): p is CartPayee => !!p && typeof (p as CartPayee).webId === 'string' && /^https?:\/\//.test((p as CartPayee).webId) && typeof (p as CartPayee).url === 'string' && /^https?:\/\//.test((p as CartPayee).url);
+const payeeOk = (p: unknown): p is CartPayee => !!p && typeof (p as CartPayee).webId === 'string' && /^https?:\/\//.test((p as CartPayee).webId) && typeof (p as CartPayee).url === 'string' && /^https?:\/\//.test((p as CartPayee).url)
+  && typeof (p as CartPayee).vouch?.credential === 'string' && /^https?:\/\//.test(String((p as CartPayee).vouch?.issuer));
 
 /** What's wrong with delivery terms, if anything. */
 export function deliveryProblems(d: unknown): string[] {
@@ -198,7 +201,7 @@ export async function signCart(o: {
   /** Who is paid, when not the seller: the house an assistant sells for. */
   payee?: CartPayee;
 }): Promise<CartMandate> {
-  if (o.payee && !payeeOk(o.payee)) throw new Error('payee: { webId, url }, both http(s) addresses');
+  if (o.payee && !payeeOk(o.payee)) throw new Error('payee: { webId, url, vouch: { credential, issuer } }');
   if (!o.items.length || o.items.length > MAX_ITEMS) throw new Error(`a cart holds 1 to ${MAX_ITEMS} items`);
   const currency = o.items[0]!.amount.currency;
   if (o.items.some((x) => x.amount.currency !== currency)) throw new Error('one currency per cart');
@@ -248,7 +251,7 @@ export async function checkCart(cart: CartMandate, sellerJwk: jose.JWK, now = Da
   if (items.reduce((a, x) => a + Math.round(x.amount.value * 100), 0) !== Math.round(total.amount.value * 100)) throw new Error('the cart\'s lines don\'t add up to its total');
   if (Date.parse(c.cart_expiry) < now) throw new Error(`the cart expired at ${c.cart_expiry}`);
   const data = (c.payment_request.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery), ...(data?.payee !== undefined && !payeeOk(data.payee) ? ['the cart\'s payee: { webId, url }'] : [])];
+  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery), ...(data?.payee !== undefined && !payeeOk(data.payee) ? ['the cart\'s payee: { webId, url, vouch }'] : [])];
   if (problems.length) throw new Error(problems.join('; '));
   return { id: c.id, seller: String(claims.iss), buyer: String(claims.sub), total: total.amount, hash: cartHash(c), expires: c.cart_expiry, items, ...cartTerms(c) };
 }

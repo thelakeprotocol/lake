@@ -442,6 +442,13 @@ describe('the owner', () => {
     expect(await asHelper({ kind: 'assistant.suggest', text: 'The street solar pledge binds only if three households sign: I would sign it.', pledge: { tally: `${specialistsUrl}/tally/a2a`, id: 'street-solar' } })).toMatchObject({ ok: true });
     expect((await ownerCall({ kind: 'list' })).suggestions[0]).toMatchObject({ pledge: { tally: `${specialistsUrl}/tally`, id: 'street-solar' } });
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', pledge: { tally: 'not a url', id: 'x' } })).toMatchObject({ error: expect.stringMatching(/^pledge:/) });
+    // Advice is a field, never read out of the words; a question has choices to tap, and the answer goes back.
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'Hold off for now', pledge: { tally: `${specialistsUrl}/tally`, id: 'street-solar' }, advice: 'dont' })).toMatchObject({ ok: true });
+    expect((await ownerCall({ kind: 'list' })).suggestions[0]).toMatchObject({ advice: 'dont' });
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'just words', advice: 'do' })).toMatchObject({ error: expect.stringMatching(/^advice is about/) });
+    const q = await asHelper({ kind: 'assistant.suggest', text: 'Priya asks if you can take in her parcel at 3 pm', ask: { choices: ['Yes', 'No'], recommend: 0 } });
+    expect(await ownerCall({ kind: 'panel.assistant.answer', id: q.id, choice: 'Maybe' })).toMatchObject({ error: expect.any(String) });
+    expect(await ownerCall({ kind: 'panel.assistant.answer', id: q.id, choice: 'Yes' })).toMatchObject({ ok: true, answered: 'Yes' });
     const pay = async (amount: number, currency = 'USD') => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test', currency })] })).reply;
     // Nothing converts: dollars signed for are spent in dollars.
     expect(await pay(3, 'AUD')).toMatchObject({ kind: 'refused', problems: ['the allowance is in USD; this payment is in AUD'] });
@@ -460,15 +467,16 @@ describe('the owner', () => {
       const sellerJwk = (await verifyLakeCard(seller.card)).publicJwk;
       const paired = await (await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: sellerJwk, code, label: 'Mia helper', webId: seller.webId, url: seller.card.supportedInterfaces[0]!.url }) })).json();
       expect(paired).toMatchObject({ paired: true, badge: { credential: expect.any(String), issuer: expect.stringMatching(/\/a2a$/) } });
-      await seller.sellFor({ badge: paired.badge, payee: { webId: paired.webId, url: paired.badge.issuer } });
-      // Not on its card until it sells: the house's word says which house is its human's.
+      await seller.sellFor({ webId: paired.webId, url: paired.badge.issuer, vouch: paired.badge });
+      // Never on its card: the house's word says which house is its human's (run 39: a stranger found Mia's house by it).
       const seen = async () => (await buyer.find({ q: 'Mia helper' })).find((x) => x.webId === seller.webId)!;
       expect((await seen()).vouched).toBeUndefined();
       // The cart names the house as payee; the payments agent pays it because the seller's card carries the house's word.
       const before = (await ownerCall({ kind: 'panel.money' })).total;
       const cart = await seller.cart(buyer.webId, [{ label: '55 words of candle copy', amount: { currency: 'USD', value: 8 } }]);
-      // Search shows the house's word now, checked by the node (a house is no specialist of the node: not listed).
-      expect((await seen()).vouched).toEqual([{ by: expect.any(String), says: expect.stringMatching(/^may sell for the house /), listed: false }]);
+      // The cart carries it, for the buyer and the payments agent; the card still doesn't.
+      expect(cart.contents.payment_request.method_data[0]!.data).toMatchObject({ payee: { webId: paired.webId, vouch: paired.badge } });
+      expect((await seen()).vouched).toBeUndefined();
       const paid = await buyer.payCart(seller.card.supportedInterfaces[0]!.url, cart, false);
       expect(paid).toMatchObject({ paid: 8, to: paired.webId });
       for (let i = 0; i < 20 && (await ownerCall({ kind: 'panel.money' })).total === before; i++) await new Promise((r) => setTimeout(r, 250));
@@ -1664,9 +1672,10 @@ describe('the weekly shop, priced inside the house', () => {
     const best = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible);
     const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
     expect(accepted).toMatchObject({ status: 'accepted', answer: { kind: 'agreed', what: 'order confirmed', order: best.id, outputs: { total: best.result.outputs.total } } });
-    // Found what it was looking for: the request closes, and the order stays on the owner's list.
+    // Found what it was looking for: no more quotes are asked for, but the house still counts in its group for a day, so a
+    // neighbour deciding later gets the street's price (run 39); the order stays on the owner's list.
     const after = await b.call({ kind: 'panel.market' });
-    expect(after.intents).toEqual([]);
+    expect(after.intents).toEqual([expect.objectContaining({ pack: 'shopping@1', acceptedAt: expect.any(String) })]);
     expect(after.offers.find((o: any) => o.id === best.id)).toMatchObject({ status: 'accepted' });
     const audit = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit'));
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
@@ -1718,8 +1727,13 @@ describe('the weekly shop, priced inside the house', () => {
     const { code } = await b.call({ kind: 'panel.assistant.invite', label: 'Rook' });
     expect((await fetch(`${b.url}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: me.visitor.id.publicJwk, code, label: 'Rook', webId: me.webId, url: me.card.supportedInterfaces[0]!.url }) })).status).toBe(200);
     me.setAllowanceSource(async () => { const r = await asAssistant({ kind: 'assistant.allowance' }); return r.intent ? { ...r.intent, currency: r.currency } : null; });
-    // The owner signs AUD 150 on their phone; the assistant hears of it.
+    // The owner signs AUD 150 on their phone; the assistant hears of it. (First AUD 10: too little for any basket.)
     const kid = String(me.visitor.id.publicJwk.kid);
+    const small = await b.call({ kind: 'panel.allowance.draft', kid, amount: 10, currency: 'AUD', days: 3 });
+    await b.call({ kind: 'panel.allowance.set', id: small.id, credential: await issueCredential({ ...small.draft, validFrom: new Date().toISOString() } as never, b.phone) });
+    const tooDear = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible && o.status === 'open');
+    // Accepting what the assistant may not pay is said first: the shopping list would go out with nothing bought (run 39).
+    expect(await b.call({ kind: 'panel.offer.accept', offer: tooDear.id })).toMatchObject({ code: 'over_allowance', error: expect.stringMatching(/is more than your assistant may spend \(AUD 10\)/) });
     const { id, draft } = await b.call({ kind: 'panel.allowance.draft', kid, amount: 150, currency: 'AUD', days: 3 });
     expect(draft.credentialSubject.budget).toEqual({ currency: 'AUD', amount: 150 });
     await b.call({ kind: 'panel.allowance.set', id, credential: await issueCredential({ ...draft, validFrom: new Date().toISOString() } as never, b.phone) });
@@ -1733,7 +1747,7 @@ describe('the weekly shop, priced inside the house', () => {
     expect((await b.call({ kind: 'list' })).suggestions[0]).toMatchObject({ offer: pick.id });
     await b.call({ kind: 'panel.offer.accept', offer: pick.id });
     for (let i = 0; i < 40 && !news.some((n) => n.about === 'offer.accepted'); i++) await new Promise((r) => setTimeout(r, 250));
-    expect(news.find((n) => n.about === 'allowance')).toMatchObject({ amount: 150, currency: 'AUD' });
+    expect(news.filter((n) => n.about === 'allowance').at(-1)).toMatchObject({ amount: 150, currency: 'AUD' });
     const accepted = news.find((n) => n.about === 'offer.accepted')!;
     expect(accepted).toMatchObject({ offer: pick.id, currency: 'AUD', from: { name: pick.quoter.name }, answer: { kind: 'agreed', order: pick.id } });
     // It pays in AUD, naming the order; dollars are refused (nothing converts).
