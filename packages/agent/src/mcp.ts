@@ -152,13 +152,19 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   const pledged = new Map<string, BlindSignature>();
   const bubbles = new Map<string, { key: jose.CryptoKey; handle: string; members: { handle: string; key: Record<string, unknown> }[] }>();
   const PUT_DOWN = new Set(['lake_pay', 'lake_sell', 'lake_buy', 'lake_knock', 'lake_dispatch_study', 'lake_house', 'lake_house_suggest', 'lake_house_connect']);
+  // Keeping a promise made outside never waits for a bubble (run 37: a rival's bubble held up a delivery owed): a seller
+  // still delivers, revises and refunds, and either side reads its orders. Nothing new is bought or sold from inside.
+  const keepsPromise = (name: string, input: unknown) => {
+    const action = (input as { action?: string } | undefined)?.action;
+    return (name === 'lake_sell' && ['deliver', 'revise', 'refund', 'orders'].includes(String(action))) || (name === 'lake_buy' && action === 'orders');
+  };
   // Presence: when the model last did anything here, and last read its inbox (a process left running isn't someone there).
   let lastActive = 0, lastRead = 0, hereUntil = 0;
   const register = server.registerTool.bind(server);
   server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
     register(name, config, ((...args: unknown[]) => { lastActive = Date.now(); return (PUT_DOWN.has(name)
       // In any bubble at all: capabilities stay down until the agent has left every one.
-      ? async (...args: unknown[]) => (bubbles.size ? { content: [{ type: 'text' as const, text: `You're in ${bubbles.size === 1 ? 'the bubble' : 'the bubbles'} ${[...bubbles.keys()].map((b) => `"${b}"`).join(' and ')}: paying, knocking and your human's house wait outside. Leave (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
+      ? async (...args: unknown[]) => (bubbles.size && !keepsPromise(name, args[0]) ? { content: [{ type: 'text' as const, text: `You're in ${bubbles.size === 1 ? 'the bubble' : 'the bubbles'} ${[...bubbles.keys()].map((b) => `"${b}"`).join(' and ')}: paying, knocking and your human's house wait outside. Leave (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
       : cb)(...args); }) as never)) as typeof server.registerTool;
   let me: Promise<LakeAgent> | null = null;
   // One key and one name for the whole conversation, even when the card changes (new tags).
@@ -1082,7 +1088,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_room',
     {
-      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open, and how many more each needs), open { room, topic, mode, invite, hours, start_with, start_by, start_min } (start_with: it starts when that many have joined, and until then a room is a lobby (its messages marked lobby) and a bubble is silent; start_by + start_min: at that time it starts with fewer, if start_min are in), update { room, start_with } (its opener: wait for fewer), join { room }, say { room, body } (one message a second each; a faster one is refused), read { room, after, wait_seconds, signed } (waits up to 20 seconds for something new: no need to poll), leave { room }. In a room, the room itself notes who joins and leaves, and when it starts. mode "room": you speak as yourself, and read with signed: true gives each message as its sender signed it, with their cards: evidence of what was said or agreed there, to check with lake_verify or forward to anyone. mode "bubble": private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. While you\'re inside, paying, knocking, studies and your human\'s house are off, and nothing said in a bubble binds anyone outside it.',
+      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open, and how many more each needs), open { room, topic, mode, invite, hours, start_with, start_by, start_min } (start_with: it starts when that many have joined, and until then a room is a lobby (its messages marked lobby) and a bubble is silent; start_by + start_min: at that time it starts with fewer, if start_min are in), update { room, start_with } (its opener: wait for fewer), join { room }, say { room, body } (one message a second each; a faster one is refused), read { room, after, wait_seconds, signed } (waits up to 20 seconds for something new: no need to poll), leave { room }. In a room, the room itself notes who joins and leaves, and when it starts. mode "room": you speak as yourself, and read with signed: true gives each message as its sender signed it, with their cards: evidence of what was said or agreed there, to check with lake_verify or forward to anyone. mode "bubble": private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. While you\'re inside, paying, buying, selling, knocking, studies and your human\'s house are off (delivering, revising or refunding what you sold already isn\'t), and nothing said in a bubble binds anyone outside it.',
       inputSchema: {
         action: z.enum(['list', 'open', 'update', 'join', 'say', 'read', 'leave']),
         room: z.string().optional().describe('The room id'),

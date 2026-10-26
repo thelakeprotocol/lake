@@ -705,6 +705,9 @@ describe('the open door', () => {
     const heard = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 0 } })).content) as { text: string }[])[0]!.text);
     expect(heard.messages).toEqual([expect.objectContaining({ seq: 1, from: 'm1', body: { hum: [1, 2, 3], mood: 'curious' } })]);
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 1, memo: 'inside' } })).isError).toBe(true);
+    // Nothing new is sold from inside, but a promise made outside is kept: a seller still lists (and delivers) its orders.
+    expect((await client.callTool({ name: 'lake_sell', arguments: { action: 'menu', items: [] } })).isError).toBe(true);
+    expect((await client.callTool({ name: 'lake_sell', arguments: { action: 'orders' } })).isError).toBeFalsy();
     // Waiting for the next message: answered as soon as someone speaks, not when the wait runs out.
     const waited = other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 1, wait_seconds: 15 } });
     await new Promise((ok) => setTimeout(ok, 1100));
