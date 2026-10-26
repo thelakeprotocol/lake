@@ -70,6 +70,26 @@ export async function verifyOwnerKey(credential: string, houseJwk: JWK, houseWeb
   return { ...s.ownerKey, alg: 'EdDSA' };
 }
 
+/**
+ * A house's word that an agent is its owner's assistant and may sell for it (SPEC §6.5): pinned to the assistant's key,
+ * revocable on the house's status list (taking the assistant's key back sets its bit). A cart the assistant signs can
+ * then name the house as payee, so what it earns is the house's. It widens nothing and moves no money by itself, so the
+ * house's key signs it, not the owner's.
+ */
+export const ASSISTANT_KEY_TYPE = 'LakeAssistantKey';
+
+export function assistantKeyCredential(house: Identity, houseWebId: string, assistant: { webId: string; jkt: string }, status: unknown, days = 30): Promise<string> {
+  const now = Date.now();
+  return issueCredential(
+    {
+      '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', ASSISTANT_KEY_TYPE], issuer: houseWebId,
+      validFrom: new Date(now).toISOString(), validUntil: new Date(now + days * 86_400_000).toISOString(),
+      credentialSubject: { id: assistant.webId, cnf: { jkt: assistant.jkt }, house: houseWebId, may: ['sell'] }, credentialStatus: status,
+    } as never,
+    house,
+  );
+}
+
 /** An allowance the owner signs on their device: what their assistant may spend for them, in which currency, until when (SPEC §6.2). */
 export const allowanceDraft = (houseWebId: string, assistantWebId: string, amount: number, until: Date, status?: unknown, currency = 'USD') => ({
   '@context': ['https://www.w3.org/ns/credentials/v2'],

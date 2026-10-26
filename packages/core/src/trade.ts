@@ -52,7 +52,13 @@ export interface CartParty { url: string; webId: string; jkt: string }
  * whose receipts the seller counts as this cart paid, and the arbiters whose rulings it accepts on it. Inside the signed
  * contents, so the buyer pays (and its payment mandate names the hash of) these very terms.
  */
-export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms }
+export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee }
+
+/**
+ * Who is paid, when not the seller who signs the cart (SPEC §6.5): an owner's assistant sells for its owner's house, so
+ * the house is paid. A payments agent pays it only if the seller's card carries the house's `LakeAssistantKey` badge.
+ */
+export interface CartPayee { webId: string; url: string }
 
 /**
  * What the seller promises about the delivery, signed in the cart (SPEC §6.5): how soon, how long the buyer has to answer
@@ -70,6 +76,8 @@ export interface DeliveryTerms {
   words?: { min?: number; max?: number };
   lines?: { min?: number; max?: number };
 }
+
+const payeeOk = (p: unknown): p is CartPayee => !!p && typeof (p as CartPayee).webId === 'string' && /^https?:\/\//.test((p as CartPayee).webId) && typeof (p as CartPayee).url === 'string' && /^https?:\/\//.test((p as CartPayee).url);
 
 /** What's wrong with delivery terms, if anything. */
 export function deliveryProblems(d: unknown): string[] {
@@ -128,9 +136,9 @@ const partyProblems = (xs: unknown, what: string): string[] => {
 };
 
 /** The payments agents and arbiters a cart names, from its Lake payment method (empty when it names none). */
-export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms } {
+export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee } {
   const data = (contents?.payment_request?.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}) };
+  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}), ...(payeeOk(data?.payee) ? { payee: data!.payee } : {}) };
 }
 const MAX_CART_MINUTES = 24 * 60;
 
@@ -187,7 +195,10 @@ export async function signCart(o: {
   payments?: CartParty[]; arbiters?: CartParty[];
   /** What the seller promises about the delivery. */
   delivery?: DeliveryTerms;
+  /** Who is paid, when not the seller: the house an assistant sells for. */
+  payee?: CartPayee;
 }): Promise<CartMandate> {
+  if (o.payee && !payeeOk(o.payee)) throw new Error('payee: { webId, url }, both http(s) addresses');
   if (!o.items.length || o.items.length > MAX_ITEMS) throw new Error(`a cart holds 1 to ${MAX_ITEMS} items`);
   const currency = o.items[0]!.amount.currency;
   if (o.items.some((x) => x.amount.currency !== currency)) throw new Error('one currency per cart');
@@ -195,7 +206,7 @@ export async function signCart(o: {
   if (cents < 1) throw new Error('a cart costs at least 0.01');
   const minutes = Math.min(Math.max(o.minutes ?? 30, 1), MAX_CART_MINUTES);
   const id = o.id ?? randomUUID();
-  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}) };
+  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}), ...(o.payee ? { payee: o.payee } : {}) };
   const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters'), ...deliveryProblems(terms.delivery)];
   if (problems.length) throw new Error(problems.join('; '));
   const contents: CartContents = {
@@ -216,7 +227,7 @@ export async function signCart(o: {
 }
 
 /** What a checked cart says: who sells, to whom, the total, the hash a payment names, and whom the seller named to settle it. */
-export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms }
+export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee }
 
 /**
  * Checks a cart against the seller's key (from its verified card): the signature, that the JWT's hash is this very
@@ -237,7 +248,7 @@ export async function checkCart(cart: CartMandate, sellerJwk: jose.JWK, now = Da
   if (items.reduce((a, x) => a + Math.round(x.amount.value * 100), 0) !== Math.round(total.amount.value * 100)) throw new Error('the cart\'s lines don\'t add up to its total');
   if (Date.parse(c.cart_expiry) < now) throw new Error(`the cart expired at ${c.cart_expiry}`);
   const data = (c.payment_request.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery)];
+  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery), ...(data?.payee !== undefined && !payeeOk(data.payee) ? ['the cart\'s payee: { webId, url }'] : [])];
   if (problems.length) throw new Error(problems.join('; '));
   return { id: c.id, seller: String(claims.iss), buyer: String(claims.sub), total: total.amount, hash: cartHash(c), expires: c.cart_expiry, items, ...cartTerms(c) };
 }

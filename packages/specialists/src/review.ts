@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  packId, checkCart, isParty, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
+  packId, checkCart, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
@@ -143,7 +143,9 @@ export async function createAuthority(o: SpecialistOptions & { pack: LakePack })
     if (p.kind !== 'authorise') return { kind: 'refused', problems: ['send { kind: "authorise", pack } for yourself, or { kind: "registered", domain } to check anyone'] };
     if (p.pack !== id) return { kind: 'refused', problems: [`this register covers ${id}`] };
     if (!a.register.includes(profile.ownerDomain)) return { kind: 'refused', problems: [`${profile.ownerDomain} is not on the register`] };
-    const credential = await s.vc('LakeAuthorisation', { id: from, domain: profile.ownerDomain, pack: id, scope: 'quote' }, 365);
+    // Pinned to the agent's key as well as its WebID (cnf.jkt, RFC 7800): it can go on that agent's card as a badge, and
+    // one owner's agents share a WebID.
+    const credential = await s.vc('LakeAuthorisation', { id: from, domain: profile.ownerDomain, pack: id, scope: 'quote', cnf: { jkt: await keyThumbprint(profile.publicJwk) } }, 365);
     return { kind: 'approved', credential, notes: [`authorised to quote for ${id}`] };
   });
   return { app: s.app, card: s.card, webId: s.webId };
@@ -176,6 +178,8 @@ interface Hold {
   maxDeliveries?: number;
   /** The latest delivery the seller filed: its sha256 and number (1, then each revision). */
   delivered?: { sha256: string; revision: number; at: number };
+  /** The seller who signed the cart, when another is paid (an assistant selling for its owner's house), and its address. */
+  seller?: string; sellerUrl?: string;
   /** Each dispute, about one delivery, and how it ended. */
   disputes?: { code: DisputeCode; sha256: string; at: number; ended?: string }[];
   /** Before deliveries were filed: the buyer disputed it. */
@@ -289,6 +293,13 @@ export async function createPayments(o: SpecialistOptions & {
         return { kind: 'refused', problems: [(e as Error).message] };
       }
       if (paidCarts.has(cart.hash)) return { kind: 'refused', problems: [`cart ${cart.id} is paid already`] };
+      // Paid to another than its seller only on that payee's word (SPEC §6.5): the seller's card carries the house's
+      // LakeAssistantKey badge, checked against the house's own card and status list.
+      if (cart.payee) {
+        const seller = await verifyLakeCard(c!.card as AgentCard);
+        const ok = (await checkBadges(seller, { sandbox: o.sandbox })).some((b) => b.type === ASSISTANT_KEY_TYPE && b.issuerWebId === cart!.payee!.webId && (b.subject.may as string[] | undefined)?.includes('sell'));
+        if (!ok) return { kind: 'refused', problems: [`cart ${cart.id} names ${cart.payee.webId} as payee, but the seller's card carries no word from it that the seller sells for it: nothing was paid`] };
+      }
       if (payments.length !== 1) return { kind: 'refused', problems: ['one payment per cart'] };
     }
     const checked: { payee: string; amount: number; agreement: string }[] = [];
@@ -302,8 +313,8 @@ export async function createPayments(o: SpecialistOptions & {
         // Whole cents, at least one; and an agent can't pay itself (it would only inflate what looks settled).
         if (x.amount.value < 0.01 || Math.abs(x.amount.value * 100 - Math.round(x.amount.value * 100)) > 1e-6) return { kind: 'refused', problems: [`${currency} ${x.amount.value}: pay at least 0.01, in whole cents`] };
         if (x.id === agentWebId) return { kind: 'refused', problems: ['an agent can\'t pay itself'] };
-        if (cart && (x.id !== cart.webId || x.cart_hash !== cart.hash || Math.round(x.amount.value * 100) !== Math.round(cart.total.value * 100) || (x.amount.currency ?? 'USD') !== cart.total.currency)) {
-          return { kind: 'refused', problems: [`the payment must be exactly the cart: ${cart.total.currency} ${cart.total.value} to its seller, naming its hash`] };
+        if (cart && (x.id !== (cart.payee?.webId ?? cart.webId) || x.cart_hash !== cart.hash || Math.round(x.amount.value * 100) !== Math.round(cart.total.value * 100) || (x.amount.currency ?? 'USD') !== cart.total.currency)) {
+          return { kind: 'refused', problems: [`the payment must be exactly the cart: ${cart.total.currency} ${cart.total.value} to ${cart.payee ? 'the payee it names' : 'its seller'}, naming its hash`] };
         }
         // A plain refund of a cart, once, and never of one whose held payment already went back.
         const refundOf = String(x.agreement ?? '').startsWith('urn:lake:order:refund:') ? String(x.agreement).slice('urn:lake:order:refund:'.length) : undefined;
@@ -337,10 +348,11 @@ export async function createPayments(o: SpecialistOptions & {
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
         const settlementId = randomUUID();
         // Where both sides are reached when it settles: the seller's card came with the cart, the buyer's with this message.
-        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url, amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}) });
+        const sellerUrl = (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url;
+        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: cart!.payee?.url ?? sellerUrl, ...(cart!.payee ? { seller: cart!.webId, sellerUrl } : {}), amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}) });
         return {
           payee: c.payee,
-          credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash } } : {}), intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
+          credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash }, seller: cart.webId } : {}), intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
         };
       }),
     );
@@ -365,10 +377,10 @@ export async function createPayments(o: SpecialistOptions & {
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
     await save();
     const story = { how, ...(h.delivered ? { delivered: h.delivered.sha256, deliveries: h.delivered.revision } : {}), ...(h.disputes?.length ? { disputes: h.disputes.map((d) => ({ code: d.code, ended: d.ended })) } : {}) };
-    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why, ...story }, 3650);
+    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why, ...story }, 3650);
     const logged = o.log ? await o.log(credential, to === 'captured' ? 'capture' : 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
     const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `${to === 'captured' ? 'released' : 'voided'}: ${why}` };
-    for (const url of new Set([h.payeeUrl, h.payerUrl].filter((u): u is string => !!u))) {
+    for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
       void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
     }
     if (to === 'captured') o.onSettled?.(h.amount / 100, 1, { cart: true, released: true, currency: h.currency });
@@ -395,7 +407,7 @@ export async function createPayments(o: SpecialistOptions & {
     const latest = () => !h.delivered ? 'nothing has been delivered yet: the seller delivers first'
       : sha !== h.delivered.sha256 ? `name the delivery you mean by its sha256: the latest is ${h.delivered.sha256} (revision ${h.delivered.revision})` : null;
     if (p.kind === 'delivered') {
-      if (from !== h.payee) return { kind: 'refused', problems: ['only the seller files a delivery'] };
+      if (from !== (h.seller ?? h.payee)) return { kind: 'refused', problems: ['only the seller files a delivery'] };
       if (!/^[0-9a-f]{64}$/.test(sha)) return { kind: 'refused', problems: ['sha256: the hex sha256 of what you delivered'] };
       if (sha === EMPTY_SHA256) return { kind: 'refused', problems: ['that is the sha256 of nothing: an empty delivery is not a delivery'] };
       if (h.delivered?.sha256 === sha) return { kind: 'refused', problems: ['that delivery is filed already'] };
@@ -416,7 +428,7 @@ export async function createPayments(o: SpecialistOptions & {
       return (await finish(h, 'captured', 'accepted', 'the buyer accepted')) as never;
     }
     if (p.kind === 'void') {
-      if (from !== h.payee) return { kind: 'refused', problems: ['only the seller voids it (a refund)'] };
+      if (from !== (h.seller ?? h.payee)) return { kind: 'refused', problems: ['only the seller voids it (a refund)'] };
       if (p.amount === undefined) return (await finish(h, 'voided', 'seller_void', 'the seller refunded it')) as never;
       // Part of it back (run 37: a "not what I ordered" dispute froze the money, and a whole refund was the seller's only
       // way out): the rest stays held, for the buyer to accept, as marketplaces settle such disputes with a partial refund.
@@ -425,10 +437,10 @@ export async function createPayments(o: SpecialistOptions & {
       h.amount -= part;
       spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - part));
       await save();
-      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.payee, intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
+      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
       const logged = o.log ? await o.log(credential, 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
       const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: part / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `part refunded: ${h.currency} ${part / 100}; ${h.currency} ${h.amount / 100} still held` };
-      for (const url of new Set([h.payeeUrl, h.payerUrl].filter((u): u is string => !!u))) {
+      for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
         void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
       }
       return { kind: 'voided', partial: true, hold: h.id, cart: h.cart.id, refunded: part / 100, still_held: h.amount / 100, credential, ...(logged ? { logged } : {}) } as never;

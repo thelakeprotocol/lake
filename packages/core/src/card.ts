@@ -2,6 +2,7 @@ import { generateAgentCardSignature, verifyAgentCardSignature, type AgentCard } 
 import * as jose from 'jose';
 import type { Identity } from './crypto.js';
 import type { MenuItem } from './trade.js';
+import type { Badge } from './badges.js';
 import { LAKE_EXTENSION_URI, LAKE_VERSION } from './lake.js';
 
 export type LakeRole = 'house' | 'specialist' | 'visitor' | 'agent' | 'node';
@@ -21,6 +22,12 @@ export interface LakeProfile {
   packs?: string[];
   /** What this agent sells and for how much (SPEC §6.5): signed with the card, so a price can't be changed in transit. */
   menu?: MenuItem[];
+  /**
+   * Credentials others signed about this agent (SPEC §2.5): a register's authorisation, say, each with the A2A address of
+   * its issuer, whose own card gives the key it checks against. Tags, names and menu labels are the agent's own words; a
+   * badge is someone else's, and counts as far as the reader trusts that issuer.
+   */
+  badges?: Badge[];
   lakeVersion: string;
 }
 

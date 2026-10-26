@@ -437,6 +437,11 @@ describe('the owner', () => {
     // The assistant fetches it from the house and pays under it: the payments agent checks the owner's key by the house's word.
     const mine = await (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'assistant.allowance' }, helper.id, { iss: 'assistant' })) })).json();
     expect(mine).toMatchObject({ amount: 7, currency: 'USD', intent: { credential: signed, owner: expect.any(String) } });
+    // A pledge put in front of the owner: the note carries it, and the panel a Sign button (signing stays the owner's tap).
+    const asHelper = async (payload: Record<string, unknown>) => (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, helper.id, { iss: 'assistant' })) })).json();
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'The street solar pledge binds only if three households sign: I would sign it.', pledge: { tally: `${specialistsUrl}/tally/a2a`, id: 'street-solar' } })).toMatchObject({ ok: true });
+    expect((await ownerCall({ kind: 'list' })).suggestions[0]).toMatchObject({ pledge: { tally: `${specialistsUrl}/tally`, id: 'street-solar' } });
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'x', pledge: { tally: 'not a url', id: 'x' } })).toMatchObject({ error: expect.stringMatching(/^pledge:/) });
     const pay = async (amount: number, currency = 'USD') => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test', currency })] })).reply;
     // Nothing converts: dollars signed for are spent in dollars.
     expect(await pay(3, 'AUD')).toMatchObject({ kind: 'refused', problems: ['the allowance is in USD; this payment is in AUD'] });
@@ -445,6 +450,39 @@ describe('the owner', () => {
     // Taken back: its bit goes up on the house's status list, and payments refuse it at once.
     expect(await ownerCall({ kind: 'panel.allowance.revoke', kid })).toMatchObject({ revoked: true });
     expect(await pay(1)).toMatchObject({ kind: 'refused', problems: ['the owner has taken this allowance back'] });
+  });
+
+  it("an owner's assistant sells for the house: the house vouches for it on its card, carts name the house as payee, and the house is paid (SPEC §6.5)", async () => {
+    const seller = await joinLake({ name: 'Mia helper', domain: 'mia-helper.example', node, port: await freePort(), payments, onMessage: async () => ({ kind: 'received' }) });
+    const buyer = await joinLake({ name: 'Candle shop', domain: 'candles.example', node, port: await freePort(), payments, allowanceUsd: 20, onMessage: async () => ({ kind: 'received' }) });
+    try {
+      const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Mia helper' });
+      const sellerJwk = (await verifyLakeCard(seller.card)).publicJwk;
+      const paired = await (await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: sellerJwk, code, label: 'Mia helper', webId: seller.webId, url: seller.card.supportedInterfaces[0]!.url }) })).json();
+      expect(paired).toMatchObject({ paired: true, badge: { credential: expect.any(String), issuer: expect.stringMatching(/\/a2a$/) } });
+      await seller.sellFor({ badge: paired.badge, payee: { webId: paired.webId, url: paired.badge.issuer } });
+      // Not on its card until it sells: the house's word says which house is its human's.
+      const seen = async () => (await buyer.find({ q: 'Mia helper' })).find((x) => x.webId === seller.webId)!;
+      expect((await seen()).vouched).toBeUndefined();
+      // The cart names the house as payee; the payments agent pays it because the seller's card carries the house's word.
+      const before = (await ownerCall({ kind: 'panel.money' })).total;
+      const cart = await seller.cart(buyer.webId, [{ label: '55 words of candle copy', amount: { currency: 'USD', value: 8 } }]);
+      // Search shows the house's word now, checked by the node (a house is no specialist of the node: not listed).
+      expect((await seen()).vouched).toEqual([{ by: expect.any(String), says: expect.stringMatching(/^may sell for the house /), listed: false }]);
+      const paid = await buyer.payCart(seller.card.supportedInterfaces[0]!.url, cart, false);
+      expect(paid).toMatchObject({ paid: 8, to: paired.webId });
+      for (let i = 0; i < 20 && (await ownerCall({ kind: 'panel.money' })).total === before; i++) await new Promise((r) => setTimeout(r, 250));
+      const money = await ownerCall({ kind: 'panel.money' });
+      expect(money.total - before).toBe(8);
+      expect(money.receipts).toContainEqual(expect.objectContaining({ amount: 8, via: seller.webId }));
+      // Taken back: the badge's bit goes up, and no payments agent pays the house through it any more.
+      expect(await ownerCall({ kind: 'panel.assistant.revoke', kid: sellerJwk.kid })).toMatchObject({ revoked: 1 });
+      const after = await seller.cart(buyer.webId, [{ label: 'more copy', amount: { currency: 'USD', value: 2 } }]);
+      await expect(buyer.payCart(seller.card.supportedInterfaces[0]!.url, after, false)).rejects.toThrow(/carries no word from it that the seller sells for it/);
+    } finally {
+      await seller.close();
+      await buyer.close();
+    }
   });
 
   it('one person, one house: a person stamp, and a people-only pledge counts two houses of one owner once', async () => {
@@ -718,6 +756,10 @@ describe('the open door', () => {
     await new Promise((ok) => setTimeout(ok, 1100));
     // Nobody can look inside a blind bubble, so the connector itself keeps out anything that could count outside.
     expect((await client.callTool({ name: 'lake_room', arguments: { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt } })).isError).toBe(true);
+    // Leaving hands over what was said since the member last read (run 15 lost a message that way), opened for it.
+    await text('lake_room', { action: 'say', room: 'jam', body: 'bye for now' });
+    const otherLeft = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'jam' } })).content) as { text: string }[])[0]!.text);
+    expect(otherLeft).toMatchObject({ kind: 'room.left', unread: [expect.objectContaining({ seq: 3, from: 'm1', body: 'bye for now' })] });
     // Blind: the rooms agent holds only ciphertext; members' keys there are fresh for this bubble, not their cards' keys.
     const stored = JSON.parse(await readFile(join(dir, 'specialists', 'rooms', 'rooms.json'), 'utf8')).find((r: { id: string }) => r.id === 'jam');
     expect(stored.said.every((m: { body: { sealed?: unknown } }) => !!m.body.sealed)).toBe(true);
@@ -743,6 +785,9 @@ describe('the open door', () => {
     expect(left).toMatchObject({ kind: 'room.left' });
     // Its own record for a dispute: what it sent, each with the other side's signed reply.
     const record = await text('lake_inbox', { history: true });
+    // History narrows by kind or sender, and says what it left out.
+    expect(await text('lake_inbox', { history: true, kind: 'no-such-kind' })).toEqual({ received: [], sent: [] });
+    expect(await text('lake_inbox', { history: true, limit: 1 })).toMatchObject({ left_out: { sent: expect.any(Number) }, note: expect.stringMatching(/newest 1 of each/) });
     expect(record.sent.length).toBeGreaterThan(0);
     expect(record.sent.at(-1).reply.envelope).toBeDefined();
     // A signed reading of the node's counters, for a bet or a contract to name.

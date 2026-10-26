@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, keyThumbprint, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -263,6 +263,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     loadAllowances: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/allowances.json`); return r.ok ? r.json() : []; },
     // The house vouches for its owner's key (for a payments agent checking an allowance); it never signs money itself.
     vouchOwner: (ownerJwk) => ownerKeyCredential(id, owner.webId, ownerJwk, 1),
+    vouchAssistant: async (a, status) => assistantKeyCredential(id, owner.webId, { webId: a.webId, jkt: await keyThumbprint(a.jwk) }, status),
     card: () => card,
     statusUrl: () => keeperRef!.statusUrl,
     loadAssistants: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/assistants.json`); return r.ok ? r.json() : []; },
@@ -425,8 +426,9 @@ function panelFor(x: {
     const receipts = files.map((f) => {
       const vc = receiptCache.get(f)?.vc;
       const s = vc?.credentialSubject;
-      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
-    }).filter(Boolean) as { amount: number; at: string }[];
+      // Sold by the owner's assistant for this house (SPEC §6.5): the receipt names it as seller.
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.seller && s.seller !== owner.webId ? { via: String(s.seller) } : {}) } : null;
+    }).filter(Boolean) as { amount: number; at: string; settlement: string }[];
     // On a leased house, money is counted from this owner's claim: the last owner's earnings were never theirs.
     const since = x.desk().claimedAt();
     if (since) receipts.splice(0, receipts.length, ...receipts.filter((r) => Date.parse(r.at) >= since));
@@ -436,7 +438,8 @@ function panelFor(x: {
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
-    return { total: receipts.reduce((n, r) => n + r.amount, 0), receipts, spent };
+    // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
+    return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
   return {
     async overview(tzOffset?: number) {

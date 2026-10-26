@@ -65,7 +65,8 @@ export async function createArbiter(o: SpecialistOptions & { payments?: string[]
         const sub = vc.credentialSubject as unknown as { id: string; payer?: string; amount: { value: number; currency?: string }; cart?: { id: string; hash: string } };
         const status = await checkCredentialStatus(vc as never).catch(() => ({ checked: false as const }));
         if (status.checked && status.revoked) throw new Error('the receipt was revoked');
-        paid = sub.cart?.hash === cart.hash && sub.id === cart.seller && sub.payer === cart.buyer && Math.round(sub.amount.value * 100) === Math.round(cart.total.value * 100) && (sub.amount.currency ?? 'USD') === cart.total.currency;
+        // Paid to the seller, or to the payee the seller named in the cart (a house its assistant sells for).
+        paid = sub.cart?.hash === cart.hash && sub.id === (cart.payee?.webId ?? cart.seller) && sub.payer === cart.buyer && Math.round(sub.amount.value * 100) === Math.round(cart.total.value * 100) && (sub.amount.currency ?? 'USD') === cart.total.currency;
         if (paid) facts.push(`paid: ${cart.total.currency} ${cart.total.value}, receipt signed by ${signer.ownerDomain}`);
       } catch {
         // a receipt that doesn't check is simply not proof of payment

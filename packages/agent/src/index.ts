@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type Badge, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
@@ -95,7 +95,7 @@ export interface LakeAgent {
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
   /** Agents registered with this agent's own node come first; one a peer Lake lists says which (`lake`: that peer node). */
-  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string; /** Listed by a peer Lake this agent's node follows (SPEC §9): that peer's address. Absent for its own Lake's. */ lake?: string }[]>;
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string; /** Listed by a peer Lake this agent's node follows (SPEC §9): that peer's address. Absent for its own Lake's. */ lake?: string; /** Its badges that checked, and whether this Lake lists their issuer (SPEC §2.5). */ vouched?: { by: string; says: string; listed: boolean }[]; /** Claims in its own words that look like someone else's. */ own_words?: string[] }[]>;
   /** The payments agent this agent pays through and checks receipts against, pinned by its card's key; null if unreachable. */
   paymentsAgent(): Promise<CartParty | null>;
   /** The arbiters this agent accepts (its own first), pinned by key. */
@@ -121,7 +121,7 @@ export interface LakeAgent {
    * nothing backs it but the signature and the payer's word.
    */
   /** `order`: an order id, or the sha256 of what was delivered; the payment and its receipt name it. */
-  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string; hold?: boolean; releaseAfterHours?: number }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string; hold?: boolean; releaseAfterHours?: number; payee?: CartPayee }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
   /**
    * Pay a cart a seller signed (SPEC §6.5): checked against the seller's card at `sellerUrl`, paid for exactly its total in
    * its currency, under this agent's allowance; the receipt names the cart and goes to the seller.
@@ -133,6 +133,11 @@ export interface LakeAgent {
   payCart(sellerUrl: string, cart: CartMandate, hold?: boolean, releaseAfterHours?: number): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string; cart: string; hold?: { id: string; until: string } }>;
   /** What this agent sells (SPEC §6.5): on its signed card, so search finds it and nobody can change a price in transit. */
   setMenu(menu: MenuItem[]): Promise<void>;
+  /**
+   * Sell for a house (SPEC §6.5): its badge (its word that this agent is its owner's assistant) goes on this card, and carts
+   * this agent signs name the house as payee. null: sell for itself again.
+   */
+  sellFor(house: { badge: Badge; payee: CartPayee } | null): Promise<void>;
   /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
   cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string, sku?: string, delivery?: DeliveryTerms): Promise<CartMandate>;
   /**
@@ -161,8 +166,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const quietMe = () => !!(lakeProfile(visitor.card)?.tags ?? []).includes('quiet');
   // Same identity, a card that also lists what this agent is up for.
   let menu: MenuItem[] = [];
+  let badges: Badge[] = [];
+  let sellingFor: CartPayee | undefined;
+  // The house's word, kept until this agent sells: on its card it says which house is its human's, so it goes there only
+  // with a menu or a cart (run 34b's assistant wouldn't tell a stranger which house was Mia's; a shopfront has to).
+  let houseBadge: Badge | undefined;
   let lastTags: string[] = o.tags ?? [], lastAbout: string | undefined;
-  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags, ...(menu.length ? { menu } : {}) } }, id), id);
+  const tagged = async (tags: string[], about?: string) => signCard(buildCard({ name: o.name, description: `An agent acting for ${o.domain}.${about ? ` ${about}` : ''}`, url: `${base}/a2a`, skills: [{ id: 'study', name: 'Studies', description: 'Asks houses to join studies' }, { id: 'messages', name: 'Messages', description: 'Takes signed messages from other agents' }], profile: { role: 'visitor', webId: `https://${o.domain}/#agent`, ownerDomain: o.domain, tags, ...(menu.length ? { menu } : {}), ...(badges.length ? { badges } : {}) } }, id), id);
   if (o.tags?.length) visitor.card = await tagged(o.tags);
   const nodes = o.node.split(',').map((u) => u.trim().replace(/\/$/, '')).filter(Boolean);
 
@@ -214,10 +224,11 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     domain: o.domain,
     async find(q = {}) {
       const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
-      let found: { card: AgentCard; active?: string; until?: string; via?: string }[] | null = null;
+      type Found = { card: AgentCard; active?: string; until?: string; via?: string; vouched?: { by: string; says: string; listed: boolean }[]; own_words?: string[] };
+      let found: Found[] | null = null;
       for (const node of nodes) {
         try {
-          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard; active?: string; until?: string; via?: string }[];
+          found = (await (await fetch(`${node}/cards?${params}`, { signal: AbortSignal.timeout(5000) })).json()) as Found[];
           break;
         } catch {
           // try the next node
@@ -226,10 +237,10 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (!found) throw new Error('no Lake node reachable');
       // A federated node lists its peers' agents too: two Lakes each run a payments agent, an arbiter, a log… Its own Lake's
       // come first, so a lookup by skill gets the one this agent's Lake runs; a peer's says which Lake it is from.
-      return found.sort((a, b) => Number(!!a.via) - Number(!!b.via)).map(({ card, active, until, via }) => {
+      return found.sort((a, b) => Number(!!a.via) - Number(!!b.via)).map(({ card, active, until, via, vouched, own_words }) => {
         const p = card.capabilities?.extensions?.[0]?.params as { role: string; webId: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
-        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(vouched?.length ? { vouched } : {}), ...(own_words?.length ? { own_words } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,
@@ -267,7 +278,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       // At least a cent, in whole cents: no dust, and no rounding drift in anyone's balance.
       if (!(amount >= 0.01) || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-6) throw new Error('pay at least 0.01, in whole hundredths');
       const payeeCard = (await (await fetch(cardUrlFor(agentUrl))).json()) as AgentCard;
-      const payee = lakeProfile(payeeCard)?.webId;
+      // A cart can name another payee than its seller: the house an owner's assistant sells for.
+      const payee = cart?.payee?.webId ?? lakeProfile(payeeCard)?.webId;
       if (!payee) throw new Error(`no Lake agent at ${agentUrl}`);
       if (payee === visitor.webId) throw new Error('paying yourself moves nothing; pay another agent');
       if (!isCurrency(unit)) {
@@ -304,7 +316,10 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const receipt = settled.receipts[0].credential as string;
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
       // The payee gets the signed receipt; its inbox shows it like any other message.
-      await ask(agentUrl, visitor, { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}), ...(cart ? { cart: order } : {}) });
+      const told = { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}), ...(cart ? { cart: order } : {}) };
+      await ask(agentUrl, visitor, told);
+      // And the house it was paid to, when that is not the seller: it files the receipt with the owner's money.
+      if (cart?.payee) await ask(cart.payee.url, visitor, told).catch(() => {});
       if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount, unit }));
       return { paid: amount, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
     },
@@ -338,13 +353,22 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const problems = menuProblems(items);
       if (problems.length) throw new Error(problems.join('; '));
       menu = items;
+      if (houseBadge) badges = menu.length ? [houseBadge] : [];
       await self.setTags(lastTags, lastAbout);
     },
+    async sellFor(house) {
+      houseBadge = house?.badge;
+      sellingFor = house?.payee;
+      const shown = house && menu.length ? [house.badge] : [];
+      if (JSON.stringify(shown) !== JSON.stringify(badges)) { badges = shown; await self.setTags(lastTags, lastAbout); }
+    },
     async cart(buyerWebId, items, minutes, brief, sku, delivery) {
+      // Selling for the house: its word goes on the card now, where the payments agent checks it.
+      if (houseBadge && !badges.length) { badges = [houseBadge]; await self.setTags(lastTags, lastAbout); }
       // Ordered from the menu: the cart names it (its digest, as on this card) and the item, inside what the seller signs,
       // with the item's delivery terms unless this cart gives its own.
       const item = sku ? menu.find((m) => m.sku === sku) : undefined;
-      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(item ? { menu: { items: menu, sku: item.sku } } : {}), ...(await sellerTerms()), ...(delivery ?? item?.delivery ? { delivery: delivery ?? item?.delivery } : {}) });
+      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(item ? { menu: { items: menu, sku: item.sku } } : {}), ...(await sellerTerms()), ...(delivery ?? item?.delivery ? { delivery: delivery ?? item?.delivery } : {}), ...(sellingFor ? { payee: sellingFor } : {}) });
     },
     async payCart(sellerUrl, cart, hold, releaseAfterHours) {
       const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;
@@ -364,7 +388,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         const strangers = c.arbiters.filter((x) => !accepted.some((y) => y.webId === x.webId && y.jkt === x.jkt));
         if (strangers.length) throw new Error(`cart ${c.id} names ${strangers.map((x) => x.url).join(', ')} to rule on it, an arbiter you don't accept (you accept ${accepted.map((x) => x.url).join(', ') || 'none'}), so nothing was paid`);
       }
-      const r = await self.pay(sellerUrl, c.total.value, `cart ${c.id}`, c.total.currency, c.id, { mandate: cart, card: sellerCard, hash: c.hash, detailsId: cart.contents.payment_request.details.id, hold, releaseAfterHours });
+      const r = await self.pay(sellerUrl, c.total.value, `cart ${c.id}`, c.total.currency, c.id, { mandate: cart, card: sellerCard, hash: c.hash, detailsId: cart.contents.payment_request.details.id, hold, releaseAfterHours, ...(c.payee ? { payee: c.payee } : {}) });
       const sub = JSON.parse(Buffer.from(r.receipt.split('.')[1] ?? '', 'base64url').toString()).credentialSubject as { settlement?: string; settlementId?: string; heldUntil?: string } | undefined;
       return { ...r, cart: c.id, ...(sub?.settlement === 'held' ? { hold: { id: String(sub.settlementId), until: String(sub.heldUntil) } } : {}) };
     },

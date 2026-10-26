@@ -1,4 +1,4 @@
-import { canonicalize, cardUrlFor, menuProblems, proveDomain, verifyLakeCard, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { canonicalize, cardUrlFor, badgeProblems, checkBadges, keyThumbprint, menuProblems, ownWordClaims, proveDomain, verifyLakeCard, type AgentCard, type CheckedBadge, type LakeProfile } from '@thelakeprotocol/core';
 
 export interface Entry {
   /** Short, stable id the map and events use: role plus the start of the key id. */
@@ -17,7 +17,15 @@ export interface Entry {
   lastActive?: number;
   /** Until when it says it will be around. */
   hereUntil?: number;
+  /** Its key's RFC 7638 thumbprint: what a badge its issuer signed names it by. */
+  jkt: string;
+  /** Its badges that checked (SPEC §2.5), checked here once and again now and then, not by every reader on every search. */
+  vouched?: CheckedBadge[];
+  vouchedAt?: number;
 }
+
+/** A badge as search shows it: who vouches, what for, and whether that issuer is one of this node's own specialists. */
+export interface Vouch { by: string; says: string; listed: boolean }
 
 export type Refusal = { code: 'not-lake' | 'forged-card' | 'domain' | 'unreachable' | 'card-mismatch' | 'reserved'; why: string };
 
@@ -42,6 +50,7 @@ export class Registry {
     }
     // A menu others will order from must make sense: a search shows it as it is.
     if (profile.menu !== undefined && menuProblems(profile.menu).length) return { ok: false, refusal: { code: 'not-lake', why: menuProblems(profile.menu).join('; ') } };
+    if (badgeProblems(profile.badges).length) return { ok: false, refusal: { code: 'not-lake', why: badgeProblems(profile.badges).join('; ') } };
     const claimed = via === 'direct' ? this.claims(card, profile) : undefined;
     if (claimed) return { ok: false, refusal: { code: 'reserved', why: claimed } };
     const proof = await proveDomain(profile, { sandbox: this.o.sandbox });
@@ -65,9 +74,29 @@ export class Registry {
     // One live card per WebID: a newer card (a rotated key) replaces the old one.
     const replaced: Entry[] = [];
     for (const [old, e] of this.entries) if (e.profile.webId === profile.webId && old !== id) { this.entries.delete(old); replaced.push(e); }
-    const entry: Entry = { id, label: card.name, card, profile, domainVia: proof.via, registeredAt: new Date().toISOString(), url, via, lastSeen: Date.now() };
+    const entry: Entry = { id, label: card.name, card, profile, domainVia: proof.via, registeredAt: new Date().toISOString(), url, via, lastSeen: Date.now(), jkt: await keyThumbprint(profile.publicJwk), ...(profile.badges?.length ? { vouched: await checkBadges(profile, { sandbox: this.o.sandbox }), vouchedAt: Date.now() } : {}) };
     this.entries.set(id, entry);
     return { ok: true, entry, replaced };
+  }
+
+  /**
+   * What search shows about an entry's claims (SPEC §2.5): its badges that checked, each marked listed when its issuer is a
+   * specialist registered here directly with that very key (the node's own list of issuers, like a trust anchor's trust
+   * mark issuers); and the claims in its own words that look like someone else's (approval words, other agents' names).
+   */
+  claimsOf(e: Entry): { vouched?: Vouch[]; own_words?: string[] } {
+    const issuers = new Map([...this.entries.values()].filter((x) => x.via === 'direct' && x.profile.role === 'specialist').map((x) => [x.url, x]));
+    const vouched = (e.vouched ?? []).map((b) => ({ by: b.by, says: b.says, listed: issuers.get(b.issuer)?.jkt === b.jkt }));
+    const own = ownWordClaims({ name: e.card.name, description: e.card.description, menu: e.profile.menu }, [...this.entries.values()].filter((x) => x !== e).map((x) => x.card.name));
+    return { ...(vouched.length ? { vouched } : {}), ...(own.length ? { own_words: own } : {}) };
+  }
+  /** Badges are checked again now and then: an issuer may have revoked one, or it may have expired. */
+  async recheck(maxAgeMs = 30 * 60_000) {
+    for (const e of this.entries.values()) {
+      if (!e.profile.badges?.length || Date.now() - (e.vouchedAt ?? 0) < maxAgeMs) continue;
+      e.vouched = await checkBadges(e.profile, { sandbox: this.o.sandbox }).catch(() => e.vouched);
+      e.vouchedAt = Date.now();
+    }
   }
 
   /**

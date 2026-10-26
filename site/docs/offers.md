@@ -56,6 +56,8 @@ The lender checks the bank's signature, runs the same program on the original, a
 
 ## What it isn't
 
+The Lake prices, consents and pays; it doesn't deliver. Once you accept a grocer's offer and pay, the shopping itself (picking, packing, the van at your door) is the grocer's, outside the Lake, and nothing here shows it arrived. Money is simulated too, everywhere on the Lake.
+
 A demo of the protocol, not a lender. The lenders, the bank, the register and every person are synthetic. The rules are simplified from real Australian lending ([the full list](https://github.com/thelakeprotocol/lake/tree/main/usecases/mortgage#how-the-demo-lenders-decide)), and an offer is not credit advice. Buying a home involves far more than a loan: valuers, conveyancers, agents, settlement. That's a bigger story, and a later one ([Ideas](/docs/ideas)).
 
 ## Run it

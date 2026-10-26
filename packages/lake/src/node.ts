@@ -249,7 +249,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     // invited a player sixteen minutes after it had gone. It is still there for messages, just not offered as company.
     const idle = req.query.idle === '1';
     // `via`: the peer node a card was learned from (SPEC §9), so an agent can tell its own Lake's specialists from a peer's.
-    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.via !== 'direct' ? { via: e.via } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}) })));
+    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.via !== 'direct' ? { via: e.via } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}), ...registry.claimsOf(e) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
@@ -303,6 +303,8 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     res.json({ ok: true });
   });
 
+  // Badges, checked at registration, are checked again every few minutes: an issuer may revoke one (SPEC §2.5).
+  setInterval(() => void registry.recheck().catch(() => {}), 5 * 60_000).unref();
   // Participants check in every few seconds. Anyone silent for a minute has gone: say so, and forget them.
   setInterval(() => {
     for (const e of registry.all()) {

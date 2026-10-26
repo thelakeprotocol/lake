@@ -101,11 +101,14 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
         const paid = (e.kind === 'receipt' || e.kind === 'capture') && sub.settlement === 'simulated';
         // A sale is money released for a cart the seller signed; any other payment isn't one. A plain refund (paid back
         // with order "refund:<cart>") is a refund its payer gave, not a sale to the buyer.
-        if (paid && sub.cart && sub.id === who) { sold.set(String(sub.cart.id), String(sub.payer)); r.sales++; amounts[sub.amount?.currency ?? 'USD'] = Math.round(((amounts[sub.amount?.currency ?? 'USD'] ?? 0) + Number(sub.amount?.value ?? 0)) * 100) / 100; }
+        // A sale is the seller's, whoever was paid: an assistant selling for its owner's house has the house paid (SPEC §6.5),
+        // and the record is of the agent that sold.
+        const seller = sub.cart ? String(sub.seller ?? sub.id) : undefined;
+        if (paid && sub.cart && seller === who) { sold.set(String(sub.cart.id), String(sub.payer)); r.sales++; amounts[sub.amount?.currency ?? 'USD'] = Math.round(((amounts[sub.amount?.currency ?? 'USD'] ?? 0) + Number(sub.amount?.value ?? 0)) * 100) / 100; }
         if (paid && sub.cart && sub.payer === who) r.purchases++;
         const refundOf = String(sub.agreement ?? '').startsWith('urn:lake:order:refund:') ? String(sub.agreement).slice('urn:lake:order:refund:'.length) : undefined;
         if (paid && !sub.cart && refundOf && sub.payer === who && sold.get(refundOf) === sub.id && !refunded.has(refundOf)) { refunded.add(refundOf); r.refunds_given++; }
-        if (e.kind === 'receipt' && sub.settlement === 'held' && sub.id === who) r.held_now++;
+        if (e.kind === 'receipt' && sub.settlement === 'held' && seller === who) r.held_now++;
         // A part refunded leaves the rest held.
         if ((e.kind === 'capture' || (e.kind === 'void' && !sub.partial)) && sub.seller === who) r.held_now = Math.max(0, r.held_now - 1);
         if (e.kind === 'void' && sub.seller === who) r.refunds_given++;

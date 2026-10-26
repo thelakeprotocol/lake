@@ -644,7 +644,7 @@ function allowanceForm(a: Assistant): Node {
 const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
-type Note = { id: string; from: string; text: string; at: string; offer?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string } };
 function suggestionList(list: Note[]): Node {
   return h('ul', { class: 'rows' }, ...list.map((x) => h('li', {},
     h('div', {}, h('div', { class: 'r-title' }, x.text), h('div', { class: 'r-meta' }, `${x.from} · ${time(x.at)}`)),
@@ -656,6 +656,14 @@ function suggestionList(list: Note[]): Node {
         if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
         void show();
       } }, 'Accept the offer') : '',
+      // Likewise a pledge: signing it is your tap, with your house's key (and your person stamp, for a people-only one).
+      x.pledge ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
+        (e.target as HTMLButtonElement).disabled = true;
+        const r = await call<{ error?: string }>({ kind: 'panel.pledge.sign', tally: x.pledge!.tally, id: x.pledge!.id });
+        if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
+        else alert(r.error);
+        void show();
+      } }, 'Sign the pledge') : '',
       ' ',
       h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.dismiss', id: x.id }); void show(); } }, 'Dismiss')))));
 }

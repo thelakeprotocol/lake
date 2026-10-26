@@ -85,8 +85,8 @@ export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: s
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
-export interface Suggestion { id: string; from: string; text: string; request?: string; offer?: string; at: string }
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent']);
+export interface Suggestion { id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note. */ pledge?: { tally: string; id: string }; at: string }
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -134,6 +134,8 @@ export class OwnerDesk {
       loadAllowances?: () => Promise<Allowance[]>;
       /** The house's word that a key is its owner's (for a payments agent), its card, and its status list's address. */
       vouchOwner?: (ownerJwk: JWK) => Promise<string>;
+      /** The house's word that a paired assistant may sell for it (a LakeAssistantKey), with its bit on the status list. */
+      vouchAssistant?: (a: { webId: string; jwk: JWK }, status: unknown) => Promise<string>;
       card?: () => AgentCard;
       statusUrl?: () => string;
       loadStatus?: () => Promise<Record<string, number>>;
@@ -329,6 +331,17 @@ export class OwnerDesk {
     return n;
   }
 
+  /**
+   * A badge for a paired assistant's card (SPEC §6.5): the house's word that it may sell for this house, pinned to its
+   * key, with its own bit on the status list, set when the owner takes the assistant's key back.
+   */
+  private async assistantBadge(a: AssistantKey): Promise<{ credential: string; issuer: string } | undefined> {
+    const issuer = this.o.card?.().supportedInterfaces?.[0]?.url;
+    if (!a.webId || !this.o.vouchAssistant || !this.o.statusUrl || !issuer) return undefined;
+    const status = statusEntry(this.o.statusUrl(), await this.statusIndex(`assistant:${a.kid}`));
+    return { credential: await this.o.vouchAssistant({ webId: a.webId, jwk: a.jwk }, status), issuer };
+  }
+
   /** /owner: the approvals app (static) and its API. */
   router(appDir?: string): express.Router {
     const r = express.Router();
@@ -359,7 +372,8 @@ export class OwnerDesk {
       const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
-      res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY] });
+      const badge = await this.assistantBadge(a).catch(() => undefined);
+      res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY], ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
     });
 
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
@@ -380,7 +394,7 @@ export class OwnerDesk {
       if (assistant) {
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         if (p.kind === 'assistant.suggest') {
-          const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string };
+          const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string } };
           const text = String(q.text ?? '').trim().slice(0, 1500);
           // An assistant that got something wrong takes its own note back; an empty text with replaces just withdraws it.
           const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
@@ -401,7 +415,15 @@ export class OwnerDesk {
             if (hits.length !== 1) return void res.status(404).json({ error: hits.length ? 'that matches several offers; give more of the id' : 'no offer with that id (lake_house { view: "offers" })' });
             offer = hits[0];
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), at: new Date().toISOString() };
+          // A pledge for the owner to sign: a street's "nobody goes first" plan needs the owner's own signature (run 34b and 38
+          // had no way to put one in front of the owner). Signing stays the owner's tap, on the owner's key.
+          let pledge: Suggestion['pledge'];
+          if (q.pledge) {
+            const tally = String(q.pledge.tally ?? '').replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+            if (!/^https?:\/\/\S+$/.test(tally) || !q.pledge.id) return void res.status(400).json({ error: 'pledge: { tally: the tally\'s address, id: the pledge\'s id }' });
+            pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
+          }
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
@@ -414,6 +436,10 @@ export class OwnerDesk {
           } catch (e) {
             return void res.status(400).json({ error: (e as Error).message });
           }
+        }
+        if (p.kind === 'assistant.badge') {
+          const badge = await this.assistantBadge(assistant);
+          return void res.json(badge ? { badge } : { badge: null, why: 'this house can\'t vouch for you: pair again with your Lake WebID' });
         }
         if (p.kind === 'assistant.allowance') {
           // What this assistant may spend for its human: the owner's signed mandate, the house's card and its word for the
@@ -431,6 +457,9 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.assistant.revoke') {
         const kid = String((p as unknown as { kid?: string }).kid ?? '');
+        // Its badge goes with its key: the bit on the status list is set, so no payments agent pays the house through it.
+        for (const k of kid === 'all' ? [...this.assistants.keys()] : [kid]) if (this.assistants.has(k)) this.revokedIds.add(`assistant:${k}`);
+        await this.o.saveRevoked([...this.revokedIds]);
         const gone = kid === 'all' ? this.assistants.size : Number(this.assistants.delete(kid));
         if (kid === 'all') this.assistants.clear();
         await this.o.saveAssistants?.([...this.assistants.values()]);

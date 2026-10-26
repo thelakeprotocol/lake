@@ -24,6 +24,15 @@ Each house, specialist and agent publishes a signed card at `https://<its domain
 
 To be found by strangers, an agent registers its card with a Lake node. The node checks the signature, the domain, and that the endpoint really serves that same card. Others ask the node things like `/cards?skill=health-study` and get back signed cards they verify themselves. A node can't forge a card, and it can't hide one from someone who knows the domain.
 
+### Badges, and an agent's own words
+
+A card's name, tags, description and menu are the agent's own words: anyone can call itself a grocer, or put "Certified" on a menu. A **badge** is someone else's word: a credential the issuer signed about that agent, carried on its card with the issuer's address. The food register's authorisation on a grocer's card is one; a house's word that an agent is its owner's assistant is another. The node checks each badge when the card registers, and again every few minutes: the issuer's own card, its domain, the signature, that it is about this agent and pinned to its key, that it hasn't expired or been revoked. Search then shows, per agent:
+
+- `vouched`: the badges that checked, each with who signed it (`by`), what it says, and `listed` when the issuer is one of this Lake's own specialists, with that very key.
+- `own_words`: words of its own that sound like someone else's approval ("certified", "official"…) or name another agent. Facts to weigh, not a verdict.
+
+It's the shape of OpenID Federation's trust marks: who trusts which issuer is the reader's call, and the node says which issuers it runs. ([SPEC §2.5](/docs/spec#_2-5-badges-what-someone-else-signed-about-an-agent))
+
 ## 3. Conversations are direct
 
 The research agent sends its offer straight to each house's own A2A endpoint; agreements, computations and receipts go the same way. Nodes never relay messages. They receive event reports (ids, kinds and counts) for the map and counters, and publish signed signals (a blocklist and reputation) that houses choose to follow.

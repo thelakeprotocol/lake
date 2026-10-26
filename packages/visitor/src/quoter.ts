@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import {
   buildCard, generateIdentity, GROUP_SIZE, lakeAgentApp, LakeLinks, loadOrCreateIdentity, pack as packOf, ReplayGuard, runProgram, sendLake, signCard, signIntentMandate, signMessage,
   signPaymentMandate, verifyCredential, verifyLakeCard, verifyLakeData,
-  type AgentCard, type Claim, type Attachment, type Identity, type LakeData, type QuoterExample,
+  type AgentCard, type Badge, type Claim, type Attachment, type Identity, type LakeData, type QuoterExample,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
 import { makeHuman } from './dispatch.js';
@@ -45,11 +45,12 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
   if (!p) throw new Error(`no pack ${ex.program.pack} loaded`);
   const id: Identity = o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity();
   const webId = o.webId ?? `${o.publicUrl.replace(/\/$/, '')}/#agent`;
-  const card = await signCard(buildCard({
+  const cardWith = (badges?: Badge[]) => signCard(buildCard({
     name: ex.name, description: `Quotes for ${p.title.toLowerCase()} intents. Its program runs inside your house; only you see the result.`,
     url: `${o.publicUrl}/a2a`, skills: [{ id: `${p.id}-quote`, name: `${p.title} quotes`, description: ex.program.title }],
-    profile: { role: 'agent', webId, ownerDomain: ex.domain, tags: [p.id] },
+    profile: { role: 'agent', webId, ownerDomain: ex.domain, tags: [p.id], ...(badges ? { badges } : {}) },
   }, id), id);
+  let card = await cardWith();
   const me: Visitor = { id, card, webId, domain: ex.domain };
   const log = o.log ?? (() => {});
 
@@ -58,6 +59,10 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
   const authorised = await untilReachable(() => ask(`${o.authority}/a2a`, me, { kind: 'authorise', pack: ex.program.pack }), o.authoriseWithinMs ?? 180_000, (e, wait) => log(`${ex.name}: the authority isn't answering yet (${e.message.slice(0, 80)}); again in ${Math.round(wait / 1000)} s`));
   if (authorised.reply.kind !== 'approved') throw new Error(`${ex.name} not authorised: ${(authorised.reply.problems ?? []).join('; ')}`);
   const authorisation: Attachment = { credential: authorised.reply.credential, card: await cardOf(o.authority) };
+  // On its card too, as a badge: anyone searching sees the register vouches for it, not just a house that asks (run 23:
+  // anyone could tag itself a grocer).
+  card = await cardWith([{ credential: authorised.reply.credential, issuer: `${o.authority}/a2a` }]);
+  me.card = card;
   const certified = await untilReachable(() => ask(`${o.auditor}/a2a`, me, { kind: 'audit-program', program: ex.program }), o.authoriseWithinMs ?? 180_000, () => {});
   if (certified.reply.kind !== 'certified') throw new Error(`${ex.name}'s program not certified: ${(certified.reply.problems ?? []).join('; ')}`);
   const certificate: Attachment = { credential: certified.reply.credential, card: await cardOf(o.auditor) };
