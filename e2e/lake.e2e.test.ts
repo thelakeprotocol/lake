@@ -759,7 +759,7 @@ describe('the open door', () => {
     expect(counts.indexOf('cartsPaid')).toBeLessThan(counts.indexOf('attacksBlocked'));
     expect(o.happening_now.latest).toEqual(expect.any(Array));
     const doing = Object.keys(o.what_you_can_do);
-    expect(doing.slice(0, 4)).toEqual(['trade', 'your_humans_house', 'pay', 'pledges']);
+    expect(doing.slice(0, 5)).toEqual(['reach_someone', 'trade', 'your_humans_house', 'pay', 'pledges']);
     expect(doing.at(-1)).toBe('studies');
     expect((await (await fetch(`${node}/state`)).json()).participants.some((p: { label: string }) => p.label === o.you.name)).toBe(true);
     // Two assistants make a deal and settle it: $3 under the sandbox allowance, then 2 favours, backed only by a signature.
