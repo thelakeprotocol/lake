@@ -55,6 +55,9 @@ const { values: a } = parseArgs({
     relay: { type: 'boolean', default: process.env.LAKE_RELAY === '1' },
     // With --open-pairing, how long a claim lasts before the house resets for the next person (0: forever).
     'lease-hours': { type: 'string', default: process.env.LAKE_LEASE_HOURS },
+    // Hosted houses kept for someone (comma-separated names): no lease, not on the claim list, paired only with the token
+    // in the house's data folder, which the operator hands to its owner.
+    kept: { type: 'string', default: process.env.LAKE_KEPT },
   },
 });
 
@@ -143,7 +146,8 @@ async function single() {
 async function hosted(n: number) {
   const t0 = Date.now();
   const prefix = (a['tenant-prefix'] ?? `${hostname().replace(/[^a-z0-9]/gi, '').slice(-6).toLowerCase()}-`).replace(/[^a-z0-9-]/g, '');
-  const names = Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+  const kept = new Set((a.kept ?? '').split(',').map((x) => x.trim().toLowerCase()).filter((x) => /^[a-z0-9-]{2,30}$/.test(x)));
+  const names = [...Array.from({ length: n }, (_, i) => `${prefix}${i}`), ...kept];
   const dataDir = join(a.data!, 'hosted');
   const log = (msg: string) => console.log(`[hosted ${prefix}*] ${msg}`);
   // One process holds every hosted house: a slip in one (a pod write that timed out) must not take down the rest.
@@ -178,8 +182,8 @@ async function hosted(n: number) {
     await mkdir(houseDir, { recursive: true });
     await writeFile(join(houseDir, 'rules.yaml'), rulesText);
     const house = await startHouse({
-      ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'],
-      leaseHours: a['open-pairing'] ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
+      ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'] && !kept.has(name),
+      leaseHours: a['open-pairing'] && !kept.has(name) ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
       emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true,
     });
     app.use(`/t/${name}`, house.app);
@@ -188,7 +192,7 @@ async function hosted(n: number) {
   app.get('/health', (_req, res) => void res.json({ ok: true, houses: houses.length }));
   // Which houses are free to claim right now, and when the taken ones free up.
   app.get('/t/', (_req, res) => {
-    const rows = houses.map((h) => ({ name: h.name, until: h.desk.ownerJwk ? h.desk.leaseUntil()?.toISOString() ?? 'kept' : null }));
+    const rows = houses.filter((h) => !kept.has(h.name)).map((h) => ({ name: h.name, until: h.desk.ownerJwk ? h.desk.leaseUntil()?.toISOString() ?? 'kept' : null }));
     if (_req.accepts(['html', 'json']) === 'json') return void res.json(rows);
     const li = rows.map((r) => r.until
       ? `<li><span>${r.name}</span><em>taken${r.until === 'kept' ? '' : ` until ${r.until.slice(11, 16)} UTC`}</em></li>`

@@ -758,10 +758,15 @@ export class OwnerDesk {
             // Accepting releases the owner's facts at once; a price no assistant may pay leaves them out with nothing bought
             // (run 39: A$157.14 against an A$150 allowance). Said first; the owner may still go ahead.
             const price = panel.offerPrice?.(String(q.offer ?? ''));
-            const caps = [...this.allowances.values()].filter((a) => a.currency === price?.currency && Date.parse(a.until) > Date.now() && !this.isRevoked(a.statusId)).map((a) => a.amount);
+            const live = [...this.allowances.values()].filter((a) => a.currency === price?.currency && Date.parse(a.until) > Date.now() && !this.isRevoked(a.statusId));
+            const caps = live.map((a) => a.amount);
             // Only where the owner has an assistant pay in that currency: an owner with none pays themselves.
             if (price && caps.length && !(q as { even_over_allowance?: boolean }).even_over_allowance && caps.every((c) => c < price.amount)) {
-              return { error: `${price.currency} ${price.amount} is more than your assistant may spend (${price.currency} ${Math.max(...caps)}): raise its allowance first, or accept even so (even_over_allowance) and pay it yourself`, code: 'over_allowance', price };
+              const top = live.reduce((x, y) => (y.amount > x.amount ? y : x));
+              // Its assistant hears of it (run 48: the shop was refused at the owner's tap, and the assistant reported "no
+              // answer yet"); the panel offers to raise that allowance in the same tap.
+              this.news({ about: 'offer.over_allowance', offer: String(q.offer ?? ''), price, allowance: top.amount, note: 'your human tapped Accept, but it is more than you may spend: they were asked to raise your allowance or pay it themselves. Nothing is accepted yet' }, top.kid);
+              return { error: `${price.currency} ${price.amount} is more than your assistant may spend (${price.currency} ${top.amount}): raise its allowance first, or accept even so (even_over_allowance) and pay it yourself`, code: 'over_allowance', price, allowance: { kid: top.kid, amount: top.amount } };
             }
             return panel.acceptOffer(String(q.offer ?? ''));
           },

@@ -249,7 +249,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     // invited a player sixteen minutes after it had gone. It is still there for messages, just not offered as company.
     const idle = req.query.idle === '1';
     // `via`: the peer node a card was learned from (SPEC §9), so an agent can tell its own Lake's specialists from a peer's.
-    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.via !== 'direct' ? { via: e.via } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}), ...registry.claimsOf(e) })));
+    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.via !== 'direct' ? { via: e.via, ...(peerHealth.get(e.via)?.answering === false ? { unreachable_since: peerHealth.get(e.via)!.since } : {}) } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}), ...registry.claimsOf(e) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
@@ -316,7 +316,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   }, 15_000).unref();
 
   // `recent` is what the map's log shows anyway: what just happened, in one line each, newest first.
-  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList(), recent: recent.slice(-20).reverse().map((l) => ({ at: l.event.at, kind: l.event.kind, text: l.text })) }));
+  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList(), lakes: [...peerHealth].map(([url, h]) => ({ url, answering: h.answering, since: h.since })), recent: recent.slice(-20).reverse().map((l) => ({ at: l.event.at, kind: l.event.kind, text: l.text })) }));
 
   // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
   // A node republishes the blocklists of the peers it chose to follow, alongside its own.
@@ -527,9 +527,32 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   // Federation (SPEC §9): follow peers. Their cards are verified again here, from the agents' own endpoints,
   // so a peer can point us at agents but can't vouch for them. A card disappears when its peer drops it.
   const peerKeys = new Map<string, import('@thelakeprotocol/core').JWK>();
+  // Whether each followed Lake answers, and since when: said on the feed when it changes, shown on /state and on its cards
+  // in /cards (run 48: a peer was dark for three minutes, its houses still counted, and nobody was told).
+  const peerHealth = new Map<string, { answering: boolean; since: string; fails: number }>();
+  const peerSays = (peer: string, ok: boolean) => {
+    const h = peerHealth.get(peer) ?? { answering: true, since: new Date().toISOString(), fails: 0 };
+    h.fails = ok ? 0 : h.fails + 1;
+    // Two misses in a row (about ten seconds) before calling it down: one slow answer isn't an outage.
+    const answering = ok || (h.answering && h.fails < 2);
+    if (answering !== h.answering) {
+      publish(makeEvent('lake.status', o.url, undefined, { lake: peer, answering, since: answering ? h.since : new Date().toISOString() }));
+      h.answering = answering;
+      h.since = new Date().toISOString();
+    }
+    peerHealth.set(peer, h);
+  };
   async function syncPeer(peer: string) {
+    let listed: { card: AgentCard }[];
     try {
-      const listed = (await (await fetch(`${peer}/cards`, { signal: AbortSignal.timeout(5000) })).json()) as { card: AgentCard }[];
+      const r = await fetch(`${peer}/cards`, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) throw new Error(String(r.status));
+      listed = (await r.json()) as { card: AgentCard }[];
+    } catch {
+      return peerSays(peer, false);
+    }
+    peerSays(peer, true);
+    try {
       const seen = new Set<string>();
       for (const { card } of listed) {
         const webId = (card.capabilities?.extensions?.[0]?.params as { webId?: string } | undefined)?.webId;

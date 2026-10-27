@@ -126,10 +126,11 @@ async function show() {
 
 // ---- Home ----
 async function home(box: HTMLElement) {
-  const [o, feed, { suggestions, assistants, notes, agenda }] = await Promise.all([
+  const [o, feed, { suggestions, assistants, notes, agenda }, door] = await Promise.all([
     call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
     call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string }[]; agenda?: AgendaItem[] }>({ kind: 'list' }),
+    call<{ open: boolean; address: string; error?: string }>({ kind: 'panel.door' }).then((d) => (d.error ? null : d)).catch(() => null),
   ]);
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
@@ -140,6 +141,7 @@ async function home(box: HTMLElement) {
       h('p', { class: 'muted' }, assistants.length ? `${assistants.map((a) => a.label.replace(/\s*\(.*\)$/, '')).join(', ')} ${assistants.length === 1 ? 'is' : 'are'} looking after your house: it sees every knock and suggests; you decide.` : 'Let your own AI agent look after your house: it sees every knock and suggests what to do; only you decide.'),
       h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, assistants.length ? 'My agent →' : 'Give it a key →'));
   box.replaceChildren(
+    startCard(door, assistants.length > 0),
     suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
     // What you agreed to, written in by your agent: yours to see and remove.
     agenda?.length ? agendaCard(agenda) : '',
@@ -569,10 +571,8 @@ async function offers(box: HTMLElement) {
       accept.onclick = async () => {
         if (!confirm(`Accept ${o.quoter.name}'s offer? Your signed record goes to them, and only them, so they can confirm it.`)) return;
         accept.disabled = true;
-        let r = await call<Offer & { error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: o.id }).catch((e) => ({ error: (e as Error).message }) as never);
-        // More than your assistant may spend: said before anything leaves; you may still go ahead and pay it yourself.
-        if (r.code === 'over_allowance' && confirm(`${r.error}\n\nAccept anyway?`)) r = await call<Offer & { error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: o.id, even_over_allowance: true }).catch((e) => ({ error: (e as Error).message }) as never);
-        else if (r.error && r.code !== 'over_allowance') alert(r.error);
+        const r = await acceptOffer(o.id);
+        if (r.error) alert(r.error);
         void show();
       };
       blocks.push(h('article', { class: 'req', style: `border-color:${o.result.eligible ? 'var(--mint)' : 'var(--line)'};background:none` },
@@ -685,6 +685,27 @@ function allowanceForm(a: Assistant): Node {
   return h('div', { class: 'r-meta', style: 'margin-top:6px' }, 'Spending money: ', currency, ' ', amount, ' for ', days, ' ', sign, ' ', msg);
 }
 
+/**
+ * Accept an offer. More than your agent may spend: said before anything leaves (accepting releases your facts at once),
+ * and the way on is one tap: raise its allowance to cover it (signed here, on this device) and accept, or pay it yourself
+ * (run 48: the shop stopped at a refusal nobody could act on).
+ */
+async function acceptOffer(offer: string): Promise<{ error?: string; cancelled?: boolean }> {
+  type R = { error?: string; code?: string; price?: { amount: number; currency: string }; allowance?: { kid: string; amount: number } };
+  const accept = (even = false) => call<R>({ kind: 'panel.offer.accept', offer, ...(even ? { even_over_allowance: true } : {}) }).catch((e) => ({ error: (e as Error).message }) as R);
+  const r = await accept();
+  if (r.code !== 'over_allowance' || !r.price || !r.allowance) return r;
+  const need = Math.min(Math.ceil(r.price.amount), 500);
+  if (need >= r.price.amount && confirm(`${money$(r.price.amount, r.price.currency)} is more than your agent may spend (${money$(r.allowance.amount, r.price.currency)}).\n\nRaise its allowance to ${money$(need, r.price.currency)} for 7 days, signed on this device, and accept?`)) {
+    const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: r.allowance.kid, amount: need, currency: r.price.currency, days: 7 });
+    if (d.error) return d;
+    const set = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
+    if (!set.ok) return { error: set.error ?? 'the allowance was refused' };
+    return accept();
+  }
+  return confirm('Accept anyway, and pay it yourself?') ? accept(true) : { cancelled: true };
+}
+
 const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
@@ -706,21 +727,47 @@ function replyBox(x: Note): Node {
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 // What you agreed to, written in by your agent, with who agreed on the other side (or that nobody has yet): yours to see,
 // add to your own calendar, and remove.
-function agendaCard(agenda: AgendaItem[]): Node {
+/** Your agenda's private calendar address, shown on a tap, with Copy and New address. */
+function feedLine(): Node {
   const feed = h('span', {});
   const showFeed = async (reset = false) => {
     const f = await call<{ url?: string; path: string }>({ kind: 'panel.agenda.feed', ...(reset ? { reset: true } : {}) });
     const url = f.url ?? new URL(f.path.replace(/^\/owner\//, ''), location.href).href;
-    feed.replaceChildren(h('code', {}, url), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(url) }, 'Copy'), ' ',
+    try { localStorage.setItem('lake.start.calendar', '1'); } catch { /* a private window */ }
+    feed.replaceChildren(h('code', { style: 'overflow-wrap:anywhere' }, url), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(url) }, 'Copy'), ' ',
       h('button', { class: 'btn small', type: 'button', onclick: () => { if (confirm('Make a new address? The old one stops working.')) void showFeed(true); } }, 'New address'));
   };
+  return h('span', {}, h('button', { class: 'btn small', type: 'button', onclick: (e: Event) => { (e.target as HTMLElement).remove(); void showFeed(); } }, 'Show the address'), feed);
+}
+
+const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+
+/**
+ * The first five minutes, on Home until done: open your door, connect your own AI, put your agenda in your calendar, and
+ * try it. Each step says what it is in one line; nothing to learn first.
+ */
+function startCard(door: { open: boolean; address: string } | null, hasAssistant: boolean): Node | string {
+  if (stored('lake.start.done') || !door) return '';
+  const calendar = !!stored('lake.start.calendar');
+  if (door.open && hasAssistant && calendar) return '';
+  const step = (done: boolean, title: string, body: Node | string) => h('li', {}, h('div', {}, h('div', { class: 'r-title' }, `${done ? '✓ ' : ''}${title}`), h('div', { class: 'r-meta' }, body)));
+  return h('div', { class: 'card' }, h('h3', {}, 'Start here'),
+    h('ol', { class: 'rows' },
+      step(door.open, 'Open your door', door.open ? h('span', {}, 'Your address, for your email signature or a QR code: ', h('code', { style: 'overflow-wrap:anywhere' }, door.address), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(door.address) }, 'Copy')) : doorCard()),
+      step(hasAssistant, 'Let your own AI look after it', hasAssistant ? 'Connected: it sees what comes to your door and suggests; you tap.' : h('span', {}, 'It answers people for you, by what you\'ve agreed, and asks you the rest. ', h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, 'Give it a key →'))),
+      step(calendar, 'Put your agenda in your calendar', h('span', {}, 'What you agree to through your AI shows up in your own calendar app (subscribe to this address; keep it to yourself). ', feedLine())),
+      step(false, 'Try it', door.open ? h('span', {}, 'Ask any AI with the Lake connector: ', h('em', {}, `“Leave a note at ${door.address} saying hello.”`), ' It shows up here, and your AI hears of it.') : 'Once your door is open.')),
+    h('button', { class: 'btn small', type: 'button', onclick: () => { try { localStorage.setItem('lake.start.done', '1'); } catch { /* fine */ } void show(); } }, 'Hide this'));
+}
+
+function agendaCard(agenda: AgendaItem[]): Node {
   return h('div', { class: 'card' }, h('h3', {}, 'Coming up'), h('ul', { class: 'rows' }, ...agenda.map((a) => h('li', {},
     h('div', {}, h('div', { class: 'r-title' }, a.what),
       h('div', { class: 'r-meta' }, `${a.when}${a.where ? ` · ${a.where}` : ''}${a.with ? ` · with ${a.with}` : ''} · noted by ${a.by}`),
       h('div', { class: 'r-meta' }, a.agreed ? `Agreed by ${a.agreed.by}${a.agreed.speaks_for?.checked ? `, which speaks for ${a.agreed.speaks_for.house}` : ' (an agent; it showed no house it speaks for)'}: “${a.agreed.said}”` : 'Proposed: nothing from their side says they agreed yet'),
       a.note ? h('div', { class: 'r-meta' }, `${a.by}: “${a.note}”`) : ''),
     h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void show(); } }, 'Remove'))))),
-    h('p', { class: 'r-meta' }, 'In your own calendar app: subscribe to this address (keep it to yourself: whoever has it can read your agenda). ', h('button', { class: 'btn small', type: 'button', onclick: (e: Event) => { (e.target as HTMLElement).remove(); void showFeed(); } }, 'Show the address'), feed));
+    h('p', { class: 'r-meta' }, 'In your own calendar app: subscribe to this address (keep it to yourself: whoever has it can read your agenda). ', feedLine()));
 }
 
 function suggestionList(list: Note[]): Node {
@@ -730,9 +777,8 @@ function suggestionList(list: Note[]): Node {
       // A note about an offer carries its Accept: still your tap, on your key, like on the Offers tab.
       x.offer ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
         (e.target as HTMLButtonElement).disabled = true;
-        let r = await call<{ error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: x.offer });
-        if (r.code === 'over_allowance' && confirm(`${r.error}\n\nAccept anyway?`)) r = await call<{ error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: x.offer, even_over_allowance: true });
-        if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
+        const r = await acceptOffer(x.offer!);
+        if (!r.error && !r.cancelled) await call({ kind: 'panel.assistant.dismiss', id: x.id }); else if (r.error) alert(r.error);
         void show();
       } }, 'Accept the offer') : '',
       // Your agent proposes not hearing from a note's sender again: your tap mutes it, by its key.

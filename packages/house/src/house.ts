@@ -170,14 +170,16 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         {
           // An open door: the owner gives out this address; a name only if they add one.
           name: r.door?.name ? `${r.door.name} (house)` : `House ${o.name}`,
-          description: r.door ? `${r.door.name ? `${r.door.name}'s house` : 'A house'} with an open door${r.door.about ? `: ${r.door.about.trim().replace(/[.!?]+$/, '')}` : ''}. Knock with a signed purpose, or leave a note; it answers by its owner's rules, and data never leaves.` : `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
+          // Whether its door is open, and its line, are on the page at its address, not on the card every search returns
+          // (run 48: the one house tagged "door" was Mia's, and a broker's agent listed it). A name only if the owner gives one.
+          description: `${r.door?.name ? `${r.door.name}'s house` : `Housekeeper for ${o.name}`}. Knock with a signed purpose, or leave a note; it answers by its owner's rules, and data never leaves.`,
           url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
           alsoAt: relayed?.slice(1),
           // One skill per pack (`health-study`, `mortgage-study`), so agents find the houses that can answer them.
           skills: show
             ? o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: r.tags ?? [] }))
             : [{ id: 'offers', name: 'Offers', description: 'Considers offers by its owner\'s rules', tags: r.tags ?? [] }],
-          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: [...new Set([...(r.tags ?? []), ...(r.door ? ['door'] : [])])], packs: show ? o.packs.map(packId) : [] },
+          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [] },
         },
         id,
       ),

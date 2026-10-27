@@ -40,7 +40,8 @@
         "offer.accepted",
         "blueprint.published",
         "agent.message",
-        "tally.update"
+        "tally.update",
+        "lake.status"
       ]
     },
     "at": {

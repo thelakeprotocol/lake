@@ -23,8 +23,19 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
   const cards = new Map<string, express.Express>();
   // Names in use by live conversations, so no two agents here answer to the same one.
   const named = new Map<string, string>();
+  // And names already on cards the node lists, this Lake's and the ones it follows (run 48: two "Lumen"s, one per Lake,
+  // and "a different name looks like an impostor" read the other way round). Refreshed as a conversation starts.
+  let listedNames = new Set<string>();
+  const refreshListed = async () => {
+    const seen = new Set<string>();
+    for (const n of o.node.split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean)) {
+      const found = (await fetch(`${n}/cards?idle=1`, { signal: AbortSignal.timeout(2000) }).then((r) => r.json()).catch(() => [])) as { card?: { name?: string } }[];
+      for (const f of Array.isArray(found) ? found : []) if (f.card?.name) seen.add(f.card.name.split(' (')[0]!.trim());
+    }
+    if (seen.size) listedNames = seen;
+  };
   const nameFor = (id: string) => {
-    const taken = new Set(named.values());
+    const taken = new Set([...named.values(), ...listedNames]);
     const start = parseInt(id, 16) % CREATURES.length;
     for (let k = 0; k < CREATURES.length; k++) {
       const n = CREATURES[(start + k) % CREATURES.length]!;
@@ -56,6 +67,7 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
       if (sid || !isInitializeRequest(req.body)) return void res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'unknown or missing session; start with initialize' }, id: null });
       if (sessions.size >= (o.maxSessions ?? 40)) return void res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'the sandbox is full right now; try again in a few minutes' }, id: null });
       const id = randomBytes(4).toString('hex');
+      await refreshListed();
       const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newSid) => { sessions.set(newSid, entry); },

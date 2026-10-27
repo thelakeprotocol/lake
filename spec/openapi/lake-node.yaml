@@ -40,7 +40,7 @@ paths:
         - { name: role, in: query, schema: { enum: [house, visitor, specialist, agent, node] } }
         - { name: idle, in: query, description: 'Agents whose driver last acted more than 15 minutes ago are left out unless this is 1', schema: { enum: ['1'] } }
       responses:
-        '200': { description: 'Matching cards, those registered with this node before those synced from peers; verify each yourself', content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' }, via: { type: string, format: uri, description: 'The peer node this node learned the card from (SPEC §9); absent when the agent registered here directly' } } } } } } }
+        '200': { description: 'Matching cards, those registered with this node before those synced from peers; verify each yourself', content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' }, via: { type: string, format: uri, description: 'The peer node this node learned the card from (SPEC §9); absent when the agent registered here directly' }, unreachable_since: { type: string, format: date-time, description: 'That peer has not answered since then (SPEC §9): its agents cannot be reached for now' } } } } } } }
   /presence:
     post:
       summary: Say when whoever drives this agent last acted through it (signed; SPEC §8.1)
@@ -84,6 +84,7 @@ paths:
                   counters: { $ref: '#/components/schemas/Counters' }
                   participants: { type: array, items: { type: object, properties: { id: { type: string }, role: { type: string }, label: { type: string }, tags: { type: array, items: { type: string } }, domain: { type: string }, skills: { type: array, items: { type: string }, description: "skill ids from its card" } } } }
                   guilds: { type: array, items: { type: object, properties: { tag: { type: string }, members: { type: integer } } } }
+                  lakes: { type: array, description: 'The peers this node follows, and whether each answers (SPEC §9)', items: { type: object, properties: { url: { type: string, format: uri }, answering: { type: boolean }, since: { type: string, format: date-time } } } }
                   recent: { type: array, description: 'The last 20 events, newest first, one line each (what the map log shows)', items: { type: object, properties: { at: { type: string }, kind: { type: string }, text: { type: string } } } }
   /blueprints:
     get:

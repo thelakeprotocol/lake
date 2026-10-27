@@ -1,7 +1,7 @@
 // Setup for a door run: claims houses (claim.mjs), opens house 1's door with a line (the owner's phone, through the panel),
 // and starts the owners' phones (owner-bot.mjs) in the background: no shop, an allowance for the assistant, advice followed.
 import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { importIdentity, signMessage } from '../../packages/core/dist/index.js';
 const run = process.argv[2];
@@ -15,5 +15,8 @@ const about = (process.env.EXPLORE_DEMO && JSON.parse(readFileSync(join(process.
 const opened = await call({ kind: 'panel.door.set', open: true, about });
 if (!opened.ok) throw new Error(`door: ${JSON.stringify(opened)}`);
 vars.house_1_door = (await call({ kind: 'panel.door' })).address;
+// The owner's private calendar address, for the narrator to read what their calendar app would show.
+const feed = await call({ kind: 'panel.agenda.feed' });
+if (feed.url) writeFileSync(join(run, 'calendar-feed.txt'), feed.url);
 spawn(process.execPath, [join(here, 'owner-bot.mjs'), run, '{}', '50', '30', 'USD'], { detached: true, stdio: 'ignore' }).unref();
 console.log(JSON.stringify(vars));

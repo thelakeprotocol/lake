@@ -404,8 +404,10 @@ describe('the owner', () => {
     expect(await page()).toMatch(/hasn't opened its door/);
     expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ndoor: { about: "Ask my agent about talks." }\n` })).toEqual({ ok: true });
     const card = await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json();
-    expect(card).toMatchObject({ name: 'House strict', description: expect.stringMatching(/^A house with an open door: Ask my agent about talks\./) });
-    expect(card.capabilities.extensions[0].params.tags).toContain('door');
+    // The card every search returns doesn't say the door is open, nor its line: those are on the page at the address.
+    expect(card.name).toBe('House strict');
+    expect(JSON.stringify(card)).not.toMatch(/open door|Ask my agent about talks/);
+    expect(card.capabilities.extensions[0].params.tags).not.toContain('door');
     expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*To reach its owner, ask your AI[\s\S]*Knock on the house at /);
     expect(await (await fetch(houses.strict!, { headers: { accept: 'application/json' } })).json()).toMatchObject({ door: { about: 'Ask my agent about talks.' } });
     // A name only if the owner adds one.
@@ -1897,6 +1899,15 @@ describe('federation (runs last: it stops the nodes)', () => {
     procs[0]!.kill('SIGTERM'); // the first node, gone
     const r = await running;
     expect(r.participants).toBeGreaterThan(0);
+    // The node that follows it says so: on its feed, on /state, and on the cards it learned there, still listed (run 48).
+    let state: { lakes: { url: string; answering: boolean; since: string }[]; recent: { kind: string; text: string }[] } = { lakes: [], recent: [] };
+    for (let i = 0; i < 40 && !state.lakes.some((l) => !l.answering); i++) {
+      await new Promise((ok) => setTimeout(ok, 250));
+      state = await (await fetch(`${nodeB}/state`)).json();
+    }
+    expect(state.lakes).toEqual([expect.objectContaining({ url: node, answering: false })]);
+    expect(((await (await fetch(`${nodeB}/state`)).json()).recent as { kind: string; text: string }[]).some((e) => e.kind === 'lake.status' && /isn't answering/.test(e.text))).toBe(true);
+    expect(((await (await fetch(`${nodeB}/cards?role=house`)).json()) as { via?: string; unreachable_since?: string }[]).filter((c) => c.via === node).every((c) => c.unreachable_since)).toBe(true);
   });
 
   it('with every node offline, houses are still found at their own .well-known address, and a study still runs', async () => {

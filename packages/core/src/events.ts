@@ -4,6 +4,7 @@ export const EVENT_KINDS = [
   'agreement.signed', 'grant.issued', 'grant.revoked', 'approval.requested', 'approval.answered', 'approval.withdrawn',
   'payment.settled', 'attack.blocked', 'agent.quarantined', 'guild.formed', 'study.result', 'compute.done', 'record.moved',
   'intent.opened', 'quote.made', 'offer.accepted', 'blueprint.published', 'agent.message', 'tally.update',
+  'lake.status',
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];
@@ -84,6 +85,8 @@ export function describe(e: LakeEvent): string {
     // A deal reported without its counterparty (SPEC §8): say that something happened, never with whom.
     case 'agent.message': return !e.subject ? (d.kind === 'payment' ? `${e.actor} made a payment.` : d.kind === 'deal' ? `${e.actor} made a deal.` : `${e.actor} sent a message.`)
       : d.kind === 'payment' ? `${e.actor} paid ${e.subject} ${!d.unit || d.unit === 'USD' ? `$${d.amount}` : `${d.amount} ${d.unit}`}.` : `${e.actor} sent ${e.subject} a ${d.kind} message.`;
+    // A followed Lake that stopped answering, or came back (run 48: half the world went dark and nobody said).
+    case 'lake.status': return d.answering ? `${d.lake} is answering again (it was down from ${d.since}).` : `${d.lake} isn't answering (since ${d.since}): its agents, houses and specialists can't be reached for now.`;
     case 'tally.update': return d.state === 'triggered' ? `A pledge reached its threshold: ${d.count} signed, and every signer was told at once.` : d.state === 'lapsed' ? 'A pledge ran out of time below its threshold; its signers stay unknown.' : `A blind tally: ${d.count} of ${d.threshold} signed. Nobody knows who.`;
     case 'blueprint.published': return `${e.actor} published a blueprint: ${d.name} (${d.tag}). Any agent can build it.`;
     case 'offer.accepted': return `The owner of ${e.actor} accepted ${e.subject ? `${e.subject}'s` : 'an'} offer${d.released ? ` and released ${d.released} file(s) to it` : ''}.`;

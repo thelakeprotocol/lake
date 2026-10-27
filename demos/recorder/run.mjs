@@ -2,7 +2,8 @@
 // Lake, a page showing the live map beside their transcripts, and an mp4 at the end.
 //   npm run connect4        (needs: claude, Google Chrome, ffmpeg)
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
@@ -20,8 +21,12 @@ writeFileSync(join(run, 'mcp.json'), JSON.stringify({ mcpServers: { lake: { type
 // Each player gets its own empty folder: whatever it builds, it builds there.
 const blueprints = process.env.LAKE_BLUEPRINTS ?? 'https://lake.doneinfifty.com/blueprints';
 const fill = (text) => text.replaceAll('{{lake}}', lake).replace(/\{\{blueprint_url:([\w.-]+)\}\}/g, (_, f) => `${blueprints}/${f}`).replace(/\{\{blueprint:([\w.-]+)\}\}/g, (_, f) => readFileSync(join(root, '..', 'spec', 'blueprints', f), 'utf8').trim());
+// The folder itself lives outside the repo, linked back into the run: a player started inside the checkout read the
+// project's CLAUDE.md and AGENTS.md, and its git log (run 48: a commit message named the blackout before it came).
+const outside = join(process.env.LAKE_RUNS_OUTSIDE ?? join(homedir(), '.lake-runs'), basename(run));
 for (const p of config.players) {
-  mkdirSync(join(run, p.id), { recursive: true });
+  mkdirSync(join(outside, p.id), { recursive: true });
+  symlinkSync(join(outside, p.id), join(run, p.id), 'dir');
   writeFileSync(join(run, `${p.id}.jsonl`), '');
 }
 
@@ -52,7 +57,7 @@ const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() =
   const mcp = p.lake ? join(run, `mcp-${p.id}.json`) : join(run, 'mcp.json');
   if (p.lake) writeFileSync(mcp, JSON.stringify({ mcpServers: { lake: { type: 'http', url: `${p.lake.replace(/\/$/, '')}/mcp` } } }));
   const c = spawn('claude', ['-p', prompt, '--mcp-config', mcp, '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
-    { cwd: join(run, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
+    { cwd: join(outside, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
   // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
   let rest = '';
   c.stdout.on('data', (d) => {

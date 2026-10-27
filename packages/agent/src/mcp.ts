@@ -490,6 +490,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const me = await agent();
         return json({
           lake: LAKE_IS,
+          // The Lakes this one follows, and whether each answers (run 48: one went dark and nothing said so).
+          ...(s.lakes?.length ? { other_lakes: (s.lakes as { url: string; answering: boolean; since: string }[]).map((l) => (l.answering ? { url: l.url, answering: true } : { url: l.url, answering: false, since: l.since, note: 'its agents, houses and specialists can\'t be reached for now; held payments and deadlines keep running' })) } : {}),
           // The node's own counts from what each party reported, everyday things first, then the latest events.
           happening_now: { ...s.counters, selling_now: cards.filter(({ card }) => lakeProfile(card)?.menu?.length).length, guilds: s.guilds.length, latest: ((s.recent ?? []) as { text: string }[]).slice(0, 8).map((r) => r.text) },
           // Everyday things first; studies are one use among many.

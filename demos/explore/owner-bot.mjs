@@ -76,7 +76,14 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
       const m = await c({ kind: 'panel.market' });
       const named = (m.offers ?? []).find((x) => x.status === 'open' && x.result?.eligible && (v.suggestions ?? []).some((s) => s.offer === x.id || s.text.includes(x.id) || s.text.includes(x.id.slice(0, 8))));
       if (named) {
-        const r = await c({ kind: 'panel.offer.accept', offer: named.id });
+        let r = await c({ kind: 'panel.offer.accept', offer: named.id });
+        // As the panel does: over the assistant's allowance, raise it to cover the offer (signed here) and accept.
+        if (r.code === 'over_allowance' && r.allowance) {
+          const d = await c({ kind: 'panel.allowance.draft', kid: r.allowance.kid, amount: Math.ceil(r.price.amount), currency: r.price.currency, days: 3 });
+          const set = await c({ kind: 'panel.allowance.set', id: d.id, credential: await issueCredential({ ...d.draft, validFrom: new Date().toISOString() }, o.id) });
+          log(`${o.house}: raised the allowance to ${r.price.currency} ${Math.ceil(r.price.amount)} to accept: ${JSON.stringify(set)}`);
+          r = await c({ kind: 'panel.offer.accept', offer: named.id });
+        }
         o.accepted = true;
         log(`${o.house}: accepted ${named.quoter?.name} (${named.id}): ${JSON.stringify(r.answer ?? r)}`);
       }

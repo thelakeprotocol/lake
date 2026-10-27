@@ -60,6 +60,8 @@ services:
       NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-256}"
       # Two houses start at a time: ten pods starting together overloaded the 1 GB droplet after deploys (run 28).
       LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
+      # Houses kept for someone: no lease, not on the claim list, paired with the token in their data folder.
+      LAKE_KEPT: "${LAKE_KEPT:-}"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       # Health and the weekly shop (shopping@1); never mortgage on the sandbox.
