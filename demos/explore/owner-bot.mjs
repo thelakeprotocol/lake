@@ -47,6 +47,15 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
           : req.grantDraft ? await c({ kind: 'answer', request: req.offerId, answer: 'allow', grant: await issueCredential({ ...req.grantDraft, validFrom: new Date().toISOString() }, o.id) }) : { error: 'no grant to sign' };
         log(`${o.house}: ${sug.advice === 'dont' ? 'denied' : 'allowed'} ${req.visitor?.domain ?? ''} (${req.offerId}) on the assistant's advice: ${JSON.stringify(r)}`);
       }
+      // A note the assistant advises against: its sender muted. New rules it advises: applied.
+      if (sug.note && sug.advice === 'dont' && !o.given.has(`mute:${sug.note}`)) {
+        o.given.add(`mute:${sug.note}`);
+        log(`${o.house}: muted the sender of note ${sug.note} on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.note.mute', id: sug.note }))}`);
+      }
+      if (sug.rules && sug.advice === 'do' && !o.given.has(`rules:${sug.id}`)) {
+        o.given.add(`rules:${sug.id}`);
+        log(`${o.house}: applied new rules on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.rules.set', text: sug.rules }))}`);
+      }
       if (sug.pledge && sug.advice === 'do' && !o.given.has(`pledge:${sug.pledge.id}`)) {
         o.given.add(`pledge:${sug.pledge.id}`);
         log(`${o.house}: signed pledge ${sug.pledge.id} on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.pledge.sign', tally: sug.pledge.tally, id: sug.pledge.id }))}`);

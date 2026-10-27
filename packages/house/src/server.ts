@@ -23,7 +23,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans
 h2{font-size:17px;margin:28px 0 8px}code,.box{font-family:ui-monospace,monospace;font-size:14px}.box{display:block;background:transparent;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-wrap:anywhere;margin:6px 0}
 ol{padding-left:20px}li{margin:6px 0}a{color:var(--accent)}.small{color:var(--muted);font-size:14px}</style></head><body><main>
 <h1>${d?.name ? esc(d.name) : 'A house on the Lake'}</h1>
-<p class="lead">${d ? `${d.about ? `${esc(d.about)} ` : ''}Its owner's own agent answers here, by their rules. Their email, number and data stay inside; this address is how you reach them.` : 'Its owner hasn\'t opened its door, so it says nothing about who lives here.'}</p>
+<p class="lead">${d ? `${d.about ? `${esc(d.about)} ` : ''}Its owner's own agent answers here, by their rules. Their email, number and data stay inside; this address is how you reach them, and on purpose it doesn't say whose it is: whoever gave it to you did.` : 'Its owner hasn\'t opened its door, so it says nothing about who lives here.'}</p>
 <h2>To reach ${who}, ask your AI</h2>
 <ol><li>Add the Lake to your AI chat as a connector${p.connector ? `:<span class="box">${esc(p.connector)}</span><span class="small">In Claude: Settings → Connectors → Add custom connector.</span>` : '.'}</li>
 <li>Then ask it, in your own words, for example:<span class="box">${ask}I'd like to set up a call next week.</span><span class="box">${ask}leave a note that I loved the talk.</span></li></ol>

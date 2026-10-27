@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, consentRecord, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, consentRecord, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -103,11 +103,13 @@ export interface Suggestion {
   ask?: { choices: string[]; recommend?: number; answered?: string };
   /** The owner's own words back to the assistant. */
   reply?: string;
+  /** New rules (the whole text) the assistant proposes: the owner's panel shows an Apply button. */
+  rules?: string;
   at: string;
 }
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
-export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; speaks_for?: { house: string; checked: boolean; why?: string } }
+export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
@@ -224,6 +226,7 @@ export class OwnerDesk {
   async init() {
     this.ownerJwk = await this.o.readOwnerKey();
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
+    for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
       check();
@@ -333,10 +336,25 @@ export class OwnerDesk {
   }
 
   /** What one agent asked this house lately, any purpose: lets the owner see a visitor trying another label. */
+  /**
+   * Senders the owner doesn't want to hear from again, by key, not name (run 45: a pitch relabelled "contact" got past a
+   * rule about marketing). Their notes and knocks are declined at the door.
+   */
+  readonly muted = new Set<string>();
+  async mute(key: string) {
+    if (!key) return;
+    this.muted.add(key);
+    this.notes = this.notes.filter((n) => n.from.key !== key);
+    await writeFile(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted])).catch(() => {});
+  }
+
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
   notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string }): string | null {
+    // The same words again from the same sender are the same note (run 45 got one twice).
+    const again = this.notes.find((x) => x.from.webId === n.from.webId && x.text === n.text);
+    if (again) return again.id;
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);
@@ -444,7 +462,7 @@ export class OwnerDesk {
       if (assistant) {
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         if (p.kind === 'assistant.suggest') {
-          const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown } };
+          const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown }; rules?: unknown };
           const text = String(q.text ?? '').trim().slice(0, 1500);
           // An assistant that got something wrong takes its own note back; an empty text with replaces just withdraws it.
           const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
@@ -476,10 +494,16 @@ export class OwnerDesk {
             pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
           }
           if (q.advice !== undefined && !ADVICE.includes(q.advice as Advice)) return void res.status(400).json({ error: `advice: one of ${ADVICE.join(', ')}` });
+          // New rules for the owner to apply with a tap (run 45: they agreed to a change nobody could make): checked now, so
+          // the Apply button never fails; applying stays the owner's key.
+          let rules: string | undefined;
+          if (q.rules !== undefined) {
+            try { parseRules(String(q.rules)); rules = String(q.rules); } catch (e) { return void res.status(400).json({ error: `rules: ${(e as Error).message}` }); }
+          }
           // Or about a note at the door (run 42: "don't answer this one" had nowhere to go).
           const aboutNote = typeof (q as { note?: unknown }).note === 'string' ? this.notes.find((n) => n.id === (q as { note: string }).note)?.id : undefined;
           if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id' });
-          if (q.advice !== undefined && !request && !offer && !pledge && !aboutNote) return void res.status(400).json({ error: 'advice is about a request, an offer, a pledge or a note: name it' });
+          if (q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules) return void res.status(400).json({ error: 'advice is about a request, an offer, a pledge, a note or rules: name it' });
           let ask: Suggestion['ask'];
           if (q.ask) {
             // Refused, not cut (run 40 stored "…return fa"): the assistant shortens its own words.
@@ -487,10 +511,10 @@ export class OwnerDesk {
             if (choices.length < 2 || choices.length > 4 || choices.some((c) => c.length > 80)) return void res.status(400).json({ error: 'ask: { choices: 2 to 4 answers of up to 80 characters, recommend?: the index of the one you advise }' });
             const r = Number(q.ask.recommend);
             // "Your call" means it (run 44: three "your call" questions each carried a recommended choice, and it was taken).
-            if (q.advice === 'your_call' && q.ask.recommend !== undefined) return void res.status(400).json({ error: 'advice your_call with a recommended choice: leave recommend out, or advise do or dont' });
-            ask = { choices, ...(Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
+            // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
+            ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote } : {}), ...(rules ? { rules } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
@@ -590,6 +614,13 @@ export class OwnerDesk {
         if (text) sug.reply = text;
         this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
+      }
+      if (p.kind === 'panel.note.mute') {
+        const note = this.notes.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
+        if (!note?.from.key) return void res.status(404).json({ error: 'no note at the door with that id' });
+        await this.mute(note.from.key);
+        this.news({ about: 'sender.muted', domain: note.from.domain, note: 'your human won\'t hear from this sender again: its notes and knocks are declined at the door' });
+        return void res.json({ ok: true, muted: note.from.domain });
       }
       if (p.kind === 'panel.note.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');

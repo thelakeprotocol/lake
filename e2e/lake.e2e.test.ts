@@ -485,6 +485,16 @@ describe('the owner', () => {
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Could you take in a parcel for me at 3 pm? Happy to return the favour.' })).reply).toMatchObject({ kind: 'noted' });
     expect((await ownerCall({ kind: 'list' })).notes[0]).toMatchObject({ from: { domain: 'neighbour.example', checked: false }, text: expect.stringMatching(/^Could you take in a parcel/) });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: '' })).reply).toMatchObject({ kind: 'rejected' });
+    // The same words again are the same note; "your call" means it (a recommendation is dropped, not the note refused).
+    const twice = (await ask(houses.strict!, neighbour, { kind: 'note', text: 'Could you take in a parcel for me at 3 pm? Happy to return the favour.' })).reply;
+    expect(twice.note).toBe((await ownerCall({ kind: 'list' })).notes[0].id);
+    const neutral = await asHelper({ kind: 'assistant.suggest', text: 'Coffee with Ana: which day?', note: twice.note, advice: 'your_call', ask: { choices: ['Tuesday', 'Thursday'], recommend: 0 } });
+    expect((await ownerCall({ kind: 'list' })).suggestions.find((x: any) => x.id === neutral.id).ask).toEqual({ choices: ['Tuesday', 'Thursday'] });
+    // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'x', rules: 'rules: [' })).toMatchObject({ error: expect.stringMatching(/^rules:/) });
+    // A sender the owner won't hear from again, by key: its next note is declined at the door.
+    expect(await ownerCall({ kind: 'panel.note.mute', id: twice.note })).toMatchObject({ ok: true, muted: 'neighbour.example' });
+    expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Hello again?' })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });
     const pay = async (amount: number, currency = 'USD') => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test', currency })] })).reply;
     // Nothing converts: dollars signed for are spent in dollars.
     expect(await pay(3, 'AUD')).toMatchObject({ kind: 'refused', problems: ['the allowance is in USD; this payment is in AUD'] });

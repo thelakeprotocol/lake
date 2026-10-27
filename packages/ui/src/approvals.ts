@@ -144,7 +144,8 @@ async function home(box: HTMLElement) {
     // Notes other agents left at your door: their words, nothing asked of your data. Your agent hears of them too.
     notes?.length ? h('div', { class: 'card' }, h('h3', {}, 'Notes at your door'), h('ul', { class: 'rows' }, ...notes.map((n) => h('li', {},
       h('div', {}, h('div', { class: 'r-title' }, `“${n.text}”`), h('div', { class: 'r-meta' }, `${n.from.name} (${n.from.domain}${n.from.checked ? ', domain proved' : ': not verified, anyone could send this'})${n.from.speaks_for ? (n.from.speaks_for.checked ? ` · the assistant of ${n.from.speaks_for.house.replace(/\/profile\/card#me$/, '')}: that house says so` : ' · says it speaks for a house, with nothing to show it') : ''} · ${time(n.at)} · their words`)),
-      h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.dismiss', id: n.id }); void show(); } }, 'Dismiss')))))) : '',
+      h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.dismiss', id: n.id }); void show(); } }, 'Dismiss'), ' ',
+        h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.mute', id: n.id }); void show(); } }, 'Don\'t hear from them again')))))) : '',
     h('dl', { class: 'tiles' },
       tile('Waiting for you', o.pending, 'requests', o.pending ? 'amber' : ''),
       tile('Knocks today', o.knocksToday, 'agents'),
@@ -685,7 +686,7 @@ function allowanceForm(a: Assistant): Node {
 const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string };
 const ADVICE_SAYS = { do: 'Your assistant advises: yes', dont: 'Your assistant advises: no', your_call: 'Your assistant says: your call' } as const;
 function replyBox(x: Note): Node {
   if (x.reply) return h('div', { class: 'r-meta' }, `you wrote: “${x.reply}”`);
@@ -712,6 +713,13 @@ function suggestionList(list: Note[]): Node {
         if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
         void show();
       } }, 'Accept the offer') : '',
+      // New rules your agent proposes: applied by your tap, with your key, like editing them yourself.
+      x.rules ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
+        (e.target as HTMLButtonElement).disabled = true;
+        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.rules.set', text: x.rules });
+        if (r.ok) { draft = null; await call({ kind: 'panel.assistant.dismiss', id: x.id }); } else alert(r.error);
+        void show();
+      } }, 'Apply these rules') : '',
       // Your own words back to your agent (a café, a title, "not this week"): sent as yours.
       replyBox(x),
       // A question: each choice is a button; the answer goes to your assistant.

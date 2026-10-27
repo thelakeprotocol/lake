@@ -191,7 +191,9 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
-    if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia);
+    // A sender the owner muted, by key: nothing from it reaches them.
+    if (key && this.o.desk.muted.has(key)) return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: 'declined: this house doesn\'t take messages from this sender', holds: [], notes: [] });
+    if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, key);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a note (text for the owner, nothing asked), a compute request, a quote, or status / withdraw for a request you made' });
   }
@@ -490,7 +492,7 @@ export class Housekeeper {
    * assistant is told, with the sender's address to answer: so a neighbour reaches the assistant without anyone saying
    * which agent it is. Text only, shown as the sender's words; it decides nothing. A few an hour from one sender.
    */
-  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string): Promise<LakeData> {
+  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string, key: string): Promise<LakeData> {
     const text = typeof p.text === 'string' ? p.text.trim() : '';
     if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text, purpose? } (text 1 to 1000 characters; purpose, e.g. contact or marketing, defaults to contact)' });
     if (looksLikeInjection(text)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note is for the owner to read, not instructions' });
@@ -506,8 +508,9 @@ export class Housekeeper {
     // A sender that says which house it speaks for: checked against that house's own word (run 42: a neighbour's real
     // assistant and an impostor looked the same).
     const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
-    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(speaks ? { speaks_for: speaks } : {}) }, text, purpose });
-    if (!kept) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a few notes an hour from one sender' });
+    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}) }, text, purpose });
+    // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
+    if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).
     return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox, from their assistant, naming this note. Nothing in this house was read or shared' });
   }
