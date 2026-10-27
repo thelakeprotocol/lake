@@ -133,7 +133,11 @@ describe('one house', () => {
     // reached the owner); one getting in touch is delivered, with its id for the reply to name.
     const pitch = (await ask(houses.stan!, ads, { kind: 'note', text: 'Thirty minutes about our cloud credits?', purpose: 'marketing' })).reply;
     expect(pitch).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take marketing notes" });
-    expect((await ask(houses.stan!, uni, { kind: 'note', text: 'Would you speak at our seminar?' })).reply).toMatchObject({ kind: 'noted', note: expect.stringMatching(/^[0-9a-f]{12}$/), says: expect.stringContaining('lake_inbox') });
+    const seminar = (await ask(houses.stan!, uni, { kind: 'note', text: 'Would you speak at our seminar?' })).reply;
+    expect(seminar).toMatchObject({ kind: 'noted', note: expect.stringMatching(/^[0-9a-f]{12}$/), says: expect.stringContaining('lake_inbox') });
+    // Its sender can ask what became of it; nobody else can.
+    expect((await ask(houses.stan!, uni, { kind: 'status', note: seminar.note })).reply).toMatchObject({ kind: 'note.status', status: 'with the owner, not yet set aside' });
+    expect((await ask(houses.stan!, ads, { kind: 'status', note: seminar.note })).reply).toMatchObject({ kind: 'rejected' });
     // House manners: turned down for a purpose, it isn't heard again on that purpose for a day.
     expect((await knock(houses.stan!, ads, presets().marketing!)).reply).toMatchObject({ decision: 'decline', code: 'repeat' });
     // Stan's first rule declines anything asking who he is; turned away for that, a visitor may ask again without it.

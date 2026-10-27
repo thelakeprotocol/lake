@@ -453,7 +453,15 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // learned "they last read their inbox just now, 3 messages waiting").
         const known = (await agent()).sent.some((s) => !s.internal && (s.with?.domain === m.from.ownerDomain || s.to === m.card.supportedInterfaces?.[0]?.url));
         const reader = tags.includes('quiet') || !known ? {} : { reader: { last_active: lastActive ? new Date(lastActive).toISOString() : null, last_read_inbox: lastRead ? new Date(lastRead).toISOString() : null, waiting: inbox.length, ...(hereUntil > Date.now() ? { here_until: new Date(hereUntil).toISOString() } : {}) } };
-        return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), ...reader };
+        // An assistant that has stopped reading (run 43: a neighbour's request sat unread and the tomatoes went unwatered):
+        // words for its human go to their panel as a note, and the sender is told, without saying which house.
+        const words = typeof m.payload.text === 'string' ? m.payload.text : typeof m.payload.body === 'string' ? m.payload.body : undefined;
+        let passed: Record<string, string> = {};
+        if (house && words && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) {
+          const r = (await houseCall({ kind: 'assistant.forward', from: { name: m.card.name, domain: m.from.ownerDomain, webId: m.from.webId, url: m.card.supportedInterfaces?.[0]?.url }, text: words.slice(0, 1000) }).catch(() => null)) as { ok?: boolean } | null;
+          if (r?.ok) passed = { passed_on: 'this assistant isn\'t reading right now: your words went to its human directly, as a note' };
+        }
+        return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), ...reader, ...passed };
       },
     });
     x.onAgent?.(a);
@@ -556,6 +564,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   // Your human's house, if they gave you an assistant key: you may look and suggest, never decide.
   let house: string | null = null;
+  /** How long without reading or acting before an assistant counts as away, and words for its human go to them directly. */
+  const QUIET_MS = 10 * 60_000;
   // The house's word that this agent is its owner's assistant, to show whoever the assistant chooses to tell (SPEC §6.5).
   let speaksFor: SpeaksFor | null = null;
   // Which house is the owner's is theirs to tell (runs 40, 41: "Tom's agent (sb-1)" in a message, "Mia's assistant (sb-0)"

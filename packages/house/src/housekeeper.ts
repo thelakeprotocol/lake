@@ -49,7 +49,7 @@ export type Reply =
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment; authorisation?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string; count?: string }
-interface StatusPayload { kind: 'status'; offerId: string }
+interface StatusPayload { kind: 'status'; offerId?: string; note?: string }
 interface ReceiptPayload { kind: 'receipt'; receipt: Attachment }
 interface QuotePayload { kind: 'quote'; program: import('@thelakeprotocol/core').QuoteProgram; certificate?: Attachment; authorisation?: Attachment; fee?: number; currency?: string }
 
@@ -526,7 +526,12 @@ export class Housekeeper {
 
   /** A visitor waiting on an "ask" checks back: has the owner answered? */
   private async status(p: StatusPayload, requester: string): Promise<LakeData> {
-    const req = this.o.desk.pending.get(p.offerId);
+    // A note's status, for its sender only (run 45: "no such request from you" on a note id).
+    if (p.note) {
+      const state = this.o.desk.noteState(String(p.note), requester);
+      return state ? this.reply({ kind: 'note.status', note: String(p.note), status: state } as never) : this.reply({ kind: 'rejected', code: 'malformed', why: 'no such note from you' });
+    }
+    const req = this.o.desk.pending.get(String(p.offerId ?? ''));
     if (!req || req.visitor.webId !== requester) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such request from you' });
     const base = { kind: 'decision' as const, offerId: req.offerId, holds: [], notes: [] };
     if (req.status === 'allowed') {

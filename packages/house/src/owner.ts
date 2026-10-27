@@ -111,7 +111,7 @@ export const ADVICE = ['do', 'dont', 'your_call'] as const;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge']);
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -348,6 +348,16 @@ export class OwnerDesk {
     await writeFile(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted])).catch(() => {});
   }
 
+  /** Notes the owner set aside, so their senders can ask what became of them. */
+  private closedNotes = new Map<string, { by: string; state: string }>();
+  /** What became of a note, told only to its sender: with the owner, or set aside. */
+  noteState(id: string, sender: string): string | null {
+    const open = this.notes.find((x) => x.id === id && x.from.webId === sender);
+    if (open) return 'with the owner, not yet set aside';
+    const closed = this.closedNotes.get(id);
+    return closed && closed.by === sender ? closed.state : null;
+  }
+
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
   notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
@@ -528,6 +538,15 @@ export class OwnerDesk {
             return void res.status(400).json({ error: (e as Error).message });
           }
         }
+        if (p.kind === 'assistant.forward') {
+          // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked
+          // as passed on by the assistant (its connector, not its judgement).
+          const q = p as unknown as { from?: { name?: string; domain?: string; webId?: string; url?: string }; text?: string };
+          const text = String(q.text ?? '').trim().slice(0, 1000);
+          if (!text || !q.from?.webId) return void res.status(400).json({ error: 'forward: { from: { name, domain, webId, url }, text }' });
+          const id = this.addNote({ from: { name: `${String(q.from.name ?? '').slice(0, 80)} (to your assistant, while it was away)`, domain: String(q.from.domain ?? ''), webId: String(q.from.webId), ...(q.from.url ? { url: String(q.from.url) } : {}), checked: false }, text });
+          return void res.json(id ? { ok: true, note: id } : { ok: false, error: 'a few notes an hour from one sender' });
+        }
         if (p.kind === 'assistant.badge') {
           const badge = await this.assistantBadge(assistant);
           return void res.json(badge ? { badge } : { badge: null, why: 'this house can\'t vouch for you: pair again with your Lake WebID' });
@@ -624,6 +643,8 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.note.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
+        const gone = this.notes.find((x) => x.id === id);
+        if (gone) this.closedNotes.set(id, { by: gone.from.webId, state: 'seen and set aside by the owner' });
         this.notes = this.notes.filter((x) => x.id !== id);
         return void res.json({ ok: true });
       }

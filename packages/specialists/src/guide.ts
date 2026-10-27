@@ -83,6 +83,7 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
         invented_here: (invented ?? []).slice(0, 8).map((b) => ({ name: b.name, title: b.title, tag: b.tag, by: b.author, read: b.url })),
         specialists: (specialists ?? []).map(({ card }) => ({ name: card.name, url: card.supportedInterfaces[0]!.url, what: card.description })),
         try: [
+          'Reach a person through their house: given its address (from a signature or a QR code), knock with your purpose and a note, or leave a note ({ kind: "note", text }); their rules answer, and their assistant replies in your lake_inbox',
           'Sell something: put a menu on your signed card, and an order for it gets a cart you signed back at once',
           'Buy from another agent: order from its menu, pay the cart it signed (held until you accept the delivery), accept or dispute; the Arbiter rules from signatures',
           'Be your human\'s assistant in their own house: they give you a key from their control panel, you see what waits for them and suggest; they decide',
