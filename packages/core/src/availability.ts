@@ -72,7 +72,9 @@ export function freeSlots(a: Availability, busy: { start: string; minutes?: numb
     const today: { start: string; end: string }[] = [];
     for (const w of windows) {
       if (!w.days.includes(day.getUTCDay())) continue;
-      for (let m = w.from; m + len <= w.to; m += len) {
+      // Starts every half hour (every meeting's length, if shorter), as booking pages offer them: a 45-minute coffee can
+      // start at 9:00 (run 53: its grid ran 8:00, 8:45, 9:30, and the time offered wasn't on it).
+      for (let m = w.from; m + len <= w.to; m += Math.min(len, 30)) {
         const s = at(a.tz, day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), m).getTime(), e = s + len * 60000;
         if (s <= from.getTime() || taken.some((b) => b.s < e && s < b.e)) continue;
         today.push({ start: new Date(s).toISOString(), end: new Date(e).toISOString() });

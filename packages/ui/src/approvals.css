@@ -1,10 +1,11 @@
 /* The owner's panel. One calm look shared with the house's public page and the claim page: dark, one sans face for
-   reading, mono only for addresses and codes, one accent (mint) for what to tap. */
+   reading, mono only for addresses and codes, one accent (mint) for what to tap. The device's own fonts: nothing is
+   loaded from anyone else. */
 :root {
   --ink: #070B12; --raised: #0E1622; --raised-2: #142032; --line: #1E2A3B; --fg: #E8EEF4; --muted: #93A3B6; --faint: #5C6B7E;
   --mint: #3DDC97; --mint-ink: #04170F; --amber: #F5C451; --threat: #FF5C73; --violet: #A99BFF;
-  --f-body: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --f-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --f-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --f-mono: ui-monospace, 'SF Mono', Menlo, monospace;
   --r: 12px;
   color-scheme: dark;
 }

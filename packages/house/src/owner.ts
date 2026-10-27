@@ -660,6 +660,9 @@ export class OwnerDesk {
             const ag = q.agreed;
             if (!ag || typeof ag !== 'object') return void res.status(400).json({ error: 'agenda: { id, agreed_in: the lake_inbox id of their message agreeing }' });
             const str = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
+            // What the assistant said about it while it was proposed is replaced, not left contradicting it (run 53).
+            item.note = q.note !== undefined ? str(q.note, 500) || undefined : undefined;
+            if (q.where) item.where = str(q.where, 120);
             item.agreed = { by: str(ag.by, 120), domain: str(ag.domain, 200), said: str(ag.said, 300), at: str(ag.at, 40), ...(ag.speaks_for ? { speaks_for: { house: str(ag.speaks_for.house, 300), checked: ag.speaks_for.checked === true } } : {}) };
             await this.saveAgenda();
             return void res.json({ ok: true, id: item.id, status: `agreed: by ${item.agreed.by}` });

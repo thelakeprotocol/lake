@@ -739,7 +739,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
             const sf = (m.checked as { speaks_for?: { house?: string; checked?: boolean } } | undefined)?.speaks_for;
             agreed = { by: m.from.name, domain: m.from.domain, said: String(m.message.text ?? JSON.stringify(m.message)).slice(0, 300), at: m.at, ...(sf?.house ? { speaks_for: { house: sf.house, checked: sf.checked === true } } : {}) };
           }
-          if (item.id) return json(await houseCall({ kind: 'assistant.agenda', id: item.id, ...(agreed ? { agreed } : {}) }));
+          if (item.id) return json(await houseCall({ kind: 'assistant.agenda', id: item.id, ...(agreed ? { agreed } : {}), ...(a.text.trim() ? { note: a.text } : {}), ...(item.where ? { where: item.where } : {}) }));
           return json(await houseCall({ kind: 'assistant.agenda', ...item, ...(a.text.trim() ? { note: a.text } : {}), ...(agreed ? { agreed } : {}) }));
         }
         return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.mute ? { mute: true } : {}), ...(a.rules ? { rules: a.rules } : {}), ...(a.door ? { door: a.door } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
@@ -1152,13 +1152,22 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       description:
         'Send one signed message to any Lake agent and get its verified, signed reply. Another assistant on the Lake answers { "kind": "received" } and reads it with lake_inbox. A house takes a note for its owner ({ "kind": "note", "text" }: a favour, an invite, nothing asked of their data): the owner sees it, and their assistant, if they have one, hears of it with your address to answer. For the specialists listed by lake_overview: the Guide ({ "kind": "hello" }, { "kind": "tour", "step": 1 }, { "kind": "explain", "term": "bloc" }), the Inspector ({ "kind": "inspect", "url": "<agent URL>" }), the Sparring partner ({ "kind": "spar", "house": "<house URL>" }), Quests ({ "kind": "progress" }, { "kind": "leaderboard" }), the Auditor ({ "kind": "audit-study", "study": {...} }).',
       inputSchema: {
-        agent_url: z.string().describe("The agent's A2A endpoint, from lake_overview or lake_search"),
-        message: z.record(z.string(), z.unknown()).describe('The payload; must have a "kind"'),
+        agent_url: z.string().optional().describe("The agent's A2A endpoint, from lake_overview or lake_search"),
+        message: z.record(z.string(), z.unknown()).optional().describe('The payload; must have a "kind"'),
+        // The names agents reach for first (runs 52-53: each cost a failed call): the same thing, said their way.
+        to: z.string().optional().describe('Same as agent_url'),
+        text: z.string().optional().describe('Shorthand, with no message: sends { kind: "note", text }'),
+        kind: z.string().optional().describe('Shorthand, with no message: the kind to send with text'),
         reveal_house: z.boolean().default(false).describe('Tell the other agent which house is your human\'s, deliberately: the message then carries the house\'s word that you speak for it, which their side checks'),
       },
     },
-    async (a) => {
+    async (input) => {
       try {
+        const agent_url = input.agent_url ?? input.to;
+        if (!agent_url) throw new Error('agent_url: the agent\'s A2A address (from lake_search, or the url a message came from)');
+        const message = input.message ?? (input.text !== undefined || input.kind ? { kind: input.kind ?? 'note', ...(input.text !== undefined ? { text: input.text } : {}) } : undefined);
+        if (!message) throw new Error('message: the payload, e.g. { "kind": "note", "text": "…" } (or just text)');
+        const a = { ...input, agent_url, message };
         if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
         // Which house is your human's is theirs to tell (run 40: assistants told strangers "Tom's agent (sb-1)"). A message
         // to anyone but the house itself that names it waits for a second, deliberate send.

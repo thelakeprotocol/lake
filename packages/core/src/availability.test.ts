@@ -16,7 +16,8 @@ describe('availability: when the owner is free, and the slots it leaves (SPEC §
     // Tuesday 3 Nov 2026, 08:00 in Sydney (UTC+11): the morning's three slots, less the 10:00 coffee already in the agenda.
     const from = new Date('2026-11-02T21:00:00Z');
     const slots = freeSlots({ tz: 'Australia/Sydney', free: ['mon-fri 09:00-12:00'] }, [{ start: '2026-11-02T23:00:00Z' }], from, 1);
-    expect(slots).toEqual([{ start: '2026-11-02T22:00:00.000Z', end: '2026-11-02T23:00:00.000Z' }, { start: '2026-11-03T00:00:00.000Z', end: '2026-11-03T01:00:00.000Z' }]);
+    expect(slots.map((x) => x.start)).toEqual(['2026-11-02T22:00:00.000Z', '2026-11-03T00:00:00.000Z']);
+    // Starts every half hour: 9:00 and 11:00 are free; 9:30, 10:00 and 10:30 overlap the coffee.
     // Half-hour meetings, and nothing in the past.
     expect(freeSlots({ tz: 'Australia/Sydney', free: ['mon-fri 09:00-10:00'], meetings: 30 }, [], new Date('2026-11-02T22:10:00Z'), 1)).toEqual([{ start: '2026-11-02T22:30:00.000Z', end: '2026-11-02T23:00:00.000Z' }]);
   });
