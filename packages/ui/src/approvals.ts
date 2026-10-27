@@ -349,8 +349,8 @@ async function keys(box: HTMLElement) {
   // A long history folds away on a phone; the newest stay in sight.
   const [recent, older] = [consents.slice(0, 20), consents.slice(20)];
   box.replaceChildren(
-    h('p', { class: 'lede' }, 'Everyone you’ve said yes to, newest first: who, what, for what, and how. Take one back and they’re cut off on their next request; your pod keeps the record, with the day you took it back.'),
-    consents.length ? h('ul', { class: 'rows' }, ...recent.map(row)) : h('p', { class: 'muted' }, 'You haven’t said yes to anyone yet.'),
+    h('p', { class: 'lede' }, 'Everyone you’ve said yes to. Take one back any time: they’re cut off on their next request.'),
+    consents.length ? h('ul', { class: 'rows' }, ...recent.map(row)) : h('p', { class: 'empty' }, 'You haven’t said yes to anyone yet.'),
     older.length ? h('details', { class: 'fold' }, h('summary', { class: 'muted' }, `${older.length} older`), h('ul', { class: 'rows' }, ...older.map(row))) : '',
     loose.length ? h('div', {}, h('h2', {}, 'Other keys'), h('ul', { class: 'rows' }, ...loose.map((k) => h('li', {},
       h('div', {}, h('div', { class: 'r-title' }, `${k.visitor} · ${k.purpose}`), h('div', { class: 'r-meta' }, `${k.fields.map(nice).join(', ')} · ${hoursLeft(k.until)} left · ${k.authorizedBy}`)),
@@ -490,7 +490,7 @@ type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[
  */
 function doorCard(d: DoorState | null, qr?: string): Node | string {
   if (!d) return '';
-  const about = h('input', { type: 'text', maxlength: '200', placeholder: 'e.g. Ask my agent about work, or about meeting up.', value: d.about ?? '' }) as HTMLInputElement;
+  const about = h('input', { type: 'text', maxlength: '200', placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', value: d.about ?? '' }) as HTMLInputElement;
   const name = h('input', { type: 'text', maxlength: '60', placeholder: 'Optional: the address is enough', value: d.name ?? '' }) as HTMLInputElement;
   const msg = h('span', { class: 'muted' });
   const save = async (open: boolean) => {
@@ -682,7 +682,7 @@ async function agents(box: HTMLElement) {
       h('div', { class: 'r-meta' }, a.reputation === null ? (a.blocked ? 'blocked' : '') : h('span', {}, `reputation ${a.reputation}`, h('span', { class: 'rep' }, h('i', { style: `width:${Math.round(a.reputation * 100)}%` })))));
   const real = list.filter((a) => !junk.includes(a));
   box.replaceChildren(
-    h('p', { class: 'lede' }, 'Every agent that has come to your door lately, what your house told it, and how it behaves across the Lake.'),
+    h('p', { class: 'lede' }, 'Agents that came to your door lately, and what your house told them.'),
     real.length ? h('ul', { class: 'rows' }, ...real.map(row)) : h('p', { class: 'muted' }, 'No visitors yet.'),
     junk.length ? h('details', { class: 'fold' }, h('summary', { class: 'muted' }, `${junk.length} unproven key${junk.length === 1 ? '' : 's'} tried something and ${junk.length === 1 ? 'was' : 'were'} blocked`), h('ul', { class: 'rows' }, ...junk.map(row))) : '',
   );
@@ -836,11 +836,11 @@ function startCard(door: DoorState | null, hasAssistant: boolean, free: FreeStat
   const done = steps.filter(([d]) => d).length;
   if (done === steps.length) return '';
   return h('section', { class: 'block start', id: 'start' },
-    h('div', { class: 'start-head' }, h('h2', {}, 'Get set up'), h('span', { class: 'progress' }, `${done} of ${steps.length}`)),
+    h('div', { class: 'start-head' }, h('h2', {}, 'Get set up'), h('span', { class: 'progress' }, `${done} of ${steps.length}`,
+      h('button', { class: 'link', type: 'button', onclick: () => { try { localStorage.setItem('lake.start.done', '1'); } catch { /* fine */ } void show(); } }, 'Hide'))),
     h('ol', { class: 'steps' }, ...steps.map(([ok, title, action], i) => h('li', { class: ok ? 'done' : '', id: `step-${i}` },
-      h('span', { class: 'tick', 'aria-hidden': 'true' }, ok ? '✓' : String(i + 1)), h('span', { class: 'step-title' }, title), ok && i !== 0 ? '' : h('span', { class: 'step-action' }, action)))),
-    door.open ? h('p', { class: 'hint' }, 'Try it: ask any AI, ', h('em', {}, `“Leave a note at ${door.address} saying hello.”`)) : '',
-    h('button', { class: 'btn small quiet', type: 'button', onclick: () => { try { localStorage.setItem('lake.start.done', '1'); } catch { /* fine */ } void show(); } }, 'Hide this'));
+      h('span', { class: 'tick', 'aria-hidden': 'true' }, ok ? '✓' : String(i + 1)), h('span', { class: 'step-title' }, title), ok ? '' : h('span', { class: 'step-action' }, action)))),
+    door.open ? h('p', { class: 'hint' }, 'Try it: tell any AI, ', h('em', {}, `“Knock on the door at ${door.address} and say hello.”`)) : '');
 }
 
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
@@ -912,12 +912,12 @@ function suggestionItems(list: Note[]): Node[] {
 async function money(box: HTMLElement) {
   const m = await call<{ total: number; receipts: { amount: number; currency: string; agreement: string; from: string; payer?: string; at: string; settlement: string }[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string }[] }>({ kind: 'panel.money' });
   box.replaceChildren(
+    h('p', { class: 'lede' }, 'Every payment comes with a signed receipt, filed in your pod. On the sandbox, money is simulated.'),
     h('dl', { class: 'tiles' }, h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.total}`)), h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.receipts.length)))),
-    h('p', { class: 'lede' }, 'Every payment comes with a receipt signed by a payments agent you trust, filed in your pod. In the sandbox, settlement is simulated.'),
     m.receipts.length ? h('ul', { class: 'rows', style: 'margin-top:14px' }, ...m.receipts.map((r) => h('li', {},
       h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `${money$(r.amount, r.currency)} from ${who(r.payer)}` : money$(r.amount, r.currency)), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · signed by ${who(r.from)} · ${r.settlement}`)),
       h('span', { class: 'chip share' }, 'signed'))))
-      : h('p', { class: 'muted' }, 'No payments yet.'),
+      : h('p', { class: 'empty' }, 'No payments yet.'),
     // What your own agent paid for you, under the allowance you signed: its receipts, handed back to your house.
     m.spent?.length ? h('div', {}, h('h2', {}, 'Spent by your agent'), h('ul', { class: 'rows' }, ...m.spent.map((r) => h('li', {},
       h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('div', { class: 'r-meta' }, `${new Date(r.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · under your allowance · ${r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40)}`)),

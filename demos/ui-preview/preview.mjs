@@ -22,7 +22,7 @@ if (cmd === 'seed') {
   const pair = await (await fetch(`${url}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: owner.publicJwk }) })).json();
   if (!pair.paired) throw new Error(`pair: ${JSON.stringify(pair)}`);
   const call = async (p, id = owner, iss = pair.webId) => (await fetch(`${url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, id, { iss })) })).json();
-  await call({ kind: 'panel.door.set', open: true, about: 'Ask my agent about catching up, or about my work.' });
+  await call({ kind: 'panel.door.set', open: true, about: 'Send your AI over: mine knows when I\'m free.' });
   await call({ kind: 'panel.availability.set', availability: { tz: 'Australia/Sydney', free: ['mon-fri 08:00-11:00'], meetings: 45 } });
   // Its own assistant, connected with a code from My agent, with a few things to show.
   const { code } = await call({ kind: 'panel.assistant.invite', label: 'Claude' });

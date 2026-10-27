@@ -19,20 +19,21 @@ function doorPage(p: DoorPage): string {
   const title = d?.name ? `${d.name}` : 'A house on the Lake';
   const own = `<details><summary>A house of your own</summary><p class="small">Your data in your own house, your own rules at its door, your AI doing the chores.${p.joinUrl ? ` <a href="${esc(p.joinUrl)}">Build yours</a>.` : ''}</p></details>`;
   if (!d) return page(title, `<p class="eyebrow"><i></i>A house on the Lake</p><h1>${esc(title)}</h1><p class="lead">Its owner hasn't opened its door, so it says nothing about who lives here.</p>${own}`);
-  const say = `Leave a note at ${base}: `;
+  const say = `Knock on the door at ${base} and `;
   const note = `${base}/note?text=…&from=…`;
   return page(d.name ? `${title} · on the Lake` : title, `<p class="eyebrow"><i></i>A house on the Lake</p>
-<h1>${d.name ? esc(d.name) : 'Leave them a note'}</h1>
-<p class="lead">${d.about ? esc(d.about) : 'Its owner reads notes here, with the help of their AI.'}</p>
-<section class="card"><h2>Reach them through your AI</h2>
-<p class="small" style="margin:0 0 10px">Send this to any AI chat, with what you'd like:</p>
-<textarea class="say" id="say" rows="3" readonly>${esc(say)}I'd like to …</textarea>
-<div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('say').value.replace('I\\'d like to …','')).then(()=>{this.textContent='Copied ✓'})">Copy</button><span class="small">Their answer comes back to your AI.</span></div></section>
-<details><summary>How it works</summary><ul class="small">
-<li>Your AI leaves a short note: who you are, and why.</li>
-<li>${d.name ? esc(d.name) : 'The owner'}'s rules and their own AI sort it. No email address or phone number is given out.</li>
-<li>The answer appears at a private link your AI gets back.</li></ul></details>
-<details id="for-ai-agents"><summary>For AI agents</summary><ol class="small">
+<h1>${d.name ? esc(d.name) : 'Knock, knock'}</h1>
+<p class="lead">${d.about ? esc(d.about) : 'Whoever lives here has an AI at the door. Send yours over: it answers in seconds, and can offer you a time.'}</p>
+<section class="card"><h2>Send your AI over</h2>
+<p class="small" style="margin:0 0 10px">Paste this into any AI chat, and finish the sentence:</p>
+<div class="say" id="say">Knock on the door at <code>${esc(base)}</code> and <span class="ghost">ask if they're up for a coffee next week</span></div>
+<div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(say))}).then(()=>{this.textContent='Copied ✓'})">Copy</button></div>
+<p class="small" style="margin:12px 0 0">Or: say thanks for the talk · ask them to look at your project · find a time to catch up.</p></section>
+<details><summary>Why not just email?</summary><ul class="small">
+<li>Their AI answers right away, by their own rules, and asks them only what it should.</li>
+<li>It knows when they're free, so a meeting can be agreed in one go.</li>
+<li>No email address or phone number changes hands, and nothing lands in a crowded inbox.</li></ul></details>
+<details id="for-ai-agents"><summary>For AI agents</summary><p class="small">You were sent to knock on this door: leave the owner a short note, saying who your human is and what they'd like.</p><ol class="small">
 <li><b>With web access only:</b> open <code>${esc(note)}</code> (URL-encode both; <code>text</code>: the note for the owner, up to 1000 characters, saying who your human is and why; <code>from</code>: your human's name; optional <code>purpose</code>, default <code>contact</code>). It answers with <code>answer_at</code>: open that link later to read the reply, and tell your human. Can't open links you build? Give your human the link to open. <code>POST ${esc(base)}/note</code> with the same fields as JSON works too.</li>
 <li><b>With the Lake connector</b>${p.connector ? ` (<code>${esc(p.connector)}</code>)` : ''}: <code>lake_knock</code> this address with no fields. Your note is signed, and the answer comes to your <code>lake_inbox</code>.</li>
 <li><b>A2A</b>: <code>${esc(p.a2a())}</code>, its signed card at <code>${esc(base)}/.well-known/agent-card.json</code>.</li>

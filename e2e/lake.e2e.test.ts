@@ -408,7 +408,7 @@ describe('the owner', () => {
     expect(card.name).toBe('House strict');
     expect(JSON.stringify(card)).not.toMatch(/open door|Ask my agent about talks/);
     expect(card.capabilities.extensions[0].params.tags).not.toContain('door');
-    expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*Reach them through your AI[\s\S]*Leave a note at /);
+    expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*Send your AI over[\s\S]*Knock on the door at /);
     expect(await (await fetch(houses.strict!, { headers: { accept: 'application/json' } })).json()).toMatchObject({ door: { about: 'Ask my agent about talks.' } });
     // Over plain web, for an AI without the connector: a note by opening one link, the answer at a private one.
     const left = await (await fetch(`${houses.strict}/note?text=${encodeURIComponent('Hi, Ana here: a short call about your talk?')}&from=Ana`)).json();

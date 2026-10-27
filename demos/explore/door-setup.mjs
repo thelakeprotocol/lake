@@ -11,7 +11,7 @@ const [stan] = JSON.parse(readFileSync(join(run, 'owners.json'), 'utf8'));
 const owner = await importIdentity(stan.key);
 const call = async (p) => (await fetch(`${stan.url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, owner, { iss: stan.webId })) })).json();
 // The scenario may give the door its own line (demo.json `doorAbout`).
-const about = (process.env.EXPLORE_DEMO && JSON.parse(readFileSync(join(process.env.EXPLORE_DEMO, 'demo.json'), 'utf8')).doorAbout) || 'Ask my agent about work, talks or meeting up.';
+const about = (process.env.EXPLORE_DEMO && JSON.parse(readFileSync(join(process.env.EXPLORE_DEMO, 'demo.json'), 'utf8')).doorAbout) || 'Send your AI over: mine knows when I\'m free.';
 const opened = await call({ kind: 'panel.door.set', open: true, about });
 if (!opened.ok) throw new Error(`door: ${JSON.stringify(opened)}`);
 vars.house_1_door = (await call({ kind: 'panel.door' })).address;

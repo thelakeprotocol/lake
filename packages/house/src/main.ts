@@ -198,7 +198,7 @@ async function hosted(n: number) {
     // The same look as the house's own pages and the owner's panel.
     const li = rows.map((r) => r.until
       ? `<li><span>House ${r.name}</span><span class="chip">${r.until === 'kept' ? 'taken' : `taken until ${r.until.slice(11, 16)} UTC`}</span></li>`
-      : `<li><span>House ${r.name}</span><a class="btn primary" href="${r.name}/owner/">Claim it</a></li>`).join('');
+      : `<li><span>House ${r.name}</span><a class="btn primary small" href="${r.name}/owner/">Claim it</a></li>`).join('');
     const hours = Number(a['lease-hours'] ?? 24) || 0;
     res.type('html').send(page('Claim a house', `<p class="eyebrow"><i></i>The Lake sandbox</p><h1>Claim a house</h1>
 <p class="lead">Free to try: synthetic data, simulated money, real signatures. Open one and tap <b>Pair this device</b>: your phone becomes its key.</p>
