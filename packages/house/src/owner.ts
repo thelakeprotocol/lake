@@ -112,7 +112,7 @@ export const ADVICE = ['do', 'dont', 'your_call'] as const;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward']);
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -228,6 +228,7 @@ export class OwnerDesk {
     this.ownerJwk = await this.o.readOwnerKey();
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
+    this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
       check();
@@ -348,6 +349,13 @@ export class OwnerDesk {
     this.notes = this.notes.filter((n) => n.from.key !== key);
     await writeFile(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted])).catch(() => {});
   }
+
+  /**
+   * What the owner has agreed to (coffee on Tuesday, a talk on the 16th), written in by their assistant so it lives in the
+   * house, not in two inboxes (run 46: the coffee had a time and no home). The owner's to see and remove; nobody else's.
+   */
+  agenda: { id: string; what: string; when: string; with?: string; by: string; at: string }[] = [];
+  private saveAgenda = () => writeFile(join(this.o.dataDir, 'agenda.json'), JSON.stringify(this.agenda)).catch(() => {});
 
   /** Notes the owner set aside, so their senders can ask what became of them. */
   private closedNotes = new Map<string, { by: string; state: string }>();
@@ -541,6 +549,16 @@ export class OwnerDesk {
             return void res.status(400).json({ error: (e as Error).message });
           }
         }
+        if (p.kind === 'assistant.agenda') {
+          const q = p as unknown as { what?: string; when?: string; with?: string; remove?: string };
+          if (q.remove) { this.agenda = this.agenda.filter((x) => !(x.id === q.remove && x.by === assistant.label)); await this.saveAgenda(); return void res.json({ ok: true }); }
+          const what = String(q.what ?? '').trim().slice(0, 200), when = String(q.when ?? '').trim().slice(0, 80);
+          if (!what || !when) return void res.status(400).json({ error: 'agenda: { what, when, with? } (what was agreed, and when)' });
+          const item = { id: randomBytes(6).toString('hex'), what, when, ...(q.with ? { with: String(q.with).slice(0, 120) } : {}), by: assistant.label, at: new Date().toISOString() };
+          this.agenda = [...this.agenda, item].slice(-100);
+          await this.saveAgenda();
+          return void res.json({ ok: true, id: item.id, note: 'in your human\'s agenda, in their house' });
+        }
         if (p.kind === 'assistant.forward') {
           // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked
           // as passed on by the assistant (its connector, not its judgement).
@@ -637,6 +655,12 @@ export class OwnerDesk {
         this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
       }
+      if (p.kind === 'panel.agenda.remove') {
+        const id = String((p as unknown as { id?: string }).id ?? '');
+        this.agenda = this.agenda.filter((x) => x.id !== id);
+        await this.saveAgenda();
+        return void res.json({ ok: true });
+      }
       if (p.kind === 'panel.note.mute') {
         const note = this.notes.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
         if (!note?.from.key) return void res.status(404).json({ error: 'no note at the door with that id' });
@@ -725,6 +749,7 @@ export class OwnerDesk {
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
       notes: this.notes,
+      agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };
   }

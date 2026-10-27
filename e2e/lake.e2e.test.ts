@@ -494,6 +494,13 @@ describe('the owner', () => {
     expect(twice.note).toBe((await ownerCall({ kind: 'list' })).notes[0].id);
     const neutral = await asHelper({ kind: 'assistant.suggest', text: 'Coffee with Ana: which day?', note: twice.note, advice: 'your_call', ask: { choices: ['Tuesday', 'Thursday'], recommend: 0 } });
     expect((await ownerCall({ kind: 'list' })).suggestions.find((x: any) => x.id === neutral.id).ask).toEqual({ choices: ['Tuesday', 'Thursday'] });
+    // What the owner agreed to lives in their house: the assistant writes it in, the owner sees and removes it.
+    const coffee = await asHelper({ kind: 'assistant.agenda', what: 'Coffee with Ana', when: 'Tuesday 10:00', with: 'neighbour.example' });
+    expect(coffee).toMatchObject({ ok: true, id: expect.any(String) });
+    expect(await asHelper({ kind: 'assistant.agenda', what: 'no time given' })).toMatchObject({ error: expect.stringMatching(/^agenda:/) });
+    expect((await ownerCall({ kind: 'list' })).agenda).toEqual([expect.objectContaining({ id: coffee.id, what: 'Coffee with Ana', when: 'Tuesday 10:00', with: 'neighbour.example' })]);
+    await ownerCall({ kind: 'panel.agenda.remove', id: coffee.id });
+    expect((await ownerCall({ kind: 'list' })).agenda).toEqual([]);
     // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', rules: 'rules: [' })).toMatchObject({ error: expect.stringMatching(/^rules:/) });
     // A sender the owner won't hear from again, by key: its next note is declined at the door.
