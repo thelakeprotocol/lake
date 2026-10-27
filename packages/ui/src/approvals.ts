@@ -129,7 +129,7 @@ async function home(box: HTMLElement) {
   const [o, feed, { suggestions, assistants, notes, agenda }] = await Promise.all([
     call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
-    call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string }[]; agenda?: { id: string; what: string; when: string; with?: string; by: string }[] }>({ kind: 'list' }),
+    call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string }[]; agenda?: AgendaItem[] }>({ kind: 'list' }),
   ]);
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
@@ -142,9 +142,7 @@ async function home(box: HTMLElement) {
   box.replaceChildren(
     suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
     // What you agreed to, written in by your agent: yours to see and remove.
-    agenda?.length ? h('div', { class: 'card' }, h('h3', {}, 'Coming up'), h('ul', { class: 'rows' }, ...agenda.map((a) => h('li', {},
-      h('div', {}, h('div', { class: 'r-title' }, a.what), h('div', { class: 'r-meta' }, `${a.when}${a.with ? ` · with ${a.with}` : ''} · noted by ${a.by}`)),
-      h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void show(); } }, 'Remove')))))) : '',
+    agenda?.length ? agendaCard(agenda) : '',
     // Notes other agents left at your door: their words, nothing asked of your data. Your agent hears of them too.
     notes?.length ? h('div', { class: 'card' }, h('h3', {}, 'Notes at your door'), h('ul', { class: 'rows' }, ...notes.map((n) => h('li', {},
       h('div', {}, h('div', { class: 'r-title' }, `“${n.text}”`), h('div', { class: 'r-meta' }, `${n.from.name} (${n.from.domain}${n.from.checked ? ', domain proved' : ': not verified, anyone could send this'})${n.from.speaks_for ? (n.from.speaks_for.checked ? ` · the assistant of ${n.from.speaks_for.house.replace(/\/profile\/card#me$/, '')}: that house says so` : ' · says it speaks for a house, with nothing to show it') : ''} · ${time(n.at)} · their words`)),
@@ -690,7 +688,7 @@ function allowanceForm(a: Assistant): Node {
 const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; note?: string; mute?: boolean };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean };
 const ADVICE_SAYS = { do: 'Your assistant advises: yes', dont: 'Your assistant advises: no', your_call: 'Your assistant says: your call' } as const;
 function replyBox(x: Note): Node {
   if (x.reply) return h('div', { class: 'r-meta' }, `you wrote: “${x.reply}”`);
@@ -703,6 +701,26 @@ function replyBox(x: Note): Node {
     void show();
   };
   return h('span', {}, input, ' ', send, ' ');
+}
+
+type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
+// What you agreed to, written in by your agent, with who agreed on the other side (or that nobody has yet): yours to see,
+// add to your own calendar, and remove.
+function agendaCard(agenda: AgendaItem[]): Node {
+  const feed = h('span', {});
+  const showFeed = async (reset = false) => {
+    const f = await call<{ url?: string; path: string }>({ kind: 'panel.agenda.feed', ...(reset ? { reset: true } : {}) });
+    const url = f.url ?? new URL(f.path.replace(/^\/owner\//, ''), location.href).href;
+    feed.replaceChildren(h('code', {}, url), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(url) }, 'Copy'), ' ',
+      h('button', { class: 'btn small', type: 'button', onclick: () => { if (confirm('Make a new address? The old one stops working.')) void showFeed(true); } }, 'New address'));
+  };
+  return h('div', { class: 'card' }, h('h3', {}, 'Coming up'), h('ul', { class: 'rows' }, ...agenda.map((a) => h('li', {},
+    h('div', {}, h('div', { class: 'r-title' }, a.what),
+      h('div', { class: 'r-meta' }, `${a.when}${a.where ? ` · ${a.where}` : ''}${a.with ? ` · with ${a.with}` : ''} · noted by ${a.by}`),
+      h('div', { class: 'r-meta' }, a.agreed ? `Agreed by ${a.agreed.by}${a.agreed.speaks_for?.checked ? `, which speaks for ${a.agreed.speaks_for.house}` : ' (an agent; it showed no house it speaks for)'}: “${a.agreed.said}”` : 'Proposed: nothing from their side says they agreed yet'),
+      a.note ? h('div', { class: 'r-meta' }, `${a.by}: “${a.note}”`) : ''),
+    h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void show(); } }, 'Remove'))))),
+    h('p', { class: 'r-meta' }, 'In your own calendar app: subscribe to this address (keep it to yourself: whoever has it can read your agenda). ', h('button', { class: 'btn small', type: 'button', onclick: (e: Event) => { (e.target as HTMLElement).remove(); void showFeed(); } }, 'Show the address'), feed));
 }
 
 function suggestionList(list: Note[]): Node {
@@ -731,6 +749,14 @@ function suggestionList(list: Note[]): Node {
         if (r.ok) { draft = null; await call({ kind: 'panel.assistant.dismiss', id: x.id }); } else alert(r.error);
         void show();
       } }, 'Apply these rules') : '',
+      // A new line for your door: applied by your tap; the door stays open, its name as it was.
+      x.door ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
+        (e.target as HTMLButtonElement).disabled = true;
+        const cur = await call<{ name?: string }>({ kind: 'panel.door' });
+        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) });
+        if (r.ok) await call({ kind: 'panel.assistant.dismiss', id: x.id }); else alert(r.error);
+        void show();
+      } }, `Put “${x.door.about}” on your door`) : '',
       // Your own words back to your agent (a café, a title, "not this week"): sent as yours.
       replyBox(x),
       // A question: each choice is a button; the answer goes to your assistant.

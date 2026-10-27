@@ -192,7 +192,10 @@ export class Housekeeper {
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
     // A sender the owner muted, by key: nothing from it reaches them.
-    if (key && this.o.desk.muted.has(key)) return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: 'declined: this house doesn\'t take messages from this sender', holds: [], notes: [] });
+    if (key && this.o.desk.muted.has(key)) {
+      this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'a muted sender' }));
+      return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: 'declined: this house doesn\'t take messages from this sender', holds: [], notes: [] });
+    }
     if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, key);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a note (text for the owner, nothing asked), a compute request, a quote, or status / withdraw for a request you made' });
@@ -500,6 +503,8 @@ export class Housekeeper {
     // delivered, as they would a knock (run 44: five sales notes all reached the owner).
     const purpose = typeof p.purpose === 'string' && p.purpose ? p.purpose : 'contact';
     if (!isPurpose(purpose)) return this.reply({ kind: 'rejected', code: 'malformed', why: `purpose: one of ${Object.keys(PURPOSES).join(', ')}` });
+    // A note is a knock at the door like any other: counted, and in the owner's activity (run 47: four notes, "knocksToday: 0").
+    this.o.emit(makeEvent('knock', this.actor, `agent:${from.ownerDomain}`, { purpose }));
     const said = noteDecision(this.o.rules, { purpose, requester: from.ownerDomain }, { reputation: this.o.signals?.().reputation[from.ownerDomain] });
     // Recorded in the owner's activity like a declined knock (run 46: a turned-away pitch left no trace).
     if (!said.deliver) {

@@ -56,6 +56,11 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
         o.given.add(`rules:${sug.id}`);
         log(`${o.house}: applied new rules on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.rules.set', text: sug.rules }))}`);
       }
+      if (sug.door && sug.advice === 'do' && !o.given.has(`door:${sug.id}`)) {
+        o.given.add(`door:${sug.id}`);
+        const cur = await c({ kind: 'panel.door' });
+        log(`${o.house}: put "${sug.door.about}" on the door on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.door.set', open: true, about: sug.door.about, ...(cur.name ? { name: cur.name } : {}) }))}`);
+      }
       if (sug.pledge && sug.advice === 'do' && !o.given.has(`pledge:${sug.pledge.id}`)) {
         o.given.add(`pledge:${sug.pledge.id}`);
         log(`${o.house}: signed pledge ${sug.pledge.id} on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.pledge.sign', tally: sug.pledge.tally, id: sug.pledge.id }))}`);

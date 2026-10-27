@@ -495,10 +495,17 @@ describe('the owner', () => {
     const neutral = await asHelper({ kind: 'assistant.suggest', text: 'Coffee with Ana: which day?', note: twice.note, advice: 'your_call', ask: { choices: ['Tuesday', 'Thursday'], recommend: 0 } });
     expect((await ownerCall({ kind: 'list' })).suggestions.find((x: any) => x.id === neutral.id).ask).toEqual({ choices: ['Tuesday', 'Thursday'] });
     // What the owner agreed to lives in their house: the assistant writes it in, the owner sees and removes it.
-    const coffee = await asHelper({ kind: 'assistant.agenda', what: 'Coffee with Ana', when: 'Tuesday 10:00', with: 'neighbour.example' });
-    expect(coffee).toMatchObject({ ok: true, id: expect.any(String) });
+    // Without the other side's word it is only proposed; with it, it says who agreed and whether they speak for a house.
+    const coffee = await asHelper({ kind: 'assistant.agenda', what: 'Coffee with Ana', when: 'Tuesday 10:00', start: '2026-11-03T10:00:00+11:00', where: 'The corner café', with: 'neighbour.example', note: 'I assumed the morning suits you', agreed: { by: 'Ana helper', domain: 'neighbour.example', said: 'Tuesday 10 is great', at: new Date().toISOString() } });
+    expect(coffee).toMatchObject({ ok: true, id: expect.any(String), status: expect.stringMatching(/^agreed: by Ana helper, an agent that showed no house/) });
     expect(await asHelper({ kind: 'assistant.agenda', what: 'no time given' })).toMatchObject({ error: expect.stringMatching(/^agenda:/) });
-    expect((await ownerCall({ kind: 'list' })).agenda).toEqual([expect.objectContaining({ id: coffee.id, what: 'Coffee with Ana', when: 'Tuesday 10:00', with: 'neighbour.example' })]);
+    expect(await asHelper({ kind: 'assistant.agenda', what: 'x', when: 'soon', start: 'next tuesday' })).toMatchObject({ error: expect.stringMatching(/^agenda.start:/) });
+    expect((await ownerCall({ kind: 'list' })).agenda).toEqual([expect.objectContaining({ id: coffee.id, what: 'Coffee with Ana', start: '2026-11-02T23:00:00.000Z', where: 'The corner café', note: 'I assumed the morning suits you', agreed: expect.objectContaining({ by: 'Ana helper' }) })]);
+    const { path: feed } = await ownerCall({ kind: 'panel.agenda.feed' });
+    expect(await (await fetch(`${houses.strict}${feed}`)).text()).toContain('STATUS:CONFIRMED');
+    // A new line for the door, with the owner's tap to apply.
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'Say the sofa is gone', door: { about: 'Sofa gone; plants free to neighbours.' }, advice: 'do' })).toMatchObject({ ok: true });
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'x', door: { about: '' } })).toMatchObject({ error: expect.stringMatching(/^door:/) });
     await ownerCall({ kind: 'panel.agenda.remove', id: coffee.id });
     expect((await ownerCall({ kind: 'list' })).agenda).toEqual([]);
     // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.

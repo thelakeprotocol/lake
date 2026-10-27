@@ -106,9 +106,22 @@ export interface Suggestion {
   reply?: string;
   /** New rules (the whole text) the assistant proposes: the owner's panel shows an Apply button. */
   rules?: string;
+  /** A new line for the door (run 47: "plants free, sofa gone" took a whole rules file): an Apply tap, the rest kept. */
+  door?: { about: string };
   at: string;
 }
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
+/**
+ * Something the owner agreed to, in their agenda. Who agreed on the other side is what it rests on (run 47: a visitor's
+ * agent wrote "Sam confirms" without asking Sam): `agreed` is their signed message, as the assistant's connector checked
+ * it, and whether that agent showed it speaks for a house; without it the entry is only proposed (iCalendar: TENTATIVE).
+ */
+export interface AgendaItem {
+  id: string; what: string; when: string; /** When it starts, for the owner's calendar. */ start?: string; where?: string; with?: string;
+  /** The assistant's own words to the owner about it ("I assumed your first week starts Monday"). */ note?: string;
+  agreed?: { by: string; domain: string; said: string; at: string; speaks_for?: { house: string; checked: boolean } };
+  by: string; at: string;
+}
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
@@ -216,6 +229,14 @@ export class OwnerDesk {
     this.pending.clear();
     this.assistants.clear();
     this.suggestions = [];
+    // The last owner's notes, mutes and agenda were theirs: the next one starts with none, and a new calendar address.
+    this.notes = [];
+    this.closedNotes.clear();
+    this.muted.clear();
+    await writeFile(join(this.o.dataDir, 'muted.json'), '[]').catch(() => {});
+    this.agenda = [];
+    await this.saveAgenda();
+    this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'), true);
     await this.o.saveAssistants?.([]);
     this.ownerJwk = null;
     this.ownerSeen = 0;
@@ -229,6 +250,7 @@ export class OwnerDesk {
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
+    this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'));
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
       check();
@@ -354,7 +376,9 @@ export class OwnerDesk {
    * What the owner has agreed to (coffee on Tuesday, a talk on the 16th), written in by their assistant so it lives in the
    * house, not in two inboxes (run 46: the coffee had a time and no home). The owner's to see and remove; nobody else's.
    */
-  agenda: { id: string; what: string; when: string; with?: string; by: string; at: string }[] = [];
+  agenda: AgendaItem[] = [];
+  /** The secret in the owner's calendar address for the agenda (a private iCal feed, as calendars give out): reset makes a new one. */
+  private feedKey = '';
   private saveAgenda = () => writeFile(join(this.o.dataDir, 'agenda.json'), JSON.stringify(this.agenda)).catch(() => {});
 
   /** Notes the owner set aside, so their senders can ask what became of them. */
@@ -464,6 +488,12 @@ export class OwnerDesk {
     });
 
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
+    // The agenda as a private iCal feed (RFC 5545) for the owner's own calendar app: whoever has the address can read it,
+    // as with any calendar's secret address, so only the owner's panel shows it.
+    r.get('/agenda.ics', (req, res) => {
+      if (!this.ownerJwk || !this.feedKey || String(req.query.key ?? '') !== this.feedKey) return void res.status(404).send('no such calendar');
+      res.type('text/calendar').send(agendaIcs(this.agenda, this.o.webId));
+    });
     r.get('/status', (_req, res) => void res.json({ claimed: !!this.ownerJwk, until: this.leaseUntil()?.toISOString() ?? null, leaseHours: this.o.leaseHours ?? null }));
 
     r.post('/api', async (req, res) => {
@@ -519,12 +549,19 @@ export class OwnerDesk {
           if (q.rules !== undefined) {
             try { parseRules(String(q.rules)); rules = String(q.rules); } catch (e) { return void res.status(400).json({ error: `rules: ${(e as Error).message}` }); }
           }
+          let door: Suggestion['door'];
+          const d = (q as { door?: { about?: unknown } }).door;
+          if (d !== undefined) {
+            const about = typeof d?.about === 'string' ? d.about.trim() : '';
+            if (!about || about.length > 200) return void res.status(400).json({ error: 'door: { about: the new line for your human\'s door, up to 200 characters }' });
+            door = { about };
+          }
           // Muting a sender is its own choice, never read from advice (run 46: an FYI marked "dont" muted the seller).
           const mute = (q as { mute?: unknown }).mute === true;
           // Or about a note at the door (run 42: "don't answer this one" had nowhere to go).
           const aboutNote = typeof (q as { note?: unknown }).note === 'string' ? this.notes.find((n) => n.id === (q as { note: string }).note)?.id : undefined;
           if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id' });
-          if (q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules) return void res.status(400).json({ error: 'advice is about a request, an offer, a pledge, a note or rules: name it' });
+          if (q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door) return void res.status(400).json({ error: 'advice is about a request, an offer, a pledge, a note, rules or a door line: name it' });
           let ask: Suggestion['ask'];
           if (q.ask) {
             // Refused, not cut (run 40 stored "…return fa"): the assistant shortens its own words.
@@ -535,7 +572,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
         }
@@ -550,14 +587,19 @@ export class OwnerDesk {
           }
         }
         if (p.kind === 'assistant.agenda') {
-          const q = p as unknown as { what?: string; when?: string; with?: string; remove?: string };
+          const q = p as unknown as { what?: string; when?: string; start?: string; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string };
           if (q.remove) { this.agenda = this.agenda.filter((x) => !(x.id === q.remove && x.by === assistant.label)); await this.saveAgenda(); return void res.json({ ok: true }); }
           const what = String(q.what ?? '').trim().slice(0, 200), when = String(q.when ?? '').trim().slice(0, 80);
-          if (!what || !when) return void res.status(400).json({ error: 'agenda: { what, when, with? } (what was agreed, and when)' });
-          const item = { id: randomBytes(6).toString('hex'), what, when, ...(q.with ? { with: String(q.with).slice(0, 120) } : {}), by: assistant.label, at: new Date().toISOString() };
+          if (!what || !when) return void res.status(400).json({ error: 'agenda: { what, when, start?, where?, with? } (what was agreed, and when)' });
+          const start = q.start ? new Date(String(q.start)) : undefined;
+          if (start && Number.isNaN(start.getTime())) return void res.status(400).json({ error: 'agenda.start: a date and time (ISO 8601, with its offset), for your human\'s calendar' });
+          const str = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
+          const ag = q.agreed;
+          const agreed = ag && typeof ag === 'object' ? { by: str(ag.by, 120), domain: str(ag.domain, 200), said: str(ag.said, 300), at: str(ag.at, 40), ...(ag.speaks_for ? { speaks_for: { house: str(ag.speaks_for.house, 300), checked: ag.speaks_for.checked === true } } : {}) } : undefined;
+          const item: AgendaItem = { id: randomBytes(6).toString('hex'), what, when, ...(start ? { start: start.toISOString() } : {}), ...(q.where ? { where: str(q.where, 120) } : {}), ...(q.with ? { with: str(q.with, 120) } : {}), ...(q.note ? { note: str(q.note, 500) } : {}), ...(agreed ? { agreed } : {}), by: assistant.label, at: new Date().toISOString() };
           this.agenda = [...this.agenda, item].slice(-100);
           await this.saveAgenda();
-          return void res.json({ ok: true, id: item.id, note: 'in your human\'s agenda, in their house' });
+          return void res.json({ ok: true, id: item.id, status: agreed ? `agreed: by ${agreed.by}${agreed.speaks_for?.checked ? `, which speaks for ${agreed.speaks_for.house}` : ', an agent that showed no house it speaks for'}` : 'proposed: nothing from their side says they agreed (name their message with agreed_in once they do)', note: 'in your human\'s agenda, in their house' });
         }
         if (p.kind === 'assistant.forward') {
           // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked
@@ -654,6 +696,12 @@ export class OwnerDesk {
         if (text) sug.reply = text;
         this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
+      }
+      if (p.kind === 'panel.agenda.feed') {
+        // The owner's calendar subscribes to this address; a reset makes the old one stop working.
+        if ((p as unknown as { reset?: boolean }).reset) this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'), true);
+        const base = this.o.panel?.door?.().address;
+        return void res.json({ ok: true, path: `/owner/agenda.ics?key=${this.feedKey}`, ...(base ? { url: `${base}/owner/agenda.ics?key=${this.feedKey}` } : {}) });
       }
       if (p.kind === 'panel.agenda.remove') {
         const id = String((p as unknown as { id?: string }).id ?? '');
@@ -794,6 +842,22 @@ export class OwnerDesk {
     this.news({ about: 'request.answered', request: id, by: req.visitor.domain, answer: 'allow', fields: s!.fields, until: new Date(until).toISOString() });
     return { ok: true };
   }
+}
+
+/** The agenda as iCalendar: entries with a start time become events, CONFIRMED when the other side agreed, TENTATIVE if not. */
+export function agendaIcs(items: AgendaItem[], house: string): string {
+  const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const t = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//The Lake//house agenda//EN', 'X-WR-CALNAME:Agenda'];
+  for (const x of items.filter((i) => i.start)) {
+    const who = x.agreed ? `Agreed by ${x.agreed.by}${x.agreed.speaks_for?.checked ? ` (speaks for ${x.agreed.speaks_for.house})` : ''}: "${x.agreed.said}"` : 'Proposed: their side has not agreed yet';
+    lines.push('BEGIN:VEVENT', `UID:${x.id}@${new URL(house).host}`, `DTSTAMP:${t(x.at)}`, `DTSTART:${t(x.start!)}`, 'DURATION:PT1H', `SUMMARY:${esc(x.what)}`,
+      ...(x.where ? [`LOCATION:${esc(x.where)}`] : []), `DESCRIPTION:${esc([x.when, x.with ? `with ${x.with}` : '', who, x.note ?? ''].filter(Boolean).join('\n'))}`,
+      `STATUS:${x.agreed ? 'CONFIRMED' : 'TENTATIVE'}`, 'END:VEVENT');
+  }
+  lines.push('END:VCALENDAR');
+  // Lines end in CRLF, and long ones fold at 75 octets (RFC 5545 §3.1).
+  return lines.map((l) => { const out: string[] = []; let s = l; while (Buffer.byteLength(s) > 75) { let n = 75; while (Buffer.byteLength(s.slice(0, n)) > 75) n--; out.push(s.slice(0, n)); s = ' ' + s.slice(n); } out.push(s); return out.join('\r\n'); }).join('\r\n') + '\r\n';
 }
 
 async function secret(path: string, rotate = false): Promise<string> {
