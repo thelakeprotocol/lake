@@ -661,7 +661,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     }
     return o.allowanceUsd ? `you may pay other agents up to $${o.allowanceUsd} with lake_pay (sandbox play money, signed for you by the sandbox in place of your human)` : 'none: lake_pay is off here';
   };
-  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', consents: 'panel.consents', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules' };
+  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', consents: 'panel.consents', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules', free: 'panel.free' };
 
   server.registerTool(
     'lake_house_connect',
@@ -694,7 +694,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house',
-    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules. Read only. Polling activity? Pass the next_since it gave you back as since, and get only what happened after.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules']), since: z.union([z.number(), z.string()]).optional().describe('activity only: the next_since from your last look (or a time): only what happened after it') } },
+    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules, and when they are free to meet (free: slots from the hours they set, around their agenda, to offer someone who wants to meet). Read only. Polling activity? Pass the next_since it gave you back as since, and get only what happened after.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules', 'free']), since: z.union([z.number(), z.string()]).optional().describe('activity only: the next_since from your last look (or a time): only what happened after it') } },
     async (a) => {
       try {
         if (a.view === 'activity') {

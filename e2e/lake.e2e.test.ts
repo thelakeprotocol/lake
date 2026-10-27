@@ -503,6 +503,15 @@ describe('the owner', () => {
     expect(await asHelper({ kind: 'assistant.agenda', what: 'no time given' })).toMatchObject({ error: expect.stringMatching(/^agenda:/) });
     expect(await asHelper({ kind: 'assistant.agenda', what: 'x', when: 'soon', start: 'next tuesday' })).toMatchObject({ error: expect.stringMatching(/^agenda.start:/) });
     expect((await ownerCall({ kind: 'list' })).agenda).toEqual([expect.objectContaining({ id: coffee.id, what: 'Coffee with Ana', start: '2026-11-02T23:00:00.000Z', where: 'The corner café', note: 'I assumed the morning suits you', agreed: expect.objectContaining({ by: 'Ana helper' }) })]);
+    // When the owner is free: their assistant reads the slots left around the agenda, never the rules' other settings.
+    expect(await asHelper({ kind: 'panel.free' })).toMatchObject({ set: false, slots: [] });
+    expect(await ownerCall({ kind: 'panel.availability.set', availability: { tz: 'Australia/Sydney', free: ['mon-fri 9-12'] } })).toMatchObject({ error: expect.stringMatching(/write it like/) });
+    expect(await ownerCall({ kind: 'panel.availability.set', availability: { tz: 'Australia/Sydney', free: ['mon-fri 09:00-12:00'], meetings: 30 } })).toEqual({ ok: true });
+    const free = await asHelper({ kind: 'panel.free' });
+    expect(free).toMatchObject({ set: true, tz: 'Australia/Sydney', meetings: 30 });
+    expect(free.slots.length).toBeGreaterThan(0);
+    expect(free.slots.some((s: { start: string }) => s.start === '2026-11-02T23:00:00.000Z')).toBe(false); // the coffee
+    expect(await ownerCall({ kind: 'panel.availability.set', availability: null })).toEqual({ ok: true });
     const { path: feed } = await ownerCall({ kind: 'panel.agenda.feed' });
     expect(await (await fetch(`${houses.strict}${feed}`)).text()).toContain('STATUS:CONFIRMED');
     // A new line for the door, with the owner's tap to apply.

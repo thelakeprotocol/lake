@@ -43,7 +43,8 @@
                   "research",
                   "academic-research",
                   "commercial-research",
-                  "care", "contact",
+                  "care",
+                  "contact",
                   "service",
                   "insurance",
                   "credit",
@@ -197,6 +198,58 @@
         "show_packs": {
           "type": "boolean",
           "description": "false: the house's public card doesn't name the kinds of data it holds; agents searching by kind won't find it"
+        }
+      },
+      "additionalProperties": false
+    },
+    "door": {
+      "description": "An open door (SPEC \u00a79.0): the house's address serves a page saying how to reach the owner through an agent",
+      "oneOf": [
+        {
+          "const": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "about": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "availability": {
+      "description": "When the owner is free to meet (SPEC \u00a79.0): their assistant offers these times, around their agenda",
+      "type": "object",
+      "required": [
+        "tz",
+        "free"
+      ],
+      "properties": {
+        "tz": {
+          "type": "string",
+          "description": "IANA time zone, e.g. Australia/Sydney"
+        },
+        "free": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 14,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{3}(-[a-z]{3})?(,[a-z]{3}(-[a-z]{3})?)* \\d{2}:\\d{2}-\\d{2}:\\d{2}$"
+          }
+        },
+        "meetings": {
+          "type": "integer",
+          "minimum": 15,
+          "maximum": 240
         }
       },
       "additionalProperties": false

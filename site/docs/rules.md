@@ -85,6 +85,7 @@ Order matters: the named providers come first, the catch-all `decline` last. A l
 | `rules[].grant_hours` | integer | Key lifetime. Default 48. |
 | `rules[].decision` | `join` \| `decline` \| `ask` | |
 | `door` | `true` or `{ about?, name? }` | An open door ([SPEC §9.0](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md)): the house's address serves a page saying how to reach you through an agent, and takes notes. `about` is one line (up to 200 characters); `name` is optional, the address is enough. The control panel's Rules tab sets it. |
+| `availability` | `{ tz, free, meetings? }` | When you're free to meet: an IANA time zone (`Australia/Sydney`), windows like `mon-fri 09:00-12:00`, and a meeting length in minutes (default 60). Your assistant offers the free slots these leave around your agenda. The Rules tab sets it. |
 | `negotiation.join_collectives` | boolean | Allow your housekeeper to bargain with neighbours as one bloc |
 | `intents[]` | list of `{ pack, terms }` | Standing intents: what you're looking for, so authorised agents price it inside your house. A term set to `auto` is worked out from your own data. ([How an offer works](/docs/offers)) |
 

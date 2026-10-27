@@ -2,6 +2,7 @@ import { parse } from 'yaml';
 import { DEFAULT_GRANT_HOURS } from './lake.js';
 import type { Offer } from './offer.js';
 import { isPurpose, PURPOSES, purposeWithin } from './purpose.js';
+import { availabilityProblems, type Availability } from './availability.js';
 
 /**
  * rules.yaml — the owner's standing rules, the note on the fridge.
@@ -30,6 +31,8 @@ export interface Rules {
    * the owner through an agent. Without it, a house says nothing at its address.
    */
   door?: { name?: string; about?: string };
+  /** When the owner is free to meet (SPEC §9.0): their assistant offers these times, around their agenda. */
+  availability?: Availability;
 }
 
 export interface Rule {
@@ -85,6 +88,10 @@ export function parseRules(text: string): Rules {
     if (d.name !== undefined && (typeof d.name !== 'string' || !d.name.trim() || d.name.length > 60)) throw new RulesError('door.name: a name to show, 1 to 60 characters (or leave it out: the address is enough)');
     if (d.about !== undefined && (typeof d.about !== 'string' || d.about.length > 200)) throw new RulesError('door.about: one line, up to 200 characters');
     for (const k of Object.keys(d)) if (k !== 'name' && k !== 'about') throw new RulesError(`door: unknown setting "${k}" (allowed: name, about)`);
+  }
+  if (raw.availability !== undefined) {
+    const problems = availabilityProblems(raw.availability);
+    if (problems.length) throw new RulesError(problems[0]!);
   }
   for (const [i, x] of (raw.intents ?? []).entries()) {
     if (!x || typeof x.pack !== 'string' || !x.terms || typeof x.terms !== 'object') throw new RulesError(`intents ${i + 1}: needs a pack and its terms`);

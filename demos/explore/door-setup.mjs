@@ -15,6 +15,9 @@ const about = (process.env.EXPLORE_DEMO && JSON.parse(readFileSync(join(process.
 const opened = await call({ kind: 'panel.door.set', open: true, about });
 if (!opened.ok) throw new Error(`door: ${JSON.stringify(opened)}`);
 vars.house_1_door = (await call({ kind: 'panel.door' })).address;
+// When the owner is free to meet, if the scenario says (demo.json `availability`), as the owner would set it in the panel.
+const av = process.env.EXPLORE_DEMO && JSON.parse(readFileSync(join(process.env.EXPLORE_DEMO, 'demo.json'), 'utf8')).availability;
+if (av) { const r = await call({ kind: 'panel.availability.set', availability: av }); if (!r.ok) throw new Error(`availability: ${JSON.stringify(r)}`); }
 // The owner's private calendar address, for the narrator to read what their calendar app would show.
 const feed = await call({ kind: 'panel.agenda.feed' });
 if (feed.url) writeFileSync(join(run, 'calendar-feed.txt'), feed.url);

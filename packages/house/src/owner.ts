@@ -3,8 +3,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, consentRecord, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
-  type AgentCard, type JWK, type LakeEvent, type Signed, type Study,
+  allowanceDraft, availabilityProblems, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
 /** When the owner was last at their desk, as a visitor waiting on an ask hears it: a bucket, never a time (SPEC §5). */
@@ -46,6 +46,8 @@ export interface PanelProvider {
   door?(): { open: boolean; about?: string; name?: string; address: string; a2a: string };
   /** Opens or closes it, written into the owner's rules like any other setting. */
   setDoor?(d: { open: boolean; about?: string; name?: string }): Promise<{ ok: true } | { ok: false; error: string }>;
+  availability?(): Availability | null;
+  setAvailability?(a: Availability | null): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Newest first; with `since` (a seq from an earlier look, or a time), only what came after it. */
   activity(since?: number | string): { seq: number }[];
   agents(): unknown[];
@@ -125,7 +127,7 @@ export interface AgendaItem {
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda']);
+const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -743,6 +745,18 @@ export class OwnerDesk {
           'panel.overview': () => panel.overview(Number((q as { tz_offset?: number }).tz_offset)),
           'panel.rules': () => panel.rules(),
           'panel.door': async () => panel.door?.() ?? { error: 'this house has no door' },
+          // The owner's free slots, around what is already in their agenda: what their assistant may offer (runs 49-50).
+          'panel.free': async () => {
+            const av = panel.availability?.();
+            if (!av) return { set: false, slots: [], note: 'your human hasn\'t said when they are free to meet (control panel, Rules: When you\'re free): ask them for a time' };
+            return { set: true, tz: av.tz, meetings: av.meetings ?? 60, slots: freeSlots(av, this.agenda.filter((x) => x.start).map((x) => ({ start: x.start! }))), note: 'free in their agenda now: offer a few; once the other side agrees, write it in with lake_house_suggest agenda (start, agreed_in)' };
+          },
+          'panel.availability.set': async () => {
+            const av = (q as { availability?: unknown }).availability;
+            if (av === null) return panel.setAvailability?.(null) ?? { error: 'this house has no availability' };
+            const problems = availabilityProblems(av);
+            return problems.length ? { error: problems.join('; ') } : panel.setAvailability?.(av as Availability) ?? { error: 'this house has no availability' };
+          },
           'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}) }) ?? { error: 'this house has no door' },
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity((q as { since?: number | string }).since),

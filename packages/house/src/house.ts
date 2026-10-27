@@ -520,6 +520,16 @@ function panelFor(x: {
       return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
     },
     // Written into the owner's rules (comments and all kept): the door is one of their settings, saved in their pod.
+    // When the owner is free to meet, in their rules like the door (null takes it out).
+    async setAvailability(av) {
+      const doc = parseDocument(x.keeper().rulesText);
+      if (!av) doc.delete('availability');
+      else doc.set('availability', av);
+      return this.setRules(String(doc));
+    },
+    availability() {
+      return x.keeper().rules.availability ?? null;
+    },
     async setDoor(d) {
       const doc = parseDocument(x.keeper().rulesText);
       if (!d.open) doc.delete('door');

@@ -5,6 +5,7 @@ export * from './card.js';
 export * from './events.js';
 export * from './offer.js';
 export * from './rules.js';
+export * from './availability.js';
 export * from './purpose.js';
 export * from './vc.js';
 export * from './domain.js';

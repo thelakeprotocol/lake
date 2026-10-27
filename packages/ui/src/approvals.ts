@@ -126,11 +126,12 @@ async function show() {
 
 // ---- Home ----
 async function home(box: HTMLElement) {
-  const [o, feed, { suggestions, assistants, notes, agenda }, door] = await Promise.all([
+  const [o, feed, { suggestions, assistants, notes, agenda }, door, free] = await Promise.all([
     call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
     call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string }[]; agenda?: AgendaItem[] }>({ kind: 'list' }),
     call<{ open: boolean; address: string; error?: string }>({ kind: 'panel.door' }).then((d) => (d.error ? null : d)).catch(() => null),
+    call<{ set?: boolean }>({ kind: 'panel.free' }).catch(() => ({ set: false })),
   ]);
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
@@ -141,7 +142,7 @@ async function home(box: HTMLElement) {
       h('p', { class: 'muted' }, assistants.length ? `${assistants.map((a) => a.label.replace(/\s*\(.*\)$/, '')).join(', ')} ${assistants.length === 1 ? 'is' : 'are'} looking after your house: it sees every knock and suggests; you decide.` : 'Let your own AI agent look after your house: it sees every knock and suggests what to do; only you decide.'),
       h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, assistants.length ? 'My agent →' : 'Give it a key →'));
   box.replaceChildren(
-    startCard(door, assistants.length > 0),
+    startCard(door, assistants.length > 0, !!free.set),
     suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
     // What you agreed to, written in by your agent: yours to see and remove.
     agenda?.length ? agendaCard(agenda) : '',
@@ -465,6 +466,37 @@ function doorCard(): HTMLElement {
   return box;
 }
 
+/**
+ * When you're free to meet: windows like "mon-fri 09:00-12:00" in your own time zone. Your agent offers those times, around
+ * what is already in your agenda, instead of asking you each time. Saved in your rules.
+ */
+function freeCard(): HTMLElement {
+  const box = h('div', { class: 'card', style: 'max-width:820px;margin-bottom:18px' }, h('p', { class: 'muted' }, 'When you\'re free…'));
+  void (async () => {
+    const f = await call<{ set: boolean; tz?: string; meetings?: number; slots: unknown[] }>({ kind: 'panel.free' }).catch(() => null);
+    if (!f) return void box.remove();
+    const r = await call<{ rules: { availability?: { tz: string; free: string[]; meetings?: number } } }>({ kind: 'panel.rules' });
+    const av = r.rules.availability;
+    const free = h('textarea', { rows: '3', style: 'width:100%', placeholder: 'mon-fri 09:00-12:00\nsat 10:00-11:00' }) as HTMLTextAreaElement;
+    free.value = (av?.free ?? []).join('\n');
+    const tz = av?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const len = h('select', {}, ...[30, 45, 60, 90].map((m) => h('option', { value: String(m), ...((av?.meetings ?? 60) === m ? { selected: true } : {}) }, `${m} minutes`))) as HTMLSelectElement;
+    const msg = h('span', { class: 'muted' });
+    const save = async (clear = false) => {
+      const lines = free.value.split('\n').map((x) => x.trim()).filter(Boolean);
+      const res = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.availability.set', availability: clear || !lines.length ? null : { tz, free: lines, meetings: Number(len.value) } });
+      if (!res.ok) return void (msg.textContent = res.error ?? 'not saved');
+      draft = null;
+      void show();
+    };
+    box.replaceChildren(
+      h('h3', {}, 'When you\'re free to meet'),
+      h('p', { class: 'muted' }, `Your agent offers these times (in ${tz}) to people who want to meet you, around what's already in your agenda, so it doesn't have to ask you each time. One window a line, like "mon-fri 09:00-12:00".${f.set ? ` Free now: ${f.slots.length} slot${f.slots.length === 1 ? '' : 's'} in the next two weeks.` : ''}`),
+      free, h('div', { style: 'margin-top:8px' }, 'Each meeting: ', len, ' ', h('button', { class: 'btn primary small', type: 'button', onclick: () => void save() }, 'Save'), ' ', av ? h('button', { class: 'btn small', type: 'button', onclick: () => void save(true) }, 'Clear') : '', ' ', msg));
+  })();
+  return box;
+}
+
 function renderRules(message?: { ok: boolean; text: string }) {
   const r = draft!;
   const trust = (r.trust ??= {});
@@ -478,6 +510,7 @@ function renderRules(message?: { ok: boolean; text: string }) {
   };
   boxFor('rules').replaceChildren(
     doorCard(),
+    freeCard(),
     h('p', { class: 'lede' }, 'Your housekeeper follows these, top to bottom; the first rule that fits decides. They run as code, and nothing an agent writes can change them.'),
     ...r.rules.map((rule, i) => ruleCard(rule, i, r.rules)),
     h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn', type: 'button', onclick: () => { r.rules.push({ match: { purpose: 'research' }, decision: 'ask' }); renderRules(); } }, '+ Add a rule')),
@@ -746,15 +779,16 @@ const stored = (k: string) => { try { return localStorage.getItem(k); } catch { 
  * The first five minutes, on Home until done: open your door, connect your own AI, put your agenda in your calendar, and
  * try it. Each step says what it is in one line; nothing to learn first.
  */
-function startCard(door: { open: boolean; address: string } | null, hasAssistant: boolean): Node | string {
+function startCard(door: { open: boolean; address: string } | null, hasAssistant: boolean, freeSet: boolean): Node | string {
   if (stored('lake.start.done') || !door) return '';
   const calendar = !!stored('lake.start.calendar');
-  if (door.open && hasAssistant && calendar) return '';
+  if (door.open && hasAssistant && calendar && freeSet) return '';
   const step = (done: boolean, title: string, body: Node | string) => h('li', {}, h('div', {}, h('div', { class: 'r-title' }, `${done ? '✓ ' : ''}${title}`), h('div', { class: 'r-meta' }, body)));
   return h('div', { class: 'card' }, h('h3', {}, 'Start here'),
     h('ol', { class: 'rows' },
       step(door.open, 'Open your door', door.open ? h('span', {}, 'Your address, for your email signature or a QR code: ', h('code', { style: 'overflow-wrap:anywhere' }, door.address), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(door.address) }, 'Copy')) : doorCard()),
       step(hasAssistant, 'Let your own AI look after it', hasAssistant ? 'Connected: it sees what comes to your door and suggests; you tap.' : h('span', {}, 'It answers people for you, by what you\'ve agreed, and asks you the rest. ', h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, 'Give it a key →'))),
+      step(freeSet, 'Say when you\'re free to meet', freeSet ? 'Set: your agent offers those times, around your agenda.' : freeCard()),
       step(calendar, 'Put your agenda in your calendar', h('span', {}, 'What you agree to through your AI shows up in your own calendar app (subscribe to this address; keep it to yourself). ', feedLine())),
       step(false, 'Try it', door.open ? h('span', {}, 'Ask any AI with the Lake connector: ', h('em', {}, `“Leave a note at ${door.address} saying hello.”`), ' It shows up here, and your AI hears of it.') : 'Once your door is open.')),
     h('button', { class: 'btn small', type: 'button', onclick: () => { try { localStorage.setItem('lake.start.done', '1'); } catch { /* fine */ } void show(); } }, 'Hide this'));
