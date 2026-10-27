@@ -515,6 +515,10 @@ describe('the owner', () => {
     // A sender the owner won't hear from again, by key: its next note is declined at the door.
     expect(await ownerCall({ kind: 'panel.note.mute', id: twice.note })).toMatchObject({ ok: true, muted: 'neighbour.example' });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Hello again?' })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });
+    // A newcomer's hello is answered with what the door takes, not rejected and not delivered.
+    const notesBefore = (await ownerCall({ kind: 'list' })).notes.length;
+    expect((await ask(houses.strict!, helper, { kind: 'hello' })).reply).toMatchObject({ kind: 'door', example: { kind: 'note' } });
+    expect((await ownerCall({ kind: 'list' })).notes).toHaveLength(notesBefore);
     const pay = async (amount: number, currency = 'USD') => (await ask(`${payments}/a2a`, helper, { kind: 'settle', intent: mine.intent, payments: [await signPaymentMandate(helper.id, helper.webId, { payee: 'https://shop.example/#agent', amount, intentMandate: signed, agreement: 'urn:lake:memo:test', currency })] })).reply;
     // Nothing converts: dollars signed for are spent in dollars.
     expect(await pay(3, 'AUD')).toMatchObject({ kind: 'refused', problems: ['the allowance is in USD; this payment is in AUD'] });

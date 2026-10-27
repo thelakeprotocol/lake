@@ -401,7 +401,7 @@ export class OwnerDesk {
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);
-    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), at: note.at, reply: 'their own words; answer the sender at from.url if your human would want you to' });
+    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), at: note.at, reply: 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word' }) });
     return note.id;
   }
 

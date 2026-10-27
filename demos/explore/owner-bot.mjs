@@ -70,6 +70,13 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
         const choice = sug.ask.choices[sug.ask.recommend];
         log(`${o.house}: answered "${choice}" to "${sug.text.slice(0, 80)}" as the assistant recommended: ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice }))}`);
       }
+      // A question with no advice is the owner's own call: a person answers it after a while, picking for themselves (run 49:
+      // the bot never tapped one, and the run stalled). Picked at random here, and logged as the owner's own pick.
+      if (sug.ask && !sug.ask.answered && !Number.isInteger(sug.ask.recommend) && Date.now() - Date.parse(sug.at) > 45_000 && !o.given.has(`ask:${sug.id}`)) {
+        o.given.add(`ask:${sug.id}`);
+        const choice = sug.ask.choices[Math.floor(Math.random() * sug.ask.choices.length)];
+        log(`${o.house}: picked "${choice}" (its own call; no advice) for "${sug.text.slice(0, 80)}": ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice }))}`);
+      }
     }
     // Accept only an offer the assistant names in a suggestion (its Accept button, or the id in the text).
     if (!o.accepted) {

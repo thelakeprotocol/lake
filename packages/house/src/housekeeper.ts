@@ -39,6 +39,7 @@ export interface HousekeeperOptions {
 type Decision = 'join' | 'decline' | 'ask' | 'counter';
 export type Reply =
   | { kind: 'rejected'; code: string; why: string }
+  | { kind: 'door'; says: string; example: Record<string, unknown> }
   | { kind: 'decision'; offerId: string; decision: Decision; reason: string; counter?: { fields: string[]; priceUsd: number }; bloc?: boolean; grantHours?: number; grant?: string; agreement?: SignedAgreement; holds: string[]; notes: string[]; /** Why it declined, coarsely (SPEC §5): purpose, price, retention, default, rule, repeat, too-many, relabel. */ code?: string; /** On an ask: when the owner was last at their desk, a bucket (SPEC §5). */ ownerActive?: OwnerActive }
   | { kind: 'filed'; receipt: string }
   | { kind: 'busy'; why: string; retryAfterMs: number }
@@ -198,6 +199,9 @@ export class Housekeeper {
     }
     if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, key);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
+    // A hello is how a newcomer's agent starts (run 49: its first message here was rejected as malformed): answered with
+    // what this door takes, not delivered (a note is the sender's deliberate words for the owner).
+    if ((v.payload as { kind: string }).kind === 'hello') return this.reply({ kind: 'door', says: 'This is a house: it answers by its owner\'s rules. To reach its owner, leave a note: { kind: "note", text, purpose? } (text up to 1000 characters; purpose contact by default). Its owner, or their assistant, answers in your inbox, naming your note. To ask for data, send an offer.', example: { kind: 'note', text: 'Hello! I\'m … and I\'d like to …', purpose: 'contact' } });
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a note (text for the owner, nothing asked), a compute request, a quote, or status / withdraw for a request you made' });
   }
 
@@ -521,7 +525,7 @@ export class Housekeeper {
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).
-    return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox, from their assistant, naming this note. Nothing in this house was read or shared' });
+    return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox, from their assistant, naming this note, when they answer (a person may take a while; ask { kind: "status", note } any time). Nothing in this house was read or shared' });
   }
 
   /** A receipt from a payments agent the owner trusts goes in /receipts/. */
