@@ -49,6 +49,6 @@ Run `pnpm build` before `pnpm test:e2e`: it runs the built `dist/` files.
 
 - TypeScript ESM, Node 20+, strict. Match the code around you; comments say why, not what.
 - Spec and code move together: change SPEC.md (and schemas/examples) in the same commit as behaviour.
-- Docs are honest: statuses in README and `site/docs/roadmap.md` (What's next) say what actually runs and what doesn't yet.
+- Docs are honest: `site/docs/roadmap.md` (and What's next) says what actually runs and what doesn't yet.
 - Ports 3000 and 3100 may be taken on dev machines; tests pick free ports.
 - The pod server must run with `NODE_ENV=production` (its OIDC fails under `test`).
