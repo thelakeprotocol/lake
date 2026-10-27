@@ -8,7 +8,7 @@ N standards need N converters into one canonical model, not N² mappings between
 
 - **RDF / Linked Data**, stored natively in Solid pods, validated with **SHACL**.
 - **Small core:** `Party`, `Thing`, `Claim`, `Provenance`, `Offer`, `Terms`, `Receipt`.
-- **Domains extend the core.** Health adds `AgeBand`, `Medication`, `Condition`, `Readmission`. Energy, cars and rentals add their own claim types the same way.
+- **Domains extend the core.** Health adds `AgeBand`, `Medication`, `Condition`, `Readmission`; the weekly shop and home loans add theirs the same way, each in its own pack.
 - **Versioned.** Messages name the model version; nodes accept the current and previous major.
 
 <span class="status done">drafted</span> [`model/lake.ttl`](https://github.com/thelakeprotocol/lake/blob/main/model/lake.ttl) (ontology) and [`model/shapes.ttl`](https://github.com/thelakeprotocol/lake/blob/main/model/shapes.ttl) (SHACL shapes).
@@ -29,9 +29,9 @@ Every value carries a tier, and offers state the minimum they accept:
 2. The **converted** claim carries the original's hash, the converter's package name, version and certificate, and the housekeeper's signature.
 3. **Study code verifies all three** before using a value. Any failure drops the value, and that house isn't paid.
 
-## Write a converter <span class="status done">two run: FHIR and bank data</span>
+## Write a converter <span class="status done">three run: FHIR, bank data, receipts</span>
 
-A converter maps one external standard into the canonical model. Each use case brings its own in its pack: FHIR R4 for health (`usecases/health`), Consumer Data Right-style bank data for home loans (`usecases/mortgage`), then whatever you need.
+A converter maps one external standard into the canonical model. Each use case brings its own in its pack: FHIR R4 for health (`usecases/health`), Consumer Data Right-style bank data for home loans (`usecases/mortgage`), signed grocery receipts for the weekly shop (`usecases/shopping`), then whatever you need.
 
 - Runs **inside the house**. Raw source data never leaves.
 - Must be **signed by its author** and **certified by the Auditor** before a house will run it, the same rule as study code.

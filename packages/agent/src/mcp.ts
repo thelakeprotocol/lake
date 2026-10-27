@@ -584,7 +584,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
     return text.includes(house) || (name && name.length >= 3 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)) ? name ?? house : null;
   };
   const houseCall = async (payload: Record<string, unknown> & { kind: string }) => {
-    if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (Agents tab), then lake_house_connect');
+    if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (My agent tab), then lake_house_connect');
     const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, await key, { iss: 'assistant' })) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
@@ -662,7 +662,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_connect',
-    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (Agents tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), code: z.string() } },
+    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (My agent tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), code: z.string() } },
     async (a) => {
       try {
         const base = a.house_url.replace(/\/(a2a|owner\/?)?$/, '').replace(/\/$/, '');

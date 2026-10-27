@@ -25,7 +25,7 @@ Open the map at `http://localhost:7000` on the big screen. Scan its QR code with
 | 5 | "It knocks on every house. $2 each, and it wants postcodes." | The broadcast ripple; houses turn green, amber or grey. |
 | 6 | "The houses noticed. They push back together." | **$2 → $5**, postcode dropped. |
 | 7 | "My phone just buzzed." | Tap **Allow** on stage. |
-| 8 | "The study runs inside each house. Only noise-protected answers leave." | Threads back to the agent; payments; **Records moved: 0**. |
+| 8 | "The study runs inside each house. Each answer leaves only as two unreadable pieces, to two tellers; the researcher gets totals." | Threads back to the agent; payments; **Records moved: 0**. |
 | 9 | "Here's an attacker." | It's in the same `lake demo` run: forged cards, replays, injection. Quarantined, no human involved. |
 | 10 | "I changed my mind." | **Revoke every key** on your phone; the lines snap. |
 | 11 | "And nobody owns the water." | `docker stop lake-node-a`. The map on `:7001` (node B) keeps going; studies keep working. |

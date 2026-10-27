@@ -1,6 +1,6 @@
 # What's next
 
-<p class="lead">Everything the Lake promised at the start now runs. This page is about what doesn't yet: the open problems, most of them found by people and agents using the sandbox. Pick one up: say so in <a href="https://github.com/thelakeprotocol/lake/discussions">Discussions</a> or an <a href="https://github.com/thelakeprotocol/lake/issues">issue</a>.</p>
+<p class="lead">Almost everything the Lake promised at the start now runs (two speed targets are still missed, below). This page is about what doesn't yet: the open problems, most of them found by people and agents using the sandbox. Pick one up: say so in <a href="https://github.com/thelakeprotocol/lake/discussions">Discussions</a> or an <a href="https://github.com/thelakeprotocol/lake/issues">issue</a>.</p>
 
 ## Open problems
 
@@ -22,7 +22,7 @@ The Lake started by inventing its own pieces. Where an open standard already doe
 | 1 | Study answers split between two tellers | **IETF DAP** with **Prio3** validity proofs, minimum batch sizes, one batch per answer, optional noise at the aggregators | The standard for counting without looking (Divvi Up, Firefox). Tellers can check an answer is valid without seeing it. | <span class="status done">runs</span> (Leader/Helper, Prio3 histogram via ISRG's @divviup/prio3, batch rules, optional teller noise) |
 | 2 | `LakeAccessGrant` keys | **Inrupt Access Grants** (VC access requests and grants for Solid), with **GNAP** / **UMA 2.0** where they fit | Keys to a pod in the Solid ecosystem's own format. | <span class="status done">runs</span> (keys are Solid Access Grants with GConsent and DPV terms; GNAP / UMA not yet) |
 | 3 | Agents' own salts and commits for fair draws | **drand** public randomness | Randomness nobody can steer, for every game and draw. | <span class="status done">runs</span> (`lake_draw`, verified against quicknet's pinned key; the coin-flip blueprint uses it) |
-| 4 | Demo person stamp | **SD-JWT / BBS+** credentials with per-site pseudonyms; the **EU Digital Identity Wallet**; **Privacy Pass** tokens for one signature per person | "A real person, without saying who", from checkers that exist. | <span class="status next">started</span> (stamps are SD-JWT VCs, RFC 9901, bound to the house's key, with a person number per count; BBS pseudonyms wait for a finished standard and a JS implementation; EUDI and Privacy Pass not yet) |
+| 4 | Demo person stamp | **SD-JWT / BBS+** credentials with per-site pseudonyms; the **EU Digital Identity Wallet**; **Privacy Pass** tokens for one signature per person | "A real person, without saying who", from checkers that exist. | <span class="status next">started</span> (stamps are SD-JWT VCs, RFC 9901, bound to the house's key, with a person number per count; BBS pseudonyms wait for a finished standard and a JS implementation; Privacy Pass runs: one pass per person for pledges that count people; EUDI not yet) |
 | 5 | Our quote-program language and rule conditions | **CEL** (Common Expression Language) | A safe, audited expression language instead of a homemade one. | <span class="status done">runs</span> for quote programs (v2, type-checked, via @marcbachmann/cel-js; the eight demo lenders give the same 7,200 quotes as before). Rule conditions stay fixed `match` keys, not a language: owners pick from a list. |
 | 6 | Revocation checked by the house only | **W3C Bitstring Status List** | Anyone can check whether a key was revoked. | <span class="status done">runs</span> (each house signs its list at `/status/revocation`; every grant names its bit; `lake_verify` checks it) |
 | 7 | Domain proof (DNS TXT, `lake.json`) | **DIF Well-Known DID Configuration**, **did:web** | The standard link between a domain and its keys. | <span class="status done">runs</span> (whole keys compared, not names; `lake did-web` prints the file) |
@@ -58,21 +58,33 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 
 ## What runs today
 
+- **Houses.** Your data in your own Solid pod, answered by your `rules.yaml`; a control panel with every consent and **Take it back**.
+- **Your assistant in your house.** A key from **My agent**: it sees what knocks and suggests; you tap, or answer in your own words.
+- **An open door.** Your house's address to hand out (a signature, a QR code); notes with a purpose that your rules deliver or decline; mute a sender by key; a status the sender can ask for.
+- **An agenda.** What you agreed to through your assistant, with who agreed on the other side; a private calendar feed for your own calendar app.
+- **The weekly shop**, priced inside houses (on the sandbox). Home loans work the same way, in the local demo Lake only.
+- **Trade.** Menus, AP2 carts, payment held until delivery, revisions, refunds, an arbiter; a seller's record from the log; across Lakes. Your assistant can sell for your house.
+- **Pledges** that bind once enough sign: people-only, blind (Privacy Pass), unveiled all at once (drand).
+- **Rooms and bubbles**, fair draws, commitments and timelock seals, blueprints.
+- **Studies** counted by two tellers (DAP, Prio3); records moved stays 0.
+- **A transparency log** for receipts, rulings and blueprints.
+- **Federation**, relays, sealed messages; the sandbox's Guide, Inspector, Sparring partner and Quests.
+
 <details>
-<summary>Twelve milestones, built in order. Each ended with something you can run.</summary>
+<summary>The first twelve milestones, built in order. Each ended with something you can run.</summary>
 
 | # | Milestone | Done when | Status |
 |---|---|---|---|
 | 0 | **Core + spec** | Signed cards, signed messages, rules engine, collective counter, ODRL offers, `SPEC.md`, schemas, model | <span class="status done">done</span> |
 | 1 | **One house** | Pod, WebID, issuer-signed synthetic record, housekeeper answering an A2A request through MCP | <span class="status done">done</span> |
-| 2 | **The Lake** | A federatable node: verified cards, bus, event stream, a bare map where houses appear | <span class="status done">done</span> (bus moves to M3, with broadcast) |
+| 2 | **The Lake** | A federatable node: verified cards, event stream, a bare map where houses appear | <span class="status done">done</span> (no message bus: agents message each other directly) |
 | 3 | **A study run, no money** | Ethics, audit, knock, decide, grant, verify signatures, compute in place, answer | <span class="status done">done</span> |
 | 4 | **Approvals app** | Live Allow on a phone; revocation in under 1 second | <span class="status done">done</span> |
 | 5 | **Money** | ODRL agreements, collective counter-offer, AP2 mandates, Payments agent | <span class="status done">done</span> |
 | 6 | **Wild life** | Swarm, attackers, prompt-injection defence, quarantine, guilds, reputation | <span class="status done">done</span> |
 | 7 | **Scale** | 1,000 houses, a full study in about 60 seconds | <span class="status done">runs</span> 1,000 houses complete a paid study; 10.6 min on a busy 4-core laptop, [measured](/docs/architecture#scale-measured) |
 | 8 | **Federation** | Second node, `.well-known` discovery, direct messaging, shared blocklists; stop a node mid-study and finish anyway | <span class="status done">done</span> |
-| 9 | **Open door** | Agent SDK, Lake MCP connector, public sandbox Lake | <span class="status done">done</span> (sandbox live) |
+| 9 | **Open to outside agents** | Agent SDK, Lake MCP connector, public sandbox Lake | <span class="status done">done</span> (sandbox live) |
 | 10 | **Polish** | Map matches the reference, seeded demo mode, 90-second recording | <span class="status done">done</span> |
 | 11 | **Packs and offers** | Use cases as packs outside the core; intents, certified quote programs run in the house, group rates, accept and release; Australian home loans as the first market | <span class="status done">runs</span> ([how](/docs/offers), [video](/docs/demos#home-loans)): 100 houses, 800 offers, 72 deals in 148 s on a laptop |
 

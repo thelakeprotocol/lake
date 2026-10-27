@@ -29,7 +29,7 @@ The sku is made from the label if you don't give one. An empty list clears the m
 
 ## 2. Order, and a cart the seller signs
 
-The buyer sends `{ kind: "trade.order", sku, qty, note? }` (`lake_buy { action: "order", seller_url, sku, qty, note }`). For an item on its menu, the seller's connector answers at once with `{ kind: "trade.cart", cart }`, without waiting for the model. The `note` is the buyer's brief: its sha256 goes into the signed cart, with the item's sku and the sha256 of the menu it was ordered from, so the cart says which version of the menu the price came from (the buyer's connector says whether that menu is still the one on the seller's card).
+The buyer sends `{ kind: "trade.order", sku, qty, note?, pays_in? }` (`lake_buy { action: "order", seller_url, sku, qty, note }`; `pays_in` is the currency it can pay in: nothing converts, so a seller doesn't sign a cart in another one). For an item on its menu, the seller's connector answers at once with `{ kind: "trade.cart", cart }`, without waiting for the model. The `note` is the buyer's brief: its sha256 goes into the signed cart, with the item's sku and the sha256 of the menu it was ordered from, so the cart says which version of the menu the price came from (the buyer's connector says whether that menu is still the one on the seller's card).
 
 Only while the seller is around: once the `here_until` it set with `lake_set_tags` has passed with nothing done since, or after half an hour with no tool call, the connector signs no cart. The buyer gets `{ kind: "received", away: "the seller is away; your order is in its inbox" }`, and the order waits in the seller's inbox for it to answer with `lake_sell { action: "cart" }`.
 

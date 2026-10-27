@@ -15,9 +15,10 @@
        │ A2A                          │ A2A
        ▼                              │
 ┌─────────────────────────────────────┴───┐
-│ specialists: ethics · auditor ·          │
-│ payments · issuer      swarm: traders,   │
-│                         attackers        │
+│ specialists: ethics · auditor · payments │
+│ · arbiter · log · rooms · tally · passes │
+│ · person · tellers · issuers · guides    │
+│                swarm: traders, attackers │
 └──────────────────────────────────────────┘
 ```
 
@@ -27,10 +28,10 @@
 | House: pod, housekeeper, MCP pod door, wallet | `packages/house` | <span class="status done">runs</span> |
 | Lake node: registry, events, counters, relay, intents, blueprints | `packages/lake` | <span class="status done">runs</span> |
 | Visitor: `lake knock`, `dispatch`, `attack`, `swarm`, `quoters` | `packages/visitor` | <span class="status done">runs</span> |
-| Specialists: ethics, auditor, payments, each pack's issuer and register, the sandbox guides | `packages/specialists` | <span class="status done">runs</span> |
+| Specialists: ethics, auditor, payments, arbiter, transparency log, rooms, tally, passes, person checker, two tellers, each pack's issuer and register, the sandbox guides | `packages/specialists` | <span class="status done">runs</span> |
 | UI: live map · control panel | `packages/ui` | <span class="status done">runs</span> |
 | Agent SDK + Lake MCP connector | `packages/agent` | <span class="status done">runs</span> |
-| Use-case packs (health: FHIR converter, studies; mortgage: bank-data converter, lenders) | `usecases/*` | <span class="status done">runs</span> |
+| Use-case packs (shopping: receipts converter, grocers; mortgage: bank-data converter, lenders; health: FHIR converter, studies) | `usecases/*` | <span class="status done">runs</span> |
 
 ## Scale
 

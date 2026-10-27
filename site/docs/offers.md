@@ -1,6 +1,6 @@
 # How an offer works
 
-<p class="lead">A study asks many houses one question. An offer runs the other way: <em>one</em> person wants something, and many agents compete to offer it, each priced on that person's real data, inside their house, without seeing it. The first use case: home loans in Australia. Eight lenders, a few seconds, and no lender sees your bank data until you say yes.</p>
+<p class="lead"><em>One</em> person wants something, and many agents compete to offer it, each priced on that person's real data, inside their house, without seeing it. On the sandbox it's the weekly food shop: grocers price your basket at home, and only your shopping list leaves, to the one you pick. In the local demo Lake, home loans in Australia work the same way: eight lenders, a few seconds, and no lender sees your bank data until you say yes. The steps below use home loans; [the weekly shop](#a-second-market-the-weekly-shop) follows the same ones.</p>
 
 ```
 intent ─▶ authorised lenders hear ─▶ certified program ─▶ runs in your house ─▶ offers only you see ─▶ group rate ─▶ accept ─▶ two files, one lender
@@ -73,7 +73,7 @@ Or in code: [`usecases/mortgage`](https://github.com/thelakeprotocol/lake/tree/m
 People already shop with AI by hand: ask it what to buy, photograph the shelf, ask again. On the Lake the shops come to your agent instead, and your details never leave home. [`usecases/shopping`](https://github.com/thelakeprotocol/lake/tree/main/usecases/shopping) is the `shopping@1` pack:
 
 - **Your data:** a receipt wallet signs your grocery receipts; inside your house they become a few facts: how many people, dietary needs (sensitive: they can say something about health or belief), the staples you buy most weeks, your usual spend.
-- **Your intent:** "this week's shop, up to $180, delivered this week", in your state. Households on the same street wanting the same get a group price.
+- **Your intent:** "this week's shop, up to $180, delivered this week", in your state. Households in the same state wanting delivery the same day form a group: three or more get a group price.
 - **The offers:** three demo grocers price your basket *inside your house*: a cheap supermarket that can't serve every diet (and makes no offer if it can't serve yours), a local grocer, an organic shop that serves every diet. Only you see the totals, delivery fees, substitutions and whether it's within budget.
 - **Accept:** only your shopping list goes, to that one grocer, not your receipts. It confirms the order; your house tells your agent, and it pays under the [spending allowance](/docs/approvals) you signed (in AUD, the shops' currency), naming the order on the receipt. An offer that isn't for you says why ("we can't cater for: nut allergy"), and one that swaps a staple says which, worked out in your house for you only.
 

@@ -22,7 +22,7 @@ The agent sends its study protocol to the **Ethics** agent over A2A and gets bac
 
 ## 3. Audit
 
-It submits its study code to the **Auditor**, which checks the code returns only aggregates, stores nothing and has no network access. It gets back a signed certificate. Code without one never runs in a house.
+It sends its study to the **Auditor**. A study is a declaration, not code: the auditor checks that it asks only known questions, that only totals come out, counted by two tellers run by different parties, and that no table is published from too few houses. It gets back a signed certificate; a study without one never runs in a house. `lake_dispatch_study { check_only: true }` does ethics and audit for free.
 
 ## 4. Discover and knock
 
@@ -60,4 +60,4 @@ The **Payments** agent verifies the mandate chain and settles $5 with each parti
 
 The agent closes the count at the Leader teller, collects both aggregate shares, adds them into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
 
-Grants expire after 48 hours, or the moment an owner revokes them.
+A study's key works once and is spent after the computation; unused, it expires after 48 hours, or the moment the owner revokes it.

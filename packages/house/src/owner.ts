@@ -618,7 +618,7 @@ export class OwnerDesk {
           // What this assistant may spend for its human: the owner's signed mandate, the house's card and its word for the
           // owner's key, so a payments agent can check the whole chain. The house signs no money itself.
           const a = this.allowanceFor(assistant.kid);
-          if (!a || !this.o.vouchOwner || !this.o.card) return void res.json({ intent: null, why: 'your human has not given you an allowance (control panel: Money → Spending allowance)' });
+          if (!a || !this.o.vouchOwner || !this.o.card) return void res.json({ intent: null, why: 'your human has not given you an allowance (control panel: My agent → spending allowance)' });
           return void res.json({ intent: { credential: a.credential, card: this.o.card(), owner: await this.o.vouchOwner(this.ownerJwk!) }, amount: a.amount, currency: a.currency, until: a.until });
         }
       }

@@ -4,13 +4,13 @@
 
 ```
                  ┌──────────── Lake node A ────────────┐      ┌──────── Lake node B ───────┐
-                 │ index of signed cards · signals ·   │◀────▶│ follows A: cards,          │   milestone 8
+                 │ index of signed cards · signals ·   │◀────▶│ follows A: cards,          │
                  │ event stream for the map            │      │ revocations, blocklists    │
                  └──────▲───────────────▲──────────────┘      └─────────────▲──────────────┘
-        register card   │               │ "who offers health-study?"        │
+        register card   │               │ "who sells the weekly shop?"      │
                         │               │                                   │
    ┌────────────┐       │        ┌──────┴────────┐                    ┌─────┴──────┐
-   │ house stan │───────┘        │research agent │                    │ house you  │
+   │ house stan │───────┘        │ buyer agent   │                    │ house you  │
    └─────▲──────┘                └──────┬────────┘                    └─────▲──────┘
          │      direct A2A: offer, agreement, compute, receipt              │
          └──────────────────────────────┴───────────────────────────────────┘
@@ -22,7 +22,7 @@ Each house, specialist and agent publishes a signed card at `https://<its domain
 
 ## 2. Nodes are search indexes
 
-To be found by strangers, an agent registers its card with a Lake node. The node checks the signature, the domain, and that the endpoint really serves that same card. Others ask the node things like `/cards?skill=health-study` and get back signed cards they verify themselves. A node can't forge a card, and it can't hide one from someone who knows the domain.
+To be found by strangers, an agent registers its card with a Lake node. The node checks the signature, the domain, and that the endpoint really serves that same card. Others ask the node things like `/cards?tag=grocer` and get back signed cards they verify themselves. A node can't forge a card, and it can't hide one from someone who knows the domain.
 
 ### Badges, and an agent's own words
 
@@ -35,11 +35,11 @@ It's the shape of OpenID Federation's trust marks: who trusts which issuer is th
 
 ## 3. Conversations are direct
 
-The research agent sends its offer straight to each house's own A2A endpoint; agreements, computations and receipts go the same way. Nodes never relay messages. They receive event reports (ids, kinds and counts) for the map and counters, and publish signed signals (a blocklist and reputation) that houses choose to follow.
+An agent sends its offer straight to each house's own A2A endpoint; agreements, computations and receipts go the same way. Nodes don't sit in conversations (a house behind a home router is the one exception: below). They receive event reports (ids, kinds and counts) for the map and counters, and publish signed signals (a blocklist and reputation) that houses choose to follow.
 
 ## Houses at home
 
-A house on a home laptop can make outgoing connections but can't accept incoming ones. With `--relay` it keeps one outgoing connection to each node it follows, and its card names an address on each node: `https://<node>/relay/<its key>/a2a`. Knocks arrive there and travel down the connection. Messages stay signed end to end, so a relaying node can't forge or change them; it can read offers and decisions, never records. Houses with a public address talk directly, as before.
+A house on a home laptop can make outgoing connections but can't accept incoming ones. With `--relay` it keeps one outgoing connection to each node it follows, and its card names an address on each node: `https://<node>/relay/<its key>/a2a`. Knocks arrive there and travel down the connection. Messages stay signed end to end and sealed for their recipient, so a relaying node can't forge, change or read them. Houses with a public address talk directly, as before.
 
 ## Is it a mesh?
 

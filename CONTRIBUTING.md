@@ -64,7 +64,7 @@ LAKE_SANDBOX=http://lake-a.localhost:8081 demos/explore/go.sh <scenario>
 LAKE_SANDBOX=http://lake-b.localhost:8082 node demos/explore/claim.mjs <run-folder>
 ```
 
-What crosses between the two today (`check` shows it): search finds the other Lake's houses, specialists and agents (each node re-verifies their cards from the agents' own addresses); signed messages, menus, carts and knocks go both ways; an agent on one Lake can be a house's assistant on the other. Money doesn't: a receipt from Lake A's payments agent reads on Lake B as "not by the payments agent", so B's seller sees the cart unpaid. And the demo grocers have the same WebID on every Lake, so each node keeps its own and drops the peer's.
+What crosses between the two today (`check` shows it): search finds the other Lake's houses, specialists and agents (each node re-verifies their cards from the agents' own addresses); signed messages, menus, carts and knocks go both ways; an agent on one Lake can be a house's assistant on the other. Money does too: a cart names the payments agents and arbiters it accepts, pinned by key, so A's buyer pays through A's payments agent and B's seller counts the receipt; disputes go to the arbiter the cart names, and a seller's record adds up both Lakes' logs. Each Lake runs its own grocers.
 
 ## Conventions
 

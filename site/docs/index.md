@@ -15,6 +15,7 @@ What that looks like today, in the [sandbox](/docs/sandbox) (synthetic data, sim
 - **The weekly shop, priced inside your house.** Grocers send pricing programs; your house works them out on your own receipts and only you see the offers. Accept one and only the shopping list goes. Home-loan quotes work the same way in the local demo Lake. [Offers](/docs/offers)
 - **Buying and selling between agents.** Menus on signed cards, carts the seller signs, payment held until the buyer accepts the delivery, an Arbiter that rules from signatures. [Trade](/docs/trade)
 - **Your own assistant in your house.** It sees what's waiting for you and suggests; you decide, and you take its key back when you like. [Approvals](/docs/approvals)
+- **An open door.** Hand out your house's address instead of your email: people's AI leave notes with a purpose, your rules sort them, your assistant answers, and what you agree to lands in your agenda. [Approvals](/docs/approvals)
 - **Consents on record.** Every agreement sits in your pod beside its consent record; revoke a key and the next request is refused.
 - **Nobody goes first.** Pledges that bind only once enough people sign. [Sandbox](/docs/sandbox)
 - **Games, rooms and inventions.** Agents build apps from one-file [blueprints](/docs/blueprints) and play with each other, no server.
@@ -29,7 +30,7 @@ How it's built:
 
 ## The three laws
 
-1. **Data never moves.** Certified code runs inside the house and returns only an answer. Every record that leaves a pod is counted publicly.
+1. **Data never moves.** Certified studies and pricing programs run inside the house; only answers leave (a study's as two unreadable shares for two tellers, which publish totals). Every record that leaves a pod is counted publicly.
 2. **Agents knock.** No signed, domain-anchored card, no conversation.
 3. **Only humans cut keys.** Agents can use access but never grant, widen or extend it. Every key traces to a human tap or a rule a human wrote.
 

@@ -19,7 +19,7 @@
 | Broadcast | **Direct A2A** to every discovered house, 32 at a time; no NATS | Direct messaging is required anyway (SPEC §9); a bus is an optimisation to revisit at 1,000 houses (milestone 7) |
 | Converter certificates | The auditor certifies `name@version` from an allowlist | Pinning the package digest is a follow-up |
 | Grants | A `join` is the owner's standing pre-approval; keys are minted by the owner's approval flow (milestone 4) | Agents never mint keys |
-| Houses at home | Relay through the nodes the house follows (`--relay`): one outgoing WebSocket each | Works behind any home router with zero setup; signed messages mean a relay can't tamper. Nodes can read relayed offers, so end-to-end encryption is next |
+| Houses at home | Relay through the nodes the house follows (`--relay`): one outgoing WebSocket each | Works behind any home router with zero setup; every message is signed and sealed for its recipient, so a relay can neither read nor tamper with it |
 | Federation | Pull: a node reads its peers' `/cards` and `/signals` every 5 s, and re-verifies every card itself | Peers can point at agents but never vouch for them; no new protocol beyond what every node already serves |
 | Discovery with every node down | Agents remember the houses they found; every card lives at its owner's address | Registries are search indexes, not gatekeepers |
 | Record checks under load | Full chain once a minute; in between, re-read the two data files and compare with the digests the verified credentials pin | Tampering with either file is still caught; a forger can't swap credential files without the issuer's key |
@@ -38,5 +38,5 @@
 | One card per WebID at a node | A newer card replaces the old one | Key rotation must work; stale keys must not |
 | The owner's key | Ed25519, made on the phone with `@noble/curves` | Phones on a home network load the app over plain HTTP, where browsers disable WebCrypto |
 | Pairing | One-time token in the printed link; sandbox may allow first-come | A stranger on the Wi-Fi can't claim your house |
-| Live updates in the app | Polling once a second | Works everywhere with no push service; push notifications are a follow-up |
+| Live updates in the app | Polling (every 1.5 s for the badge, every 3 s for an open tab) | Works everywhere with no push service; push notifications are a follow-up |
 | LLM | **None bundled.** Rules decide; templates write reasons | People bring their own agents through MCP or A2A |

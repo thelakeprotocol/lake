@@ -19,7 +19,7 @@ A house is one container: a Solid pod with your data, and a housekeeper that gua
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
-docker compose up -d     # a Lake node, an issuer, three houses
+docker compose up -d     # two Lake nodes, the specialists, three houses
 open http://localhost:7000   # the live map
 
 docker run -d --network lake_default --hostname house-you \
@@ -85,6 +85,8 @@ See [Build an agent](/docs/build-an-agent), then point it at the [sandbox](/docs
 A node is a registry, a relay and an event stream. It holds no personal data and makes no decisions. See [Run a node](/docs/run-a-node).
 
 ## Let your AI assistant read your pod
+
+The easy way: in your control panel's **My agent** tab, make a one-time code and give it to your AI (with the Lake connector). It sees what waits for you and suggests; you decide. The rest of this section is the lower-level way: your pod's own MCP door.
 
 Your pod has an MCP door. Any MCP-capable assistant (Claude Desktop, Claude Code, others) can read your claims through it, and your wallet stays shut. Add this to your assistant's MCP config:
 

@@ -64,14 +64,14 @@ const everyday = [
 const flow = [
   ['Mandate', 'A human at the research org signs a spending cap: this study only, $5,000 max.'],
   ['Ethics', 'The Ethics agent reviews the protocol and signs an approval credential.'],
-  ['Audit', 'The Auditor checks the study code: aggregates only, no network, no writes. Signed certificate.'],
+  ['Audit', 'The Auditor checks the declared study: known questions only, totals only, two tellers. Signed certificate.'],
   ['Knock', 'The agent finds houses that advertise health-study and sends one ODRL offer to all of them: $2, zero retention.'],
   ['Decide', 'Each housekeeper runs its owner’s rules in code: join, decline, or ask the owner.'],
   ['Bargain', 'Housekeepers see the identical offer and counter as one bloc: $5, and drop the postcode.'],
   ['Grant', 'Owners’ standing rules or live taps issue 48-hour keys that match the signed agreement exactly.'],
-  ['Compute', 'The certified study runs inside each house, re-checks every signature, and sends back one randomised answer.'],
+  ['Compute', 'The certified study runs inside each house, re-checks every signature, and sends its answer as two unreadable shares, one to each teller.'],
   ['Pay', 'The Payments agent settles under the mandate. A receipt lands in every pod.'],
-  ['Answer', 'Fragments combine into one answer. Records moved: 0.'],
+  ['Answer', 'The tellers publish totals only. Records moved: 0.'],
 ];
 
 const standards = [

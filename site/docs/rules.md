@@ -47,6 +47,10 @@ For a matching rule with `decision: join`:
 
 A `default: join` with no matching rule becomes **ask**, because without a rule nothing limits the fields.
 
+### Notes at your door
+
+A note asks for no data, so only the rules about who and why apply to it: those that match on `purpose`, `requester` or `reputation_at_least` alone. The first that fits decides: `decline` turns the note away, anything else delivers it to you; no rule fitting delivers it. A sender you muted never reaches you.
+
 ## Care only from providers you name
 
 `requester` matches the domain of the agent asking: its card's domain, which its node proved when it registered and your house checks again on every message (an offer that names any other domain is turned away as impersonation). So one rule per provider you name, then a rule that declines every other care request:
@@ -72,7 +76,7 @@ Order matters: the named providers come first, the catch-all `decline` last. A l
 | `device` | string | Where `ask` requests go |
 | `default` | `join` \| `decline` \| `ask` | When no rule matches. Default `ask`. |
 | `tags` | list | Interests, used for discovery and guilds |
-| `rules[].match` | map | All keys must equal the offer's. Keys: `purpose`, `requester` (the asking agent's domain, proved outside a sandbox; one per rule), `sponsor_verified`, `ethics_approved`, `audit_certified`, and `reputation_at_least` (a number: the visitor's reputation from the nodes you follow, 0–1; unknown agents count as 0.5), and `price_below` (a number of dollars: matches offers paying less, so `{ purpose: research, price_below: 5 }` → `decline` turns away cheap research before any join rule sees it; `min_price_usd` on a join rule counters instead), and `asks_identifying` (true matches offers asking for any field a use case marks directly identifying: a name, a date of birth, an account number. `{ asks_identifying: true }` → `decline` first turns them all away, whatever else they offer; the visitor is told `code: "identifying"` and may ask again without them. Every default persona starts with it). `purpose` is one of the Lake's purposes (`research`, `academic-research`, `commercial-research`, `care`, `service`, `insurance`, `credit`, `marketing`, `advertising`, `personalised-advertising`, `direct-marketing`, `security`, `legal`; [SPEC §4](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md#4-offers-and-agreements-odrl)) and covers the narrower ones inside it: `marketing` also matches `advertising`. Any other purpose is an error, and houses turn away offers with a purpose that isn't on the list. |
+| `rules[].match` | map | All keys must equal the offer's. Keys: `purpose`, `requester` (the asking agent's domain, proved outside a sandbox; one per rule), `sponsor_verified`, `ethics_approved`, `audit_certified`, and `reputation_at_least` (a number: the visitor's reputation from the nodes you follow, 0–1; unknown agents count as 0.5), and `price_below` (a number of dollars: matches offers paying less, so `{ purpose: research, price_below: 5 }` → `decline` turns away cheap research before any join rule sees it; `min_price_usd` on a join rule counters instead), and `asks_identifying` (true matches offers asking for any field a use case marks directly identifying: a name, a date of birth, an account number. `{ asks_identifying: true }` → `decline` first turns them all away, whatever else they offer; the visitor is told `code: "identifying"` and may ask again without them. Every default persona starts with it). `purpose` is one of the Lake's purposes (`research`, `academic-research`, `commercial-research`, `care`, `contact`, `service`, `insurance`, `credit`, `marketing`, `advertising`, `personalised-advertising`, `direct-marketing`, `security`, `legal`; [SPEC §4](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md#4-offers-and-agreements-odrl)) and covers the narrower ones inside it: `marketing` also matches `advertising`. Any other purpose is an error, and houses turn away offers with a purpose that isn't on the list. |
 | `privacy.show_packs` | bool | Default true: the house's public card names the kinds of data it holds (health, mortgage…) so agents with matching offers find it. False: the card says only that it considers offers; agents searching by kind of data won't find it. Applies as soon as the rules are saved. |
 | `rules[].allow_fields` | list | Fields this rule may share |
 | `rules[].deny_fields` | list | Fields never shared under this rule |
@@ -80,6 +84,7 @@ Order matters: the named providers come first, the catch-all `decline` last. A l
 | `rules[].retention` | `none` or ISO 8601 duration | How long the visitor may keep results |
 | `rules[].grant_hours` | integer | Key lifetime. Default 48. |
 | `rules[].decision` | `join` \| `decline` \| `ask` | |
+| `door` | `true` or `{ about?, name? }` | An open door ([SPEC §9.0](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md)): the house's address serves a page saying how to reach you through an agent, and takes notes. `about` is one line (up to 200 characters); `name` is optional, the address is enough. The control panel's Rules tab sets it. |
 | `negotiation.join_collectives` | boolean | Allow your housekeeper to bargain with neighbours as one bloc |
 | `intents[]` | list of `{ pack, terms }` | Standing intents: what you're looking for, so authorised agents price it inside your house. A term set to `auto` is worked out from your own data. ([How an offer works](/docs/offers)) |
 

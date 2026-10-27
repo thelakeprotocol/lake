@@ -18,10 +18,10 @@ Bitcoin, Ethereum and payment providers all keep a **testnet** next to the real 
 
 | | Sandbox (test network) | The real Lake |
 |---|---|---|
-| Records | **Synthetic**, from a demo issuer | Real, signed by issuers owners trust (a hospital, a GP system, a lab) |
+| Records | **Synthetic**, from a demo issuer | Real, signed by issuers owners trust (a bank, a shop's receipts, a clinic) |
 | Money | Simulated; receipts are signed but no money moves | Real, through a payments agent owners trust |
 | Ethics, audit | Demo agents: a fixed checklist | Real committees and auditors, each one chosen by the owner |
-| Identity | Domain proof skipped: anyone can say they're `uni.example` | Every agent proves its domain (DNS) |
+| Identity | Domain proof skipped: anyone can say they're `uni.example` | Every agent proves its domain (did:web, or a DID Configuration at the domain) |
 | Houses | Anyone can claim a hosted one for 24 hours, or run their own | A house belongs to its person, full stop |
 | Started with | the default | `--production` |
 
