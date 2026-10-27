@@ -9,3 +9,4 @@ coverage/
 .env
 *.tsbuildinfo
 site/public/blueprints/
+demos/ui-preview/.state.json
