@@ -61,7 +61,7 @@ const until = async (what, fn, ms = 60_000) => {
     await new Promise((r) => setTimeout(r, 2000));
   }
 };
-const short = (x) => JSON.stringify(x).slice(0, 400);
+const short = (x) => JSON.stringify(x).slice(0, Number(process.env.CHECK_SHORT ?? 400));
 
 const seller = await session(B, 'local-check-seller');
 const buyer = await session(A, 'local-check-buyer');
@@ -130,24 +130,27 @@ await step("buyer accepts; A's payments agent releases it to the seller on B", '
   return short({ buyer: r.money, seller: o.money });
 });
 let second;
-await step("a dispute goes to the arbiter the seller's cart names (B's), and A's payments agent follows its ruling", 'works', async () => {
+await step("a dispute goes to the arbiter the seller's cart names (B's); the seller refunds through A's payments agent", 'works', async () => {
+  // Delivered, and the buyer says it isn't what was ordered: B's arbiter signs what the signatures show and moves no money
+  // (no signature says the work is the work ordered: SPEC §6.5), so it stays held at A's until the seller refunds it.
   second = (await buyer('lake_buy', { action: 'order', seller_url: s.url, sku: 'tea' })).cart;
   await buyer('lake_buy', { action: 'pay', cart: second });
   await inbox(seller, (y) => y.message?.kind === 'receipt' && y.message?.cart === second, 'the second receipt');
   await seller('lake_sell', { action: 'deliver', cart: second, content: 'A second cup: darker, no lemon.' });
   await inbox(buyer, (y) => y.message?.kind === 'trade.deliver' && y.message?.cart === second, 'the second delivery');
-  await buyer('lake_buy', { action: 'dispute', cart: second, reason: 'it never came' });
+  await buyer('lake_buy', { action: 'dispute', cart: second, code: 'not_as_described', reason: 'I asked for lemon' });
   const r = await buyer('lake_buy', { action: 'arbitrate', cart: second });
-  if (r.kind !== 'ruling' || !r.paid || r.held_payment !== 'released to the seller') throw new Error(short(r));
-  const o = await until('the release at the seller', async () => { const x = await sale(second); return x?.payment === 'released' ? x : null; });
-  return short({ ruling: r.ruling, facts: r.facts, seller: o.money });
+  if (r.kind !== 'ruling' || !r.paid || r.held_payment !== 'still held' || !String(r.logged?.origin ?? '').includes('lake-b')) throw new Error(short(r));
+  const back = await seller('lake_sell', { action: 'refund', cart: second });
+  const o = await until('the void at the seller', async () => { const x = await sale(second); return x?.payment === 'voided' ? x : null; });
+  return short({ ruling: r.ruling, logged: r.logged, refund: back, seller: o.money });
 });
-await step("seller on B's record counts the sales paid from A (A's log) and the ruling of B's arbiter (B's log)", 'works', async () => {
-  // Searched from B: B's log alone holds no sale of this seller (A's payments agent logged them on A's), so the connector
+await step("seller on B's record counts the sale paid from A (A's log), adding up both Lakes' logs", 'works', async () => {
+  // Searched from B: B's log alone holds no sale of this seller (A's payments agent logged it on A's), so the connector
   // adds up every log it finds, B's and the followed Lake A's.
   const me = (await seller('lake_search', { q: s.name.split(' ')[0] })).find((x) => x.url === s.url);
   const r = me?.record;
-  if (!r || r.sales < 2 || r.rulings?.delivered < 1 || (r.logs?.length ?? 0) < 2 || r.partial) throw new Error(short(me ?? 'the seller not found on B'));
+  if (!r || r.sales < 1 || (r.logs?.length ?? 0) < 2 || r.partial) throw new Error(short(me ?? 'the seller not found on B'));
   return short(r);
 });
 await step("the buyer's own Lake's specialists come first; B's are marked as B's", 'works', async () => {
