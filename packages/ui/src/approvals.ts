@@ -1,6 +1,7 @@
 import './approvals.css';
 import { stringify } from 'yaml';
 import QRCode from 'qrcode';
+import { Idiomorph } from 'idiomorph';
 import { loadKey, signCredential, signEnvelope } from './owner-crypto';
 
 // The control panel that comes with every house (open source). Served by the house at /owner/; every
@@ -26,7 +27,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, 
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === false) continue;
-    if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v as EventListener);
+    // As a property, not a listener: a redraw that keeps this node (see morphInto) hands it the new handler.
+    if (k.startsWith('on') && typeof v === 'function') (el as unknown as Record<string, unknown>)[k] = v;
     else if (k === 'class') el.className = String(v);
     else el.setAttribute(k, v === true ? '' : String(v));
   }
@@ -49,10 +51,33 @@ async function pair(): Promise<boolean> {
   return false;
 }
 
+/** What a tab's drawing fetched, in order: the same answers mean nothing to redraw. */
+let recording: string[] | null = null;
 async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signEnvelope(payload, key, webId || 'owner')) });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? String(res.status));
-  return res.json();
+  const body = await res.json();
+  recording?.push(JSON.stringify(body));
+  return body;
+}
+
+const HANDLERS = ['onclick', 'onchange', 'oninput', 'onkeydown', 'onfocus', 'onsubmit'] as const;
+/**
+ * Brings a tab up to date by changing only what differs (idiomorph), so what you're looking at doesn't flicker and your
+ * scroll, focus, typing and open folds stay put. A node it keeps takes the new render's handlers; a fold stays as you left it.
+ */
+function morphInto(box: HTMLElement, fresh: HTMLElement) {
+  Idiomorph.morph(box, fresh, {
+    morphStyle: 'innerHTML',
+    ignoreActiveValue: true,
+    callbacks: {
+      afterNodeMorphed: (old: Node, now: Node) => {
+        if (!(old instanceof HTMLElement) || !(now instanceof HTMLElement)) return;
+        for (const p of HANDLERS) (old as unknown as Record<string, unknown>)[p] = (now as unknown as Record<string, unknown>)[p] ?? null;
+      },
+      beforeAttributeUpdated: (name: string, node: Element) => !(name === 'open' && node.tagName === 'DETAILS'),
+    },
+  });
 }
 
 // ---- navigation ----
@@ -67,9 +92,20 @@ let pending = 0;
 
 const unused = new Set<Tab>(); // tabs this house has nothing for (no use case with offers, say)
 
+/** Four tabs for every day; the rest one tap away under More. */
+const MAIN: Tab[] = ['home', 'requests', 'myagent', 'rules'];
+let moreOpen = false;
 function renderNav() {
-  $('nav').replaceChildren(...TABS.filter(([id]) => !unused.has(id) || id === tab).map(([id, label]) =>
-    h('button', { type: 'button', 'aria-current': id === tab ? 'page' : undefined, onclick: () => go(id) }, label, id === 'requests' && pending ? h('span', { class: 'badge' }, String(pending)) : null)));
+  const button = ([id, label]: readonly [Tab, string]) =>
+    h('button', { type: 'button', class: MAIN.includes(id) ? 'main' : 'extra', 'aria-current': id === tab ? 'page' : undefined, onclick: () => { moreOpen = false; go(id); } }, label, id === 'requests' && pending ? h('span', { class: 'badge' }, String(pending)) : null);
+  const shown = TABS.filter(([id]) => !unused.has(id) || id === tab);
+  const extraHere = !MAIN.includes(tab);
+  $('nav').classList.toggle('more-open', moreOpen);
+  $('nav').replaceChildren(
+    ...shown.filter(([id]) => MAIN.includes(id)).map(button),
+    h('button', { type: 'button', class: `more-btn${extraHere ? ' here' : ''}`, 'aria-expanded': String(moreOpen), onclick: () => { moreOpen = !moreOpen; renderNav(); } }, extraHere ? (TABS.find(([id]) => id === tab)?.[1] ?? 'More') : 'More', ' ▾'),
+    h('div', { class: 'more-menu' }, h('span', { class: 'more-label' }, 'More'), ...shown.filter(([id]) => !MAIN.includes(id)).map(button)),
+  );
 }
 
 function go(t: Tab) {
@@ -92,6 +128,7 @@ const boxFor = (t: Tab) => {
 };
 const view = () => boxFor(tab);
 const drawing = new Map<Tab, boolean>(); // tab → asked again while drawing
+const prints = new Map<Tab, string>(); // what each tab was last drawn from
 const hoursLeft = (iso: string) => { const hr = (Date.parse(iso) - Date.now()) / 3_600_000; return hr < 1 ? `${Math.max(1, Math.round(hr * 60))} min` : `${Math.round(hr)} h`; };
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const nice = (f: string) => f.replace(/_/g, ' ');
@@ -112,11 +149,19 @@ async function show() {
   try {
     do {
       drawing.set(t, false);
-      await { home, requests, keys, rules, offers, myagent, agents, money, data, move }[t](box);
+      // Drawn off-screen, from data fetched first; then only what changed is changed on screen.
+      const fresh = h('div', {});
+      const seen: string[] = (recording = []);
+      await { home, requests, keys, rules, offers, myagent, agents, money, data, move }[t](fresh);
+      recording = null;
+      const print = seen.join('\n');
+      if (prints.get(t) !== print || !box.dataset.drawn) { morphInto(box, fresh); box.dataset.drawn = '1'; prints.set(t, print); }
     } while (drawing.get(t));
     $('status').className = 'dot live';
   } catch (e) {
     $('status').className = 'dot down';
+    recording = null;
+    prints.delete(t);
     box.replaceChildren(h('p', { class: 'muted' }, `Couldn't reach your house: ${(e as Error).message}`));
   } finally {
     drawing.delete(t);
@@ -126,53 +171,47 @@ async function show() {
 
 // ---- Home ----
 async function home(box: HTMLElement) {
-  const [o, feed, { suggestions, assistants, notes, agenda }, door, free] = await Promise.all([
+  const [o, feed, list, door, free] = await Promise.all([
     call({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }),
     call<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' }),
-    call<{ suggestions: Note[]; assistants: { label: string }[]; notes: { id: string; from: { name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string }[]; agenda?: AgendaItem[] }>({ kind: 'list' }),
-    call<{ open: boolean; address: string; error?: string }>({ kind: 'panel.door' }).then((d) => (d.error ? null : d)).catch(() => null),
-    call<{ set?: boolean }>({ kind: 'panel.free' }).catch(() => ({ set: false })),
+    call<{ suggestions: Note[]; assistants: { label: string }[]; notes: DoorNote[]; agenda?: AgendaItem[] }>({ kind: 'list' }),
+    call<DoorState>({ kind: 'panel.door' }).then((d) => (d.error ? null : d)).catch(() => null),
+    call<FreeState>({ kind: 'panel.free' }).catch(() => ({ set: false, slots: [] }) as FreeState),
   ]);
+  const { suggestions, assistants, notes, agenda } = list;
   houseName = o.name;
   $('title').textContent = `House ${o.name}`;
-  const tile = (label: string, value: string | number, to: Tab, cls = '') =>
-    h('div', { class: `tile link ${cls}`, role: 'button', tabindex: 0, onclick: () => go(to), onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') go(to); } }, h('dt', {}, label), h('dd', {}, String(value)));
-  const agentCard = h('div', { class: 'card' },
-      h('h3', {}, 'Your AI agent'),
-      h('p', { class: 'muted' }, assistants.length ? `${assistants.map((a) => a.label.replace(/\s*\(.*\)$/, '')).join(', ')} ${assistants.length === 1 ? 'is' : 'are'} looking after your house: it sees every knock and suggests; you decide.` : 'Let your own AI agent look after your house: it sees every knock and suggests what to do; only you decide.'),
-      h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, assistants.length ? 'My agent →' : 'Give it a key →'));
+  const waiting = (o.pending as number) || 0;
+  const stat = (label: string, value: string | number, to: Tab, cls = '') =>
+    h('button', { class: `stat ${cls}`, type: 'button', onclick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
   box.replaceChildren(
-    startCard(door, assistants.length > 0, !!free.set),
-    suggestions.length ? h('div', { class: 'card' }, h('h3', {}, 'Your agent suggests'), suggestionList(suggestions)) : '',
-    // What you agreed to, written in by your agent: yours to see and remove.
-    agenda?.length ? agendaCard(agenda) : '',
-    // Notes other agents left at your door: their words, nothing asked of your data. Your agent hears of them too.
-    notes?.length ? h('div', { class: 'card' }, h('h3', {}, 'Notes at your door'), h('ul', { class: 'rows' }, ...notes.map((n) => h('li', {},
-      h('div', {}, h('div', { class: 'r-title' }, `“${n.text}”`), h('div', { class: 'r-meta' }, `${n.from.name} (${n.from.domain}${n.from.checked ? ', domain proved' : ': not verified, anyone could send this'})${n.from.speaks_for ? (n.from.speaks_for.checked ? ` · the assistant of ${n.from.speaks_for.house.replace(/\/profile\/card#me$/, '')}: that house says so` : ' · says it speaks for a house, with nothing to show it') : ''} · ${time(n.at)} · their words`)),
-      h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.dismiss', id: n.id }); void show(); } }, 'Dismiss'), ' ',
-        h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.mute', id: n.id }); void show(); } }, 'Don\'t hear from them again')))))) : '',
-    h('dl', { class: 'tiles' },
-      tile('Waiting for you', o.pending, 'requests', o.pending ? 'amber' : ''),
-      tile('Knocks today', o.knocksToday, 'agents'),
-      tile('Live keys', o.keys, 'keys'),
-      tile('Earned', `$${o.earned}`, 'money', 'mint'),
-      tile('Attacks blocked today', o.blockedToday, 'agents', o.blockedToday ? 'threat' : ''),
-    ),
-    h('div', { class: `card ${o.record.ok ? 'ok' : 'bad'}` },
-      h('h3', {}, o.record.ok ? 'Your record checks out' : 'Your record failed its check'),
-      h('p', { class: 'muted' }, o.record.ok
-        ? `Signed by a trusted issuer, unchanged since, converted by a certified converter. Your house holds ${o.claims} claims: ${o.holds.map(nice).join(', ') || 'none'}.`
-        : `${o.record.why}. Your house won't join studies until this is fixed.`)),
-    agentCard,
-    leaseUntil ? leaseCard() : '',
-    personCard(o.person),
-    h('div', { class: 'card' },
-      h('h3', {}, o.relayed ? 'Reached through the Lake' : 'Reached directly'),
-      h('p', { class: 'muted' }, o.relayed ? 'Your house is behind a router; agents reach it through the nodes it follows.' : 'Agents reach your house at its own address.'),
-      ...o.reachedAt.map((u: string) => h('div', {}, h('code', {}, u)))),
-    h('h2', {}, 'At your door'),
-    feed.length ? h('ul', { class: 'feed' }, ...feed.slice(0, 12).map((a) => h('li', {}, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text))))
-      : h('p', { class: 'muted' }, 'Quiet so far.'),
+    startCard(door, assistants.length > 0, free),
+    // What needs you, first and only: your agent's suggestions, notes at your door, requests your rules left to you.
+    h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
+      waiting || suggestions.length || notes?.length
+        ? h('ul', { class: 'items' },
+            waiting ? h('li', { id: 'waiting', class: 'item amber' }, h('p', { class: 'item-text' }, `${waiting} request${waiting === 1 ? '' : 's'} your rules left to you`),
+              h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onclick: () => go('requests') }, 'Look at them'))) : '',
+            ...suggestionItems(suggestions), ...noteItems(notes ?? []))
+        : h('p', { class: 'empty' }, 'Nothing needs you. Your rules and your agent are handling it.')),
+    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), agendaList(agenda)) : '',
+    h('div', { class: 'stats' },
+      stat(o.knocksToday === 1 ? 'knock today' : 'knocks today', o.knocksToday, 'agents'),
+      stat(o.keys === 1 ? 'live key' : 'live keys', o.keys, 'keys'),
+      stat('earned', `$${o.earned}`, 'money'),
+      o.blockedToday ? stat('attacks blocked', o.blockedToday, 'agents', 'threat') : ''),
+    // Everything else, one tap away.
+    h('details', { class: 'fold', id: 'home-about' }, h('summary', {}, 'About your house'),
+      h('dl', { class: 'facts' },
+        h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.claims} claims (${o.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.record.why}.`)),
+        h('div', {}, h('dt', {}, 'Your agent'), h('dd', {}, assistants.length ? `${assistants.map((a) => a.label.replace(/\s*\(.*\)$/, '')).join(', ')}: looks and suggests; you decide.` : 'None yet.')),
+        h('div', {}, h('dt', {}, 'Reached'), h('dd', {}, o.relayed ? 'Through the Lake (your house is behind a router)' : 'Directly, at its own address')),
+        h('div', {}, h('dt', {}, 'Identity'), h('dd', {}, h('code', {}, webId)))),
+      personCard(o.person),
+      leaseUntil ? leaseCard() : '',
+      h('h3', {}, 'Recent at your door'),
+      feed.length ? h('ul', { class: 'feed' }, ...feed.slice(0, 12).map((a) => h('li', {}, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text))))
+        : h('p', { class: 'muted' }, 'Quiet so far.')),
   );
 }
 
@@ -327,14 +366,24 @@ let FIELDS: { name: string; label: string; pack: string }[] = [];
 let PURPOSES: { name: string; label: string; within?: string }[] = ['research', 'care', 'marketing', 'insurance'].map((name) => ({ name, label: name }));
 let draft: Rules | null = null;
 
+/** The door and your hours, fetched before the Rules tab draws (no placeholder that fills in later). */
+let rulesExtras: { door: DoorState | null; qr?: string; free: FreeState } = { door: null, free: { set: false, slots: [] } };
+/** The rules as last saved, so the save bar shows only when there's something to save. */
+let savedRules = '';
 async function rules(box: HTMLElement) {
+  const [r, door, free] = await Promise.all([
+    call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[]; purposes?: typeof PURPOSES }>({ kind: 'panel.rules' }),
+    call<DoorState>({ kind: 'panel.door' }).then((d) => (d.error ? null : d)).catch(() => null),
+    call<FreeState>({ kind: 'panel.free' }).catch(() => ({ set: false, slots: [] }) as FreeState),
+  ]);
   if (!draft) {
-    const r = await call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[]; purposes?: typeof PURPOSES }>({ kind: 'panel.rules' });
+    savedRules = stringify(r.rules);
     draft = structuredClone(r.rules);
     FIELDS = r.fields ?? [];
     if (r.purposes?.length) PURPOSES = r.purposes;
   }
-  renderRules();
+  rulesExtras = { door, free, qr: door?.open ? await QRCode.toDataURL(door.address, { margin: 1, width: 240 }) : undefined };
+  renderRules(undefined, box);
 }
 
 function summary(r: Rule): Child[] {
@@ -398,13 +447,13 @@ function ruleCard(r: Rule, i: number, all: Rule[]) {
   const price = h('input', { type: 'number', min: '0', step: '0.5', value: r.min_price_usd ?? '', placeholder: 'any', onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; if (v === '') delete r.min_price_usd; else r.min_price_usd = Number(v); redraw(); } });
   const hours = h('input', { type: 'number', min: '1', max: '720', value: r.grant_hours ?? '', placeholder: '48', onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; if (v === '') delete r.grant_hours; else r.grant_hours = Number(v); redraw(); } });
   const move = (d: number) => { const j = i + d; if (j < 0 || j >= all.length) return; [all[i], all[j]] = [all[j]!, all[i]!]; redraw(); };
-  return h('div', { class: 'rule' },
-    h('div', { class: 'head' }, h('span', { class: 'count' }, `Rule ${i + 1}`),
-      h('div', { class: 'tools' },
-        h('button', { class: 'btn small', type: 'button', onclick: () => move(-1), disabled: i === 0, 'aria-label': 'Move up' }, '↑'),
-        h('button', { class: 'btn small', type: 'button', onclick: () => move(1), disabled: i === all.length - 1, 'aria-label': 'Move down' }, '↓'),
-        h('button', { class: 'btn small danger', type: 'button', onclick: () => { all.splice(i, 1); redraw(); } }, 'Remove'))),
-    h('p', { class: 'sum' }, ...summary(r)),
+  // Each rule reads as one sentence; its settings are a tap away (a page of open forms was too much at once).
+  return h('details', { class: 'rule', id: `rule-${i}` },
+    h('summary', {}, h('span', { class: 'rule-n' }, String(i + 1)), h('span', { class: 'sum' }, ...summary(r))),
+    h('div', { class: 'tools' },
+      h('button', { class: 'btn small', type: 'button', onclick: () => move(-1), disabled: i === 0, 'aria-label': 'Move up' }, '↑ Earlier'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => move(1), disabled: i === all.length - 1, 'aria-label': 'Move down' }, '↓ Later'),
+      h('button', { class: 'btn small danger', type: 'button', onclick: () => { all.splice(i, 1); redraw(); } }, 'Remove')),
     h('div', { class: 'grid2' },
       h('div', { class: 'field' }, h('label', {}, 'When the purpose is'), purpose),
       h('div', { class: 'field' }, h('label', {}, 'From'), requester),
@@ -433,71 +482,65 @@ function chipsEditor(values: string[], placeholder: string, onChange: (v: string
   return h('div', {}, ...values.map((v) => h('button', { type: 'button', class: 'chip', title: 'Remove', onclick: () => onChange(values.filter((x) => x !== v)) }, v, ' ✕')), input);
 }
 
+type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
+type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
 /**
  * Your door (SPEC §9.0): open it to give your house's address out, in a signature or as a QR code, so people's AI can knock
  * or leave a note. The address is the identifier; a name only if you add one. Saved in your rules, like any setting.
  */
-function doorCard(): HTMLElement {
-  const box = h('div', { class: 'card', style: 'max-width:820px;margin-bottom:18px' }, h('p', { class: 'muted' }, 'Your door…'));
-  void (async () => {
-    const d = await call<{ open: boolean; about?: string; name?: string; address: string; error?: string }>({ kind: 'panel.door' }).catch(() => ({ error: 'no door' }) as never);
-    if (d.error) return void box.remove();
-    const about = h('input', { type: 'text', maxlength: '200', placeholder: 'One line, e.g. "Ask my agent about work, or about meeting up."', value: d.about ?? '', style: 'width:100%' }) as HTMLInputElement;
-    const name = h('input', { type: 'text', maxlength: '60', placeholder: 'Optional: the address is enough', value: d.name ?? '', style: 'width:100%' }) as HTMLInputElement;
-    const msg = h('span', { class: 'muted' });
-    const save = async (open: boolean) => {
-      const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.value, name: name.value });
-      if (!r.ok) return void (msg.textContent = r.error ?? 'not saved');
-      draft = null;
-      void show();
-    };
-    const qr = d.open ? h('img', { alt: 'A QR code of your house address', width: '150', height: '150', src: await QRCode.toDataURL(d.address, { margin: 1, width: 300 }) }) : '';
-    box.replaceChildren(
-      h('h3', {}, d.open ? 'Your door is open' : 'Your door is closed'),
-      h('p', { class: 'muted' }, d.open
-        ? 'Give this address out, in your signature or as this QR code. Anyone\'s AI can knock there or leave a note, and your rules answer; opened in a browser, it shows people how.'
-        : 'Open it to give your house\'s address out, in your signature or as a QR code, so people can reach you through their AI. Nobody finds you by name unless you add one, and your rules still answer everything.'),
-      d.open ? h('div', { style: 'display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:10px 0' }, h('div', { style: 'flex:1;min-width:220px' }, h('code', { style: 'overflow-wrap:anywhere' }, d.address), h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard?.writeText(d.address) }, 'Copy'))), qr) : '',
-      h('div', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door'), about),
-      h('div', { class: 'field' }, h('span', { class: 'lab' }, 'A name to show'), name),
-      h('div', {}, h('button', { class: 'btn primary small', type: 'button', onclick: () => void save(true) }, d.open ? 'Save' : 'Open my door'), ' ', d.open ? h('button', { class: 'btn small', type: 'button', onclick: () => void save(false) }, 'Close it') : '', ' ', msg),
-    );
-  })();
-  return box;
+function doorCard(d: DoorState | null, qr?: string): Node | string {
+  if (!d) return '';
+  const about = h('input', { type: 'text', maxlength: '200', placeholder: 'e.g. Ask my agent about work, or about meeting up.', value: d.about ?? '' }) as HTMLInputElement;
+  const name = h('input', { type: 'text', maxlength: '60', placeholder: 'Optional: the address is enough', value: d.name ?? '' }) as HTMLInputElement;
+  const msg = h('span', { class: 'muted' });
+  const save = async (open: boolean) => {
+    const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.value, name: name.value });
+    if (!r.ok) return void (msg.textContent = r.error ?? 'not saved');
+    draft = null;
+    void show();
+  };
+  return h('section', { class: 'block', id: 'door' },
+    h('h2', {}, d.open ? 'Your door is open' : 'Your door is closed'),
+    h('p', { class: 'muted' }, d.open ? 'Give this address out: in your signature, or as the QR code. Anyone\'s AI can leave you a note there; your rules and your agent answer.' : 'Open it to give your house\'s address out, so people can reach you through their AI. No name needed.'),
+    d.open ? h('div', { class: 'address' }, qr ? h('img', { alt: 'QR code of your house address', width: '120', height: '120', src: qr }) : '',
+      h('div', {}, h('code', {}, d.address), h('div', { class: 'row' }, copyButton(d.address), h('a', { class: 'btn small', href: d.address, target: '_blank', rel: 'noopener' }, 'See it as others do')))) : '',
+    h('details', { class: 'fold', id: 'door-edit', ...(d.open ? {} : { open: true }) }, h('summary', {}, d.open ? 'Change what it says' : 'What it says'),
+      h('label', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door'), about),
+      h('label', { class: 'field' }, h('span', { class: 'lab' }, 'A name to show (optional)'), name),
+      h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => void save(true) }, d.open ? 'Save' : 'Open my door'),
+        d.open ? h('button', { class: 'btn', type: 'button', onclick: () => void save(false) }, 'Close my door') : '', msg)));
 }
+
+const copyButton = (text: string, label = 'Copy') => h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
+  const b = e.currentTarget as HTMLButtonElement;
+  try { await navigator.clipboard.writeText(text); b.textContent = 'Copied ✓'; setTimeout(() => (b.textContent = label), 1500); } catch { b.textContent = 'Copy failed'; }
+} }, label);
 
 /**
  * When you're free to meet: windows like "mon-fri 09:00-12:00" in your own time zone. Your agent offers those times, around
  * what is already in your agenda, instead of asking you each time. Saved in your rules.
  */
-function freeCard(): HTMLElement {
-  const box = h('div', { class: 'card', style: 'max-width:820px;margin-bottom:18px' }, h('p', { class: 'muted' }, 'When you\'re free…'));
-  void (async () => {
-    const f = await call<{ set: boolean; tz?: string; meetings?: number; slots: unknown[] }>({ kind: 'panel.free' }).catch(() => null);
-    if (!f) return void box.remove();
-    const r = await call<{ rules: { availability?: { tz: string; free: string[]; meetings?: number } } }>({ kind: 'panel.rules' });
-    const av = r.rules.availability;
-    const free = h('textarea', { rows: '3', style: 'width:100%', placeholder: 'mon-fri 09:00-12:00\nsat 10:00-11:00' }) as HTMLTextAreaElement;
-    free.value = (av?.free ?? []).join('\n');
-    const tz = av?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const len = h('select', {}, ...[30, 45, 60, 90].map((m) => h('option', { value: String(m), ...((av?.meetings ?? 60) === m ? { selected: true } : {}) }, `${m} minutes`))) as HTMLSelectElement;
-    const msg = h('span', { class: 'muted' });
-    const save = async (clear = false) => {
-      const lines = free.value.split('\n').map((x) => x.trim()).filter(Boolean);
-      const res = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.availability.set', availability: clear || !lines.length ? null : { tz, free: lines, meetings: Number(len.value) } });
-      if (!res.ok) return void (msg.textContent = res.error ?? 'not saved');
-      draft = null;
-      void show();
-    };
-    box.replaceChildren(
-      h('h3', {}, 'When you\'re free to meet'),
-      h('p', { class: 'muted' }, `Your agent offers these times (in ${tz}) to people who want to meet you, around what's already in your agenda, so it doesn't have to ask you each time. One window a line, like "mon-fri 09:00-12:00".${f.set ? ` Free now: ${f.slots.length} slot${f.slots.length === 1 ? '' : 's'} in the next two weeks.` : ''}`),
-      free, h('div', { style: 'margin-top:8px' }, 'Each meeting: ', len, ' ', h('button', { class: 'btn primary small', type: 'button', onclick: () => void save() }, 'Save'), ' ', av ? h('button', { class: 'btn small', type: 'button', onclick: () => void save(true) }, 'Clear') : '', ' ', msg));
-  })();
-  return box;
+function freeCard(f: FreeState, av?: { tz: string; free: string[]; meetings?: number }): Node {
+  const free = h('textarea', { rows: '3', placeholder: 'mon-fri 09:00-12:00\nsat 10:00-11:00' }) as HTMLTextAreaElement;
+  free.value = (av?.free ?? []).join('\n');
+  const tz = av?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const len = h('select', {}, ...[30, 45, 60, 90].map((m) => h('option', { value: String(m), ...((av?.meetings ?? 60) === m ? { selected: true } : {}) }, `${m} min`))) as HTMLSelectElement;
+  const msg = h('span', { class: 'muted' });
+  const save = async (clear = false) => {
+    const lines = free.value.split('\n').map((x) => x.trim()).filter(Boolean);
+    const res = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.availability.set', availability: clear || !lines.length ? null : { tz, free: lines, meetings: Number(len.value) } });
+    if (!res.ok) return void (msg.textContent = res.error ?? 'not saved');
+    draft = null;
+    void show();
+  };
+  return h('section', { class: 'block', id: 'free' },
+    h('h2', {}, 'When you\'re free to meet'),
+    h('p', { class: 'muted' }, f.set ? `Your agent offers these times to people who want to meet you, around your agenda: ${f.slots.length} free in the next two weeks.` : 'Say when you\'re usually free, and your agent can offer people a time without asking you first.'),
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, `One window a line, in ${tz}`), free),
+    h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Meetings last ', len), h('button', { class: 'btn primary', type: 'button', onclick: () => void save() }, 'Save'), av ? h('button', { class: 'btn', type: 'button', onclick: () => void save(true) }, 'Clear') : '', msg));
 }
 
-function renderRules(message?: { ok: boolean; text: string }) {
+function renderRules(message?: { ok: boolean; text: string }, into?: HTMLElement) {
   const r = draft!;
   const trust = (r.trust ??= {});
   const save = h('button', { class: 'btn primary', type: 'button' }, 'Save my rules');
@@ -506,33 +549,38 @@ function renderRules(message?: { ok: boolean; text: string }) {
     const clean = structuredClone(r);
     if (clean.trust && !Object.values(clean.trust).some((v) => v?.length)) delete clean.trust;
     const res = await call<{ ok: boolean; error?: string }>({ kind: 'panel.rules.set', text: stringify(clean) });
-    renderRules(res.ok ? { ok: true, text: 'Saved in your pod. Your housekeeper uses these rules from now on.' } : { ok: false, text: res.error ?? 'not saved' });
+    if (res.ok) savedRules = stringify(clean);
+    renderRules(res.ok ? { ok: true, text: 'Saved. Your housekeeper uses these from now on.' } : { ok: false, text: res.error ?? 'not saved' });
   };
-  boxFor('rules').replaceChildren(
-    doorCard(),
-    freeCard(),
-    h('p', { class: 'lede' }, 'Your housekeeper follows these, top to bottom; the first rule that fits decides. They run as code, and nothing an agent writes can change them.'),
+  const fresh = h('div', {});
+  fresh.replaceChildren(
+    doorCard(rulesExtras.door, rulesExtras.qr),
+    freeCard(rulesExtras.free, (r as { availability?: { tz: string; free: string[]; meetings?: number } }).availability),
+    h('h2', { class: 'section' }, 'Who gets what'),
+    h('p', { class: 'muted' }, 'Your housekeeper follows these, top to bottom; the first rule that fits decides. Nothing an agent writes can change them.'),
     ...r.rules.map((rule, i) => ruleCard(rule, i, r.rules)),
     h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn', type: 'button', onclick: () => { r.rules.push({ match: { purpose: 'research' }, decision: 'ask' }); renderRules(); } }, '+ Add a rule')),
-    h('h2', {}, 'Everything else'),
-    h('div', { class: 'card', style: 'max-width:820px' },
+    h('details', { class: 'fold', id: 'rules-more', style: 'margin-top:24px' }, h('summary', {}, 'More settings'),
+    h('h3', {}, 'Everything else'),
+    h('div', { class: 'card' },
       h('div', { class: 'grid2' },
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'When no rule fits'), seg(r.default, (d) => { r.default = d; renderRules(); })),
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Bargaining'), toggle('bargain together with neighbours (a bloc gets better terms)', !!r.negotiation?.join_collectives, (v) => { r.negotiation = { ...(r.negotiation ?? {}), join_collectives: v }; renderRules(); })),
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Your house in public'), toggle('say what kinds of data my house holds (so agents with matching offers can find it)', r.privacy?.show_packs !== false, (v) => { if (v) delete r.privacy; else r.privacy = { show_packs: false }; renderRules(); })),
         h('div', { class: 'field' }, h('span', { class: 'lab' }, 'My interests (for guilds)'), chipsEditor(r.tags ?? [], 'add, then Enter', (v) => { r.tags = v; renderRules(); })),
       )),
-    h('h2', {}, 'Whose word counts'),
-    h('div', { class: 'card', style: 'max-width:820px' },
+    h('h3', {}, 'Whose word counts'),
+    h('div', { class: 'card' },
       h('p', { class: 'muted', style: 'margin-top:0' }, 'Approvals and signatures count only from these domains. Anyone else’s counts as none.'),
       h('div', { class: 'grid2' }, ...(['ethics', 'auditors', 'issuers', 'payments'] as const).map((k) =>
         h('div', { class: 'field' }, h('span', { class: 'lab' }, { ethics: 'Ethics bodies', auditors: 'Auditors', issuers: 'Record issuers', payments: 'Payments' }[k]),
           chipsEditor(trust[k] ?? [], 'domain, then Enter', (v) => { trust[k] = v; renderRules(); }))))),
-    h('details', { style: 'margin-top:16px;max-width:820px' }, h('summary', { class: 'muted' }, 'See it as rules.yaml'), h('pre', {}, stringify(r))),
-    h('div', { class: 'savebar' }, save,
+    h('details', { style: 'margin-top:16px' }, h('summary', {}, 'See it as rules.yaml'), h('pre', {}, stringify(r)))),
+    stringify(r) === savedRules && !message ? '' : h('div', { class: 'savebar' }, save,
       h('button', { class: 'btn', type: 'button', onclick: async () => { draft = null; await rules(boxFor('rules')); } }, 'Undo changes'),
       message ? h('span', { class: `msg ${message.ok ? 'ok' : 'bad'}` }, message.text) : null),
   );
+  if (into) into.replaceChildren(...Array.from(fresh.childNodes)); else morphInto(boxFor('rules'), fresh);
 }
 
 // ---- Offers ----
@@ -649,7 +697,7 @@ async function myagent(box: HTMLElement) {
   const v = await call<{ assistants: Assistant[]; suggestions: Note[] }>({ kind: 'list' });
   const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
   if (invite && invite.until < Date.now()) invite = null;
-  const give = h('button', { class: 'btn primary', type: 'button' }, v.assistants.length ? 'Give another agent a key' : 'Give my AI agent a key');
+  const give = h('button', { class: `btn ${v.assistants.length ? '' : 'primary'}`, type: 'button' }, v.assistants.length ? 'Connect another AI' : 'Give my AI a key');
   give.onclick = async () => {
     give.disabled = true;
     const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant' });
@@ -665,21 +713,22 @@ async function myagent(box: HTMLElement) {
       try { await navigator.clipboard.writeText(invite!.msg); copy.textContent = 'Copied ✓'; } catch { text.focus(); text.select(); copy.textContent = 'Selected: copy it'; }
     };
     const mins = Math.max(1, Math.round((invite.until - Date.now()) / 60_000));
-    return h('div', { class: 'card' }, h('h3', {}, 'Paste this to your AI agent'),
+    return h('section', { class: 'block start' }, h('h2', {}, 'Paste this to your AI'),
       h('p', { class: 'muted' }, `It needs the Lake connector. The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`), text, copy);
   })() : '';
   box.replaceChildren(
-    h('p', { class: 'lede' }, 'Give your own AI agent a key to your house. It can look at everything (requests, offers, visitors, your data) and suggest what to do. It can never decide: only your key can Allow, change your rules, accept an offer or revoke a key.'),
-    code || give,
+    h('p', { class: 'lede' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
     v.assistants.length
-      ? h('div', {}, h('h2', {}, 'Connected'), h('ul', { class: 'rows' }, ...v.assistants.map((a) => h('li', {},
-          h('div', {}, h('div', { class: 'r-title' }, a.label.replace(/\s*\(.*\)$/, '')),
-            h('div', { class: 'r-meta' }, `since ${time(a.addedAt)} · can look and suggest${a.allowance ? ` · may spend up to ${money$(a.allowance.amount, a.allowance.currency)} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
-            allowanceForm(a)),
-          h('button', { class: 'btn danger small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } }, 'Revoke')))))
-      : h('p', { class: 'muted', style: 'margin-top:14px' }, 'No agent connected yet.'),
-    h('h2', {}, 'What it suggests'),
-    v.suggestions.length ? suggestionList(v.suggestions) : h('p', { class: 'muted' }, 'Nothing yet. Its suggestions show up here and on Home.'),
+      ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.assistants.map((a) => h('li', { class: 'item', id: `as-${a.kid}` },
+          h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, a.label.replace(/\s*\(.*\)$/, '')), h('span', { class: 'chip ok' }, 'Connected')),
+          h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests${a.allowance ? ` · may spend ${money$(a.allowance.amount, a.allowance.currency)} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
+          h('div', { class: 'item-foot' },
+            a.allowance || !a.canHaveAllowance ? h('span', {}, allowanceForm(a)) : h('details', { class: 'more', id: `allow-${a.kid}` }, h('summary', {}, 'Give it spending money'), allowanceForm(a)),
+            h('button', { class: 'btn small danger', type: 'button', onclick: async () => { if (confirm('Take its key back? It can no longer look inside or suggest.')) { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); void show(); } } }, 'Revoke'))))))
+      : '',
+    code || h('div', { class: 'block' }, give),
+    h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
+      v.suggestions.length ? h('ul', { class: 'items' }, ...suggestionItems(v.suggestions)) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and on Home.')),
   );
 }
 
@@ -692,7 +741,7 @@ interface Assistant { kid: string; label: string; addedAt: string; canHaveAllowa
  */
 function allowanceForm(a: Assistant): Node {
   if (a.allowance) {
-    return h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.allowance.revoke', kid: a.kid }); void show(); } }, 'Take the allowance back');
+    return h('button', { class: 'btn small quiet', type: 'button', onclick: async () => { await call({ kind: 'panel.allowance.revoke', kid: a.kid }); void show(); } }, 'Take the spending money back');
   }
   if (!a.canHaveAllowance) return h('div', { class: 'r-meta' }, 'To give it spending money, connect it again with a new code.');
   const amount = h('input', { type: 'number', min: '1', max: '500', step: '1', value: '10', style: 'width:5em' }) as HTMLInputElement;
@@ -715,7 +764,7 @@ function allowanceForm(a: Assistant): Node {
       sign.disabled = false;
     }
   };
-  return h('div', { class: 'r-meta', style: 'margin-top:6px' }, 'Spending money: ', currency, ' ', amount, ' for ', days, ' ', sign, ' ', msg);
+  return h('div', { class: 'row' }, currency, amount, h('span', { class: 'muted' }, 'for'), days, sign, msg);
 }
 
 /**
@@ -743,10 +792,9 @@ const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
 type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean };
-const ADVICE_SAYS = { do: 'Your assistant advises: yes', dont: 'Your assistant advises: no', your_call: 'Your assistant says: your call' } as const;
 function replyBox(x: Note): Node {
-  if (x.reply) return h('div', { class: 'r-meta' }, `you wrote: “${x.reply}”`);
-  const input = h('input', { type: 'text', maxlength: '500', placeholder: 'Reply in your own words', style: 'min-width:12em' }) as HTMLInputElement;
+  if (x.reply) return h('p', { class: 'item-meta' }, `You wrote: “${x.reply}”`);
+  const input = h('input', { type: 'text', maxlength: '500', placeholder: 'In your own words' }) as HTMLInputElement;
   const send = h('button', { class: 'btn small', type: 'button' }, 'Send') as HTMLButtonElement;
   send.onclick = async () => {
     if (!input.value.trim()) return;
@@ -754,107 +802,110 @@ function replyBox(x: Note): Node {
     await call({ kind: 'panel.assistant.answer', id: x.id, text: input.value });
     void show();
   };
-  return h('span', {}, input, ' ', send, ' ');
+  return h('details', { class: 'reply', id: `reply-${x.id}` }, h('summary', {}, 'Reply'), h('div', { class: 'row' }, input, send));
 }
 
-type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
-// What you agreed to, written in by your agent, with who agreed on the other side (or that nobody has yet): yours to see,
-// add to your own calendar, and remove.
 /** Your agenda's private calendar address, shown on a tap, with Copy and New address. */
 function feedLine(): Node {
-  const feed = h('span', {});
+  const feed = h('span', { class: 'row' });
   const showFeed = async (reset = false) => {
     const f = await call<{ url?: string; path: string }>({ kind: 'panel.agenda.feed', ...(reset ? { reset: true } : {}) });
     const url = f.url ?? new URL(f.path.replace(/^\/owner\//, ''), location.href).href;
     try { localStorage.setItem('lake.start.calendar', '1'); } catch { /* a private window */ }
-    feed.replaceChildren(h('code', { style: 'overflow-wrap:anywhere' }, url), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(url) }, 'Copy'), ' ',
-      h('button', { class: 'btn small', type: 'button', onclick: () => { if (confirm('Make a new address? The old one stops working.')) void showFeed(true); } }, 'New address'));
+    feed.replaceChildren(h('code', {}, url), copyButton(url),
+      h('button', { class: 'btn small quiet', type: 'button', onclick: () => { if (confirm('Make a new address? The old one stops working.')) void showFeed(true); } }, 'New address'));
   };
-  return h('span', {}, h('button', { class: 'btn small', type: 'button', onclick: (e: Event) => { (e.target as HTMLElement).remove(); void showFeed(); } }, 'Show the address'), feed);
+  return h('span', {}, h('button', { class: 'btn small', type: 'button', onclick: (e: Event) => { (e.currentTarget as HTMLElement).remove(); void showFeed(); } }, 'Show the address'), feed);
 }
 
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
 /**
- * The first five minutes, on Home until done: open your door, connect your own AI, put your agenda in your calendar, and
- * try it. Each step says what it is in one line; nothing to learn first.
+ * Getting set up, on Home until done: open your door, connect your own AI, say when you're free, put your agenda in your
+ * calendar. One line and one button each; the details live where the button takes you.
  */
-function startCard(door: { open: boolean; address: string } | null, hasAssistant: boolean, freeSet: boolean): Node | string {
+function startCard(door: DoorState | null, hasAssistant: boolean, free: FreeState): Node | string {
   if (stored('lake.start.done') || !door) return '';
   const calendar = !!stored('lake.start.calendar');
-  if (door.open && hasAssistant && calendar && freeSet) return '';
-  const step = (done: boolean, title: string, body: Node | string) => h('li', {}, h('div', {}, h('div', { class: 'r-title' }, `${done ? '✓ ' : ''}${title}`), h('div', { class: 'r-meta' }, body)));
-  return h('div', { class: 'card' }, h('h3', {}, 'Start here'),
-    h('ol', { class: 'rows' },
-      step(door.open, 'Open your door', door.open ? h('span', {}, 'Your address, for your email signature or a QR code: ', h('code', { style: 'overflow-wrap:anywhere' }, door.address), ' ', h('button', { class: 'btn small', type: 'button', onclick: () => void navigator.clipboard.writeText(door.address) }, 'Copy')) : doorCard()),
-      step(hasAssistant, 'Let your own AI look after it', hasAssistant ? 'Connected: it sees what comes to your door and suggests; you tap.' : h('span', {}, 'It answers people for you, by what you\'ve agreed, and asks you the rest. ', h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, 'Give it a key →'))),
-      step(freeSet, 'Say when you\'re free to meet', freeSet ? 'Set: your agent offers those times, around your agenda.' : freeCard()),
-      step(calendar, 'Put your agenda in your calendar', h('span', {}, 'What you agree to through your AI shows up in your own calendar app (subscribe to this address; keep it to yourself). ', feedLine())),
-      step(false, 'Try it', door.open ? h('span', {}, 'Ask any AI with the Lake connector: ', h('em', {}, `“Leave a note at ${door.address} saying hello.”`), ' It shows up here, and your AI hears of it.') : 'Once your door is open.')),
-    h('button', { class: 'btn small', type: 'button', onclick: () => { try { localStorage.setItem('lake.start.done', '1'); } catch { /* fine */ } void show(); } }, 'Hide this'));
+  const steps: [boolean, string, Node][] = [
+    [door.open, 'Open your door', door.open ? copyButton(door.address, 'Copy address') : h('button', { class: 'btn primary small', type: 'button', onclick: async () => { await call({ kind: 'panel.door.set', open: true }); void show(); } }, 'Open it')],
+    [hasAssistant, 'Let your own AI look after it', h('button', { class: 'btn small', type: 'button', onclick: () => go('myagent') }, 'Give it a key')],
+    [free.set, 'Say when you\'re free to meet', h('button', { class: 'btn small', type: 'button', onclick: () => { go('rules'); setTimeout(() => $('free')?.scrollIntoView({ behavior: 'smooth' }), 400); } }, 'Set your hours')],
+    [calendar, 'Put your agenda in your calendar', feedLine()],
+  ];
+  const done = steps.filter(([d]) => d).length;
+  if (done === steps.length) return '';
+  return h('section', { class: 'block start', id: 'start' },
+    h('div', { class: 'start-head' }, h('h2', {}, 'Get set up'), h('span', { class: 'progress' }, `${done} of ${steps.length}`)),
+    h('ol', { class: 'steps' }, ...steps.map(([ok, title, action], i) => h('li', { class: ok ? 'done' : '', id: `step-${i}` },
+      h('span', { class: 'tick', 'aria-hidden': 'true' }, ok ? '✓' : String(i + 1)), h('span', { class: 'step-title' }, title), ok && i !== 0 ? '' : h('span', { class: 'step-action' }, action)))),
+    door.open ? h('p', { class: 'hint' }, 'Try it: ask any AI, ', h('em', {}, `“Leave a note at ${door.address} saying hello.”`)) : '',
+    h('button', { class: 'btn small quiet', type: 'button', onclick: () => { try { localStorage.setItem('lake.start.done', '1'); } catch { /* fine */ } void show(); } }, 'Hide this'));
 }
 
-function agendaCard(agenda: AgendaItem[]): Node {
-  return h('div', { class: 'card' }, h('h3', {}, 'Coming up'), h('ul', { class: 'rows' }, ...agenda.map((a) => h('li', {},
-    h('div', {}, h('div', { class: 'r-title' }, a.what),
-      h('div', { class: 'r-meta' }, `${a.when}${a.where ? ` · ${a.where}` : ''}${a.with ? ` · with ${a.with}` : ''} · noted by ${a.by}`),
-      h('div', { class: 'r-meta' }, a.agreed ? `Agreed by ${a.agreed.by}${a.agreed.speaks_for?.checked ? `, which speaks for ${a.agreed.speaks_for.house}` : ' (an agent; it showed no house it speaks for)'}: “${a.agreed.said}”` : 'Proposed: nothing from their side says they agreed yet'),
-      a.note ? h('div', { class: 'r-meta' }, `${a.by}: “${a.note}”`) : ''),
-    h('div', {}, h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void show(); } }, 'Remove'))))),
-    h('p', { class: 'r-meta' }, 'In your own calendar app: subscribe to this address (keep it to yourself: whoever has it can read your agenda). ', feedLine()));
+type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
+type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
+
+/** A note left over plain web has no Lake address: you answer it here, and its sender reads it at its private link. */
+function webReply(n: DoorNote): Node {
+  if (n.answered) return h('p', { class: 'item-meta' }, `${n.answered.by === 'you' ? 'You' : n.answered.by.replace(/\s*\(.*\)$/, '')} answered: “${n.answered.text}”`);
+  const input = h('input', { type: 'text', maxlength: '1000', placeholder: 'Your answer' }) as HTMLInputElement;
+  const send = h('button', { class: 'btn small primary', type: 'button', onclick: async () => {
+    if (!input.value.trim()) return;
+    const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.note.reply', id: n.id, text: input.value });
+    if (r.error) alert(r.error); else void show();
+  } }, 'Send');
+  return h('details', { class: 'reply', id: `wr-${n.id}` }, h('summary', {}, 'Answer'), h('div', { class: 'row' }, input, send));
 }
 
-function suggestionList(list: Note[]): Node {
-  return h('ul', { class: 'rows' }, ...list.map((x) => h('li', {},
-    h('div', {}, h('div', { class: 'r-title' }, x.text), h('div', { class: 'r-meta' }, `${x.from} · ${time(x.at)}${x.advice ? ` · ${ADVICE_SAYS[x.advice]}` : ''}${x.ask?.answered ? ` · you answered: ${x.ask.answered}` : ''}`)),
-    h('div', {},
-      // A note about an offer carries its Accept: still your tap, on your key, like on the Offers tab.
-      x.offer ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
-        (e.target as HTMLButtonElement).disabled = true;
-        const r = await acceptOffer(x.offer!);
-        if (!r.error && !r.cancelled) await call({ kind: 'panel.assistant.dismiss', id: x.id }); else if (r.error) alert(r.error);
-        void show();
-      } }, 'Accept the offer') : '',
-      // Your agent proposes not hearing from a note's sender again: your tap mutes it, by its key.
-      x.note && x.mute ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
-        (e.target as HTMLButtonElement).disabled = true;
-        await call({ kind: 'panel.note.mute', id: x.note });
-        await call({ kind: 'panel.assistant.dismiss', id: x.id });
-        void show();
-      } }, 'Mute this sender') : '',
-      // New rules your agent proposes: applied by your tap, with your key, like editing them yourself.
-      x.rules ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
-        (e.target as HTMLButtonElement).disabled = true;
-        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.rules.set', text: x.rules });
-        if (r.ok) { draft = null; await call({ kind: 'panel.assistant.dismiss', id: x.id }); } else alert(r.error);
-        void show();
-      } }, 'Apply these rules') : '',
-      // A new line for your door: applied by your tap; the door stays open, its name as it was.
-      x.door ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
-        (e.target as HTMLButtonElement).disabled = true;
-        const cur = await call<{ name?: string }>({ kind: 'panel.door' });
-        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) });
-        if (r.ok) await call({ kind: 'panel.assistant.dismiss', id: x.id }); else alert(r.error);
-        void show();
-      } }, `Put “${x.door.about}” on your door`) : '',
-      // Your own words back to your agent (a café, a title, "not this week"): sent as yours.
-      replyBox(x),
-      // A question: each choice is a button; the answer goes to your assistant.
-      ...(x.ask && !x.ask.answered ? x.ask.choices.map((c, i) => h('button', { class: `btn small${x.ask!.recommend === i ? ' primary' : ''}`, type: 'button', onclick: async (e: Event) => {
-        (e.target as HTMLButtonElement).disabled = true;
-        await call({ kind: 'panel.assistant.answer', id: x.id, choice: c });
-        void show();
-      } }, c)) : []),
-      // Likewise a pledge: signing it is your tap, with your house's key (and your person stamp, for a people-only one).
-      x.pledge ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
-        (e.target as HTMLButtonElement).disabled = true;
-        const r = await call<{ error?: string }>({ kind: 'panel.pledge.sign', tally: x.pledge!.tally, id: x.pledge!.id });
-        if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
-        else alert(r.error);
-        void show();
-      } }, 'Sign the pledge') : '',
-      ' ',
-      h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.assistant.dismiss', id: x.id }); void show(); } }, 'Dismiss')))));
+/** What you agreed to, written in by your agent, with who agreed on the other side (or that nobody has yet). */
+function agendaList(agenda: AgendaItem[]): Node {
+  return h('div', {},
+    h('ul', { class: 'items' }, ...agenda.map((a) => h('li', { class: 'item', id: `a-${a.id}` },
+      h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, a.what), h('span', { class: `chip ${a.agreed ? 'ok' : 'wait'}` }, a.agreed ? 'Agreed' : 'Proposed')),
+      h('p', { class: 'item-meta' }, [a.when, a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · ')),
+      h('div', { class: 'item-foot' },
+        h('details', { class: 'more', id: `a-more-${a.id}` }, h('summary', {}, 'Details'),
+          h('p', { class: 'item-meta' }, a.agreed ? `${a.agreed.by}${a.agreed.speaks_for?.checked ? `, which speaks for ${a.agreed.speaks_for.house}` : ' (an agent; it showed no house it speaks for)'} said: “${a.agreed.said}”` : 'Nothing from their side says they agreed yet: it holds the time.'),
+          a.note ? h('p', { class: 'item-meta' }, `${a.by}: “${a.note}”`) : ''),
+        h('button', { class: 'btn small quiet', type: 'button', onclick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void show(); } }, 'Remove'))))),
+    h('details', { class: 'fold', id: 'calendar' }, h('summary', {}, 'In your own calendar'),
+      h('p', { class: 'muted' }, 'Subscribe to this address in your calendar app. Keep it to yourself: whoever has it can read your agenda.'), feedLine()));
+}
+
+/** Notes agents left at your door: their words, nothing asked of your data. Your agent hears of them too. */
+function noteItems(notes: DoorNote[]): Node[] {
+  return notes.map((n) => h('li', { class: 'item', id: `n-${n.id}` },
+    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, `Note from ${n.from.name.replace(/\s*\(.*\)$/, '')}`),
+      h('span', { class: `chip ${n.from.checked || n.from.speaks_for?.checked ? 'ok' : ''}`, title: n.from.checked ? 'its domain is proved' : 'anyone could send this' }, n.from.web ? 'From the web' : n.from.speaks_for?.checked ? 'Speaks for a house' : n.from.checked ? 'Verified' : 'Unverified')),
+    h('p', { class: 'item-text' }, `“${n.text}”`),
+    h('p', { class: 'item-meta' }, `${n.from.web ? 'left over the web; nobody checked who' : n.from.domain} · ${time(n.at)}`),
+    n.from.web ? webReply(n) : '',
+    h('div', { class: 'item-actions' },
+      h('button', { class: 'btn small', type: 'button', onclick: async () => { await call({ kind: 'panel.note.dismiss', id: n.id }); void show(); } }, 'Done'),
+      h('button', { class: 'btn small quiet', type: 'button', onclick: async () => { await call({ kind: 'panel.note.mute', id: n.id }); void show(); } }, 'Mute sender'))));
+}
+
+/** Your agent's suggestions: what it says, what it advises, and your tap. */
+function suggestionItems(list: Note[]): Node[] {
+  const act = (label: string, cls: string, run: () => Promise<void>) => h('button', { class: `btn small ${cls}`, type: 'button', onclick: async (e: Event) => { (e.currentTarget as HTMLButtonElement).disabled = true; await run(); void show(); } }, label);
+  const dismiss = (x: Note) => call({ kind: 'panel.assistant.dismiss', id: x.id });
+  return list.map((x) => h('li', { class: 'item', id: `s-${x.id}` },
+    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, `From ${x.from.replace(/\s*\(.*\)$/, '')}, your agent`),
+      x.advice ? h('span', { class: `chip ${x.advice === 'do' ? 'ok' : x.advice === 'dont' ? 'no' : ''}` }, { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice]) : ''),
+    h('p', { class: 'item-text' }, x.text),
+    x.door ? h('blockquote', {}, x.door.about) : '',
+    x.ask?.answered ? h('p', { class: 'item-meta' }, `You answered: ${x.ask.answered}`) : '',
+    // A question: each choice is a button; the one your agent advises stands out.
+    x.ask && !x.ask.answered ? h('div', { class: 'choices' }, ...x.ask.choices.map((c, i) => act(c, x.ask!.recommend === i ? 'primary' : '', async () => { await call({ kind: 'panel.assistant.answer', id: x.id, choice: c }); }))) : '',
+    h('div', { class: 'item-actions' },
+      // Each is still your tap, on your key.
+      x.offer ? act('Accept the offer', 'primary', async () => { const r = await acceptOffer(x.offer!); if (!r.error && !r.cancelled) await dismiss(x); else if (r.error) alert(r.error); }) : '',
+      x.note && x.mute ? act('Mute this sender', '', async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(x); }) : '',
+      x.rules ? act('Apply these rules', 'primary', async () => { const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.rules.set', text: x.rules }); if (r.ok) { draft = null; await dismiss(x); } else alert(r.error); }) : '',
+      x.door ? act('Use this line', 'primary', async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) }); if (r.ok) await dismiss(x); else alert(r.error); }) : '',
+      x.pledge ? act('Sign the pledge', 'primary', async () => { const r = await call<{ error?: string }>({ kind: 'panel.pledge.sign', tally: x.pledge!.tally, id: x.pledge!.id }); if (!r.error) await dismiss(x); else alert(r.error); }) : ''),
+    h('div', { class: 'item-foot' }, replyBox(x), act('Dismiss', 'quiet', async () => { await dismiss(x); }))));
 }
 
 // ---- Money ----
@@ -883,16 +934,18 @@ async function data(box: HTMLElement) {
   box.replaceChildren(
     h('p', { class: 'lede' }, 'What your house holds. It never leaves: programs run here, and only what you agreed to comes out.'),
     h('h2', {}, 'Where it came from'),
-    ...d.sources.map((s) => h('div', { class: `card ${s.ok ? 'ok' : 'bad'}`, style: 'max-width:820px' },
-      h('h3', {}, s.title),
-      h('dl', { class: 'facts' },
-        ...([['Signed by', s.issuer ?? 'unknown'], ['Converted by', s.converter], ['Certified by', s.certifiedBy ?? 'not certified'], ['Kept in', `/${s.folder}`], ['Check', s.ok ? 'every signature verifies, and the claims pass their shapes' : s.why ?? 'failed']] as [string, string][])
-          .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))))),
-    h('h2', {}, 'Claims'),
-    ...[...by].map(([label, cs]) => h('div', { class: 'card', style: 'max-width:820px' }, h('h3', {}, label),
-      h('div', { style: 'margin-top:8px' }, ...cs.map((c) => h('span', { class: 'chip' }, c.value, c.observedAt ? ` · ${new Date(c.observedAt).toLocaleDateString()}` : ''))))),
-    h('h2', {}, 'Folders in your pod'),
-    h('ul', { class: 'rows' }, ...Object.entries(d.folders).map(([f, n]) => h('li', {}, h('div', { class: 'r-title' }, `/${f}`), h('span', { class: 'count' }, `${n} item${n === 1 ? '' : 's'}`)))),
+    h('ul', { class: 'items' }, ...d.sources.map((s) => h('li', { class: 'item', id: `src-${s.pack}` },
+      h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, s.title), h('span', { class: `chip ${s.ok ? 'ok' : 'no'}` }, s.ok ? 'Verified' : 'Failed its check')),
+      h('p', { class: 'item-meta' }, `Signed by ${s.issuer ?? 'unknown'}`),
+      h('details', { class: 'more', id: `src-more-${s.pack}` }, h('summary', {}, 'Details'),
+        h('dl', { class: 'facts' },
+          ...([['Converted by', s.converter], ['Certified by', s.certifiedBy ?? 'not certified'], ['Kept in', `/${s.folder}`], ['Check', s.ok ? 'every signature verifies, and the claims pass their shapes' : s.why ?? 'failed']] as [string, string][])
+            .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))))))),
+    h('h2', {}, 'What it says about you'),
+    h('ul', { class: 'items' }, ...[...by].map(([label, cs]) => h('li', { class: 'item', id: `claim-${label}` }, h('div', { class: 'item-title' }, label),
+      h('div', { class: 'row' }, ...cs.map((c) => h('span', { class: 'chip' }, c.value, c.observedAt ? ` · ${new Date(c.observedAt).toLocaleDateString()}` : '')))))),
+    h('details', { class: 'fold', id: 'folders' }, h('summary', {}, 'Folders in your pod'),
+      h('ul', { class: 'rows' }, ...Object.entries(d.folders).map(([f, n]) => h('li', {}, h('div', { class: 'r-title' }, `/${f}`), h('span', { class: 'count' }, `${n} item${n === 1 ? '' : 's'}`))))),
   );
 }
 
@@ -929,27 +982,55 @@ async function refreshBadge() {
   }
 }
 
+addEventListener('click', (e) => { if (moreOpen && !(e.target as HTMLElement).closest('#nav')) { moreOpen = false; renderNav(); } });
 addEventListener('hashchange', () => { const t = TABS.find(([id]) => id === location.hash.slice(1))?.[0]; if (t && t !== tab && webId) go(t); });
 $('pair-btn').onclick = async () => { if (await pair()) start(); };
 
 function start() {
   $('pair').hidden = true;
   $('view').hidden = false;
-  $('who').textContent = webId;
+  $('who').textContent = 'Your house on the Lake';
   void call({ kind: 'panel.overview' }).then((o) => { houseName = o.name; $('title').textContent = `House ${o.name}`; }).catch(() => {});
   renderNav();
   void show();
   void refreshBadge();
   void call<{ packs: unknown[] }>({ kind: 'panel.market' }).then((m) => { if (!m.packs?.length) { unused.add('offers'); renderNav(); } }).catch(() => {});
-  setInterval(refreshBadge, 1500);
-  // Live tabs refresh themselves; the rules editor never overwrites what you're typing.
-  // Never while you're typing, choosing or selecting something: a refresh would wipe it.
-  const busy = () => !!document.querySelector('select:focus, input:focus, textarea:focus') || !!window.getSelection()?.toString();
-  setInterval(() => { if (['home', 'requests', 'keys', 'offers', 'myagent', 'agents'].includes(tab) && !document.hidden && !busy()) void show(); }, 3000);
+  listen();
+  // A slow look anyway, in case the stream is down; and at once when you come back to the page.
+  setInterval(() => { if (!document.hidden) refresh(); }, 60_000);
+  addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+}
+
+/** Live tabs, redrawn when the house says something changed (the rules editor keeps your unsaved edits). */
+const LIVE: Tab[] = ['home', 'requests', 'keys', 'offers', 'myagent', 'agents', 'money'];
+let refreshing: ReturnType<typeof setTimeout> | undefined;
+function refresh() {
+  // A burst of changes is one redraw.
+  clearTimeout(refreshing);
+  refreshing = setTimeout(() => { void refreshBadge(); if (LIVE.includes(tab)) void show(); }, 150);
+}
+
+/**
+ * The house's stream of "something changed" (SSE): a token from a signed call opens it, since an EventSource can't sign.
+ * It reconnects with a new token if it drops.
+ */
+function listen() {
+  void call<{ path: string }>({ kind: 'panel.stream' }).then((s) => {
+    const es = new EventSource(`${api}${s.path}`);
+    let first = true;
+    es.addEventListener('changed', () => { if (first) first = false; else refresh(); });
+    es.onerror = () => { es.close(); $('status').className = 'dot down'; setTimeout(listen, 5_000); };
+    es.onopen = () => { $('status').className = 'dot live'; };
+  }).catch(() => setTimeout(listen, 15_000));
 }
 
 // Already paired? A signed "list" answers. Otherwise offer to pair (automatically when the link carries a token).
 call({ kind: 'list' }).then((v) => { webId = v.webId; leaseUntil = v.until ?? null; start(); }).catch(async () => {
+  // Not yours yet: just this house's name and the one thing to do.
+  document.body.classList.add('unpaired');
+  const name = /\/t\/([^/]+)\/owner\//.exec(location.pathname)?.[1];
+  $('who').textContent = 'A house on the Lake';
+  $('title').textContent = name ? `House ${name}` : 'A house on the Lake';
   $('pair').hidden = false;
   if (location.hash.includes('pair=') && (await pair())) start();
 });

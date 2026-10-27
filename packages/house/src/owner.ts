@@ -125,9 +125,9 @@ export interface AgendaItem {
   by: string; at: string;
 }
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
-export interface NoteSender { name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
+export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
+const ASSISTANT_MAY = new Set(['assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -234,6 +234,7 @@ export class OwnerDesk {
     // The last owner's notes, mutes and agenda were theirs: the next one starts with none, and a new calendar address.
     this.notes = [];
     this.closedNotes.clear();
+    this.webNotes.clear();
     this.muted.clear();
     await writeFile(join(this.o.dataDir, 'muted.json'), '[]').catch(() => {});
     this.agenda = [];
@@ -350,7 +351,20 @@ export class OwnerDesk {
    * Tells the owner's assistants what happened in the house that they'd otherwise only find by looking again: their
    * human decided, a visitor withdrew, an allowance changed. A signed message in each one's Lake inbox; best effort.
    */
+  /**
+   * Something the owner's panel shows changed: a counter its open panels hear at once over a stream (SSE), so the panel
+   * refetches when there is something new instead of rebuilding itself on a timer (the owner saw cards flicker).
+   */
+  version = 0;
+  private watchers = new Set<(v: number) => void>();
+  private streamTokens = new Map<string, number>();
+  touch() {
+    this.version++;
+    for (const w of this.watchers) w(this.version);
+  }
+
   news(payload: Record<string, unknown>, onlyKid?: string) {
+    this.touch();
     if (!this.o.tell) return;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;
@@ -386,6 +400,35 @@ export class OwnerDesk {
   /** Notes the owner set aside, so their senders can ask what became of them. */
   private closedNotes = new Map<string, { by: string; state: string }>();
   /** What became of a note, told only to its sender: with the owner, or set aside. */
+  /**
+   * Notes left over plain web (an AI that can only open links, SPEC §9.0): each has a private link where its sender reads
+   * the answer. The secret in that link is all it takes to read it, so it's only ever given to whoever left the note.
+   */
+  private webNotes = new Map<string, { key: string; answer?: { text: string; at: string; by: string } }>();
+  addWebNote(n: { text: string; from?: string; purpose: string }): { id: string; key: string } | null {
+    const id = this.addNote({ from: { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false }, text: n.text, purpose: n.purpose });
+    if (!id) return null;
+    const key = this.webNotes.get(id)?.key ?? randomBytes(12).toString('base64url');
+    this.webNotes.set(id, { ...this.webNotes.get(id), key });
+    return { id, key };
+  }
+  /** What became of a web note, for whoever holds its link. */
+  webNoteState(id: string, key: string): { status: string; answer?: { text: string; at: string } } | null {
+    const w = this.webNotes.get(id);
+    if (!w || w.key !== key) return null;
+    if (w.answer) return { status: 'answered', answer: { text: w.answer.text, at: w.answer.at } };
+    return { status: this.notes.some((x) => x.id === id) ? 'with the owner, not answered yet' : (this.closedNotes.get(id)?.state ?? 'seen') };
+  }
+  private answerWebNote(id: string, text: string, by: string): { ok: true } | { error: string } {
+    const w = this.webNotes.get(id);
+    if (!w) return { error: 'no note from the web with that id: answer a Lake agent at its own address instead' };
+    const t = text.trim().slice(0, 1000);
+    if (!t) return { error: 'text: the answer, up to 1000 characters' };
+    w.answer = { text: t, at: new Date().toISOString(), by };
+    this.touch();
+    return { ok: true };
+  }
+
   noteState(id: string, sender: string): string | null {
     const open = this.notes.find((x) => x.id === id && x.from.webId === sender);
     if (open) return 'with the owner, not yet set aside';
@@ -397,13 +440,14 @@ export class OwnerDesk {
   notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string }): string | null {
+    this.touch();
     // The same words again from the same sender are the same note (run 45 got one twice).
     const again = this.notes.find((x) => x.from.webId === n.from.webId && x.text === n.text);
     if (again) return again.id;
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);
-    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), at: note.at, reply: 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word' }) });
+    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word' }) });
     return note.id;
   }
 
@@ -498,7 +542,24 @@ export class OwnerDesk {
     });
     r.get('/status', (_req, res) => void res.json({ claimed: !!this.ownerJwk, until: this.leaseUntil()?.toISOString() ?? null, leaseHours: this.o.leaseHours ?? null }));
 
+    // The panel's live stream: opened with a token from a signed panel.stream (EventSource can't sign), good for a minute.
+    r.get('/stream', (req, res) => {
+      const t = String(req.query.t ?? '');
+      const until = this.streamTokens.get(t);
+      if (!until || until < Date.now()) return void res.status(403).end();
+      this.streamTokens.delete(t);
+      // No buffering on the way (Apache, nginx), and a comment now and then so proxies keep the connection open.
+      res.set({ 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no', connection: 'keep-alive' });
+      res.flushHeaders();
+      const send = (v: number) => res.write(`event: changed\ndata: ${v}\n\n`);
+      send(this.version);
+      const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+      this.watchers.add(send);
+      req.on('close', () => { clearInterval(ping); this.watchers.delete(send); });
+    });
     r.post('/api', async (req, res) => {
+      // Whatever the owner or their assistant did here may change what the panel shows.
+      res.on('finish', () => { if (req.body?.payload?.kind && !/^(list|panel\.(overview|rules|activity|agents|money|consents|data|market|door|free|stream))$/.test(req.body.payload.kind)) this.touch(); });
       if (!this.ownerJwk) return void res.status(409).json({ error: 'pair first' });
       let p: Signed<{ kind: string; request?: string; answer?: string; grant?: string; revoke?: string }>['payload'];
       let signer = '';
@@ -615,6 +676,12 @@ export class OwnerDesk {
           await this.saveAgenda();
           return void res.json({ ok: true, id: item.id, status: agreed ? `agreed: by ${agreed.by}${agreed.speaks_for?.checked ? `, which speaks for ${agreed.speaks_for.house}` : ', an agent that showed no house it speaks for'}` : 'proposed: it holds the time (your human\'s calendar shows it as tentative); when they agree, send agenda { id, agreed_in }', note: 'in your human\'s agenda, in their house' });
         }
+        // An answer to a note left over plain web: its sender reads it at the private link it was given.
+        if (p.kind === 'assistant.reply') {
+          const q = p as unknown as { note?: string; text?: string };
+          const r = this.answerWebNote(String(q.note ?? ''), String(q.text ?? ''), assistant.label);
+          return void res.status('error' in r ? 400 : 200).json('error' in r ? r : { ...r, note: 'they read it at the link they were given; your human sees it with the note' });
+        }
         if (p.kind === 'assistant.forward') {
           // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked
           // as passed on by the assistant (its connector, not its judgement).
@@ -711,6 +778,12 @@ export class OwnerDesk {
         this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
       }
+      if (p.kind === 'panel.stream') {
+        const t = randomBytes(16).toString('base64url');
+        for (const [k, until] of this.streamTokens) if (until < Date.now()) this.streamTokens.delete(k);
+        this.streamTokens.set(t, Date.now() + 60_000);
+        return void res.json({ path: `stream?t=${t}`, version: this.version });
+      }
       if (p.kind === 'panel.agenda.feed') {
         // The owner's calendar subscribes to this address; a reset makes the old one stop working.
         if ((p as unknown as { reset?: boolean }).reset) this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'), true);
@@ -729,6 +802,11 @@ export class OwnerDesk {
         await this.mute(note.from.key);
         this.news({ about: 'sender.muted', domain: note.from.domain, note: 'your human won\'t hear from this sender again: its notes and knocks are declined at the door' });
         return void res.json({ ok: true, muted: note.from.domain });
+      }
+      if (p.kind === 'panel.note.reply') {
+        const q = p as unknown as { id?: string; text?: string };
+        const r = this.answerWebNote(String(q.id ?? ''), String(q.text ?? ''), 'you');
+        return void res.status('error' in r ? 400 : 200).json(r);
       }
       if (p.kind === 'panel.note.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
@@ -827,7 +905,7 @@ export class OwnerDesk {
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
-      notes: this.notes,
+      notes: this.notes.map((n) => { const a = this.webNotes.get(n.id)?.answer; return a ? { ...n, answered: a } : n; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

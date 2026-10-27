@@ -130,7 +130,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const note = (kind: string, text: string, subject?: string, data?: LakeEvent['data']) => {
     activity.unshift({ seq: ++seq, at: new Date().toISOString(), kind, text, ...(subject ? { subject } : {}), ...(data ? { data } : {}) });
     activity.length = Math.min(activity.length, 300);
+    touchPanel();
   };
+  // The owner's open panels hear of it at once (set once the desk exists).
+  let touchPanel = () => {};
 
   // Folders and wallet. The owner sets these up; after this the housekeeper only goes through MCP.
   for (const f of ['', 'agreements/', 'receipts/', 'wallet/', 'audit/', 'settings/', 'offers/']) await ensureContainer(owner, f);
@@ -300,6 +303,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       say('the lease ended: keys revoked, owner forgotten, rules reset. Anyone can claim this house now.');
     },
   });
+  touchPanel = () => desk.touch();
   const pairing = await desk.init();
   const ownerUrl = `${(o.ownerUrl ?? o.publicUrl).replace(/\/$/, '')}/owner/`;
   if (pairing.paired) say(`owner paired. Approvals app: ${ownerUrl}`);

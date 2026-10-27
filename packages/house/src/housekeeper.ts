@@ -528,6 +528,33 @@ export class Housekeeper {
     return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox, from their assistant, naming this note, when they answer (a person may take a while; ask { kind: "status", note } any time). Nothing in this house was read or shared' });
   }
 
+  /**
+   * A note left over plain web (SPEC §9.0): by an AI that can only open links, with no Lake identity. Only at an open door;
+   * the owner's rules about who and why apply as to any note (its requester is `web`), and a few an hour per address.
+   */
+  private webCount = new Map<string, number[]>();
+  webNote(p: { text?: unknown; from?: unknown; purpose?: unknown }, ip: string): { status: number; body: Record<string, unknown> } {
+    if (!this.o.rules.door) return { status: 404, body: { error: 'this house\'s door is closed' } };
+    const text = typeof p.text === 'string' ? p.text.trim() : '';
+    if (!text || text.length > 1000) return { status: 400, body: { error: 'text: your note for the owner, 1 to 1000 characters (say who you are and why)' } };
+    if (looksLikeInjection(text)) return { status: 400, body: { error: 'a note is for the owner to read, not instructions' } };
+    const purpose = typeof p.purpose === 'string' && p.purpose ? p.purpose : 'contact';
+    if (!isPurpose(purpose)) return { status: 400, body: { error: `purpose: one of ${Object.keys(PURPOSES).join(', ')}` } };
+    // A few an hour from one address, and a few dozen in all: a link anyone can open is a link anyone can flood.
+    const now = Date.now(), hour = (k: string) => (this.webCount.get(k) ?? []).filter((t) => now - t < 3_600_000);
+    if (hour(`ip:${ip}`).length >= 3 || hour('all').length >= 20) return { status: 429, body: { error: 'this door has taken enough notes from the web this hour: try again later' } };
+    for (const k of [`ip:${ip}`, 'all']) this.webCount.set(k, [...hour(k), now]);
+    this.o.emit(makeEvent('knock', this.actor, 'agent:web', { purpose }));
+    const said = noteDecision(this.o.rules, { purpose, requester: 'web' }, {});
+    if (!said.deliver) {
+      this.o.emit(makeEvent('decision', this.actor, 'agent:web', { decision: 'decline', reason: `a ${purpose} note from the web: ${said.reason}` }));
+      return { status: 200, body: { kind: 'declined', reason: said.reason } };
+    }
+    const kept = this.o.desk.addWebNote({ text, purpose, ...(typeof p.from === 'string' ? { from: p.from } : {}) });
+    if (!kept) return { status: 429, body: { error: 'a few notes an hour from one sender: try again later' } };
+    return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key } };
+  }
+
   /** A receipt from a payments agent the owner trusts goes in /receipts/. */
   private async receipt(p: ReceiptPayload): Promise<LakeData> {
     const check = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: this.o.webId, sandbox: this.o.sandbox });

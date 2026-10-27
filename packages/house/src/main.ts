@@ -5,6 +5,7 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import express from 'express';
+import { page } from './page.js';
 import { describe, keepAliveBehindProxy, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
 
 import { startHouse, type House } from './house.js';
@@ -192,14 +193,17 @@ async function hosted(n: number) {
   app.get('/health', (_req, res) => void res.json({ ok: true, houses: houses.length }));
   // Which houses are free to claim right now, and when the taken ones free up.
   app.get('/t/', (_req, res) => {
-    const rows = houses.filter((h) => !kept.has(h.name)).map((h) => ({ name: h.name, until: h.desk.ownerJwk ? h.desk.leaseUntil()?.toISOString() ?? 'kept' : null }));
+    const rows = houses.filter((h) => !kept.has(h.name)).sort((x, y) => x.name.localeCompare(y.name, 'en', { numeric: true })).map((h) => ({ name: h.name, until: h.desk.ownerJwk ? h.desk.leaseUntil()?.toISOString() ?? 'kept' : null }));
     if (_req.accepts(['html', 'json']) === 'json') return void res.json(rows);
+    // The same look as the house's own pages and the owner's panel.
     const li = rows.map((r) => r.until
-      ? `<li><span>${r.name}</span><em>taken${r.until === 'kept' ? '' : ` until ${r.until.slice(11, 16)} UTC`}</em></li>`
-      : `<li><a href="${r.name}/owner/">${r.name}</a><b>free · claim it</b></li>`).join('');
-    res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Claim a house</title>
-<style>body{margin:0;background:#070B12;color:#E6EDF2;font:16px/1.5 system-ui,sans-serif;padding:24px 16px;max-width:560px}h1{font:700 32px/1 'Arial Narrow',sans-serif;text-transform:uppercase}p{color:#8B9BAE}ul{list-style:none;padding:0;display:grid;gap:8px}li{display:flex;justify-content:space-between;border:1px solid #1D2838;border-radius:8px;padding:12px 14px;font-family:ui-monospace,monospace}a{color:#3DDC97}b{color:#3DDC97;font-weight:400}em{color:#8B9BAE;font-style:normal}</style>
-<h1>Claim a house</h1><p>Sandbox houses: synthetic data, simulated money. A claim lasts ${Number(a['lease-hours'] ?? 24) || 'unlimited'} hours, then the house resets for the next person. Open one, tap <b>Pair this device</b>, and it's yours.</p><ul>${li}</ul>`);
+      ? `<li><span>House ${r.name}</span><span class="chip">${r.until === 'kept' ? 'taken' : `taken until ${r.until.slice(11, 16)} UTC`}</span></li>`
+      : `<li><span>House ${r.name}</span><a class="btn primary" href="${r.name}/owner/">Claim it</a></li>`).join('');
+    const hours = Number(a['lease-hours'] ?? 24) || 0;
+    res.type('html').send(page('Claim a house', `<p class="eyebrow"><i></i>The Lake sandbox</p><h1>Claim a house</h1>
+<p class="lead">Free to try: synthetic data, simulated money, real signatures. Open one and tap <b>Pair this device</b>: your phone becomes its key.</p>
+<ul class="list">${li}</ul>
+<details><summary>What happens next</summary><ul class="small"><li>Your house has its own address. Open its door and give that out: people's AI leave you notes there.</li><li>Give your own AI a key, and it looks after your door and suggests; you decide.</li><li>${hours ? `A claim lasts ${hours} hours, then the house resets for the next person.` : 'A claim lasts until you hand it back.'} You can hand it back any time.</li></ul></details>`));
   });
 
   const server = app.listen(port, async () => {

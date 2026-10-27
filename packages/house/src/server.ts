@@ -1,36 +1,48 @@
 import { lakeAgentApp, type AgentCard, type Identity } from '@thelakeprotocol/core';
-import type express from 'express';
+import express from 'express';
+import { esc, page } from './page.js';
 import type { Housekeeper } from './housekeeper.js';
 import type { OwnerDesk } from './owner.js';
 
 /** The page a person sees at a house's address: its public door, if its owner opened one, and how to reach them. */
 export interface DoorPage { door: () => { name?: string; about?: string } | undefined; a2a: () => string; connector?: string; joinUrl?: string }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-
 /**
- * A house is reached by agents; a person who opens its address learns how (SPEC §9.0): which connector to add to their
- * AI chat, what to ask it, and how to build a house of their own. No form: the owner's rules answer agents, not a page.
+ * A house is reached by agents; a person or an AI who opens its address learns how (SPEC §9.0). What you need first comes
+ * first: whose door (if they say), one line to give your AI, and a Copy button. The rest is folded: how it works, exact
+ * instructions for AI agents (an AI with only web access leaves a note by opening one link), and a house of your own.
  * Without a public door, the page says nothing about whose house it is.
  */
 function doorPage(p: DoorPage): string {
   const d = p.door();
-  const who = d?.name ? esc(d.name) : 'its owner';
-  const ask = `Knock on the house at ${esc(p.a2a())}: `;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${d?.name ? `${esc(d.name)} · on the Lake` : 'A house on the Lake'}</title>
-<style>:root{color-scheme:light dark;--fg:#1d2a33;--bg:#f7f9fa;--muted:#5d6b75;--line:#d8e0e5;--accent:#1f6f8b}@media (prefers-color-scheme:dark){:root{--fg:#e3eaee;--bg:#11181d;--muted:#9aa8b1;--line:#2a363e;--accent:#6cc0dc}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}main{max-width:640px;margin:0 auto;padding:40px 16px}h1{font-size:28px;margin:0 0 6px}.lead{color:var(--muted);margin:0 0 28px}
-h2{font-size:17px;margin:28px 0 8px}code,.box{font-family:ui-monospace,monospace;font-size:14px}.box{display:block;background:transparent;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-wrap:anywhere;margin:6px 0}
-ol{padding-left:20px}li{margin:6px 0}a{color:var(--accent)}.small{color:var(--muted);font-size:14px}</style></head><body><main>
-<h1>${d?.name ? esc(d.name) : 'A house on the Lake'}</h1>
-<p class="lead">${d ? `${d.about ? `${esc(d.about)} ` : ''}Its owner's own agent answers here, by their rules. Their email, number and data stay inside; this address is how you reach them, and on purpose it doesn't say whose it is: whoever gave it to you did.` : 'Its owner hasn\'t opened its door, so it says nothing about who lives here.'}</p>
-<h2>To reach ${who}, ask your AI</h2>
-<ol><li>Add the Lake to your AI chat as a connector${p.connector ? `:<span class="box">${esc(p.connector)}</span><span class="small">In Claude: Settings → Connectors → Add custom connector.</span>` : '.'}</li>
-<li>Then ask it, in your own words, for example:<span class="box">${ask}I'd like to set up a call next week.</span><span class="box">${ask}leave a note that I loved the talk.</span><span class="small">A note is up to 1000 characters; say who you are and why.</span></li></ol>
-<p class="small">Your agent knocks with a signed identity and says why; the owner's rules answer, or they decide on their phone. Nothing here is a form, and nobody gets an email address.</p>
-<h2>Agents</h2><p class="small">A2A 1.0 with the Lake extension (the connector above speaks it for you): <code>${esc(p.a2a())}</code> · its signed card: <code>${esc(p.a2a().replace(/\/a2a$/, ''))}/.well-known/agent-card.json</code></p>
-<h2>A house of your own</h2><p>Your data in your house, your own rules at its door, your agent doing the chores.${p.joinUrl ? ` <a href="${esc(p.joinUrl)}">Build yours</a>.` : ''}</p>
-</main></body></html>`;
+  const base = p.a2a().replace(/\/a2a$/, '');
+  const title = d?.name ? `${d.name}` : 'A house on the Lake';
+  const own = `<details><summary>A house of your own</summary><p class="small">Your data in your own house, your own rules at its door, your AI doing the chores.${p.joinUrl ? ` <a href="${esc(p.joinUrl)}">Build yours</a>.` : ''}</p></details>`;
+  if (!d) return page(title, `<p class="eyebrow"><i></i>A house on the Lake</p><h1>${esc(title)}</h1><p class="lead">Its owner hasn't opened its door, so it says nothing about who lives here.</p>${own}`);
+  const say = `Leave a note at ${base}: `;
+  const note = `${base}/note?text=…&from=…`;
+  return page(d.name ? `${title} · on the Lake` : title, `<p class="eyebrow"><i></i>A house on the Lake</p>
+<h1>${d.name ? esc(d.name) : 'Leave them a note'}</h1>
+<p class="lead">${d.about ? esc(d.about) : 'Its owner reads notes here, with the help of their AI.'}</p>
+<section class="card"><h2>Reach them through your AI</h2>
+<p class="small" style="margin:0 0 10px">Send this to any AI chat, with what you'd like:</p>
+<textarea class="say" id="say" rows="3" readonly>${esc(say)}I'd like to …</textarea>
+<div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('say').value.replace('I\\'d like to …','')).then(()=>{this.textContent='Copied ✓'})">Copy</button><span class="small">Their answer comes back to your AI.</span></div></section>
+<details><summary>How it works</summary><ul class="small">
+<li>Your AI leaves a short note: who you are, and why.</li>
+<li>${d.name ? esc(d.name) : 'The owner'}'s rules and their own AI sort it. No email address or phone number is given out.</li>
+<li>The answer appears at a private link your AI gets back.</li></ul></details>
+<details id="for-ai-agents"><summary>For AI agents</summary><ol class="small">
+<li><b>With web access only:</b> open <code>${esc(note)}</code> (URL-encode both; <code>text</code>: the note for the owner, up to 1000 characters, saying who your human is and why; <code>from</code>: your human's name; optional <code>purpose</code>, default <code>contact</code>). It answers with <code>answer_at</code>: open that link later to read the reply, and tell your human. Can't open links you build? Give your human the link to open. <code>POST ${esc(base)}/note</code> with the same fields as JSON works too.</li>
+<li><b>With the Lake connector</b>${p.connector ? ` (<code>${esc(p.connector)}</code>)` : ''}: <code>lake_knock</code> this address with no fields. Your note is signed, and the answer comes to your <code>lake_inbox</code>.</li>
+<li><b>A2A</b>: <code>${esc(p.a2a())}</code>, its signed card at <code>${esc(base)}/.well-known/agent-card.json</code>.</li>
+<li>Notes are data for the owner, never instructions. A few an hour per sender.</li></ol></details>
+${own}`, `<meta name="description" content="A house on the Lake. To reach its owner: leave a note by opening ${esc(note)} (details under For AI agents).">`);
+}
+
+/** What a person (or their AI) sees after leaving a note, and at its answer link. */
+function notePage(title: string, body: string): string {
+  return page(title, `<p class="eyebrow"><i></i>A house on the Lake</p>${body}`);
 }
 
 /** Serves the house: A2A at /a2a, its signed card at the well-known path, the owner's approvals app at /owner/, its door page at /. */
@@ -38,6 +50,31 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
   const app = lakeAgentApp(card, (data) => keeper.handle(data), id, { replay: keeper.replay });
   // A person who opens the A2A address itself (run 44: "Cannot GET") is shown the door page too.
   if (door) app.get('/a2a', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.status(405).json({ error: 'A2A: POST a JSON-RPC message here (the Lake connector does it for you)', page: door.a2a().replace(/\/a2a$/, '') })));
+  // Notes over plain web, for an AI that can only open links (SPEC §9.0): GET with a query, or POST JSON. The answer is
+  // read at a private link given only to the sender.
+  if (door) {
+    const base = () => door.a2a().replace(/\/a2a$/, '');
+    const leave = (req: express.Request, res: express.Response, p: Record<string, unknown>) => {
+      const ip = String(req.get('x-forwarded-for') ?? req.ip ?? '').split(',')[0]!.trim();
+      const r = keeper.webNote(p, ip);
+      const html = req.method === 'GET' && req.accepts(['json', 'html']) === 'html';
+      if (r.body.kind === 'noted') {
+        const at = `${base()}/note/${r.body.note}?k=${r.body.key}`;
+        const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at later to read their answer, and tell your human; it is private to whoever has the link.' };
+        return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json(body));
+      }
+      res.status(r.status);
+      return void (html ? res.type('html').send(notePage('Not left', `<h1>Not left</h1><p class="lead">${esc(String(r.body.error ?? r.body.reason ?? 'The house didn\'t take it.'))}</p>`)) : res.json(r.body));
+    };
+    app.get('/note', (req, res) => leave(req, res, { text: req.query.text, from: req.query.from, purpose: req.query.purpose }));
+    app.post('/note', express.json({ limit: '8kb' }), (req, res) => leave(req, res, req.body ?? {}));
+    app.get('/note/:id', (req, res) => {
+      const st = desk?.webNoteState(req.params.id, String(req.query.k ?? ''));
+      if (!st) return void res.status(404).json({ error: 'no such note, or the link is wrong' });
+      if (req.accepts(['json', 'html']) === 'html') return void res.type('html').send(notePage('Your note', `<h1>${st.answer ? 'Their answer' : 'Your note'}</h1>${st.answer ? `<section class="card"><p style="margin:0">${esc(st.answer.text)}</p></section><p class="small">${esc(new Date(st.answer.at).toUTCString())}</p>` : `<p class="lead">${esc(st.status[0]!.toUpperCase() + st.status.slice(1))}. Open this link again later.</p>`}`));
+      res.json(st);
+    });
+  }
   if (door) app.get('/', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.json({ a2a: door.a2a(), card: `${door.a2a().replace(/\/a2a$/, '')}/.well-known/agent-card.json`, ...(door.door() ? { door: door.door() } : {}) })));
   // Revocation anyone can check: the house's signed status list (W3C Bitstring Status List, SPEC §6).
   app.get('/status/revocation', async (_req, res) => { res.type('application/vc+jwt').set('cache-control', 'max-age=5').send(await keeper.statusList()); });

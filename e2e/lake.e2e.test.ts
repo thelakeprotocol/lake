@@ -408,8 +408,25 @@ describe('the owner', () => {
     expect(card.name).toBe('House strict');
     expect(JSON.stringify(card)).not.toMatch(/open door|Ask my agent about talks/);
     expect(card.capabilities.extensions[0].params.tags).not.toContain('door');
-    expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*To reach its owner, ask your AI[\s\S]*Knock on the house at /);
+    expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*Reach them through your AI[\s\S]*Leave a note at /);
     expect(await (await fetch(houses.strict!, { headers: { accept: 'application/json' } })).json()).toMatchObject({ door: { about: 'Ask my agent about talks.' } });
+    // Over plain web, for an AI without the connector: a note by opening one link, the answer at a private one.
+    const left = await (await fetch(`${houses.strict}/note?text=${encodeURIComponent('Hi, Ana here: a short call about your talk?')}&from=Ana`)).json();
+    expect(left).toMatchObject({ kind: 'noted', answer_at: expect.stringMatching(/\/note\/\w+\?k=/) });
+    expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: expect.stringMatching(/^with the owner/) });
+    expect((await fetch(`${houses.strict}/note/${left.note}?k=wrong`)).status).toBe(404);
+    expect((await ownerCall({ kind: 'list' })).notes.find((x: { id: string }) => x.id === left.note).from).toMatchObject({ web: true, checked: false });
+    expect(await ownerCall({ kind: 'panel.note.reply', id: left.note, text: 'Yes: Tuesday 10:00?' })).toEqual({ ok: true });
+    expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
+    expect((await fetch(`${houses.strict}/note?text=`)).status).toBe(400);
+    // The panel's live stream: a token from a signed call opens it once; it says when something changed.
+    const { path: stream } = await ownerCall({ kind: 'panel.stream' });
+    const ac = new AbortController();
+    const live = await fetch(`${houses.strict}/owner/${stream}`, { signal: ac.signal });
+    expect(live.headers.get('content-type')).toMatch(/text\/event-stream/);
+    expect(new TextDecoder().decode((await live.body!.getReader().read()).value)).toMatch(/event: changed/);
+    ac.abort();
+    expect((await fetch(`${houses.strict}/owner/${stream}`)).status).toBe(403);
     // A name only if the owner adds one.
     expect(await ownerCall({ kind: 'panel.rules.set', text: `${text}\ndoor: { name: Stan Example }\n` })).toEqual({ ok: true });
     expect((await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).name).toBe('Stan Example (house)');
@@ -744,7 +761,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_buy', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_blueprints', 'lake_buy', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
