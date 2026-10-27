@@ -512,6 +512,12 @@ describe('the owner', () => {
     expect(free.slots.length).toBeGreaterThan(0);
     expect(free.slots.some((s: { start: string }) => s.start === '2026-11-02T23:00:00.000Z')).toBe(false); // the coffee
     expect(await ownerCall({ kind: 'panel.availability.set', availability: null })).toEqual({ ok: true });
+    // An offered time is held as proposed at once, and becomes agreed when their word comes.
+    const held = await asHelper({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Thu 9:00', start: '2026-11-04T22:00:00Z' });
+    expect(held.status).toMatch(/^proposed: it holds the time/);
+    expect(await asHelper({ kind: 'assistant.agenda', id: held.id, agreed: { by: 'Sam helper', domain: 's.example', said: 'Thursday works', at: new Date().toISOString() } })).toMatchObject({ ok: true, status: 'agreed: by Sam helper' });
+    expect(await asHelper({ kind: 'assistant.agenda', id: 'nope', agreed: { by: 'x' } })).toMatchObject({ error: 'no agenda entry of yours with that id' });
+    await ownerCall({ kind: 'panel.agenda.remove', id: held.id });
     const { path: feed } = await ownerCall({ kind: 'panel.agenda.feed' });
     expect(await (await fetch(`${houses.strict}${feed}`)).text()).toContain('STATUS:CONFIRMED');
     // A new line for the door, with the owner's tap to apply.
