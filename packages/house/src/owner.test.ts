@@ -67,6 +67,7 @@ describe('the agenda', () => {
     const ics = await (await fetch(`${d.base}${path.replace(/^\/owner/, '')}`)).text();
     expect(ics).toMatch(/^BEGIN:VCALENDAR\r\n/);
     expect(ics).toContain('DTSTART:20261102T233000Z');
+    expect(ics).toContain('DURATION:PT60M');
     expect(ics).toContain('STATUS:CONFIRMED');
     expect(ics).toContain('SUMMARY:Talk\\; at the meetup'); // escaped, as RFC 5545 says
     expect(ics).toContain('STATUS:TENTATIVE');

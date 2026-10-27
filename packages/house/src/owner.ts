@@ -119,7 +119,7 @@ export const ADVICE = ['do', 'dont', 'your_call'] as const;
  * it, and whether that agent showed it speaks for a house; without it the entry is only proposed (iCalendar: TENTATIVE).
  */
 export interface AgendaItem {
-  id: string; what: string; when: string; /** When it starts, for the owner's calendar. */ start?: string; where?: string; with?: string;
+  id: string; what: string; when: string; /** When it starts, for the owner's calendar. */ start?: string; /** How long, in minutes (the owner's usual meeting length if not said). */ minutes?: number; where?: string; with?: string;
   /** The assistant's own words to the owner about it ("I assumed your first week starts Monday"). */ note?: string;
   agreed?: { by: string; domain: string; said: string; at: string; speaks_for?: { house: string; checked: boolean } };
   by: string; at: string;
@@ -650,7 +650,7 @@ export class OwnerDesk {
           }
         }
         if (p.kind === 'assistant.agenda') {
-          const q = p as unknown as { what?: string; when?: string; start?: string; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string; id?: string };
+          const q = p as unknown as { what?: string; when?: string; start?: string; minutes?: number; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string; id?: string };
           if (q.remove) { this.agenda = this.agenda.filter((x) => !(x.id === q.remove && x.by === assistant.label)); await this.saveAgenda(); return void res.json({ ok: true }); }
           // A proposed entry the other side has now agreed to: the same entry, with their word (run 51: a time was offered
           // and nothing held it, so the agenda showed nothing while the other side checked with their person).
@@ -671,7 +671,9 @@ export class OwnerDesk {
           const str = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
           const ag = q.agreed;
           const agreed = ag && typeof ag === 'object' ? { by: str(ag.by, 120), domain: str(ag.domain, 200), said: str(ag.said, 300), at: str(ag.at, 40), ...(ag.speaks_for ? { speaks_for: { house: str(ag.speaks_for.house, 300), checked: ag.speaks_for.checked === true } } : {}) } : undefined;
-          const item: AgendaItem = { id: randomBytes(6).toString('hex'), what, when, ...(start ? { start: start.toISOString() } : {}), ...(q.where ? { where: str(q.where, 120) } : {}), ...(q.with ? { with: str(q.with, 120) } : {}), ...(q.note ? { note: str(q.note, 500) } : {}), ...(agreed ? { agreed } : {}), by: assistant.label, at: new Date().toISOString() };
+          // As long as offered (run 52: a 45-minute coffee blocked an hour in the owner's calendar).
+          const minutes = Number.isInteger(q.minutes) && q.minutes! >= 5 && q.minutes! <= 720 ? q.minutes! : this.o.panel?.availability?.()?.meetings ?? 60;
+          const item: AgendaItem = { id: randomBytes(6).toString('hex'), what, when, ...(start ? { start: start.toISOString(), minutes } : {}), ...(q.where ? { where: str(q.where, 120) } : {}), ...(q.with ? { with: str(q.with, 120) } : {}), ...(q.note ? { note: str(q.note, 500) } : {}), ...(agreed ? { agreed } : {}), by: assistant.label, at: new Date().toISOString() };
           this.agenda = [...this.agenda, item].slice(-100);
           await this.saveAgenda();
           return void res.json({ ok: true, id: item.id, status: agreed ? `agreed: by ${agreed.by}${agreed.speaks_for?.checked ? `, which speaks for ${agreed.speaks_for.house}` : ', an agent that showed no house it speaks for'}` : 'proposed: it holds the time (your human\'s calendar shows it as tentative); when they agree, send agenda { id, agreed_in }', note: 'in your human\'s agenda, in their house' });
@@ -839,7 +841,7 @@ export class OwnerDesk {
           'panel.free': async () => {
             const av = panel.availability?.();
             if (!av) return { set: false, slots: [], note: 'your human hasn\'t said when they are free to meet (control panel, Rules: When you\'re free): ask them for a time' };
-            return { set: true, tz: av.tz, meetings: av.meetings ?? 60, slots: freeSlots(av, this.agenda.filter((x) => x.start).map((x) => ({ start: x.start! }))), note: 'free in their agenda now: offer a few. The one you offer, write in at once (lake_house_suggest agenda with start): it holds the time, as proposed; when they agree, add their message (agenda { id, agreed_in })' };
+            return { set: true, tz: av.tz, meetings: av.meetings ?? 60, slots: freeSlots(av, this.agenda.filter((x) => x.start).map((x) => ({ start: x.start!, ...(x.minutes ? { minutes: x.minutes } : {}) }))), note: 'free in their agenda now: offer a few. The one you offer, write in at once (lake_house_suggest agenda with start): it holds the time, as proposed; when they agree, add their message (agenda { id, agreed_in })' };
           },
           'panel.availability.set': async () => {
             const av = (q as { availability?: unknown }).availability;
@@ -960,7 +962,7 @@ export function agendaIcs(items: AgendaItem[], house: string): string {
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//The Lake//house agenda//EN', 'X-WR-CALNAME:Agenda'];
   for (const x of items.filter((i) => i.start)) {
     const who = x.agreed ? `Agreed by ${x.agreed.by}${x.agreed.speaks_for?.checked ? ` (speaks for ${x.agreed.speaks_for.house})` : ''}: "${x.agreed.said}"` : 'Proposed: their side has not agreed yet';
-    lines.push('BEGIN:VEVENT', `UID:${x.id}@${new URL(house).host}`, `DTSTAMP:${t(x.at)}`, `DTSTART:${t(x.start!)}`, 'DURATION:PT1H', `SUMMARY:${esc(x.what)}`,
+    lines.push('BEGIN:VEVENT', `UID:${x.id}@${new URL(house).host}`, `DTSTAMP:${t(x.at)}`, `DTSTART:${t(x.start!)}`, `DURATION:PT${x.minutes ?? 60}M`, `SUMMARY:${esc(x.what)}`,
       ...(x.where ? [`LOCATION:${esc(x.where)}`] : []), `DESCRIPTION:${esc([x.when, x.with ? `with ${x.with}` : '', who, x.note ?? ''].filter(Boolean).join('\n'))}`,
       `STATUS:${x.agreed ? 'CONFIRMED' : 'TENTATIVE'}`, 'END:VEVENT');
   }

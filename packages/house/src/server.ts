@@ -29,6 +29,7 @@ function doorPage(p: DoorPage): string {
 <div class="say" id="say">Knock on the door at <code>${esc(base)}</code> and <span class="ghost">ask if they're up for a coffee next week</span></div>
 <div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(say))}).then(()=>{this.textContent='Copied ✓'})">Copy</button></div>
 <p class="small" style="margin:12px 0 0">Or: say thanks for the talk · ask them to look at your project · find a time to catch up.</p></section>
+<p class="small">An AI reading this? Open <code>${esc(note)}</code>, or <code>lake_knock</code> this address with the Lake connector. Details under <a href="#for-ai-agents">For AI agents</a>.</p>
 <details><summary>Why not just email?</summary><ul class="small">
 <li>Their AI answers right away, by their own rules, and asks them only what it should.</li>
 <li>It knows when they're free, so a meeting can be agreed in one go.</li>
