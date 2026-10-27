@@ -21,6 +21,9 @@ export const PURPOSES: Record<string, Purpose> = {
   'academic-research': { label: 'academic research', within: 'research', dpv: 'AcademicResearch' },
   'commercial-research': { label: 'commercial research', within: 'research', dpv: 'CommercialResearch' },
   care: { label: 'care (someone looking after you)', dpv: 'ServiceProvision' },
+  // A note at the door asks for no data: getting in touch (an invitation, a request to meet). Run 44's visitors had no
+  // purpose to say this with, so an owner's rules couldn't tell a friend's note from a sales pitch.
+  contact: { label: 'getting in touch (a note, an invitation, a request to meet)', dpv: 'CommunicationManagement' },
   service: { label: 'a service you asked for', dpv: 'ServiceProvision' },
   insurance: { label: 'insurance', decides: true },
   credit: { label: 'credit and loans', dpv: 'CreditChecking', decides: true },

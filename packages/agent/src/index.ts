@@ -103,9 +103,12 @@ export interface LakeAgent {
   /** One signed offer to one house; the house's verified, signed reply. */
   knock(houseUrl: string, terms: Omit<Offer, 'id' | 'requester'>): Promise<Record<string, unknown>>;
   /** Any signed message to any Lake agent (the guide, the inspector, …); its verified, signed reply. */
-  ask(agentUrl: string, payload: Record<string, unknown> & { kind: string }): Promise<Record<string, unknown>>;
-  /** What this agent sent and the signed replies it got, newest last: its own evidence. */
-  sent: { at: string; to: string; message: Record<string, unknown>; reply: LakeData }[];
+  ask(agentUrl: string, payload: Record<string, unknown> & { kind: string }, opts?: { internal?: boolean }): Promise<Record<string, unknown>>;
+  /**
+   * What this agent sent and the signed replies it got, newest last: its own evidence. `with`: who answered (its card's
+   * name and domain); `internal`: a call the connector made on its own (checking a log), not something the agent said.
+   */
+  sent: { at: string; to: string; with?: { name: string; domain: string }; internal?: boolean; message: Record<string, unknown>; reply: LakeData | null }[];
   /** A whole study: ethics, audit, knock every house, bargain, agree, compute in place, pay, answer. */
   study(question: string, o?: StudyOptions): Promise<StudyRun>;
   /** The free part of a study, before paying: ethics, audit (with how often it was certified lately), how many houses. */
@@ -252,13 +255,16 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     },
     async knock(houseUrl, terms) {
       // The house reports the knock; the agent doesn't, or the two reports would pair it with the house (SPEC §8).
-      const { reply } = await knock(houseUrl, visitor, terms);
+      const { offer, reply, house } = await knock(houseUrl, visitor, terms);
+      // Kept with the rest of what it sent (run 44: knocks were missing from history).
+      sent.push({ at: new Date().toISOString(), to: houseUrl, ...(house ? { with: { name: house.webId, domain: house.ownerDomain } } : {}), message: { kind: 'offer', offer }, reply: null });
+      if (sent.length > 300) sent.shift();
       return reply;
     },
-    async ask(agentUrl, payload) {
+    async ask(agentUrl, payload, opts) {
       const { reply: r, from, signed } = await ask(agentUrl, visitor, payload);
       // What this agent sent, and the other side's signed answer to it: evidence for a dispute, kept here only.
-      sent.push({ at: new Date().toISOString(), to: agentUrl, message: payload, reply: signed });
+      sent.push({ at: new Date().toISOString(), to: agentUrl, with: { name: (signed as LakeData | null)?.card?.name ?? from.webId, domain: from.ownerDomain }, ...(opts?.internal ? { internal: true } : {}), message: payload, reply: signed });
       if (sent.length > 300) sent.shift();
       // Who talks to whom, and about what, is theirs (SPEC §8): the feed hears that this agent sent a message, never to whom or
       // what kind. (Guessing which kinds are private from their names leaked menus and findings on market day.) Nothing at all

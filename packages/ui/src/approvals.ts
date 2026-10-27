@@ -685,8 +685,21 @@ function allowanceForm(a: Assistant): Node {
 const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string } };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string };
 const ADVICE_SAYS = { do: 'Your assistant advises: yes', dont: 'Your assistant advises: no', your_call: 'Your assistant says: your call' } as const;
+function replyBox(x: Note): Node {
+  if (x.reply) return h('div', { class: 'r-meta' }, `you wrote: “${x.reply}”`);
+  const input = h('input', { type: 'text', maxlength: '500', placeholder: 'Reply in your own words', style: 'min-width:12em' }) as HTMLInputElement;
+  const send = h('button', { class: 'btn small', type: 'button' }, 'Send') as HTMLButtonElement;
+  send.onclick = async () => {
+    if (!input.value.trim()) return;
+    send.disabled = true;
+    await call({ kind: 'panel.assistant.answer', id: x.id, text: input.value });
+    void show();
+  };
+  return h('span', {}, input, ' ', send, ' ');
+}
+
 function suggestionList(list: Note[]): Node {
   return h('ul', { class: 'rows' }, ...list.map((x) => h('li', {},
     h('div', {}, h('div', { class: 'r-title' }, x.text), h('div', { class: 'r-meta' }, `${x.from} · ${time(x.at)}${x.advice ? ` · ${ADVICE_SAYS[x.advice]}` : ''}${x.ask?.answered ? ` · you answered: ${x.ask.answered}` : ''}`)),
@@ -699,6 +712,8 @@ function suggestionList(list: Note[]): Node {
         if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
         void show();
       } }, 'Accept the offer') : '',
+      // Your own words back to your agent (a café, a title, "not this week"): sent as yours.
+      replyBox(x),
       // A question: each choice is a button; the answer goes to your assistant.
       ...(x.ask && !x.ask.answered ? x.ask.choices.map((c, i) => h('button', { class: `btn small${x.ask!.recommend === i ? ' primary' : ''}`, type: 'button', onclick: async (e: Event) => {
         (e.target as HTMLButtonElement).disabled = true;

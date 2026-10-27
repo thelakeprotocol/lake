@@ -22,7 +22,7 @@
     },
     "purpose": {
       "type": "string",
-      "enum": ["research", "academic-research", "commercial-research", "care", "service", "insurance", "credit", "marketing", "advertising", "personalised-advertising", "direct-marketing", "security", "legal"],
+      "enum": ["research", "academic-research", "commercial-research", "care", "contact", "service", "insurance", "credit", "marketing", "advertising", "personalised-advertising", "direct-marketing", "security", "legal"],
       "description": "One of the Lake's purposes (SPEC §4), never prose"
     },
     "fields": {

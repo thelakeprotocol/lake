@@ -129,6 +129,11 @@ describe('one house', () => {
     // A coarse reason the visitor can act on, never the owner's rule, its number or its limits.
     expect(declined).toMatchObject({ decision: 'decline', code: 'purpose', reason: "declined: this house doesn't take marketing requests" });
     expect(JSON.stringify(declined)).not.toMatch(/rule \d/);
+    // A note with a purpose: the owner's rules about who and why apply to it as to a knock (run 44's five sales notes all
+    // reached the owner); one getting in touch is delivered, with its id for the reply to name.
+    const pitch = (await ask(houses.stan!, ads, { kind: 'note', text: 'Thirty minutes about our cloud credits?', purpose: 'marketing' })).reply;
+    expect(pitch).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take marketing notes" });
+    expect((await ask(houses.stan!, uni, { kind: 'note', text: 'Would you speak at our seminar?' })).reply).toMatchObject({ kind: 'noted', note: expect.stringMatching(/^[0-9a-f]{12}$/), says: expect.stringContaining('lake_inbox') });
     // House manners: turned down for a purpose, it isn't heard again on that purpose for a day.
     expect((await knock(houses.stan!, ads, presets().marketing!)).reply).toMatchObject({ decision: 'decline', code: 'repeat' });
     // Stan's first rule declines anything asking who he is; turned away for that, a visitor may ask again without it.
@@ -358,10 +363,13 @@ describe('the owner', () => {
     const token = (await readFile(join(dir, 'houses', 'kai', 'pairing-token'), 'utf8')).trim();
     const paired = await fetch(`${houses.kai}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk, token }) });
     const kaiWebId = (await paired.json()).webId;
-    const { reply } = await knock(houses.kai!, await visitor('carer.example'), { purpose: 'care', fields: ['conditions'], retention: 'none', priceUsd: 0, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false } });
+    const carer = await visitor('carer.example');
+    const { reply } = await knock(houses.kai!, carer, { purpose: 'care', fields: ['conditions'], retention: 'none', priceUsd: 0, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false } });
     expect(reply.decision).toBe('ask');
-    // Its owner just paired: a coarse bucket, never a time.
-    expect(reply).toMatchObject({ ownerActive: 'within the hour', reason: expect.stringContaining('owner last active: within the hour') });
+    // When its owner was last here isn't told to a stranger (run 44: a salesperson heard it on every knock); a visitor
+    // with a request waiting hears it, as a coarse bucket, when it checks the status.
+    expect(reply.ownerActive).toBeUndefined();
+    expect((await ask(houses.kai!, carer, { kind: 'status', offerId: reply.offerId })).reply).toMatchObject({ decision: 'ask', ownerActive: 'within the hour' });
     const list = await (await fetch(`${houses.kai}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, phone, { iss: kaiWebId })) })).json();
     const req = (list.requests as { visitor: { domain: string }; warnings?: string[]; recommendation: string }[]).find((q) => q.visitor.domain === 'carer.example')!;
     expect(req.warnings).toEqual(['asks for sensitive data (conditions) for care (someone looking after you), outside any certified study, from a sender whose identity isn\'t verified: allowing it lets this agent use your own conditions, not a total']);

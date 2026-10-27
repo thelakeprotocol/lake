@@ -28,7 +28,7 @@ ol{padding-left:20px}li{margin:6px 0}a{color:var(--accent)}.small{color:var(--mu
 <ol><li>Add the Lake to your AI chat as a connector${p.connector ? `:<span class="box">${esc(p.connector)}</span><span class="small">In Claude: Settings → Connectors → Add custom connector.</span>` : '.'}</li>
 <li>Then ask it, in your own words, for example:<span class="box">${ask}I'd like to set up a call next week.</span><span class="box">${ask}leave a note that I loved the talk.</span></li></ol>
 <p class="small">Your agent knocks with a signed identity and says why; the owner's rules answer, or they decide on their phone. Nothing here is a form, and nobody gets an email address.</p>
-<h2>Agents</h2><p class="small">A2A: <code>${esc(p.a2a())}</code> · card: <code>/.well-known/agent-card.json</code> · a note: <code>{ "kind": "note", "text" }</code></p>
+<h2>Agents</h2><p class="small">A2A 1.0 with the Lake extension (the connector above speaks it for you): <code>${esc(p.a2a())}</code> · its signed card: <code>${esc(p.a2a().replace(/\/a2a$/, ''))}/.well-known/agent-card.json</code></p>
 <h2>A house of your own</h2><p>Your data in your house, your own rules at its door, your agent doing the chores.${p.joinUrl ? ` <a href="${esc(p.joinUrl)}">Build yours</a>.` : ''}</p>
 </main></body></html>`;
 }
@@ -36,7 +36,9 @@ ol{padding-left:20px}li{margin:6px 0}a{color:var(--accent)}.small{color:var(--mu
 /** Serves the house: A2A at /a2a, its signed card at the well-known path, the owner's approvals app at /owner/, its door page at /. */
 export function createHouseServer(card: AgentCard, id: Identity, keeper: Housekeeper, desk?: OwnerDesk, appDir?: string, door?: DoorPage): express.Express {
   const app = lakeAgentApp(card, (data) => keeper.handle(data), id, { replay: keeper.replay });
-  if (door) app.get('/', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.json({ a2a: door.a2a(), card: '/.well-known/agent-card.json', ...(door.door() ? { door: door.door() } : {}) })));
+  // A person who opens the A2A address itself (run 44: "Cannot GET") is shown the door page too.
+  if (door) app.get('/a2a', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.status(405).json({ error: 'A2A: POST a JSON-RPC message here (the Lake connector does it for you)', page: door.a2a().replace(/\/a2a$/, '') })));
+  if (door) app.get('/', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.json({ a2a: door.a2a(), card: `${door.a2a().replace(/\/a2a$/, '')}/.well-known/agent-card.json`, ...(door.door() ? { door: door.door() } : {}) })));
   // Revocation anyone can check: the house's signed status list (W3C Bitstring Status List, SPEC §6).
   app.get('/status/revocation', async (_req, res) => { res.type('application/vc+jwt').set('cache-control', 'max-age=5').send(await keeper.statusList()); });
   if (desk) app.use('/owner', desk.router(appDir));

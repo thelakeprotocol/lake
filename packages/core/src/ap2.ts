@@ -84,7 +84,9 @@ export function assistantKeyCredential(house: Identity, houseWebId: string, assi
     {
       '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', ASSISTANT_KEY_TYPE], issuer: houseWebId,
       validFrom: new Date(now).toISOString(), validUntil: new Date(now + days * 86_400_000).toISOString(),
-      credentialSubject: { id: assistant.webId, cnf: { jkt: assistant.jkt }, house: houseWebId, may: ['sell'] }, credentialStatus: status,
+      // What it may do for the house, in its word: answer at its door for the owner, and sell for them (run 44: visitors read
+      // "sell" alone and wondered whether the assistant was allowed to be talking to them).
+      credentialSubject: { id: assistant.webId, cnf: { jkt: assistant.jkt }, house: houseWebId, may: ['answer', 'sell'] }, credentialStatus: status,
     } as never,
     house,
   );

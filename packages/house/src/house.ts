@@ -170,7 +170,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         {
           // An open door: the owner gives out this address; a name only if they add one.
           name: r.door?.name ? `${r.door.name} (house)` : `House ${o.name}`,
-          description: r.door ? `${r.door.name ? `${r.door.name}'s house` : 'A house'} with an open door${r.door.about ? `: ${r.door.about}` : ''}. Knock with a signed purpose, or leave a note; it answers by its owner's rules, and data never leaves.` : `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
+          description: r.door ? `${r.door.name ? `${r.door.name}'s house` : 'A house'} with an open door${r.door.about ? `: ${r.door.about.trim().replace(/[.!?]+$/, '')}` : ''}. Knock with a signed purpose, or leave a note; it answers by its owner's rules, and data never leaves.` : `Housekeeper for ${o.name}. Answers by its owner's rules. Data never leaves.`,
           url: relayed?.[0] ?? `${o.publicUrl}/a2a`,
           alsoAt: relayed?.slice(1),
           // One skill per pack (`health-study`, `mortgage-study`), so agents find the houses that can answer them.

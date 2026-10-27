@@ -44,7 +44,7 @@ const issuerCard = (url: string) => {
 /** In a few words: what a credential says about its subject. */
 function describe(type: string, sub: Record<string, unknown>): string {
   if (type === 'LakeAuthorisation') return `authorised to ${String(sub.scope ?? 'act')} for ${String(sub.pack ?? '?')}`;
-  if (type === 'LakeAssistantKey') return `may ${(sub.may as string[] | undefined)?.join(', ') ?? 'act'} for the house ${String(sub.house ?? '')}`.trim();
+  if (type === 'LakeAssistantKey') return `its owner's assistant: may ${(sub.may as string[] | undefined)?.join(' and ') ?? 'act'} for the house ${String(sub.house ?? '')}`.trim();
   const { id: _, cnf: _c, ...rest } = sub;
   return `${type}: ${JSON.stringify(rest).slice(0, 160)}`;
 }

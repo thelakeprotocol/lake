@@ -449,7 +449,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // The sender's proof of delivery: this agent's signed word that exactly this arrived (its sha256), kept by the
         // sender with the reply (lake_inbox history). Run 21's buyers and sellers asked for "I got your order X".
         // And whether anyone is reading: when this agent last acted and read its inbox, and how much is waiting unread.
-        const reader = tags.includes('quiet') ? {} : { reader: { last_active: lastActive ? new Date(lastActive).toISOString() : null, last_read_inbox: lastRead ? new Date(lastRead).toISOString() : null, waiting: inbox.length, ...(hereUntil > Date.now() ? { here_until: new Date(hereUntil).toISOString() } : {}) } };
+        // Only to agents this one has written to: when it reads its inbox is nobody else's business (run 44: a salesperson
+        // learned "they last read their inbox just now, 3 messages waiting").
+        const known = (await agent()).sent.some((s) => !s.internal && (s.with?.domain === m.from.ownerDomain || s.to === m.card.supportedInterfaces?.[0]?.url));
+        const reader = tags.includes('quiet') || !known ? {} : { reader: { last_active: lastActive ? new Date(lastActive).toISOString() : null, last_read_inbox: lastRead ? new Date(lastRead).toISOString() : null, waiting: inbox.length, ...(hereUntil > Date.now() ? { here_until: new Date(hereUntil).toISOString() } : {}) } };
         return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), ...reader };
       },
     });
@@ -598,7 +601,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       const log = (await me.find({ skill: 'log' }))[0];
       if (!log) return { checked: false, why: 'no transparency log on this Lake' };
       const jwk = (await verifyLakeCard((await (await fetch(cardUrlFor(log.url))).json()) as AgentCard)).publicJwk;
-      const find = async (since?: number) => (await me.ask(log.url, { kind: 'log.find', entry, ...(since ? { since } : {}) })) as Record<string, any>;
+      const find = async (since?: number) => (await me.ask(log.url, { kind: 'log.find', entry, ...(since ? { since } : {}) }, { internal: true })) as Record<string, any>;
       let r = await find(logsSeen.get(logOrigins.get(log.url) ?? '')?.size);
       let cp = verifyCheckpoint(String(r.checkpoint ?? ''), jwk);
       // A log met at a new address may be one already watched: ask again from the size it signed before.
@@ -1063,18 +1066,25 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   server.registerTool(
     'lake_knock',
     {
-      description: "Send one signed offer to one house and get its owner's rules' answer (join, decline, ask, counter). Free text never changes a decision. If the owner decides (ask), you get the request's offerId: check it later with lake_ask { kind: \"status\", offerId } to the house, or take it back with { kind: \"withdraw\", offerId }. Asking again for exactly the same thing is the same request, not a new one.",
+      description: "Knock on a house: with fields, a signed offer for that data, answered by its owner's rules (join, decline, ask, counter); with no fields, a note to the owner with your purpose (contact, to get in touch), up to 1000 characters, which their rules deliver or decline and their assistant answers in your lake_inbox. Free text never changes a decision. If the owner decides (ask), you get the request's offerId: check it later with lake_ask { kind: \"status\", offerId } to the house, or take it back with { kind: \"withdraw\", offerId }. Asking again for exactly the same thing is the same request, not a new one.",
       inputSchema: {
         house_url: z.string().describe('The house A2A endpoint, from lake_search'),
         purpose: z.enum(Object.keys(PURPOSES) as [string, ...string[]]).describe('One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
-        fields: z.array(z.string()).describe('Canonical fields, e.g. age_band, medications, readmissions'),
+        fields: z.array(z.string()).default([]).describe('Canonical fields, e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
-        note: z.string().max(280).optional().describe('A short note to the owner (who you are, why), shown to them quoted as your unchecked words. It never changes a decision; one that gives orders gets the offer declined.'),
+        note: z.string().max(1000).optional().describe('To the owner (who you are, why), shown quoted as your unchecked words; with fields, up to 280 characters and it never changes a decision (one that gives orders gets the offer declined); with none, it is the whole message'),
       },
     },
     async (a) => {
       try {
+        // Nothing asked of the pod: a note with its purpose (run 44's door page said "knock", and five knocks with no
+        // fields came back malformed).
+        if (!a.fields.length) {
+          if (!a.note?.trim()) throw new Error('with no fields, say what you want in note (a knock with neither asks for nothing)');
+          return json(await (await agent()).ask(a.house_url, { kind: 'note', text: a.note, purpose: a.purpose }));
+        }
+        if ((a.note?.length ?? 0) > 280) throw new Error('note: up to 280 characters with a data request (with no fields, up to 1000)');
         return json(await (await agent()).knock(a.house_url, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
       } catch (e) {
         return fail(e);
@@ -1102,6 +1112,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
         // Told deliberately, it comes with the house's word, so the other side can check it (run 42: neighbours couldn't).
         if (a.reveal_house && speaksFor) a.message = { ...a.message, speaks_for: speaksFor };
+        // Asked to show a house's word with none to show: said, not silently dropped (run 43).
+        if (a.reveal_house && !speaksFor) throw new Error('reveal_house: you have no house\'s word to show: only an assistant connected to its human\'s house (lake_house_connect) carries one. Send it without reveal_house; it arrives as your own words');
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
         // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
         if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';
@@ -1407,10 +1419,13 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         if (a.history) {
           const who = a.from?.toLowerCase();
           const fits = (kind: unknown, ...names: (string | undefined)[]) => (!a.kind || kind === a.kind) && (!who || names.some((n) => n?.toLowerCase().includes(who)));
+          // Matched by name, domain or address on both sides; the connector's own calls (checking a log) left out unless raw.
+          // Cards are shown by name, domain and address unless raw (run 44: 54-139 KB, each entry repeating them).
           const got = received.filter((m) => fits(m.message.kind, m.from.name, m.from.domain, m.from.url));
-          const sent = (await agent()).sent.filter((m) => fits(m.message.kind, m.to));
+          const sent = (await agent()).sent.filter((m) => (a.raw || !m.internal) && fits(m.message.kind, m.to, m.with?.name, m.with?.domain));
           const left = { received: Math.max(0, got.length - a.limit), sent: Math.max(0, sent.length - a.limit) };
-          return json({ received: got.slice(-a.limit), sent: sent.slice(-a.limit), ...(left.received || left.sent ? { left_out: left, note: `the newest ${a.limit} of each are shown: narrow with from or kind, or raise limit (up to 300)` } : {}) });
+          const show = (x: unknown) => (a.raw ? x : slim(x));
+          return json({ received: got.slice(-a.limit).map(show), sent: sent.slice(-a.limit).map(show), ...(slimmed ? cardsNote() : {}), ...(left.received || left.sent ? { left_out: left, note: `the newest ${a.limit} of each are shown: narrow with from or kind, or raise limit (up to 300)` } : {}) });
         }
         if (a.again) { const messages = shown(lastBatch); return json({ messages, again: true, ...cardsNote() }); }
         if (!inbox.length && a.wait_seconds > 0) await new Promise<void>((ok) => { const t = setTimeout(ok, a.wait_seconds * 1000); wake = () => { clearTimeout(t); ok(); }; });

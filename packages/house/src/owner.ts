@@ -27,6 +27,8 @@ export interface PendingRequest {
   note?: string;
   /** How many times the same agent has asked exactly this; one request, however many knocks. */
   asked?: number;
+  /** Its earlier requests for the same purpose that this one replaced (withdrawn, not stacked). */
+  replaces?: string[];
   recommendation: string;
   /** The grant the owner's device signs to allow it: a Solid Access Grant drafted by the house, dated and signed on the device. */
   grantDraft?: unknown;
@@ -99,6 +101,8 @@ export interface Suggestion {
   advice?: Advice;
   /** A question for the owner, with the choices to tap (a neighbour's favour, say); the house tells the assistant the answer. */
   ask?: { choices: string[]; recommend?: number; answered?: string };
+  /** The owner's own words back to the assistant. */
+  reply?: string;
   at: string;
 }
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
@@ -282,8 +286,19 @@ export class OwnerDesk {
       if (r.note) known.note = r.note;
       return known;
     }
-    const req: PendingRequest = { ...r, id: r.offerId, status: 'pending', requestedAt: new Date().toISOString() };
+    // The same visitor asking again for the same purpose, changed (a field more, another retention or price): the new one
+    // replaces the old, which is withdrawn, not stacked beside it (run 44: three waiting requests for one field). Not edited
+    // in place: the old one's grant draft and status bit are its own.
+    const older = [...this.pending.values()].filter((x) => x.status === 'pending' && x.visitor.webId === r.visitor.webId && x.purpose === r.purpose && x.fields.some((f) => r.fields.includes(f)));
+    for (const o of older) {
+      this.pending.delete(o.id);
+      this.news({ about: 'request.withdrawn', request: o.id, by: o.visitor.domain, note: `replaced by its newer request ${r.offerId}` });
+    }
+    const req: PendingRequest = { ...r, id: r.offerId, status: 'pending', requestedAt: new Date().toISOString(), ...(older.length ? { replaces: older.map((o) => o.id) } : {}) };
     this.pending.set(req.id, req);
+    // The assistant hears of it as it waits (run 44: three requests sat two minutes, found only by polling), with the
+    // house's own advice on it.
+    this.news({ about: 'request.waiting', request: req.id, by: r.visitor.domain, purpose: r.purpose, fields: r.fields, retention: r.retention, price_usd: r.priceUsd, ...(r.recommendation ? { house_says: r.recommendation } : {}), ...(r.warnings?.length ? { warnings: r.warnings } : {}), note: 'waiting for your human\'s tap: suggest an answer (lake_house_suggest with request and advice) if you have one' });
     return req;
   }
 
@@ -319,14 +334,19 @@ export class OwnerDesk {
 
   /** What one agent asked this house lately, any purpose: lets the owner see a visitor trying another label. */
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; at: string }[] = [];
-  /** Keeps a note, tells the assistants; false when its sender has sent too many this hour. */
-  addNote(n: { from: NoteSender; text: string }): boolean {
-    if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return false;
+  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string }[] = [];
+  /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
+  addNote(n: { from: NoteSender; text: string; purpose?: string }): string | null {
+    if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);
-    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, at: note.at, reply: 'their own words; answer the sender at from.url if your human would want you to' });
-    return true;
+    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), at: note.at, reply: 'their own words; answer the sender at from.url if your human would want you to' });
+    return note.id;
+  }
+
+  /** Whether the owner has dealt with this visitor: given it a key, or answered a request of its (SPEC §5: presence only to them). */
+  knows(visitor: { webId: string; domain: string }): boolean {
+    return [...this.grants.values()].some((g) => g.visitor === visitor.domain || g.visitor === visitor.webId) || [...this.pending.values()].some((x) => x.visitor.webId === visitor.webId && x.status !== 'pending');
   }
 
   recentAsks(visitorWebId: string, withinMs = 3_600_000): PendingRequest[] {
@@ -403,7 +423,7 @@ export class OwnerDesk {
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       const badge = await this.assistantBadge(a).catch(() => undefined);
-      res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY], ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
+      res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY], may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
     });
 
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
@@ -466,6 +486,8 @@ export class OwnerDesk {
             const choices = Array.isArray(q.ask.choices) ? q.ask.choices.map((c) => String(c).trim()).filter(Boolean) : [];
             if (choices.length < 2 || choices.length > 4 || choices.some((c) => c.length > 80)) return void res.status(400).json({ error: 'ask: { choices: 2 to 4 answers of up to 80 characters, recommend?: the index of the one you advise }' });
             const r = Number(q.ask.recommend);
+            // "Your call" means it (run 44: three "your call" questions each carried a recommended choice, and it was taken).
+            if (q.advice === 'your_call' && q.ask.recommend !== undefined) return void res.status(400).json({ error: 'advice your_call with a recommended choice: leave recommend out, or advise do or dont' });
             ask = { choices, ...(Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
@@ -558,12 +580,16 @@ export class OwnerDesk {
       if (p.kind === 'panel.assistant.answer') {
         // The owner taps one of the choices a question offered; the assistants hear it (run 39's parcel favour waited
         // 17 minutes with no way to answer).
-        const q = p as unknown as { id?: string; choice?: string };
-        const sug = this.suggestions.find((x) => x.id === q.id && x.ask);
-        if (!sug?.ask || !sug.ask.choices.includes(String(q.choice))) return void res.status(400).json({ error: 'answer a question with one of its choices' });
-        sug.ask.answered = String(q.choice);
-        this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), answer: sug.ask.answered });
-        return void res.json({ ok: true, answered: sug.ask.answered });
+        // A choice, the owner's own words, or both (run 44: "the panel can't carry free text to me", so the assistant guessed
+        // a café and deferred a bio). Words go to the assistant as the owner's; any note can be answered with them.
+        const q = p as unknown as { id?: string; choice?: string; text?: string };
+        const sug = this.suggestions.find((x) => x.id === q.id);
+        const text = typeof q.text === 'string' ? q.text.trim().slice(0, 500) : '';
+        if (!sug || (q.choice !== undefined && !sug.ask?.choices.includes(String(q.choice))) || (q.choice === undefined && !text)) return void res.status(400).json({ error: 'answer a note: one of its choices, your own words (text), or both' });
+        if (q.choice !== undefined) sug.ask!.answered = String(q.choice);
+        if (text) sug.reply = text;
+        this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
+        return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
       }
       if (p.kind === 'panel.note.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');

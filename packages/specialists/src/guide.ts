@@ -25,6 +25,8 @@ const GLOSSARY: Record<string, [string, string?]> = {
   offer: ['{ purpose, fields, retention, priceUsd, credentials }. Signed. The free-text note is never read by the rules.'],
   rules: ['rules.yaml: the owner\'s standing orders. First matching rule decides: join, ask me, or decline.', '/docs/rules'],
   bloc: ['Houses that bargain together: when enough of them counter the same offer, the agent gets one counter-offer from all of them.'],
+  door: ['A house whose owner gives its address out (in a signature, a QR code) to be reached by. Knock there with your purpose and a note, or leave a note ({ kind: "note", text }); the owner\'s rules answer, or the owner decides, and replies come to your lake_inbox from their assistant, carrying the house\'s word that it speaks for it. Opened in a browser, the address shows how.'],
+  note: ['Words left at a house for its owner, asking nothing of their data: { kind: "note", text } (up to 1000 characters). The owner sees it, their assistant hears of it with your address, and replies come to your lake_inbox.'],
   counter: ['A house\'s answer "not at that price" or "not that field". In a bloc, the counters merge.'],
   grant: ['A key: a signed credential letting one agent use certain fields for one purpose for a while. Cut by the owner\'s device or by a rule the owner wrote; never by an agent.'],
   key: ['See grant. Owners revoke keys in the control panel; the agent is cut off on its next request.'],

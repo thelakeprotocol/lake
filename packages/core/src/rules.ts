@@ -123,6 +123,23 @@ function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
 }
 
 /**
+ * A note at the door (SPEC §5.1): no data is asked, so only the rules about who and why apply (purpose, requester,
+ * reputation); a rule that also needs an approval, a price or a field is about data, and doesn't speak to a note. The first
+ * that fits decides: decline turns it away; anything else delivers it to the owner. No rule fitting: delivered.
+ */
+export function noteDecision(rules: Rules, note: { purpose: string; requester: string }, ctx: Context = {}): { deliver: true; rule: number | null } | { deliver: false; rule: number; reason: string } {
+  const about = new Set(['purpose', 'requester', 'reputation_at_least']);
+  for (const [i, r] of rules.rules.entries()) {
+    if (!Object.keys(r.match).every((k) => about.has(k))) continue;
+    const ok = Object.entries(r.match).every(([k, v]) => k === 'purpose' ? purposeWithin(note.purpose, String(v)) : k === 'requester' ? note.requester === v : (ctx.reputation ?? 0.5) >= Number(v));
+    if (!ok) continue;
+    // Coarse, as for a knock: the sender never hears the owner's rule or its number.
+    return r.decision === 'decline' ? { deliver: false, rule: i + 1, reason: `declined: this house doesn't take ${note.purpose} notes` } : { deliver: true, rule: i + 1 };
+  }
+  return { deliver: true, rule: null };
+}
+
+/**
  * When the owner is asked, what their own join rule for this kind of request is missing: "your rule 1 would join if
  * it had an ethics approval you trust and paid at least $5". Tells them how the ask compares with what they already
  * said yes to, so a $2 ask doesn't look as harmless as a $5 one. Null when no join rule is close.

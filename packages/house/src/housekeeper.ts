@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -45,7 +45,7 @@ export type Reply =
   | { kind: 'counted'; study: string; count: string; tellers: string[] }
   | { kind: 'excluded'; study: string; why: string }
   | { kind: 'quoted'; ref: string }
-  | { kind: 'noted'; note: string };
+  | { kind: 'noted'; note: string; says: string };
 
 interface OfferPayload { kind: 'offer'; offer: Offer; study?: Study; attachments?: { ethics?: Attachment; audit?: Attachment; authorisation?: Attachment } }
 interface ComputePayload { kind: 'compute'; grant: string; study: Study; countersignature?: string; count?: string }
@@ -221,9 +221,13 @@ export class Housekeeper {
       reason = told ?? toVisitor(decision, extra.counter, (extra as { code?: string }).code, offer.purpose);
       if (decision === 'ask') {
         this.o.emit(makeEvent('approval.requested', this.actor, visitor, { purpose: offer.purpose }));
-        // Run 31's visitors couldn't tell whether anyone would ever look at a parked request.
-        extra = { ...extra, ownerActive: this.o.desk.ownerActive() };
-        reason += `; ${lastActive(extra.ownerActive!)}`;
+        // Run 31's visitors couldn't tell whether anyone would ever look at a parked request; but when the owner was last
+        // here is said only to a visitor they've dealt with (run 44: a salesperson heard "within the hour" on every knock).
+        // (That nobody has claimed the house isn't the owner's habit: said to anyone.)
+        if (this.o.desk.knows({ webId: visitorWebId, domain }) || this.o.desk.ownerActive() === 'no owner') {
+          extra = { ...extra, ownerActive: this.o.desk.ownerActive() };
+          reason += `; ${lastActive(extra.ownerActive!)}`;
+        }
       }
       // What this house holds is said only to someone it is dealing with, never to someone it just turned away.
       const holds = decision === 'join' || decision === 'counter' ? [...new Set((await this.claims(offer.fields)).map((c) => c.field))] : [];
@@ -288,7 +292,7 @@ export class Housekeeper {
     const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() });
     // Turned down for asking who the owner is, a visitor may ask again on that purpose without those fields.
     if (d.decision === 'decline' && d.code !== 'identifying') this.declinedAt.set(declinedKey, Date.now());
-    let filed: { offerId: string; asked?: number } | null = null;
+    let filed: { offerId: string; asked?: number; replaces?: string[] } | null = null;
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
       // A visitor that already asked this house for the same fields under another purpose may be trying labels: say so.
@@ -308,6 +312,8 @@ export class Housekeeper {
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
+      // The sender hears that its newer ask replaced its older ones, not that it now has several waiting.
+      if (filed.replaces?.length) notes.push(`this replaces your earlier request ${filed.replaces.join(', ')}: one request waits, the newest`);
       // And the earlier look-alike gets the same warning, so the owner sees it on both.
       for (const t of this.o.desk.pendingLike(offer.purpose, offer.fields)) {
         if (t.visitor.webId !== visitorWebId && !t.warnings?.some((w) => w.startsWith(domain))) t.warnings = [...(t.warnings ?? []), `${domain} asked for exactly this too, for the same reason: check which one is really who it says`];
@@ -484,19 +490,26 @@ export class Housekeeper {
    * assistant is told, with the sender's address to answer: so a neighbour reaches the assistant without anyone saying
    * which agent it is. Text only, shown as the sender's words; it decides nothing. A few an hour from one sender.
    */
-  private async note(p: { text?: unknown; speaks_for?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string): Promise<LakeData> {
+  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string): Promise<LakeData> {
     const text = typeof p.text === 'string' ? p.text.trim() : '';
-    if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text } (1 to 1000 characters)' });
+    if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text, purpose? } (text 1 to 1000 characters; purpose, e.g. contact or marketing, defaults to contact)' });
     if (looksLikeInjection(text)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note is for the owner to read, not instructions' });
+    // Its purpose, said by the sender (contact by default): the owner's rules about who and why decide whether it is
+    // delivered, as they would a knock (run 44: five sales notes all reached the owner).
+    const purpose = typeof p.purpose === 'string' && p.purpose ? p.purpose : 'contact';
+    if (!isPurpose(purpose)) return this.reply({ kind: 'rejected', code: 'malformed', why: `purpose: one of ${Object.keys(PURPOSES).join(', ')}` });
+    const said = noteDecision(this.o.rules, { purpose, requester: from.ownerDomain }, { reputation: this.o.signals?.().reputation[from.ownerDomain] });
+    if (!said.deliver) return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: said.reason, holds: [], notes: [] });
     const url = card.supportedInterfaces?.[0]?.url;
     // Whether anything about the sender is checked: on a sandbox nobody proves a domain (run 41: a fake relief fund's note
     // sat in Tom's panel looking like anyone's).
     // A sender that says which house it speaks for: checked against that house's own word (run 42: a neighbour's real
     // assistant and an impostor looked the same).
     const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
-    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(speaks ? { speaks_for: speaks } : {}) }, text });
+    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(speaks ? { speaks_for: speaks } : {}) }, text, purpose });
     if (!kept) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a few notes an hour from one sender' });
-    return this.reply({ kind: 'noted', note: 'the owner will see it, and their assistant if they have one, with your address to answer; nothing in this house was read or shared' });
+    // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).
+    return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox, from their assistant, naming this note. Nothing in this house was read or shared' });
   }
 
   /** A receipt from a payments agent the owner trusts goes in /receipts/. */
