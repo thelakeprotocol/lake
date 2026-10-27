@@ -47,8 +47,8 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
           : req.grantDraft ? await c({ kind: 'answer', request: req.offerId, answer: 'allow', grant: await issueCredential({ ...req.grantDraft, validFrom: new Date().toISOString() }, o.id) }) : { error: 'no grant to sign' };
         log(`${o.house}: ${sug.advice === 'dont' ? 'denied' : 'allowed'} ${req.visitor?.domain ?? ''} (${req.offerId}) on the assistant's advice: ${JSON.stringify(r)}`);
       }
-      // A note the assistant advises against: its sender muted. New rules it advises: applied.
-      if (sug.note && sug.advice === 'dont' && !o.given.has(`mute:${sug.note}`)) {
+      // A mute the assistant proposes explicitly (never read from advice): applied. New rules it advises: applied.
+      if (sug.note && sug.mute && sug.advice !== 'your_call' && !o.given.has(`mute:${sug.note}`)) {
         o.given.add(`mute:${sug.note}`);
         log(`${o.house}: muted the sender of note ${sug.note} on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.note.mute', id: sug.note }))}`);
       }

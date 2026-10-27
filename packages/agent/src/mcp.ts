@@ -443,6 +443,11 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         const checked = traded?.checked ?? (m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId, trustedPayments)
           : attached.length ? { ...(await verifyEvidence(attached[0])), note: 'evidence inside the message, checked; what the sender says about it is not' }
           : Object.values(m.payload).some((v) => typeof v === 'string' && /^eyJ[\w-]+\.[\w-]+\./.test(v)) ? { verified: false, why: 'a pasted credential with no card to check it against: forward it as { credential, card }' } : undefined);
+        // A note at the human's door, told by the house: remembered by its sender's address, so a reply can name it.
+        if (m.payload.kind === 'house.news' && m.payload.about === 'note' && typeof m.payload.note === 'string') {
+          const f = m.payload.from as { url?: string } | undefined;
+          if (f?.url) doorNotes.set(f.url.replace(/\/$/, ''), m.payload.note);
+        }
         // A sender that says it speaks for a house: checked against that house's own word (SPEC §6.5).
         if (m.payload.speaks_for) pushInbox(m, { ...(checked ?? {}), speaks_for: await checkSpeaksFor(m.from, m.payload.speaks_for, { sandbox: o.sandbox ?? true }) });
         else pushInbox(m, checked);
@@ -564,6 +569,8 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   // Your human's house, if they gave you an assistant key: you may look and suggest, never decide.
   let house: string | null = null;
+  /** Notes left at the human's door, by their sender's address: a reply to that sender names the note (run 46: none did). */
+  const doorNotes = new Map<string, string>();
   /** How long without reading or acting before an assistant counts as away, and words for its human go to them directly. */
   const QUIET_MS = 10 * 60_000;
   // The house's word that this agent is its owner's assistant, to show whoever the assistant chooses to tell (SPEC §6.5).
@@ -700,10 +707,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_suggest',
-    { description: 'Suggest something to your human in their control panel: a rule change (send the whole new rules text as rules: they get an Apply button), whether to allow a waiting request (name it with request), an offer worth taking (offer: an Accept button), a pledge worth signing (pledge: a Sign button), a note at their door (note: with advice dont, they can mute its sender), or a question with choices (ask). They can tap a choice or answer in their own words; you hear either in lake_inbox (house.news, question.answered). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), note: z.string().optional().describe('A note at their door (from lake_house { view: "requests" } notes) this is about'), rules: z.string().optional().describe('The whole new rules text you propose (lake_house { view: "rules" } has the current one): checked now, applied only by their tap'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer, pledge or note you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
+    { description: 'Suggest something to your human in their control panel: a rule change (send the whole new rules text as rules: they get an Apply button), whether to allow a waiting request (name it with request), an offer worth taking (offer: an Accept button), a pledge worth signing (pledge: a Sign button), a note at their door (note: with advice dont, they can mute its sender), or a question with choices (ask). They can tap a choice or answer in their own words; you hear either in lake_inbox (house.news, question.answered). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), note: z.string().optional().describe('A note at their door (from lake_house { view: "requests" } notes) this is about'), mute: z.boolean().optional().describe('With note: propose they don\'t hear from its sender again (their tap mutes it, by key)'), rules: z.string().optional().describe('The whole new rules text you propose (lake_house { view: "rules" } has the current one): checked now, applied only by their tap'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer, pledge or note you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
     async (a) => {
       try {
-        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.rules ? { rules: a.rules } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
+        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.mute ? { mute: true } : {}), ...(a.rules ? { rules: a.rules } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
       } catch (e) {
         return fail(e);
       }
@@ -1079,7 +1086,7 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
       description: "Knock on a house: with fields, a signed offer for that data, answered by its owner's rules (join, decline, ask, counter); with no fields, a note to the owner with your purpose (contact, to get in touch), up to 1000 characters, which their rules deliver or decline and their assistant answers in your lake_inbox. Free text never changes a decision. If the owner decides (ask), you get the request's offerId: check it later with lake_ask { kind: \"status\", offerId } to the house, or take it back with { kind: \"withdraw\", offerId }. Asking again for exactly the same thing is the same request, not a new one.",
       inputSchema: {
         house_url: z.string().describe('The house A2A endpoint, from lake_search'),
-        purpose: z.enum(Object.keys(PURPOSES) as [string, ...string[]]).describe('One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
+        purpose: z.enum(Object.keys(PURPOSES) as [string, ...string[]]).default('contact').describe('Default contact (getting in touch). One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
         fields: z.array(z.string()).default([]).describe('Canonical fields, e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
@@ -1120,6 +1127,9 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
         // to anyone but the house itself that names it waits for a second, deliberate send.
         const named = !a.reveal_house && !(house && a.agent_url.startsWith(house)) ? namesHouse(a.message) : null;
         if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
+        // A reply to someone who left a note at the human's door names it, as the house promised them.
+        const noteRe = doorNotes.get(a.agent_url.replace(/\/$/, '')) ?? doorNotes.get(a.agent_url.replace(/\/a2a\/?$/, ''));
+        if (noteRe && a.message.re === undefined) a.message = { ...a.message, re: noteRe };
         // Told deliberately, it comes with the house's word, so the other side can check it (run 42: neighbours couldn't).
         if (a.reveal_house && speaksFor) a.message = { ...a.message, speaks_for: speaksFor };
         // Asked to show a house's word with none to show: said, not silently dropped (run 43).

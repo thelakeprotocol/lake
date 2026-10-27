@@ -686,7 +686,7 @@ function allowanceForm(a: Assistant): Node {
 const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : `${currency} ${amount}`);
 
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; note?: string; mute?: boolean };
 const ADVICE_SAYS = { do: 'Your assistant advises: yes', dont: 'Your assistant advises: no', your_call: 'Your assistant says: your call' } as const;
 function replyBox(x: Note): Node {
   if (x.reply) return h('div', { class: 'r-meta' }, `you wrote: “${x.reply}”`);
@@ -713,6 +713,13 @@ function suggestionList(list: Note[]): Node {
         if (!r.error) await call({ kind: 'panel.assistant.dismiss', id: x.id });
         void show();
       } }, 'Accept the offer') : '',
+      // Your agent proposes not hearing from a note's sender again: your tap mutes it, by its key.
+      x.note && x.mute ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
+        (e.target as HTMLButtonElement).disabled = true;
+        await call({ kind: 'panel.note.mute', id: x.note });
+        await call({ kind: 'panel.assistant.dismiss', id: x.id });
+        void show();
+      } }, 'Mute this sender') : '',
       // New rules your agent proposes: applied by your tap, with your key, like editing them yourself.
       x.rules ? h('button', { class: 'btn small', type: 'button', onclick: async (e: Event) => {
         (e.target as HTMLButtonElement).disabled = true;

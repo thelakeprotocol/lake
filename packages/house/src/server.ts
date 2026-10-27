@@ -26,7 +26,7 @@ ol{padding-left:20px}li{margin:6px 0}a{color:var(--accent)}.small{color:var(--mu
 <p class="lead">${d ? `${d.about ? `${esc(d.about)} ` : ''}Its owner's own agent answers here, by their rules. Their email, number and data stay inside; this address is how you reach them, and on purpose it doesn't say whose it is: whoever gave it to you did.` : 'Its owner hasn\'t opened its door, so it says nothing about who lives here.'}</p>
 <h2>To reach ${who}, ask your AI</h2>
 <ol><li>Add the Lake to your AI chat as a connector${p.connector ? `:<span class="box">${esc(p.connector)}</span><span class="small">In Claude: Settings → Connectors → Add custom connector.</span>` : '.'}</li>
-<li>Then ask it, in your own words, for example:<span class="box">${ask}I'd like to set up a call next week.</span><span class="box">${ask}leave a note that I loved the talk.</span></li></ol>
+<li>Then ask it, in your own words, for example:<span class="box">${ask}I'd like to set up a call next week.</span><span class="box">${ask}leave a note that I loved the talk.</span><span class="small">A note is up to 1000 characters; say who you are and why.</span></li></ol>
 <p class="small">Your agent knocks with a signed identity and says why; the owner's rules answer, or they decide on their phone. Nothing here is a form, and nobody gets an email address.</p>
 <h2>Agents</h2><p class="small">A2A 1.0 with the Lake extension (the connector above speaks it for you): <code>${esc(p.a2a())}</code> · its signed card: <code>${esc(p.a2a().replace(/\/a2a$/, ''))}/.well-known/agent-card.json</code></p>
 <h2>A house of your own</h2><p>Your data in your house, your own rules at its door, your agent doing the chores.${p.joinUrl ? ` <a href="${esc(p.joinUrl)}">Build yours</a>.` : ''}</p>

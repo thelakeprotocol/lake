@@ -501,7 +501,11 @@ export class Housekeeper {
     const purpose = typeof p.purpose === 'string' && p.purpose ? p.purpose : 'contact';
     if (!isPurpose(purpose)) return this.reply({ kind: 'rejected', code: 'malformed', why: `purpose: one of ${Object.keys(PURPOSES).join(', ')}` });
     const said = noteDecision(this.o.rules, { purpose, requester: from.ownerDomain }, { reputation: this.o.signals?.().reputation[from.ownerDomain] });
-    if (!said.deliver) return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: said.reason, holds: [], notes: [] });
+    // Recorded in the owner's activity like a declined knock (run 46: a turned-away pitch left no trace).
+    if (!said.deliver) {
+      this.o.emit(makeEvent('decision', this.actor, `agent:${from.ownerDomain}`, { decision: 'decline', reason: `a ${purpose} note: ${said.reason}` }));
+      return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: said.reason, holds: [], notes: [] });
+    }
     const url = card.supportedInterfaces?.[0]?.url;
     // Whether anything about the sender is checked: on a sandbox nobody proves a domain (run 41: a fake relief fund's note
     // sat in Tom's panel looking like anyone's).
