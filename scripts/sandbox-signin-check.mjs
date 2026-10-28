@@ -90,7 +90,15 @@ try {
   await page.locator('#nav .more-btn').click();
   await page.locator('#nav .more-menu button', { hasText: 'Money' }).click();
   const sale = page.locator('li.pay', { hasText: 'Sign-in check item' });
-  await sale.waitFor({ timeout: 20_000 });
+  // A receipt reaches the house from the payments agent and is read from the pod: allow a slow server a minute,
+  // looking again (the screen refetches when it opens).
+  for (let i = 0; i < 6 && !(await sale.isVisible()); i++) {
+    await page.waitForTimeout(10_000);
+    await page.locator('#nav > button', { hasText: 'Home' }).click();
+    await page.locator('#nav .more-btn').click();
+    await page.locator('#nav .more-menu button', { hasText: 'Money' }).click();
+  }
+  if (!(await sale.isVisible())) throw new Error(`the sale isn't on Money; it shows: ${(await page.locator('#view').innerText()).slice(0, 600)}`);
   must(/from .*sold by /.test(await sale.locator('summary').textContent()), 'Money says what for, who paid and who sold');
   await sale.locator('summary').click();
   await sale.getByText(/Held until the buyer accepts/).waitFor();
