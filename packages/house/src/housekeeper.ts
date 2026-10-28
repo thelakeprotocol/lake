@@ -421,6 +421,8 @@ export class Housekeeper {
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
     const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
+    // What it was for, beside its agreement, so the owner's money can say which study paid (not just an agreement id).
+    await this.tool('pod_write', { path: `agreements/${g.offer}.study.json`, content: JSON.stringify({ question: String(p.study.question ?? '').slice(0, 300), at: entry.at }), contentType: 'application/json' }).catch(() => {});
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
     if (g.uses === 1) await this.o.desk.spend(g.offer);
     return this.reply({ kind: 'counted', study: id, count: p.count, tellers: tellers.map((c) => c.domain) });

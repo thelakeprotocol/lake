@@ -160,8 +160,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await spend.getByRole('button', { name: 'Give some' }).click();
     // Amounts and periods are taps; the sentence says what will be signed.
     await spend.getByRole('button', { name: '$100' }).click();
-    await spend.getByRole('button', { name: 'A week' }).click();
-    await spend.getByText(/may spend up to \$100 in all, for a week/).waitFor();
+    await spend.getByLabel('Days it lasts').fill('7');
+    // A total over the days, said as one: not an amount a day.
+    await spend.getByText(/can spend \$100 in total until .*not per day/).waitFor();
     await spend.getByRole('button', { name: 'Sign and give' }).click();
     await spend.locator('.spend-amount', { hasText: 'Up to $100' }).waitFor({ timeout: 5000 });
     // Changed in place: a typed amount, signed again (the old one is revoked by the house).
@@ -377,6 +378,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await sale.waitFor({ timeout: 10_000 });
     expect(await sale.locator('summary').textContent()).toMatch(new RegExp(`\\$4 · A short summary.*from ${shopperName}.*sold by ${me.name.split(' (')[0]}`));
     await page.getByText('Held for now').waitFor();
+    // Earned, Held and Receipts side by side on a phone.
+    expect(new Set(await page.locator('.tiles .tile').evaluateAll((ts) => ts.map((t) => (t as HTMLElement).offsetTop))).size).toBe(1);
     await sale.locator('summary').click();
     await sale.getByText(/Held until the buyer accepts/).waitFor();
     await tidy();

@@ -927,7 +927,7 @@ function Allowance({ a }: { a: Assistant }) {
     h('div', { class: 'spend-label' }, 'Spending money'),
     editing ? h(AllowanceEditor, { a, done: () => setEditing(false) })
       : a.allowance ? h('div', { class: 'spend-row' },
-        h('div', {}, h('div', { class: 'spend-amount' }, `Up to ${money$(a.allowance.amount, a.allowance.currency)}`), h('div', { class: 'r-meta' }, `until ${until}`)),
+        h('div', {}, h('div', { class: 'spend-amount' }, `Up to ${money$(a.allowance.amount, a.allowance.currency)}`), h('div', { class: 'r-meta' }, `in total, until ${until}`)),
         h('div', { class: 'spend-acts' },
           h('button', { class: 'btn small', type: 'button', onClick: () => setEditing(true) }, 'Change'),
           h(Act, { label: 'Stop', cls: 'quiet', confirm: 'Tap again: it can\'t spend', run: () => call({ kind: 'panel.allowance.revoke', kid: a.kid }) })))
@@ -942,16 +942,19 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
   const [days, setDays] = useState(7);
   const chip = (on: boolean, label: string, pick: () => void) => h('button', { type: 'button', class: `day${on ? ' on' : ''}`, 'aria-pressed': on, onClick: pick }, label);
   return h('div', { class: 'spend-edit' },
-    h('div', { class: 'days', role: 'group', 'aria-label': 'Amount' }, ...[20, 50, 100, 200].map((n) => chip(amount === n, money$(n, currency), () => setAmount(n))),
+    // A total for a stretch of days, not a daily amount (the owner read "$20 · A day" as $20 a day).
+    h('div', { class: 'spend-label', style: 'margin-top:4px' }, 'Total it may spend'),
+    h('div', { class: 'days', role: 'group', 'aria-label': 'Total it may spend' }, ...[20, 50, 100, 200].map((n) => chip(amount === n, money$(n, currency), () => setAmount(n))),
       h('input', { type: 'number', min: 1, max: 500, step: 1, value: amount, 'aria-label': 'Other amount', class: 'spend-other', onInput: (e: Event) => setAmount(Number((e.target as HTMLInputElement).value)) })),
-    h('div', { class: 'days', role: 'group', 'aria-label': 'For how long' }, ...[[1, 'A day'], [7, 'A week'], [30, 'A month']].map(([d, l]) => chip(days === d, l as string, () => setDays(d as number)))),
     h('div', { class: 'row', style: 'margin:0' },
+      h('label', { class: 'inline' }, 'Lasts ', h('input', { type: 'number', min: 1, max: 31, step: 1, value: days, 'aria-label': 'Days it lasts', class: 'spend-other', style: 'width:64px', onInput: (e: Event) => setDays(Number((e.target as HTMLInputElement).value)) }), ' days'),
       // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
-      h('label', { class: 'inline' }, 'In ', h('select', { value: currency, onChange: (e: Event) => setCurrency((e.target as HTMLSelectElement).value) }, ...CURRENCIES.map((c) => h('option', { value: c }, c))))),
-    h('p', { class: 'r-meta', style: 'margin:8px 0' }, `${shortName(a.label)} may spend up to ${money$(amount || 0, currency)} in all, for ${days === 1 ? 'a day' : days === 7 ? 'a week' : 'a month'}. Signed on this phone; stop it any time.`),
+      h('label', { class: 'inline' }, 'in ', h('select', { value: currency, onChange: (e: Event) => setCurrency((e.target as HTMLSelectElement).value) }, ...CURRENCIES.map((c) => h('option', { value: c }, c))))),
+    h('p', { class: 'r-meta', style: 'margin:8px 0' }, `${shortName(a.label)} can spend ${money$(amount || 0, currency)} in total until ${days >= 1 && days <= 31 ? new Date(Date.now() + days * 86_400_000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '…'}. It's not per day: once it's spent, it's gone. Signed on this phone; stop it any time.`),
     h('div', { class: 'row', style: 'margin:0' },
       h(Act, { label: a.allowance ? 'Sign the change' : 'Sign and give', cls: 'primary', run: async () => {
         if (!(amount >= 1 && amount <= 500)) throw new Error('An amount from 1 to 500.');
+        if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
         const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amount, currency, days });
         if (d.error) throw new Error(d.error);
         const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
@@ -962,9 +965,12 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
 }
 
 // ---- Money ----
-type Receipt = { amount: number; currency: string; agreement: string; from: string; payer?: string; payerName?: string; via?: string; viaName?: string; at: string; settlement: string; heldUntil?: string; items?: { label: string; amount: { currency: string; value: number } }[] };
+type About = { question?: string; purpose: string; fields: string[]; to: string };
+type Receipt = { about?: About; amount: number; currency: string; agreement: string; from: string; payer?: string; payerName?: string; via?: string; viaName?: string; at: string; settlement: string; heldUntil?: string; items?: { label: string; amount: { currency: string; value: number } }[] };
 /** What a payment was for, as its receipt says: the cart's items, or the order it paid. */
-const forWhat = (r: Receipt) => r.items?.length ? r.items.map((i) => i.label.replace(/^1 × /, '')).join(', ') : r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40);
+const forWhat = (r: Receipt) => r.items?.length ? r.items.map((i) => i.label.replace(/^1 × /, '')).join(', ')
+  : r.about ? (r.about.question ? `Study: ${r.about.question}` : `${r.about.purpose}: ${r.about.fields.join(', ')}`)
+  : r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40);
 const named = (name: string | undefined, addr: string | undefined) => (name ? name.replace(/ \((.+), via MCP\)$/, ' ($1)') : addr ? who(addr) : 'someone');
 
 function Money() {
@@ -989,6 +995,12 @@ function Money() {
           h('span', { class: `chip ${status(r) === 'held' ? '' : 'share'}` }, status(r))),
         h('dl', { class: 'pay-detail' },
           r.items?.length ? [h('dt', {}, 'For'), h('dd', {}, ...r.items.map((i) => h('div', {}, `${i.label}: ${money$(i.amount.value, i.amount.currency)}`)))] : null,
+          // Paid for an agreement your house signed: a study it answered, or a key to some of your fields.
+          r.about ? [
+            h('dt', {}, 'For'), h('dd', {}, r.about.question ? `Answering a study: "${r.about.question}"` : `A key to some of your data, for ${r.about.purpose.toLowerCase()}`),
+            h('dt', {}, 'Purpose'), h('dd', {}, r.about.purpose),
+            h('dt', {}, r.about.question ? 'Counted' : 'Shared'), h('dd', {}, r.about.fields.join(', '), r.about.question ? h('div', { class: 'r-meta' }, 'Your answer left only as two unreadable shares; your records stayed home.') : null),
+          ] : null,
           h('dt', {}, 'Paid by'), h('dd', {}, named(r.payerName, r.payer), r.payer ? h('div', { class: 'r-meta' }, r.payer) : null),
           r.via ? [h('dt', {}, 'Sold by'), h('dd', {}, `${named(r.viaName, r.via)}, your AI, for your house`)] : null,
           h('dt', {}, 'Money'), h('dd', {}, status(r) === 'held' ? `Held until the buyer accepts${r.heldUntil ? `, or ${when(r.heldUntil)} at the latest` : ''}` : status(r) === 'refunded' ? 'Refunded to the buyer' : `Paid (${r.settlement})`),

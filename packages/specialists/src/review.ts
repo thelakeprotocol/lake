@@ -348,7 +348,10 @@ export async function createPayments(o: SpecialistOptions & {
     const until = Date.now() + (hold ? (d?.within_hours ?? DELIVER_HOURS) * 3_600_000 : holdMs);
     // What it was for and between whom, as the signed cart and cards say (an owner read "$4 from claude-code-2299….mcp.example"
     // and couldn't tell who paid or what for): the cart's items, and both agents' names.
-    const about = cart ? { items: ((c!.mandate as CartMandate).contents.payment_request.details.display_items ?? []).slice(0, 10).map((x) => ({ label: String(x.label).slice(0, 120), amount: x.amount })), ...(agentCard?.name ? { payer_name: String(agentCard.name).slice(0, 80) } : {}), ...((c!.card as AgentCard | undefined)?.name ? { seller_name: String((c!.card as AgentCard).name).slice(0, 80) } : {}) } : {};
+    const about = {
+      ...(agentCard?.name ? { payer_name: String(agentCard.name).slice(0, 80) } : {}),
+      ...(cart ? { items: ((c!.mandate as CartMandate).contents.payment_request.details.display_items ?? []).slice(0, 10).map((x) => ({ label: String(x.label).slice(0, 120), amount: x.amount })), ...((c!.card as AgentCard | undefined)?.name ? { seller_name: String((c!.card as AgentCard).name).slice(0, 80) } : {}) } : {}),
+    };
     const receipts = await Promise.all(
       checked.map(async (c) => {
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.

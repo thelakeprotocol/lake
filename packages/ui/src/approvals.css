@@ -141,9 +141,9 @@ label.inline { display: inline-flex; align-items: center; gap: 8px; color: var(-
 .card.ok { border-color: rgba(61,220,151,0.45); }
 .card.bad { border-color: var(--threat); }
 .card h3 { margin-top: 0; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-.tile { border: 1px solid var(--line); border-radius: var(--r); padding: 14px; background: var(--raised); display: flex; flex-direction: column-reverse; gap: 4px; }
-.tile dd { margin: 0; font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
+.tile { border: 1px solid var(--line); border-radius: var(--r); padding: 12px; background: var(--raised); display: flex; flex-direction: column-reverse; gap: 4px; min-width: 0; }
+.tile dd { margin: 0; font-size: clamp(20px, 6vw, 28px); font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .tile dt { font-size: 13px; color: var(--muted); }
 .tile.mint dd { color: var(--mint); } .tile.amber dd { color: var(--amber); } .tile.threat dd { color: var(--threat); }
 .count { font-size: 12px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }

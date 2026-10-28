@@ -243,7 +243,7 @@ Payments follow the Agent Payments Protocol's mandate chain, as W3C VCs:
 |---|---|---|
 | `IntentMandate` | a human at the visitor's organisation (same `ownerDomain`, a separate key) | this agent, this study, `budget`, `intent_expiry` |
 | `PaymentMandate` | the visitor agent | payee (the house's WebID), amount, the digest of the Intent Mandate, the agreement `uid` |
-| `LakeReceipt` | the payments agent | payee, payer, amount, agreement, the Intent Mandate digest, `settlement`; for a cart, also `items` (its `display_items`), `payer_name` and `seller_name` (from the signed cards), so the payee can tell what it was paid for and by whom |
+| `LakeReceipt` | the payments agent | payee, payer, amount, agreement, the Intent Mandate digest, `settlement`; `payer_name` (from its signed card) and, for a cart, `items` (its `display_items`) and `seller_name`, so the payee can tell what it was paid for and by whom |
 
 A receipt is something its payee must keep: whoever sends one (the payments agent at settlement, the buyer's connector to a house it paid) SHOULD try again when sending fails, for a while (the reference: after 15 s, 1 min, 5 min and 30 min). A house files one receipt an order and keeps the later one: a held receipt that arrives after the release that replaced it is not filed again.
 

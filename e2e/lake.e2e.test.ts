@@ -712,6 +712,15 @@ describe('money', () => {
     expect(r.paid).toEqual({ total: 15, houses: 3, receiptsFiled: 3 });
     const receipts = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'receipts'));
     expect(receipts.some((f) => f.includes('.receipt.jwt'))).toBe(true);
+    // The owner's money says which study paid and what was counted, not just an agreement id (the owner asked "where
+    // did this come from?"). A phone paired to Stan's house with its one-time token, to look.
+    const phone = await generateIdentity('stan-phone');
+    const token = (await readFile(join(dir, 'houses', 'stan', 'pairing-token'), 'utf8')).trim();
+    const paired = await fetch(`${houses.stan}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk, token }) });
+    expect(paired.status).toBe(200);
+    const stanMoney = await (await fetch(`${houses.stan}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.money' }, phone, { iss: 'owner' })) })).json();
+    const study = stanMoney.receipts.find((x: { agreement: string }) => x.agreement.startsWith('urn:lake:agreement:'));
+    expect(study).toMatchObject({ payerName: expect.any(String), about: { question: expect.stringMatching(/\?$/), purpose: expect.any(String), fields: expect.arrayContaining([expect.any(String)]) } });
     const agreements = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements'));
     const signed = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', agreements.find((f) => f.includes('.agreement.json'))!), 'utf8'));
     expect(signed.agreement['@type']).toBe('Agreement');

@@ -438,6 +438,9 @@ function panelFor(x: {
       if (vc?.credentialSubject) receiptCache.set(f, { vc, at: now });
     });
   };
+  // Read once when complete (both files never change); looked at again after ten minutes while a study's question may
+  // still be on its way (it is filed when the study runs, after the consent).
+  const aboutCache = new Map<string, { at: number; about: { question?: string; purpose: string; fields: string[]; to: string } | null }>();
   const money = async () => {
     const all = (await listContainer(owner, 'receipts/').catch(() => [...receiptCache.keys()])).filter((f) => f.endsWith('.receipt.jwt'));
     await readReceipts(all);
@@ -461,6 +464,26 @@ function panelFor(x: {
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
+    // What a payment for an agreement (a study, a key to some fields) was for: its consent record (who, which fields, what
+    // for) and, for a study, its question, filed beside it when it ran. The owner saw only "urn:lake:agreement:d4ed…".
+    await Promise.all((receipts as { agreement?: string; about?: unknown }[]).filter((r) => r.agreement?.startsWith('urn:lake:agreement:')).map(async (r) => {
+      const offer = r.agreement!.split(':')[3] ?? '';
+      if (!/^[\w-]+$/.test(offer)) return;
+      const known = aboutCache.get(offer);
+      if (!known || (!known.about?.question && Date.now() - known.at > 600_000)) {
+        const json = async (path: string) => { const res = await owner.fetch(owner.podRoot + path).catch(() => null); return res?.ok ? ((await res.json().catch(() => null)) as Record<string, any> | null) : null; };
+        const [rec, study] = await Promise.all([json(`agreements/${offer}.consent.jsonld`), json(`agreements/${offer}.study.json`)]);
+        const c = rec ? readConsentRecord(rec) : null;
+        aboutCache.set(offer, { at: Date.now(), about: c ? {
+          ...(study?.question ? { question: String(study.question) } : {}),
+          purpose: c.purposes.map((x) => PURPOSES[x]?.label ?? x.replace(/-/g, ' ')).join(' or ') || 'unstated',
+          fields: c.fields.map((f) => fieldSpec(f)?.label ?? f.replace(/_/g, ' ')),
+          to: c.visitor.domain || c.visitor.webId,
+        } : null });
+      }
+      const about = aboutCache.get(offer)?.about;
+      if (about) r.about = about;
+    }));
     // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
     return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
