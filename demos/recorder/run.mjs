@@ -51,6 +51,8 @@ if (page) {
 // every player is its own agent, as two people's AIs would be; without sign-in (404 here), none is needed.
 const mcpFor = {};
 for (const p of config.players) {
+  // `agent` makes this player a later conversation of another player's AI: the same sign-in, so the same agent.
+  if (p.agent) { mcpFor[p.id] = mcpFor[p.agent]; continue; }
   const url = `${(p.lake ?? lake).replace(/\/$/, '')}/mcp`;
   const r = await fetch(`${url}/oauth/anonymous`, { method: 'POST' }).catch(() => null);
   const t = r?.ok ? await r.json() : null;

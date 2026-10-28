@@ -100,8 +100,10 @@ try {
   // Hand the house back for the next person.
   if (claimed) {
     await page.goto(page.url().replace(/#.*$/, '')).catch(() => {});
+    // Under "About your house" on Home.
+    await page.getByText('About your house').click({ timeout: 15_000 }).catch(() => {});
     const hand = page.getByRole('button', { name: 'Hand it back now' });
-    if (await hand.count().catch(() => 0)) { await hand.click(); await page.getByRole('button', { name: /Tap again/ }).click(); await page.waitForTimeout(1500); console.log('ok   handed the house back'); }
+    if (await hand.waitFor({ timeout: 15_000 }).then(() => true, () => false)) { await hand.click(); await page.getByRole('button', { name: /Tap again/ }).click(); await page.waitForTimeout(1500); console.log('ok   handed the house back'); }
     else console.log('note the house was not handed back: do it from its panel');
   }
   await browser.close();
