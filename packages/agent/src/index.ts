@@ -4,6 +4,7 @@ import { homedir, hostname } from 'node:os';
 import {
   buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
+  deliverWithRetries,
 } from '@thelakeprotocol/core';
 import { ago } from './ago.js';
 import { ask, checkStudy, dispatch, knock, makeHuman, makeVisitor, type MissionResult, type StudyRun, type Visitor } from '@thelakeprotocol/visitor';
@@ -321,7 +322,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const told = { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}), ...(cart ? { cart: order } : {}) };
       await ask(agentUrl, visitor, told);
       // And the house it was paid to, when that is not the seller: it files the receipt with the owner's money.
-      if (cart?.payee) await ask(cart.payee.url, visitor, told).catch(() => {});
+      if (cart?.payee) deliverWithRetries(() => ask(cart.payee!.url, visitor, told));
       if (!quietMe()) link.report(makeEvent('agent.message', 'self', undefined, { kind: 'payment', amount, unit }));
       return { paid: amount, unit, to: payee, remaining: settled.remaining as number, receipt, under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
     },

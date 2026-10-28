@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
-  auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, signCard, signMessage, studyFields, studyId, verifyLakeData,
+  auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, deliverWithRetries, signCard, signMessage, studyFields, studyId, verifyLakeData,
   packId, checkCart, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -387,7 +387,7 @@ export async function createPayments(o: SpecialistOptions & {
     const logged = o.log ? await o.log(credential, to === 'captured' ? 'capture' : 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
     const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `${to === 'captured' ? 'released' : 'voided'}: ${why}` };
     for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
-      void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
+      deliverWithRetries(async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
     }
     if (to === 'captured') o.onSettled?.(h.amount / 100, 1, { cart: true, released: true, currency: h.currency });
     return { kind: to, hold: h.id, cart: h.cart.id, credential, ...(logged ? { logged } : {}), why };
@@ -447,7 +447,7 @@ export async function createPayments(o: SpecialistOptions & {
       const logged = o.log ? await o.log(credential, 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
       const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: part / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `part refunded: ${h.currency} ${part / 100}; ${h.currency} ${h.amount / 100} still held` };
       for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
-        void (async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }))().catch(() => {});
+        deliverWithRetries(async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
       }
       return { kind: 'voided', partial: true, hold: h.id, cart: h.cart.id, refunded: part / 100, still_held: h.amount / 100, credential, ...(logged ? { logged } : {}) } as never;
     }

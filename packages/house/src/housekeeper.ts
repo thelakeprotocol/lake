@@ -572,6 +572,11 @@ export class Housekeeper {
     const check = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: this.o.webId, sandbox: this.o.sandbox });
     if (!check.ok) return this.reply({ kind: 'rejected', code: 'receipt', why: check.why });
     const agreement = String(check.vc.credentialSubject.agreement ?? 'unknown').split(':').slice(-2).join('-').replace(/[^a-zA-Z0-9-]/g, '');
+    // One file an order: a later receipt (released, refunded) replaces the held one, never the other way round (a held
+    // one sent again, late, after a failed try, mustn't undo a release).
+    const filed = await this.read(`receipts/${agreement}.receipt.jwt`).catch(() => '');
+    const issued = (jws: string) => { try { const v = JSON.parse(Buffer.from(jws.split('.')[1] ?? '', 'base64url').toString()) as { validFrom?: string; vc?: { validFrom?: string } }; return Date.parse(v.validFrom ?? v.vc?.validFrom ?? '') || 0; } catch { return 0; } };
+    if (typeof filed === 'string' && filed.startsWith('ey') && issued(filed) > issued(p.receipt.credential)) return this.reply({ kind: 'filed', receipt: agreement });
     await this.tool('pod_write', { path: `receipts/${agreement}.receipt.jwt`, content: p.receipt.credential, contentType: 'text/plain' });
     // An open panel shows it now (Money, Home's earnings), not on the owner's next tap.
     this.o.desk.touch();

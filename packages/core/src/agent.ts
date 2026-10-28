@@ -130,6 +130,19 @@ export async function sendLake(agentUrl: string, data: LakeData, opts: { me: Ide
 }
 
 /**
+ * Sent until it lands: something the other side must keep (a receipt) is tried again when the send fails, a few times
+ * over half an hour, since a house that is restarting or busy (a sandbox deploy) would otherwise never file it and its
+ * owner never see the money. Only failures are retried; any answer, a refusal too, ends it. The receiver must take the
+ * same message twice as once.
+ */
+export function deliverWithRetries(send: () => Promise<unknown>, delaysMs: number[] = [15_000, 60_000, 300_000, 1_800_000]): void {
+  const go = (i: number) => void send().catch(() => {
+    if (i < delaysMs.length) setTimeout(() => go(i + 1), delaysMs[i]).unref();
+  });
+  go(0);
+}
+
+/**
  * Idle connections outlive the proxy's (SPEC §3, Retries). Node closes an idle keep-alive connection after 5 s; a
  * proxy in front (Apache pools its backend connections with no time limit of its own; Caddy keeps them 2 minutes) can
  * send the next request down a connection Node is closing just then. Apache then drops the client's connection
