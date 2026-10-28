@@ -847,7 +847,8 @@ const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home
 function App() {
   const [tab, setTab] = useState<Tab>(tabFromHash());
   const [version, setVersion] = useState(0);
-  const [live, setLive] = useState(true);
+  // live: the house's stream is open; 'reconnecting' while a phone that went to another app gets it back (grey, not red).
+  const [live, setLive] = useState<boolean | 'reconnecting'>(true);
   const bump = () => setVersion((v) => v + 1);
   const [list, setList] = useState<{ requests: Request[] } | null>(null);
   const [name, setName] = useState('');
@@ -865,11 +866,12 @@ function App() {
       let first = true;
       es.addEventListener('changed', () => { if (first) first = false; else changed(); });
       es.onopen = () => setLive(true);
-      es.onerror = () => { es?.close(); setLive(false); retry = setTimeout(open, 5_000); };
-    }).catch(() => { setLive(false); retry = setTimeout(open, 15_000); });
+      es.onerror = () => { es?.close(); es = null; setLive('reconnecting'); clearTimeout(retry); retry = setTimeout(open, 3_000); };
+    }).catch(() => { setLive(false); clearTimeout(retry); retry = setTimeout(open, 10_000); });
     void open();
     const every = setInterval(() => { if (!document.hidden) changed(); }, 60_000);
-    const back = () => { if (!document.hidden) changed(); };
+    // Back from another app: reconnect now if the phone dropped the stream, and catch up.
+    const back = () => { if (document.hidden) return; if (!es) { clearTimeout(retry); void open(); } changed(); };
     addEventListener('visibilitychange', back);
     return () => { stopped = true; es?.close(); clearTimeout(timer); clearTimeout(retry); clearInterval(every); removeEventListener('visibilitychange', back); };
   }, []);
@@ -892,7 +894,7 @@ function App() {
         h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers })),
       h('main', {},
         h('header', { class: 'top' },
-          h('div', { class: 'eyebrow' }, h('span', { class: `dot ${live ? 'live' : 'down'}` }), h('span', {}, 'Your house on the Lake')),
+          h('div', { class: 'eyebrow' }, h('span', { class: `dot ${live === true ? 'live' : live === false ? 'down' : ''}`, title: live === true ? 'live' : live === false ? 'can\'t reach your house' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
           h('h1', {}, name ? `House ${name}` : 'Your house')),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));
 }

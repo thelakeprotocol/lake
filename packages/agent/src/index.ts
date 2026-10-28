@@ -298,7 +298,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       }
       // The human's own signed allowance, from their house, comes first; then the sandbox's play money (dollars), if any.
       const own = (await allowanceSource?.().catch(() => null)) ?? null;
-      if (!own && !o.allowanceUsd) throw new Error(`this agent has no allowance to pay from in ${unit}. Spending a person's money needs their house: they sign an allowance in its control panel (Money → Spending allowance) and you connect with lake_house_connect. Or pay in another unit you agreed on.`);
+      if (!own && !o.allowanceUsd) throw new Error(`this agent has no allowance to pay from in ${unit}. Spending a person's money needs their house: they sign an allowance in its control panel (My agent → Give it spending money) and you connect with lake_house_connect. Or pay in another unit you agreed on.`);
       const currency = own ? own.currency ?? 'USD' : 'USD';
       // Nothing converts: an allowance in one currency pays in that currency only.
       if (unit !== currency) throw new Error(own ? `your human's allowance is in ${currency}, not ${unit}: pay in ${currency}, or ask them for an allowance in ${unit}` : `the sandbox's play money is in USD, not ${unit}`);

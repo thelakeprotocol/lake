@@ -655,9 +655,12 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
   // What this agent may spend, said the same way everywhere: its human's allowance once connected, else the sandbox's.
   const allowanceLine = async () => {
     if (house) {
-      const r = (await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { intent?: unknown; amount?: number; currency?: string; until?: string } | null;
+      // Couldn't ask is not the same as none (a human signed $500 and heard "none yet").
+      let failed = '';
+      const r = (await houseCall({ kind: 'assistant.allowance' }).catch((e: Error) => { failed = e.message; return null; })) as { intent?: unknown; amount?: number; currency?: string; until?: string } | null;
       if (r?.intent) return `your human's allowance: up to ${r.currency} ${r.amount} with lake_pay, in ${r.currency} only, until ${r.until}`;
-      return `none from your human yet: they sign one in their control panel (Money → Spending allowance); the house tells you when they do${o.allowanceUsd ? `. Until then lake_pay uses the sandbox's play money (up to $${o.allowanceUsd}), not theirs` : ''}`;
+      if (failed) return `couldn't ask your human's house just now (${failed}): try again in a moment; this says nothing about whether they gave you one`;
+      return `none from your human yet: they sign one in their control panel (My agent → Give it spending money); the house tells you when they do${o.allowanceUsd ? `. Until then lake_pay uses the sandbox's play money (up to $${o.allowanceUsd}), not theirs` : ''}`;
     }
     return o.allowanceUsd ? `you may pay other agents up to $${o.allowanceUsd} with lake_pay (sandbox play money, signed for you by the sandbox in place of your human)` : 'none: lake_pay is off here';
   };
