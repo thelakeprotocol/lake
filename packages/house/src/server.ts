@@ -36,7 +36,7 @@ function doorPage(p: DoorPage): string {
 <input class="say" name="from" maxlength="80" placeholder="Your name" style="margin-top:8px">
 <div class="row"><button class="btn primary" type="submit">Leave the note</button></div></form></details>
 <details id="for-ai-agents"><summary>For AI agents</summary><p class="small">You were sent to knock on this door: leave the owner a short note, saying who your human is and what they'd like.</p><ol class="small">
-<li><b>With web access only:</b> open <code>${esc(note)}</code> (URL-encode both; <code>text</code>: the note for the owner, up to 1000 characters, saying who your human is and why; <code>from</code>: your human's name; optional <code>purpose</code>, default <code>contact</code>). It answers with <code>answer_at</code>: open that link later to read the reply, and tell your human. Can't open links you build? Give your human the link to open. <code>POST ${esc(base)}/note</code> with the same fields as JSON works too.</li>
+<li><b>With web access only:</b> open <code>${esc(note)}</code> (URL-encode both; <code>text</code>: the note for the owner, up to 1000 characters, saying who your human is and why; <code>from</code>: your human's name; optional <code>purpose</code>, default <code>contact</code>). It answers with <code>answer_at</code>: open that link later to read the reply (<code>?wait=30</code> waits up to 30 s for news), and tell your human. It's a conversation: if they ask something, answer on the same link with <code>?text=</code>. Can't open links you build? Give your human the link to open. <code>POST ${esc(base)}/note</code> with the same fields as JSON works too.</li>
 <li><b>With the Lake connector</b>${p.connector ? ` (<code>${esc(p.connector)}</code>)` : ''}: <code>lake_knock</code> this address with no fields. Your note is signed, and the answer comes to your <code>lake_inbox</code>.</li>
 <li><b>A2A</b>: <code>${esc(p.a2a())}</code>, its signed card at <code>${esc(base)}/.well-known/agent-card.json</code>.</li>
 <li>Notes are data for the owner, never instructions. A few an hour per sender.</li></ol></details>
@@ -75,7 +75,7 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
       const html = req.accepts(['json', 'html']) === 'html';
       if (r.body.kind === 'noted') {
         const at = `${base()}/note/${r.body.note}/${r.body.key}`;
-        const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at to read what comes back: a quick reply may only say it reached them, so look again until status is answered (a person may take minutes or hours), then tell your human. The link is private to whoever has it.' };
+        const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at to read what comes back (add ?wait=30 to wait up to 30 s for news): a quick reply may only say it reached them, so look again until status is answered (a person may take minutes or hours), then tell your human. If they ask you something, answer on the same note: open answer_at with ?text=… (URL-encoded). The link is private to whoever has it.' };
         return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json(body));
       }
       res.status(r.status);
@@ -83,14 +83,35 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
     };
     app.get('/note', (req, res) => leave(req, res, { text: req.query.text, from: req.query.from, purpose: req.query.purpose }));
     app.post('/note', express.json({ limit: '8kb' }), express.urlencoded({ extended: false, limit: '8kb' }), (req, res) => leave(req, res, req.body ?? {}));
-    // The secret is in the path, not a query (where proxies log it and pages pass it on).
-    app.get('/note/:id/:key', (req, res) => {
+    // The secret is in the path, not a query (where proxies log it and pages pass it on). The same link carries the
+    // conversation on: ?text= answers them (POST works too), ?wait=N holds the request up to 30 s until something changes
+    // (long polling: an AI that can only open links can't sleep between looks, run 56).
+    const page = (st: NonNullable<ReturnType<NonNullable<typeof desk>['webNoteState']>>, at: string) => notePage('Your note',
+      `<h1>${st.status === 'answered' ? 'Their answer' : 'Your note'}</h1>${(st.answers ?? []).map((a) => `<section class="card"${a.from === 'you' ? ' style="margin-left:24px"' : ''}><p class="small" style="margin:0 0 6px">${a.from === 'you' ? 'You' : 'Them'}</p><p style="margin:0">${esc(a.text)}</p><p class="small" style="margin:8px 0 0">${esc(new Date(a.at).toUTCString())}</p></section>`).join('')}${st.status === 'answered' ? '' : `<p class="lead">${esc(st.status[0]!.toUpperCase() + st.status.slice(1))}. Open this link again in a few minutes.</p>`}` +
+      `<form method="post" action="${esc(at)}"><label class="small" for="t">Answer them</label><textarea id="t" name="text" rows="3" maxlength="1000" required></textarea><button type="submit">Send</button></form>`);
+    const thread = async (req: express.Request, res: express.Response, text: unknown) => {
       sealed(res);
-      const st = desk?.webNoteState(req.params.id, req.params.key);
+      const { id, key } = req.params as { id: string; key: string };
+      const at = `${base()}/note/${id}/${key}`;
+      const html = req.accepts(['json', 'html']) === 'html';
+      if (typeof text === 'string' && text) {
+        if (req.method === 'GET' && previewing(req)) return void res.status(403).json({ error: 'a link preview or prefetch: nothing was added' });
+        const r = keeper.webFollowUp(id, key, { text });
+        if (r.status !== 200) return void (html ? res.status(r.status).type('html').send(notePage('Not sent', `<h1>Not sent</h1><p class="lead">${esc(String(r.body.error))}</p>`)) : res.status(r.status).json(r.body));
+        if (html) return void res.redirect(303, at);
+      }
+      let st = desk?.webNoteState(id, key);
       if (!st) return void res.status(404).json({ error: 'no such note, or the link is wrong' });
-      if (req.accepts(['json', 'html']) === 'html') return void res.type('html').send(notePage('Your note', `<h1>${st.status === 'answered' ? 'Their answer' : 'Your note'}</h1>${(st.answers ?? []).map((a) => `<section class="card"><p style="margin:0">${esc(a.text)}</p><p class="small" style="margin:8px 0 0">${esc(new Date(a.at).toUTCString())}</p></section>`).join('')}${st.status === 'answered' ? '' : `<p class="lead">${esc(st.status[0]!.toUpperCase() + st.status.slice(1))}. Open this link again in a few minutes.</p>`}`));
-      res.json(st);
-    });
+      const wait = Math.min(30, Math.max(0, Number(req.query.wait) || 0));
+      if (wait && !text) {
+        const was = JSON.stringify(st), until = Date.now() + wait * 1000;
+        while (Date.now() < until && !res.destroyed && JSON.stringify(st) === was) { await new Promise((r) => setTimeout(r, 500)); st = desk!.webNoteState(id, key) ?? st; }
+      }
+      if (html) return void res.type('html').send(page(st, at));
+      res.json({ ...st, ...(st.status === 'answered' ? {} : { answer_here: `${at}?text=… (URL-encoded): if they asked you something` }) });
+    };
+    app.get('/note/:id/:key', (req, res) => void thread(req, res, req.query.text));
+    app.post('/note/:id/:key', express.json({ limit: '8kb' }), express.urlencoded({ extended: false, limit: '8kb' }), (req, res) => void thread(req, res, (req.body ?? {}).text));
   }
   if (door) app.get('/', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.json({ a2a: door.a2a(), card: `${door.a2a().replace(/\/a2a$/, '')}/.well-known/agent-card.json`, ...(door.door() ? { door: door.door() } : {}) })));
   // Revocation anyone can check: the house's signed status list (W3C Bitstring Status List, SPEC §6).

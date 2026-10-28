@@ -426,6 +426,21 @@ describe('the owner', () => {
     expect((await ownerCall({ kind: 'list' })).notes.find((x: { id: string }) => x.id === left.note).from).toMatchObject({ web: true, checked: false });
     expect(await ownerCall({ kind: 'panel.note.reply', id: left.note, text: 'Yes: Tuesday 10:00?' })).toEqual({ ok: true });
     expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
+    // The sender answers on the same note (run 56: asked a question, the web AI had no way to say): it reaches the owner
+    // as a note from the same sender that names the first, and the owner's reply joins the one conversation.
+    expect(await (await fetch(`${left.answer_at}?text=${encodeURIComponent('Tuesday 10:00 works, thanks!')}`)).json()).toMatchObject({ status: 'your reply is with them', answers: [{ from: 'them' }, { from: 'you', text: 'Tuesday 10:00 works, thanks!' }] });
+    const notes = (await ownerCall({ kind: 'list' })).notes as { id: string; text: string; from: { webId: string } }[];
+    const followUp = notes.find((x) => x.text === 'Tuesday 10:00 works, thanks!')!;
+    expect(followUp.from.webId).toBe(notes.find((x) => x.id === left.note)!.from.webId);
+    // Waiting on the link (long polling) returns as soon as there's news.
+    const t0 = Date.now();
+    const waited = fetch(`${left.answer_at}?wait=20`).then((r) => r.json());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await ownerCall({ kind: 'panel.note.reply', id: followUp.id, text: 'See you then.' })).toEqual({ ok: true });
+    expect(await waited).toMatchObject({ status: 'answered', answer: { text: 'See you then.' } });
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect((await fetch(`${left.answer_at}?text=x`, { headers: { 'user-agent': 'Slackbot-LinkExpanding 1.0' } })).status).toBe(403);
+    expect((await fetch(`${houses.strict}/note/${left.note}/wrong?text=hello`)).status).toBe(404);
     expect((await fetch(`${houses.strict}/note?text=`)).status).toBe(400);
     // The panel's live stream: a token from a signed call opens it once; it says when something changed.
     const { path: stream } = await ownerCall({ kind: 'panel.stream' });

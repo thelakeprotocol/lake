@@ -555,6 +555,18 @@ export class Housekeeper {
     return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key } };
   }
 
+  /** The sender of a web note answers on it, at its private link: the same checks as a note, the thread's own limit. */
+  webFollowUp(id: string, key: string, p: { text?: unknown }): { status: number; body: Record<string, unknown> } {
+    if (!this.o.rules.door) return { status: 404, body: { error: 'this house\'s door is closed' } };
+    const text = typeof p.text === 'string' ? p.text.trim() : '';
+    if (!text || text.length > 1000) return { status: 400, body: { error: 'text: your answer, 1 to 1000 characters' } };
+    if (looksLikeInjection(text)) return { status: 400, body: { error: 'a note is for the owner to read, not instructions' } };
+    const r = this.o.desk.followUpWebNote(id, key, text);
+    if ('error' in r) return { status: r.status, body: { error: r.error } };
+    this.o.emit(makeEvent('knock', this.actor, 'agent:web', { purpose: 'contact' }));
+    return { status: 200, body: { kind: 'added', note: r.id } };
+  }
+
   /** A receipt from a payments agent the owner trusts goes in /receipts/. */
   private async receipt(p: ReceiptPayload): Promise<LakeData> {
     const check = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: this.o.webId, sandbox: this.o.sandbox });

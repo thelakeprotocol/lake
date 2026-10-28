@@ -420,35 +420,56 @@ export class OwnerDesk {
    * Notes left over plain web (an AI that can only open links, SPEC §9.0): each has a private link where its sender reads
    * the answer. The secret in that link is all it takes to read it, so it's only ever given to whoever left the note.
    */
-  private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[] }>();
+  private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[]; from?: NoteSender; thread?: string }>();
   /** Kept on disk: a restart mustn't break every answer link given out. */
   private saveWebNotes = () => writeFile(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes])).catch(() => {});
   addWebNote(n: { text: string; from?: string; purpose: string }): { id: string; key: string } | null {
-    const id = this.addNote({ from: { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false }, text: n.text, purpose: n.purpose });
+    const from: NoteSender = { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false };
+    const id = this.addNote({ from, text: n.text, purpose: n.purpose });
     if (!id) return null;
     const key = this.webNotes.get(id)?.key ?? randomBytes(12).toString('base64url');
-    this.webNotes.set(id, { ...this.webNotes.get(id), key });
+    this.webNotes.set(id, { from, ...this.webNotes.get(id), key });
     void this.saveWebNotes();
     return { id, key };
   }
+  /**
+   * The sender answers on the same note, at its private link (run 56: asked "which project?", the web AI had no way to
+   * say). It reaches the owner as a note of its own, from the same sender, that names the first; replies to either go
+   * to the one thread.
+   */
+  followUpWebNote(root: string, key: string, text: string): { id: string } | { error: string; status: number } {
+    const w = this.webNotes.get(root);
+    if (!w || w.thread || !this.webNoteState(root, key)) return { error: 'no such note, or the link is wrong', status: 404 };
+    if ((w.answers ?? []).filter((a) => a.by === 'sender').length >= 10) return { error: 'ten messages on one note: leave a new note instead', status: 429 };
+    const from = w.from ?? { web: true, name: 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false };
+    const id = this.addNote({ from, text, purpose: 'contact', re: root });
+    if (!id) return { error: 'a few notes an hour from one sender: try again later', status: 429 };
+    this.webNotes.set(id, { key: w.key, thread: root });
+    w.from = from;
+    w.answers = [...(w.answers ?? []), { text, at: new Date().toISOString(), by: 'sender', final: false }].slice(-20);
+    void this.saveWebNotes();
+    return { id };
+  }
   /** What became of a web note, for whoever holds its link. */
-  webNoteState(id: string, key: string): { status: string; answer?: { text: string; at: string }; answers?: { text: string; at: string; final: boolean }[]; check_again?: string } | null {
+  webNoteState(id: string, key: string): { status: string; answer?: { text: string; at: string }; answers?: { text: string; at: string; final: boolean; from: string }[]; check_again?: string } | null {
     const w = this.webNotes.get(id);
     // Compared in constant time: the secret is the only lock on this page.
     if (!w || key.length !== w.key.length || !timingSafeEqual(Buffer.from(key), Buffer.from(w.key))) return null;
-    const answers = (w.answers ?? []).map(({ text, at, final }) => ({ text, at, final }));
-    const last = answers.at(-1);
+    // The whole conversation, the sender's own messages marked as theirs.
+    const answers = (w.answers ?? []).map(({ text, at, final, by }) => ({ text, at, final, from: by === 'sender' ? 'you' : 'them' }));
+    if (answers.at(-1)?.from === 'you') return { status: 'your reply is with them', answers, check_again: 'in a few minutes: a person may take a while' };
+    const last = answers.filter((a) => a.from === 'them').at(-1);
     // A holding reply isn't the answer (run 54: "answered" made the sender's AI stop looking 25 s before the decision).
     if (last?.final) return { status: 'answered', answer: { text: last.text, at: last.at }, answers };
     const open = this.notes.some((x) => x.id === id);
     return { status: last ? 'replied, and the answer is still to come' : open ? 'with the owner, not answered yet' : (this.closedNotes.get(id)?.state ?? 'seen'), ...(last ? { answer: { text: last.text, at: last.at }, answers } : {}), ...(open || last ? { check_again: 'in a few minutes: a person may take a while' } : {}) };
   }
   private answerWebNote(id: string, text: string, by: string, final = true): { ok: true } | { error: string } {
-    const w = this.webNotes.get(id);
+    const w = this.webNotes.get(this.webNotes.get(id)?.thread ?? id);
     if (!w) return { error: 'that note came from a Lake agent, not the web: answer it with lake_ask to the from.url in its house.news (this tool is for notes left over plain web)' };
     const t = text.trim().slice(0, 1000);
     if (!t) return { error: 'text: the answer, up to 1000 characters' };
-    w.answers = [...(w.answers ?? []), { text: t, at: new Date().toISOString(), by, final }].slice(-10);
+    w.answers = [...(w.answers ?? []), { text: t, at: new Date().toISOString(), by, final }].slice(-20);
     void this.saveWebNotes();
     this.touch();
     return { ok: true };
@@ -464,7 +485,7 @@ export class OwnerDesk {
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
   notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
-  addNote(n: { from: NoteSender; text: string; purpose?: string }): string | null {
+  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string }): string | null {
     this.touch();
     // The same words again from the same sender are the same note (run 45 got one twice).
     const again = this.notes.find((x) => x.from.webId === n.from.webId && x.text === n.text);
@@ -472,7 +493,7 @@ export class OwnerDesk {
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes].slice(0, 50);
-    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word' }) });
+    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word' }) });
     return note.id;
   }
 
@@ -980,7 +1001,8 @@ export class OwnerDesk {
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, seenAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
-      notes: this.notes.map((n) => { const a = this.webNotes.get(n.id)?.answers?.at(-1); return a ? { ...n, answered: a } : n; }),
+      // Answered: a reply in its thread after it (not the sender's own follow-up).
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); return a ? { ...n, answered: a } : n; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };
