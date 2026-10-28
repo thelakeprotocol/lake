@@ -236,3 +236,20 @@ body.fetching::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .stat.skeleton { color: var(--faint); min-width: 120px; justify-content: center; }
 .address img.qr { display: block; margin: 12px auto 0; border-radius: 10px; background: #fff; padding: 8px; }
 .address { flex-direction: column; align-items: stretch; }
+code.recovery { font-size: 20px; letter-spacing: 0.06em; padding: 10px 14px; display: inline-block; }
+input.recovery-input { flex: 1; min-width: 12em; font-family: var(--f-mono); text-transform: uppercase; background: var(--ink); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+
+/* Inline confirm and errors (no dialog boxes) */
+.act { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.act-err { color: var(--threat); font-size: 13px; flex-basis: 100%; }
+.btn.armed, button.armed { border-color: var(--threat); color: var(--threat); }
+.choice { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
+
+/* Free-time picker */
+.window { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 8px 0; }
+.window .days { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.window .day { min-width: 38px; padding: 6px 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.window .day.on { background: var(--mint); border-color: var(--mint); color: var(--mint-ink); font-weight: 600; }
+.window .times { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.window input[type=time] { background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; color-scheme: dark; }
+select.tz { max-width: 220px; }

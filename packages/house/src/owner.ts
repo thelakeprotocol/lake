@@ -1,5 +1,5 @@
-import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
 import {
@@ -143,6 +143,18 @@ export class OwnerDesk {
   readonly grants = new Map<string, GrantRecord>();
   private replay = new ReplayGuard();
   private token = '';
+  /** When a pairing link the panel made stops working (0: the operator's, which doesn't expire). */
+  private tokenUntil = 0;
+  private recoveryTries: number[] = [];
+  private recoveryFile = () => join(this.o.dataDir, 'recovery.json');
+  /** A recovery code is kept only as a salted scrypt hash. */
+  private async checkRecovery(code: string): Promise<boolean> {
+    const saved = JSON.parse(await readFile(this.recoveryFile(), 'utf8').catch(() => 'null')) as { salt: string; hash: string } | null;
+    if (!saved) return false;
+    const got = scryptSync(code.replace(/[\s-]/g, '').toUpperCase(), Buffer.from(saved.salt, 'base64'), 32);
+    return timingSafeEqual(got, Buffer.from(saved.hash, 'base64'));
+  }
+  private clearRecovery = () => rm(this.recoveryFile(), { force: true }).catch(() => {});
   private operatorToken = '';
   readonly assistants = new Map<string, AssistantKey>();
   private invites = new Map<string, { label: string; until: number }>();
@@ -241,6 +253,8 @@ export class OwnerDesk {
     this.agenda = [];
     await this.saveAgenda();
     this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'), true);
+    await this.clearRecovery();
+    this.tokenUntil = 0;
     await this.o.saveAssistants?.([]);
     this.ownerJwk = null;
     this.ownerSeen = 0;
@@ -515,13 +529,32 @@ export class OwnerDesk {
     const r = express.Router();
     r.use(express.json({ limit: '64kb' }));
 
+    // Whether a device can pair here without a link: only a sandbox house nobody holds. The pairing screen asks, so it
+    // doesn't offer a button that can't work (an owned house needs a link or a recovery code).
+    r.get('/pair', (_req, res) => void res.set('cache-control', 'no-store').json({ open: this.o.openPairing && !this.ownerJwk }));
+
     r.post('/pair', async (req, res) => {
-      const { publicJwk, token } = req.body ?? {};
+      const { publicJwk, token, recovery } = req.body ?? {};
       if (!publicJwk?.x || publicJwk.crv !== 'Ed25519') return void res.status(400).json({ error: 'send an Ed25519 public key' });
       if (this.ownerJwk && this.ownerJwk.x === publicJwk.x) return void (this.seen(), res.json({ paired: true, webId: this.o.webId }));
       const firstCome = this.o.openPairing && !this.ownerJwk;
-      if (!firstCome && token !== this.token) return void res.status(403).json({ error: this.ownerJwk ? 'this house already has an owner' : 'wrong or missing pairing token' });
-      this.ownerJwk = { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid: String(publicJwk.kid ?? 'owner'), alg: 'EdDSA', ...(this.o.leaseHours ? { claimedAt: Date.now() } : {}) } as JWK;
+      // A recovery code the owner wrote down (backup codes, as two-factor sign-ins give): it makes this device the key.
+      // Five tries an hour; each code works once.
+      let recovered = false;
+      if (!firstCome && typeof recovery === 'string' && recovery.trim()) {
+        this.recoveryTries = this.recoveryTries.filter((t) => Date.now() - t < 3_600_000);
+        if (this.recoveryTries.length >= 5) return void res.status(429).json({ error: 'too many tries: wait an hour' });
+        this.recoveryTries.push(Date.now());
+        if (!(await this.checkRecovery(recovery))) return void res.status(403).json({ error: 'that recovery code doesn\'t match (each code works once)' });
+        recovered = true;
+      }
+      const linkLive = token === this.token && (!this.tokenUntil || Date.now() < this.tokenUntil);
+      if (!firstCome && !recovered && !linkLive) return void res.status(403).json({ error: token === this.token ? 'this pairing link has expired: make a new one' : this.ownerJwk ? 'this house already has an owner' : 'wrong or missing pairing token' });
+      // Moved to this device: a lease keeps its start (moving devices doesn't lengthen a claim).
+      const claimedAt = (this.ownerJwk as { claimedAt?: number } | null)?.claimedAt;
+      this.ownerJwk = { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid: String(publicJwk.kid ?? 'owner'), alg: 'EdDSA', ...(this.o.leaseHours ? { claimedAt: claimedAt ?? Date.now() } : {}) } as JWK;
+      if (recovered) await this.clearRecovery();
+      this.tokenUntil = 0;
       await this.o.saveOwnerKey(this.ownerJwk);
       this.token = await secret(join(this.o.dataDir, 'pairing-token'), true); // one use only
       this.seen();
@@ -796,6 +829,23 @@ export class OwnerDesk {
         if (text) sug.reply = text;
         this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
+      }
+      // Your key: a recovery code to write down, and a one-use link to move to another device.
+      if (p.kind === 'panel.key') {
+        const saved = JSON.parse(await readFile(this.recoveryFile(), 'utf8').catch(() => 'null')) as { at: string } | null;
+        return void res.json({ recovery: saved ? { at: saved.at } : null });
+      }
+      if (p.kind === 'panel.recovery.make') {
+        const raw = randomBytes(15);
+        const code = Array.from(raw).map((b) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
+        const salt = randomBytes(16);
+        await writeFile(this.recoveryFile(), JSON.stringify({ salt: salt.toString('base64'), hash: scryptSync(code, salt, 32).toString('base64'), at: new Date().toISOString() }), { mode: 0o600 });
+        return void res.json({ code: code.match(/.{5}/g)!.join('-'), note: 'shown once: write it down. A new code replaces this one' });
+      }
+      if (p.kind === 'panel.pair.link') {
+        this.token = await secret(join(this.o.dataDir, 'pairing-token'), true);
+        this.tokenUntil = Date.now() + 30 * 60_000;
+        return void res.json({ hash: `#pair=${this.token}`, until: new Date(this.tokenUntil).toISOString() });
       }
       if (p.kind === 'panel.stream') {
         const t = randomBytes(16).toString('base64url');

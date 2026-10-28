@@ -34,7 +34,13 @@ async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
   try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signEnvelope(payload, key, webId || 'owner')) }); } catch (e) { reached(false); throw e; }
   reached(true);
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? String(res.status));
+  if (!res.ok) {
+    const error = (await res.json().catch(() => ({}))).error ?? String(res.status);
+    // This device's key isn't the house's any more (moved to another device, or recovered there): back to pairing.
+    // Only that answer ("no key … for …"): an expired or replayed signature, or a phone's clock off, is not a lost key.
+    if (res.status === 403 && webId && /^no key \S+ for /.test(String(error))) dispatchEvent(new CustomEvent('lake:not-the-key', { detail: error }));
+    throw new Error(error);
+  }
   return res.json();
 }
 
@@ -51,7 +57,9 @@ const cached = <T>(k: string): T | undefined => {
     return v && Date.now() - v.at < CACHE_MS ? v.v : undefined;
   } catch { return undefined; }
 };
-const remember = (k: string, v: unknown) => { try { sessionStorage.setItem(CACHE + k, JSON.stringify({ at: Date.now(), v })); } catch { /* full or private: just not kept */ } };
+// Set on sign-out: a fetch still landing must not put back what was just cleared.
+let forgetting = false;
+const remember = (k: string, v: unknown) => { if (forgetting) return; try { sessionStorage.setItem(CACHE + k, JSON.stringify({ at: Date.now(), v })); } catch { /* full or private: just not kept */ } };
 // What an earlier version kept on the device for good: gone.
 try { for (const k of Object.keys(localStorage)) if (k.startsWith('lake-panel:')) localStorage.removeItem(k); } catch { /* nothing kept */ }
 
@@ -97,14 +105,25 @@ const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${a
 const stored = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const store = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* a private window */ } };
 
-/** A button that runs something on the house: disabled while it runs, then everything refetches. */
-function Act({ label, cls = '', run, title }: { label: Child; cls?: string; run: () => Promise<unknown>; title?: string }) {
+/**
+ * A button that runs something on the house: disabled while it runs, then everything refetches. What went wrong shows
+ * next to it, not in a pop-up. With `confirm`, the first tap asks on the button itself ("Tap again to …") and the second,
+ * within a few seconds, does it: no dialog boxes.
+ */
+function Act({ label, cls = '', run, title, confirm: ask }: { label: Child; cls?: string; run: () => Promise<unknown>; title?: string; confirm?: string }) {
   const bump = useBump();
   const [busy, setBusy] = useState(false);
-  return h('button', { class: `btn small ${cls}`, type: 'button', disabled: busy, title, onClick: async () => {
-    setBusy(true);
-    try { await run(); } catch (e) { alert((e as Error).message); } finally { setBusy(false); bump(); }
-  } }, label);
+  const [armed, setArmed] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t); }, [armed]);
+  useEffect(() => { if (!err) return; const t = setTimeout(() => setErr(''), 8000); return () => clearTimeout(t); }, [err]);
+  return h('span', { class: 'act' },
+    h('button', { class: `btn small ${cls}${armed ? ' armed' : ''}`, type: 'button', disabled: busy, title, onClick: async () => {
+      if (ask && !armed) return setArmed(true);
+      setArmed(false); setBusy(true); setErr('');
+      try { await run(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); bump(); }
+    } }, armed ? ask : label),
+    err ? h('span', { class: 'act-err', role: 'alert' }, err) : null);
 }
 
 function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
@@ -130,7 +149,7 @@ function Failed({ error }: { error?: string }) {
 // Your agent and the agents that knock are different things: "My agent" is yours, "Visitors" are strangers.
 const TABS = [
   ['home', 'Home'], ['requests', 'Requests'], ['offers', 'Offers'], ['myagent', 'My agent'], ['keys', 'Keys'], ['rules', 'Rules'],
-  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'],
+  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'], ['key', 'Your key'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 /** Four tabs for every day; the rest one tap away under More. */
@@ -154,16 +173,21 @@ function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; p
     ...shown.filter(([id]) => MAIN.includes(id)).map(button),
     h('button', { type: 'button', class: `more-btn${MAIN.includes(tab) ? '' : ' here'}`, 'aria-expanded': String(open), onClick: () => setOpen(!open) }, 'More'),
     h('div', { class: 'more-menu' }, h('span', { class: 'more-label' }, 'More'), ...shown.filter(([id]) => !MAIN.includes(id)).map(button),
-      h('button', { type: 'button', class: 'extra signout', onClick: signOut }, 'Sign out on this device')));
+      h(SignOut, {})));
 }
 
 /**
  * Your key lives only on this device: signing out forgets it here. Coming back takes a new pairing link (a sandbox house
  * you claimed is simply free again once its lease ends), so it asks first.
  */
+function SignOut({ cls = 'extra signout' }: { cls?: string }) {
+  const [armed, setArmed] = useState(false);
+  return h('button', { type: 'button', class: `${cls}${armed ? ' armed' : ''}`, onClick: () => (armed ? signOut() : setArmed(true)) },
+    armed ? 'Tap again: to get back in you\'ll need your recovery code' : 'Sign out on this device');
+}
 function signOut() {
-  if (!confirm('Sign out on this device?\n\nYour house\'s key is only on this device. Once it\'s gone, you need a new pairing link to get back in (on the sandbox, from whoever runs it).')) return;
   // The key, and what the screens last showed (else the panel would open as if still paired).
+  forgetting = true;
   try {
     localStorage.removeItem(`lake-owner-key:${location.host}`);
     for (const k of Object.keys(sessionStorage)) if (k.startsWith(CACHE)) sessionStorage.removeItem(k);
@@ -262,7 +286,7 @@ function FeedLine({ onShown }: { onShown?: () => void }) {
   };
   if (!url) return h('button', { class: 'btn small', type: 'button', onClick: () => void show() }, 'Show the address');
   return h('span', { class: 'row' }, h('code', {}, url), h(CopyButton, { text: url }),
-    h('button', { class: 'btn small quiet', type: 'button', onClick: () => { if (confirm('Make a new address? The old one stops working.')) void show(true); } }, 'New address'));
+    h(Act, { label: 'New address', cls: 'quiet', confirm: 'Tap again: the old one stops working', run: () => show(true) }));
 }
 
 /** What you agreed to, written in by your agent, with who agreed on the other side (or that nobody has yet). */
@@ -315,7 +339,7 @@ function SuggestionItem({ x }: { x: Note }) {
     x.ask && !x.ask.answered ? h('div', { class: 'choices' }, ...x.ask.choices.map((c, i) => h(Act, { key: c, label: c, cls: x.ask!.recommend === i ? 'primary' : '', run: () => call({ kind: 'panel.assistant.answer', id: x.id, choice: c }) }))) : null,
     h('div', { class: 'item-actions' },
       // Each is still your tap, on your key.
-      x.offer ? h(Act, { label: 'Accept the offer', cls: 'primary', run: async () => { const r = await acceptOffer(x.offer!); if (r.error) throw new Error(r.error); if (!r.cancelled) await dismiss(); } }) : null,
+      x.offer ? h(AcceptOffer, { offer: x.offer, after: dismiss }) : null,
       x.note && x.mute ? h(Act, { label: 'Mute this sender', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }) : null,
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,
@@ -360,11 +384,7 @@ function LeaseCard() {
   return h('div', { class: 'card' },
     h('h3', {}, `Yours until ${until.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`),
     h('p', { class: 'muted' }, 'A sandbox house is a lease. When it ends, every key is revoked, the rules reset and the next person can claim it. Want to keep a house? Run your own: it stays yours.'),
-    h('button', { class: 'btn danger small', type: 'button', onClick: async () => {
-      if (!confirm('Hand this house back? Every key is revoked and the next person gets it fresh.')) return;
-      await call({ kind: 'release' });
-      location.reload();
-    } }, 'Hand it back now'));
+    h(Act, { label: 'Hand it back now', cls: 'danger', confirm: 'Tap again: every key is revoked', run: async () => { await call({ kind: 'release' }); location.reload(); } }));
 }
 
 // ---- Requests ----
@@ -451,7 +471,7 @@ function Keys() {
     loose.length ? h('div', {}, h('h2', {}, 'Other keys'), h('ul', { class: 'rows' }, ...loose.map((k) => h('li', { key: k.id },
       h('div', {}, h('div', { class: 'r-title' }, `${k.visitor} · ${k.purpose}`), h('div', { class: 'r-meta' }, `${k.fields.map(nice).join(', ')} · ${hoursLeft(k.until)} left · ${k.authorizedBy}`)),
       takeBack(k.id, 'Revoke'))))) : null,
-    live ? h('div', { class: 'savebar' }, h(Act, { label: 'Take every key back', cls: 'danger', run: async () => { if (confirm('Take back every key to your house?')) await call({ kind: 'revoke', revoke: 'all' }); } })) : null);
+    live ? h('div', { class: 'savebar' }, h(Act, { label: 'Take every key back', cls: 'danger', confirm: 'Tap again to take every key back', run: () => call({ kind: 'revoke', revoke: 'all' }) })) : null);
 }
 
 // ---- Rules ----
@@ -637,21 +657,67 @@ function ShareDoor({ address }: { address: string }) {
  * When you're free to meet: windows like "mon-fri 09:00-12:00" in your own time zone. Your agent offers those times, around
  * what is already in your agenda, instead of asking you each time. Saved in your rules.
  */
+// Days in the order a week reads (Mon first); the core's names are sun..sat.
+const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+type Win = { days: string[]; from: string; to: string };
+/** "mon-fri 09:00-12:00" or "sat,sun 10:00-11:30" into chips and times; a day range may wrap (fri-mon). */
+function readWindow(w: string): Win | null {
+  const m = /^(\S+)\s+(\d\d:\d\d)-(\d\d:\d\d)$/.exec(w.trim());
+  if (!m) return null;
+  const days = new Set<string>();
+  for (const part of m[1]!.split(',')) {
+    const [x, y] = part.split('-'), i = WEEK.indexOf(x!), j = y ? WEEK.indexOf(y) : i;
+    if (i < 0 || j < 0) return null;
+    for (let k = i; ; k = (k + 1) % 7) { days.add(WEEK[k]!); if (k === j) break; }
+  }
+  return { days: WEEK.filter((d) => days.has(d)), from: m[2]!, to: m[3] === '24:00' ? '23:59' : m[3]! };
+}
+/** Back to the house's form, runs of days as ranges: mon-fri, sat,sun. */
+function writeWindow(w: Win): string {
+  const runs: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    if (!w.days.includes(WEEK[i]!)) continue;
+    let j = i; while (j + 1 < 7 && w.days.includes(WEEK[j + 1]!)) j++;
+    runs.push(j - i >= 2 ? `${WEEK[i]}-${WEEK[j]}` : WEEK.slice(i, j + 1).join(','));
+    i = j;
+  }
+  return `${runs.join(',')} ${w.from}-${w.to === '23:59' ? '24:00' : w.to}`;
+}
+const ZONES: string[] = (() => { try { return (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf('timeZone'); } catch { return []; } })();
+
+/** When you're free: days and hours picked, not typed. */
 function FreeCard({ f, av }: { f: FreeState; av?: { tz: string; free: string[]; meetings?: number } }) {
-  const free = useRef<HTMLTextAreaElement>(null), len = useRef<HTMLSelectElement>(null);
-  const [msg, setMsg] = useState('');
-  const tz = av?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [wins, setWins] = useState<Win[]>(() => (av?.free ?? []).map(readWindow).filter((w): w is Win => !!w));
+  const [tz, setTz] = useState(av?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [len, setLen] = useState(av?.meetings ?? 60);
+  const edit = (i: number, w: Partial<Win>) => setWins(wins.map((x, k) => (k === i ? { ...x, ...w } : x)));
   const save = (clear: boolean) => async () => {
-    const lines = free.current!.value.split('\n').map((x) => x.trim()).filter(Boolean);
-    const res = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.availability.set', availability: clear || !lines.length ? null : { tz, free: lines, meetings: Number(len.current!.value) } });
-    if (!res.ok) setMsg(res.error ?? 'not saved'); else { setMsg(''); rulesDraft = null; }
+    const ok = wins.filter((w) => w.days.length && w.from < w.to);
+    if (!clear && wins.length && ok.length < wins.length) throw new Error('Each time needs a day, and to end after it starts.');
+    const res = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.availability.set', availability: clear || !ok.length ? null : { tz, free: ok.map(writeWindow), meetings: len } });
+    if (!res.ok) throw new Error(res.error ?? 'not saved');
+    rulesDraft = null;
+    if (clear) setWins([]);
   };
+  const zones = ZONES.includes(tz) ? ZONES : [tz, ...ZONES];
   return h('section', { class: 'block', id: 'free' },
     h('h2', {}, 'When you\'re free to meet'),
     h('p', { class: 'muted' }, f.set ? `Your agent offers these times to people who want to meet you, around your agenda: ${f.slots.length} free in the next two weeks.` : 'Say when you\'re usually free, and your agent can offer people a time without asking you first.'),
-    h('label', { class: 'field' }, h('span', { class: 'lab' }, `One window a line, in ${tz}`), h('textarea', { ref: free, rows: 3, placeholder: 'mon-fri 09:00-12:00\nsat 10:00-11:00', defaultValue: (av?.free ?? []).join('\n') })),
-    h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Meetings last ', h('select', { ref: len }, ...[30, 45, 60, 90].map((m) => h('option', { value: String(m), selected: (av?.meetings ?? 60) === m }, `${m} min`)))),
-      h(Act, { label: 'Save', cls: 'primary', run: save(false) }), av ? h(Act, { label: 'Clear', run: save(true) }) : null, msg ? h('span', { class: 'muted' }, msg) : null));
+    ...wins.map((w, i) => h('div', { class: 'window', key: i },
+      h('div', { class: 'days', role: 'group', 'aria-label': 'Days' }, ...WEEK.map((d) => h('button', {
+        type: 'button', class: `day${w.days.includes(d) ? ' on' : ''}`, 'aria-pressed': w.days.includes(d),
+        onClick: () => edit(i, { days: w.days.includes(d) ? w.days.filter((x) => x !== d) : WEEK.filter((x) => x === d || w.days.includes(x)) }),
+      }, d[0]!.toUpperCase() + d.slice(1, 2)))),
+      h('div', { class: 'times' },
+        h('input', { type: 'time', step: 1800, value: w.from, 'aria-label': 'From', onInput: (e: Event) => edit(i, { from: (e.target as HTMLInputElement).value }) }),
+        h('span', { class: 'muted' }, 'to'),
+        h('input', { type: 'time', step: 1800, value: w.to, 'aria-label': 'To', onInput: (e: Event) => edit(i, { to: (e.target as HTMLInputElement).value }) }),
+        h('button', { type: 'button', class: 'btn small quiet', 'aria-label': 'Remove this time', onClick: () => setWins(wins.filter((_, k) => k !== i)) }, 'Remove')))),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn small', onClick: () => setWins([...wins, { days: ['mon', 'tue', 'wed', 'thu', 'fri'], from: '09:00', to: '12:00' }]) }, wins.length ? 'Add another time' : 'Add a time')),
+    h('div', { class: 'row' },
+      h('label', { class: 'inline' }, 'Time zone ', h('select', { class: 'tz', value: tz, onChange: (e: Event) => setTz((e.target as HTMLSelectElement).value) }, ...zones.map((z) => h('option', { value: z }, z.replace(/_/g, ' ')))))),
+    h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Meetings last ', h('select', { value: String(len), onChange: (e: Event) => setLen(Number((e.target as HTMLSelectElement).value)) }, ...[30, 45, 60, 90].map((m) => h('option', { value: String(m) }, `${m} min`)))),
+      h(Act, { label: 'Save', cls: 'primary', run: save(false) }), av ? h(Act, { label: 'Clear', confirm: 'Tap again to clear your times', run: save(true) }) : null));
 }
 
 // ---- Offers ----
@@ -732,11 +798,7 @@ function OfferCard({ o, locked }: { o: Offer; locked: boolean }) {
     o.answer ? h('p', { class: 'advice' }, h('b', {}, o.quoter.name), String(o.answer.kind === 'agreed' ? `Yes: ${o.answer.what ?? 'agreed'}. ${o.answer.feePaid ? `${money0(Number(o.answer.feePaid), o.currency)} paid to you.` : ''} Next: ${o.answer.next ?? ''}` : o.answer.why ?? o.answer.kind)) : null,
     o.result.eligible ? h('div', { class: 'actions', style: 'grid-template-columns:1fr' },
       done || locked ? h('button', { class: 'btn allow', type: 'button', disabled: true }, o.status === 'paid' ? 'Paid' : o.status === 'accepted' ? 'Accepted' : 'Accept')
-        : h(Act, { label: 'Accept', cls: 'allow', run: async () => {
-          if (!confirm(`Accept ${o.quoter.name}'s offer? Your signed record goes to them, and only them, so they can confirm it.`)) return;
-          const r = await acceptOffer(o.id);
-          if (r.error) throw new Error(r.error);
-        } })) : null);
+        : h(AcceptOffer, { offer: o.id, label: 'Accept', cls: 'allow', confirmText: `Tap again: your record goes to ${o.quoter.name} only` })) : null);
 }
 
 /**
@@ -744,20 +806,37 @@ function OfferCard({ o, locked }: { o: Offer; locked: boolean }) {
  * and the way on is one tap: raise its allowance to cover it (signed here, on this device) and accept, or pay it yourself
  * (run 48: the shop stopped at a refusal nobody could act on).
  */
-async function acceptOffer(offer: string): Promise<{ error?: string; cancelled?: boolean }> {
+type OverAllowance = { price: { amount: number; currency: string }; allowance: { kid: string; amount: number } };
+async function acceptOffer(offer: string, how?: 'raise' | 'self', over?: OverAllowance): Promise<{ error?: string; over?: OverAllowance }> {
   type R = { error?: string; code?: string; price?: { amount: number; currency: string }; allowance?: { kid: string; amount: number } };
   const accept = (even = false) => call<R>({ kind: 'panel.offer.accept', offer, ...(even ? { even_over_allowance: true } : {}) }).catch((e) => ({ error: (e as Error).message }) as R);
-  const r = await accept();
-  if (r.code !== 'over_allowance' || !r.price || !r.allowance) return r;
-  const need = Math.min(Math.ceil(r.price.amount), 500);
-  if (need >= r.price.amount && confirm(`${money$(r.price.amount, r.price.currency)} is more than your agent may spend (${money$(r.allowance.amount, r.price.currency)}).\n\nRaise its allowance to ${money$(need, r.price.currency)} for 7 days, signed on this device, and accept?`)) {
-    const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: r.allowance.kid, amount: need, currency: r.price.currency, days: 7 });
+  if (how === 'self') return accept(true);
+  if (how === 'raise' && over) {
+    const need = Math.min(Math.ceil(over.price.amount), 500);
+    const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: over.allowance.kid, amount: need, currency: over.price.currency, days: 7 });
     if (d.error) return d;
     const set = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
     if (!set.ok) return { error: set.error ?? 'the allowance was refused' };
     return accept();
   }
-  return confirm('Accept anyway, and pay it yourself?') ? accept(true) : { cancelled: true };
+  const r = await accept();
+  // More than your agent may spend: asked in the page, not a dialog (OverAllowanceChoice).
+  if (r.code === 'over_allowance' && r.price && r.allowance) return { over: { price: r.price, allowance: r.allowance } };
+  return r;
+}
+
+/** Over your agent's allowance: raise it to cover this (signed here) and accept, or accept and pay it yourself. */
+function AcceptOffer({ offer, label = 'Accept the offer', cls = 'primary', confirmText, after }: { offer: string; label?: string; cls?: string; confirmText?: string; after?: () => Promise<unknown> }) {
+  const [over, setOver] = useState<OverAllowance | null>(null);
+  const done = async (r: { error?: string; over?: OverAllowance }) => { if (r.error) throw new Error(r.error); if (r.over) return setOver(r.over); setOver(null); await after?.(); };
+  if (!over) return h(Act, { label, cls, confirm: confirmText, run: async () => done(await acceptOffer(offer)) });
+  const need = Math.min(Math.ceil(over.price.amount), 500);
+  return h('div', { class: 'choice' },
+    h('p', { class: 'item-meta', style: 'margin:0 0 8px' }, `${money$(over.price.amount, over.price.currency)} is more than your agent may spend (${money$(over.allowance.amount, over.price.currency)}).`),
+    h('div', { class: 'row', style: 'margin:0' },
+      need >= over.price.amount ? h(Act, { label: `Raise it to ${money$(need, over.price.currency)} and accept`, cls: 'primary', run: async () => done(await acceptOffer(offer, 'raise', over)) }) : null,
+      h(Act, { label: 'Accept, I\'ll pay it myself', run: async () => done(await acceptOffer(offer, 'self')) }),
+      h('button', { class: 'btn small quiet', type: 'button', onClick: () => setOver(null) }, 'Not now')));
 }
 
 // ---- Visitors ----
@@ -802,7 +881,7 @@ function MyAgent() {
       h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests${a.allowance ? ` · may spend ${money$(a.allowance.amount, a.allowance.currency)} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
       h('div', { class: 'item-foot' },
         a.allowance || !a.canHaveAllowance ? h('span', {}, h(Allowance, { a })) : h('details', { class: 'more' }, h('summary', {}, 'Give it spending money'), h(Allowance, { a })),
-        h(Act, { label: 'Revoke', cls: 'danger', run: async () => { if (confirm('Take its key back? It can no longer look inside or suggest.')) await call({ kind: 'panel.assistant.revoke', kid: a.kid }); } })))))) : null,
+        h(Act, { label: 'Revoke', cls: 'danger', confirm: 'Tap again: it can no longer look or suggest', run: () => call({ kind: 'panel.assistant.revoke', kid: a.kid }) })))))) : null,
     invite ? h('section', { class: 'block start' }, h('h2', {}, 'Paste this to your AI'),
       h('p', { class: 'muted' }, `It needs the Lake connector. The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`),
       h('textarea', { readonly: true, rows: 5, class: 'copybox', value: invite.msg, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
@@ -893,7 +972,41 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey };
+
+/**
+ * Your key lives only on this device. Two ways not to lose your house with it, as sign-ins do it: a recovery code you
+ * write down (kept by the house only as a salted hash; it makes any device your key, once), and a one-use link to move
+ * the key to another device.
+ */
+function YourKey() {
+  const k = useHouse<{ recovery: { at: string } | null }>({ kind: 'panel.key' });
+  const [code, setCode] = useState<string | null>(null);
+  const [link, setLink] = useState<{ url: string; qr: string; until: string } | null>(null);
+  return h('div', {},
+    h('p', { class: 'lede' }, 'Your house\'s key is on this device, and only here. Keep a way back in, in case you lose it.'),
+    h('section', { class: 'block' }, h('h2', {}, 'Recovery code'),
+      code ? h('div', { class: 'start' },
+        h('p', { class: 'item-meta', style: 'margin-top:0' }, 'Write it down and keep it somewhere safe. It\'s shown only now; it works once.'),
+        h('p', {}, h('code', { class: 'recovery' }, code)),
+        h('div', { class: 'row' }, h(CopyButton, { text: code }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => setCode(null) }, 'I\'ve written it down')))
+        : h('div', {},
+          h('p', { class: 'muted' }, k.data?.recovery ? `You made one on ${new Date(k.data.recovery.at).toLocaleDateString()}. Lost it? Make a new one: the old one stops working.` : 'If you lose this device, a recovery code makes another one your key.'),
+          h(Act, { label: k.data?.recovery ? 'Make a new recovery code' : 'Make a recovery code', cls: k.data?.recovery ? '' : 'primary', run: async () => setCode((await call<{ code: string }>({ kind: 'panel.recovery.make' })).code) }))),
+    h('section', { class: 'block' }, h('h2', {}, 'Move to another device'),
+      link ? h('div', { class: 'address' },
+        h('div', {}, h('p', { class: 'item-meta', style: 'margin-top:0' }, `Open this on the new device. It works once, until ${new Date(link.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}; this device is signed out when it's used.`),
+          h('code', {}, link.url), h('div', { class: 'row' }, h(CopyButton, { text: link.url }))),
+        h('img', { class: 'qr', alt: 'QR code of the pairing link', width: 200, height: 200, src: link.qr }))
+        : h(Act, { label: 'Make a pairing link', run: async () => {
+          const r = await call<{ hash: string; until: string }>({ kind: 'panel.pair.link' });
+          const url = `${location.origin}${location.pathname}${r.hash}`;
+          setLink({ url, until: r.until, qr: await QRCode.toDataURL(url, { margin: 1, width: 480 }) });
+        } })),
+    h('section', { class: 'block' }, h('h2', {}, 'This device'),
+      h('p', { class: 'muted' }, 'On the sandbox, whoever runs it can also give you a new pairing link.'),
+      h(SignOut, { cls: 'btn small danger' })));
+}
 
 function App() {
   const [tab, setTab] = useState<Tab>(tabFromHash());
@@ -954,12 +1067,13 @@ function App() {
 }
 
 /** Not yours yet: just this house's name and the one thing to do. */
-function Pair({ onPaired }: { onPaired: () => void }) {
-  const [msg, setMsg] = useState('');
+function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) {
+  const [msg, setMsg] = useState(why ?? '');
+  const recovery = useRef<HTMLInputElement>(null);
   const name = /\/t\/([^/]+)\/owner\//.exec(location.pathname)?.[1];
-  const pair = async () => {
+  const pair = async (withCode?: string) => {
     const token = new URLSearchParams(location.hash.slice(1)).get('pair') ?? undefined;
-    const res = await fetch(`${api}pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: key.jwk, token }) });
+    const res = await fetch(`${api}pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: key.jwk, token, ...(withCode ? { recovery: withCode } : {}) }) });
     const body = await res.json();
     if (!res.ok) return setMsg(body.error ?? 'pairing failed');
     webId = body.webId;
@@ -967,15 +1081,25 @@ function Pair({ onPaired }: { onPaired: () => void }) {
     history.replaceState(null, '', location.pathname);
     onPaired();
   };
-  // A link that carries a token pairs at once.
-  useEffect(() => { if (location.hash.includes('pair=')) void pair(); }, []);
+  // A link that carries a token pairs at once. Without one, only a house nobody holds can be paired with a tap.
+  const [open, setOpen] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (location.hash.includes('pair=')) void pair();
+    else void fetch(`${api}pair`).then((r) => r.json()).then((b: { open?: boolean }) => setOpen(!!b.open), () => setOpen(true));
+  }, []);
+  const owned = open === false;
   return h('div', { class: 'shell unpaired' }, h('main', {},
     h('header', { class: 'top' }, h('div', { class: 'eyebrow' }, h('span', { class: 'dot' }), h('span', {}, 'A house on the Lake')), h('h1', {}, name ? `House ${name}` : 'A house on the Lake')),
     h('section', { id: 'pair' },
       h('p', { class: 'big' }, 'Make this phone its key'),
-      h('p', { class: 'muted' }, 'A key is made here, on this phone, and never leaves it. From then on, only this phone can say yes for your house.'),
-      h('button', { class: 'btn primary', type: 'button', onClick: () => void pair() }, 'Pair this device'),
-      msg ? h('p', { class: 'muted' }, msg) : null)));
+      owned
+        ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (More → Your key), or type your recovery code.')
+        : h('p', { class: 'muted' }, 'A key is made here, on this phone, and never leaves it. From then on, only this phone can say yes for your house.'),
+      owned ? null : h('button', { class: 'btn primary', type: 'button', disabled: open === null, onClick: () => void pair() }, 'Pair this device'),
+      msg ? h('p', { class: 'muted' }, msg) : null,
+      h('details', { class: 'fold', style: 'margin-top:24px', open: owned }, h('summary', {}, 'Have a recovery code?'),
+        h('div', { class: 'row' }, h('input', { ref: recovery, type: 'text', placeholder: 'XXXXX-XXXXX-XXXXX', autocomplete: 'off', class: 'recovery-input' }),
+          h('button', { class: 'btn', type: 'button', onClick: () => { const c = recovery.current!.value.trim(); if (c) void pair(c); } }, 'Use it'))))));
 }
 
 function Root() {
@@ -987,8 +1111,18 @@ function Root() {
   useEffect(() => {
     void call<{ webId: string; until?: string }>({ kind: 'list' }).then((v) => { webId = v.webId; leaseUntil = v.until ?? null; remember(JSON.stringify({ kind: 'list' }), v); setState('paired'); }, (e: Error) => { if (reachable || !seen) setState('unpaired'); void e; });
   }, []);
+  const [why, setWhy] = useState<string | undefined>();
+  useEffect(() => {
+    const lost = () => {
+      try { for (const k of Object.keys(sessionStorage)) if (k.startsWith(CACHE)) sessionStorage.removeItem(k); } catch { /* nothing kept */ }
+      setWhy('This device isn\'t your house\'s key any more (it moved to another device, or was recovered there).');
+      setState('unpaired');
+    };
+    addEventListener('lake:not-the-key', lost);
+    return () => removeEventListener('lake:not-the-key', lost);
+  }, []);
   if (state === 'checking') return null;
-  return state === 'paired' ? h(App, {}) : h(Pair, { onPaired: () => setState('paired') });
+  return state === 'paired' ? h(App, {}) : h(Pair, { onPaired: () => setState('paired'), why });
 }
 
 render(h(Root, {}), document.getElementById('app')!);

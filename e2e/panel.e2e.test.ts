@@ -46,6 +46,11 @@ const tab = async (name: string) => {
   await page.waitForTimeout(300);
 };
 
+const lostKey = async (p: Page) => {
+  const said = p.getByText(/isn't your house's key any more/);
+  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('#nav > button', { hasText: 'Home' }).click(); await said.waitFor({ timeout: 5000 }); });
+};
+
 let assistant: Identity;
 const asAssistant = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, assistant, { iss: 'assistant' })) })).json();
 
@@ -63,7 +68,8 @@ beforeAll(async () => {
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('dialog', (d) => void d.accept());
+  // The panel asks on the page, never in a browser dialog box.
+  page.on('dialog', (d) => { errors.push(`a dialog box: ${d.message()}`); void d.dismiss(); });
 }, 240_000);
 
 afterAll(async () => {
@@ -186,8 +192,34 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
+  it('picks free hours with day chips and times, in the owner\'s time zone', async () => {
+    await tab('Rules');
+    await page.getByRole('button', { name: 'Add a time' }).click();
+    const w = page.locator('#free .window').first();
+    // Mon–Fri is the start; take Friday off, add Saturday.
+    await w.getByRole('button', { name: 'Fr', exact: true }).click();
+    await w.getByRole('button', { name: 'Sa', exact: true }).click();
+    await w.getByLabel('From').fill('17:30');
+    await w.getByLabel('To').fill('20:00');
+    await page.locator('#free select.tz').selectOption('Australia/Brisbane');
+    await page.locator('#free').getByRole('button', { name: 'Save' }).click();
+    await page.getByText(/free in the next two weeks/).waitFor({ timeout: 5000 });
+    // A time that ends before it starts is said next to Save, not in a pop-up.
+    await w.getByLabel('To').fill('08:00');
+    await page.locator('#free').getByRole('button', { name: 'Save' }).click();
+    await page.locator('#free .act-err').waitFor();
+    await w.getByLabel('To').fill('20:00');
+    await page.reload();
+    await tab('Rules');
+    const again = page.locator('#free .window').first();
+    expect(await again.getByRole('button', { name: 'Sa', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    expect(await again.getByRole('button', { name: 'Fr', exact: true }).getAttribute('aria-pressed')).toBe('false');
+    expect(await page.locator('#free select.tz').inputValue()).toBe('Australia/Brisbane');
+    await tidy();
+  });
+
   it('opens every tab under More without an error or a page wider than the phone', async () => {
-    for (const name of ['Keys', 'Visitors', 'Money', 'Data', 'Move house']) {
+    for (const name of ['Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house']) {
       await tab(name);
       await page.waitForTimeout(600);
       expect(await page.locator('#view').textContent()).not.toMatch(/Couldn't reach your house/);
@@ -219,12 +251,56 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
+  it('recovers the house on a new device with a recovery code, and the old device knows it lost the key', async () => {
+    await tab('Your key');
+    await page.getByRole('button', { name: 'Make a recovery code' }).click();
+    const code = (await page.locator('code.recovery').textContent())!;
+    expect(code).toMatch(/^[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}$/);
+    await page.getByRole('button', { name: 'I\'ve written it down' }).click();
+    // A new phone, which never had the key.
+    const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const phone2 = await ctx2.newPage();
+    phone2.on('pageerror', (e) => errors.push(e.message));
+    await phone2.goto(`${house}/owner/`);
+    // The house has a key: no tap-to-pair button that can't work; the recovery code is offered open.
+    await phone2.getByText(/This house already has a key/).waitFor();
+    expect(await phone2.getByRole('button', { name: 'Pair this device' }).count()).toBe(0);
+    await phone2.locator('input.recovery-input').fill(code.toLowerCase());
+    await phone2.getByRole('button', { name: 'Use it' }).click();
+    await phone2.getByRole('heading', { name: 'Needs you' }).waitFor();
+    // The old phone's next look: not the key any more, said plainly.
+    // It may already know (the live stream refreshes it); otherwise its next tap finds out.
+    await lostKey(page);
+    // The code worked once.
+    const again = await (await fetch(`${house}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: (await generateIdentity('x')).publicJwk, recovery: code }) })).json();
+    expect(again.error).toMatch(/doesn't match/);
+    // And moves to a third device with a one-use link.
+    await phone2.locator('#nav .more-btn').click();
+    await phone2.locator('#nav .more-menu button', { hasText: 'Your key' }).click();
+    await phone2.getByRole('button', { name: 'Make a pairing link' }).click();
+    const link = (await phone2.locator('.address code').textContent())!;
+    const ctx3 = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const phone3 = await ctx3.newPage();
+    phone3.on('pageerror', (e) => errors.push(e.message));
+    phone3.on('dialog', (d) => { errors.push(`a dialog box: ${d.message()}`); void d.dismiss(); });
+    await phone3.goto(link);
+    await phone3.getByRole('heading', { name: 'Needs you' }).waitFor();
+    await lostKey(phone2);
+    await ctx2.close();
+    page = phone3;
+    ctx = ctx3;
+    await tidy();
+  });
+
   it('signs out on this device: back to the pairing screen', async () => {
     const keyNow = () => page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))?.[1] ?? null);
     const before = await keyNow();
     await page.locator('#nav .more-btn').click();
-    await page.getByRole('button', { name: 'Sign out on this device' }).click();
-    await page.getByRole('button', { name: 'Pair this device' }).waitFor({ timeout: 5000 });
+    // Asked on the button itself: the first tap arms it, the second signs out.
+    await page.locator('#nav').getByRole('button', { name: 'Sign out on this device' }).click();
+    await page.locator('#nav').getByRole('button', { name: /Tap again/ }).click();
+    // The house still holds the key this device had: getting back in takes a link or the recovery code.
+    await page.getByText(/This house already has a key/).waitFor({ timeout: 5000 });
     // The owner's key is gone from this device (a fresh one, not yet paired, is ready for pairing again).
     expect(await keyNow()).not.toBe(before);
     expect(await page.evaluate(() => Object.keys(sessionStorage).some((k) => k.startsWith('lake-panel:')))).toBe(false);
