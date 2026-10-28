@@ -279,3 +279,11 @@ select.tz { max-width: 220px; }
 
 /* A sign-in's number, to match with the page that asks */
 .connect-number { font: 700 32px var(--f-mono); letter-spacing: .12em; margin: 4px 0 10px; }
+
+/* Spending money: a total (currency in front) and a number of days */
+.spend-edit .field { display: block; margin: 0 0 10px; }
+.spend-edit .lab { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.money-input { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; max-width: 260px; }
+.money-input select { border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--raised); color: inherit; font: inherit; padding: 10px 8px; }
+.money-input input { border: 0; background: transparent; color: inherit; font: 600 18px var(--f-body); padding: 10px 12px; width: 100%; min-width: 0; }
+.days-input { width: 90px; background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 600 18px var(--f-body); }

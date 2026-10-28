@@ -945,16 +945,16 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
   const [currency, setCurrency] = useState(a.allowance?.currency ?? guess);
   const [amount, setAmount] = useState(a.allowance?.amount ?? 50);
   const [days, setDays] = useState(7);
-  const chip = (on: boolean, label: string, pick: () => void) => h('button', { type: 'button', class: `day${on ? ' on' : ''}`, 'aria-pressed': on, onClick: pick }, label);
+  // A plain form: a total and how many days (the owner found amount buttons, an amount box and periods side by side
+  // "ridiculous", and read "$20 · A day" as $20 a day).
   return h('div', { class: 'spend-edit' },
-    // A total for a stretch of days, not a daily amount (the owner read "$20 · A day" as $20 a day).
-    h('div', { class: 'spend-label', style: 'margin-top:4px' }, 'Total it may spend'),
-    h('div', { class: 'days', role: 'group', 'aria-label': 'Total it may spend' }, ...[20, 50, 100, 200].map((n) => chip(amount === n, money$(n, currency), () => setAmount(n))),
-      h('input', { type: 'number', min: 1, max: 500, step: 1, value: amount, 'aria-label': 'Other amount', class: 'spend-other', onInput: (e: Event) => setAmount(Number((e.target as HTMLInputElement).value)) })),
-    h('div', { class: 'row', style: 'margin:0' },
-      h('label', { class: 'inline' }, 'Lasts ', h('input', { type: 'number', min: 1, max: 31, step: 1, value: days, 'aria-label': 'Days it lasts', class: 'spend-other', style: 'width:64px', onInput: (e: Event) => setDays(Number((e.target as HTMLInputElement).value)) }), ' days'),
-      // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
-      h('label', { class: 'inline' }, 'in ', h('select', { value: currency, onChange: (e: Event) => setCurrency((e.target as HTMLSelectElement).value) }, ...CURRENCIES.map((c) => h('option', { value: c }, c))))),
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Total it may spend'),
+      h('div', { class: 'money-input' },
+        // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
+        h('select', { value: currency, 'aria-label': 'Currency', onChange: (e: Event) => setCurrency((e.target as HTMLSelectElement).value) }, ...CURRENCIES.map((c) => h('option', { value: c }, c))),
+        h('input', { type: 'number', inputmode: 'decimal', min: 1, max: 500, step: 1, value: amount, 'aria-label': 'Amount', onInput: (e: Event) => setAmount(Number((e.target as HTMLInputElement).value)) }))),
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'For how many days'),
+      h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 31, step: 1, value: days, 'aria-label': 'Days it lasts', class: 'days-input', onInput: (e: Event) => setDays(Number((e.target as HTMLInputElement).value)) })),
     h('p', { class: 'r-meta', style: 'margin:8px 0' }, `${shortName(a.label)} can spend ${money$(amount || 0, currency)} in total until ${days >= 1 && days <= 31 ? new Date(Date.now() + days * 86_400_000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '…'}. It's not per day: once it's spent, it's gone. Signed on this phone; stop it any time.`),
     h('div', { class: 'row', style: 'margin:0' },
       h(Act, { label: a.allowance ? 'Sign the change' : 'Sign and give', cls: 'primary', run: async () => {

@@ -158,8 +158,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('signs spending money for it, and the AI sees it', async () => {
     const spend = page.locator('.spend');
     await spend.getByRole('button', { name: 'Give some' }).click();
-    // Amounts and periods are taps; the sentence says what will be signed.
-    await spend.getByRole('button', { name: '$100' }).click();
+    // Two plain fields: the total, and for how many days; the sentence says what will be signed.
+    await spend.getByLabel('Amount').fill('100');
     await spend.getByLabel('Days it lasts').fill('7');
     // A total over the days, said as one: not an amount a day.
     await spend.getByText(/can spend \$100 in total until .*not per day/).waitFor();
@@ -167,7 +167,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await spend.locator('.spend-amount', { hasText: 'Up to $100' }).waitFor({ timeout: 5000 });
     // Changed in place: a typed amount, signed again (the old one is revoked by the house).
     await spend.getByRole('button', { name: 'Change' }).click();
-    await spend.getByLabel('Other amount').fill('500');
+    await spend.getByLabel('Amount').fill('500');
     await spend.getByRole('button', { name: 'Sign the change' }).click();
     await spend.locator('.spend-amount', { hasText: 'Up to $500' }).waitFor({ timeout: 5000 });
     expect(await asAssistant({ kind: 'assistant.allowance' })).toMatchObject({ amount: 500, currency: 'USD', intent: { credential: expect.any(String) } });
@@ -176,7 +176,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await spend.getByRole('button', { name: /Tap again/ }).click();
     await spend.getByText(/None\. It asks you/).waitFor({ timeout: 5000 });
     await spend.getByRole('button', { name: 'Give some' }).click();
-    await spend.getByLabel('Other amount').fill('500');
+    await spend.getByLabel('Amount').fill('500');
     await spend.getByRole('button', { name: 'Sign and give' }).click();
     await spend.locator('.spend-amount', { hasText: 'Up to $500' }).waitFor({ timeout: 5000 });
     await tidy();
