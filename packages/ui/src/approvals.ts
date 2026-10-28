@@ -370,6 +370,8 @@ let draft: Rules | null = null;
 let rulesExtras: { door: DoorState | null; qr?: string; free: FreeState } = { door: null, free: { set: false, slots: [] } };
 /** The rules as last saved, so the save bar shows only when there's something to save. */
 let savedRules = '';
+/** Rules as they'd be saved: drawing the editor adds an empty trust section, which is no change (the bar showed on a fresh page). */
+const normalRules = (r: Rules): Rules => { const c = structuredClone(r); if (c.trust && !Object.values(c.trust).some((v) => v?.length)) delete c.trust; return c; };
 async function rules(box: HTMLElement) {
   const [r, door, free] = await Promise.all([
     call<{ rules: Rules; fields?: { name: string; label: string; pack: string }[]; purposes?: typeof PURPOSES }>({ kind: 'panel.rules' }),
@@ -377,7 +379,7 @@ async function rules(box: HTMLElement) {
     call<FreeState>({ kind: 'panel.free' }).catch(() => ({ set: false, slots: [] }) as FreeState),
   ]);
   if (!draft) {
-    savedRules = stringify(r.rules);
+    savedRules = stringify(normalRules(r.rules));
     draft = structuredClone(r.rules);
     FIELDS = r.fields ?? [];
     if (r.purposes?.length) PURPOSES = r.purposes;
@@ -549,7 +551,7 @@ function renderRules(message?: { ok: boolean; text: string }, into?: HTMLElement
     const clean = structuredClone(r);
     if (clean.trust && !Object.values(clean.trust).some((v) => v?.length)) delete clean.trust;
     const res = await call<{ ok: boolean; error?: string }>({ kind: 'panel.rules.set', text: stringify(clean) });
-    if (res.ok) savedRules = stringify(clean);
+    if (res.ok) savedRules = stringify(normalRules(clean));
     renderRules(res.ok ? { ok: true, text: 'Saved. Your housekeeper uses these from now on.' } : { ok: false, text: res.error ?? 'not saved' });
   };
   const fresh = h('div', {});
@@ -576,7 +578,7 @@ function renderRules(message?: { ok: boolean; text: string }, into?: HTMLElement
         h('div', { class: 'field' }, h('span', { class: 'lab' }, { ethics: 'Ethics bodies', auditors: 'Auditors', issuers: 'Record issuers', payments: 'Payments' }[k]),
           chipsEditor(trust[k] ?? [], 'domain, then Enter', (v) => { trust[k] = v; renderRules(); }))))),
     h('details', { style: 'margin-top:16px' }, h('summary', {}, 'See it as rules.yaml'), h('pre', {}, stringify(r)))),
-    stringify(r) === savedRules && !message ? '' : h('div', { class: 'savebar' }, save,
+    stringify(normalRules(r)) === savedRules && !message ? '' : h('div', { class: 'savebar' }, save,
       h('button', { class: 'btn', type: 'button', onclick: async () => { draft = null; await rules(boxFor('rules')); } }, 'Undo changes'),
       message ? h('span', { class: `msg ${message.ok ? 'ok' : 'bad'}` }, message.text) : null),
   );
@@ -982,7 +984,9 @@ async function refreshBadge() {
   }
 }
 
-addEventListener('click', (e) => { if (moreOpen && !(e.target as HTMLElement).closest('#nav')) { moreOpen = false; renderNav(); } });
+// A tap outside the menu closes it. By the event's path, not its target: the menu redraws as it opens, so the button
+// tapped is no longer in the page by the time the tap reaches here (the owner's More menu closed as it opened).
+addEventListener('click', (e) => { if (moreOpen && !e.composedPath().includes($('nav'))) { moreOpen = false; renderNav(); } });
 addEventListener('hashchange', () => { const t = TABS.find(([id]) => id === location.hash.slice(1))?.[0]; if (t && t !== tab && webId) go(t); });
 $('pair-btn').onclick = async () => { if (await pair()) start(); };
 
