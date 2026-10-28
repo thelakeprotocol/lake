@@ -159,6 +159,13 @@ export class OwnerDesk {
   readonly assistants = new Map<string, AssistantKey>();
   /** What waits unread for each assistant, as its connector last said (kept in memory: it's said again). */
   private waitingFor = new Map<string, { count: number; senders: number; since: string; lastRead?: string }>();
+  /**
+   * AI apps asking, from a sign-in page, to become this owner's assistant (the sign-in may run in an app's own browser,
+   * which doesn't hold the owner's key): shown in the panel with the number the sign-in page shows, answered with the
+   * owner's key, as other services approve a sign-in on the device that's already signed in.
+   */
+  private connects = new Map<string, { ask: string; app: string; from: string; number: string; back: string; at: number }>();
+  private connectTimes: number[] = [];
   private invites = new Map<string, { label: string; until: number }>();
   suggestions: Suggestion[] = [];
   /** When the owner's own key last called the desk (the panel polls while open; answers come through it too). */
@@ -169,6 +176,8 @@ export class OwnerDesk {
     private o: {
       dataDir: string;
       webId: string;
+      /** The house's own address (a sign-in that asks to connect an AI must come from its own Lake's site). */
+      publicUrl?: string;
       actor: string;
       openPairing: boolean;
       emit: (e: LakeEvent) => void;
@@ -556,6 +565,27 @@ export class OwnerDesk {
     // doesn't offer a button that can't work (an owned house needs a link or a recovery code).
     r.get('/pair', (_req, res) => void res.set('cache-control', 'no-store').json({ open: this.o.openPairing && !this.ownerJwk }));
 
+    // A sign-in page on this house's own Lake asks, for an AI app, to connect it as the owner's assistant. Nothing is
+    // granted here: the owner sees it (with the sign-in page's number) and answers with their key.
+    r.post('/connect', (req, res) => {
+      const q = (req.body ?? {}) as Record<string, unknown>;
+      const str = (k: string, n: number) => (typeof q[k] === 'string' ? (q[k] as string).slice(0, n) : '');
+      const back = str('back', 500), ask = str('ask', 100), number = str('number', 8);
+      let ok = false;
+      try { ok = !!this.o.publicUrl && new URL(back).origin === new URL(this.o.publicUrl).origin && new URL(back).pathname.endsWith('/oauth/house/answer'); } catch { /* not a URL */ }
+      if (!ok) return void res.status(403).json({ error: 'a sign-in can connect an AI only from this house\'s own Lake' });
+      if (!ask || !/^\d{4}$/.test(number)) return void res.status(400).json({ error: 'ask and a 4-digit number' });
+      if (!this.ownerJwk) return void res.status(409).json({ error: 'this house has no owner yet: claim it first' });
+      const now = Date.now();
+      for (const [k, c] of this.connects) if (now - c.at > 15 * 60_000) this.connects.delete(k);
+      this.connectTimes = this.connectTimes.filter((t) => now - t < 3_600_000);
+      if (this.connects.size >= 3 || this.connectTimes.length >= 10) return void res.status(429).json({ error: 'too many sign-ins waiting at this house: try again later' });
+      this.connectTimes.push(now);
+      this.connects.set(randomBytes(6).toString('hex'), { ask, app: str('app', 60) || 'An AI app', from: str('from', 100), number, back, at: now });
+      this.touch();
+      res.json({ waiting: true });
+    });
+
     r.post('/pair', async (req, res) => {
       const { publicJwk, token, recovery } = req.body ?? {};
       if (!publicJwk?.x || publicJwk.crv !== 'Ed25519') return void res.status(400).json({ error: 'send an Ed25519 public key' });
@@ -793,6 +823,22 @@ export class OwnerDesk {
           return void res.json({ intent: { credential: a.credential, card: this.o.card(), owner: await this.o.vouchOwner(this.ownerJwk!) }, amount: a.amount, currency: a.currency, until: a.until });
         }
       }
+      // The owner's answer to an AI app's sign-in: yes makes a one-time assistant code and hands it to the sign-in, which
+      // uses it at once for that AI's agent; no tells the sign-in so.
+      if (p.kind === 'panel.connect.answer') {
+        const q = p as unknown as { id?: string; yes?: boolean };
+        const c = this.connects.get(String(q.id ?? ''));
+        if (!c) return void res.status(404).json({ error: 'that sign-in has gone (they last 15 minutes)' });
+        this.connects.delete(String(q.id));
+        this.touch();
+        const code = randomBytes(9).toString('base64url');
+        if (q.yes) this.invites.set(code, { label: c.app, until: Date.now() + 15 * 60_000 });
+        const house = this.o.publicUrl!.replace(/\/$/, '');
+        const r2 = await fetch(c.back, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(q.yes ? { ask: c.ask, house, code } : { ask: c.ask, house, refused: true }), signal: AbortSignal.timeout(20_000) }).catch((e: Error) => ({ ok: false, json: async () => ({ error: e.message }) }) as Response);
+        const said = (await r2.json().catch(() => ({}))) as { ok?: boolean; error?: string; name?: string };
+        if (!r2.ok) { this.invites.delete(code); return void res.status(502).json({ error: said.error ?? 'the sign-in didn\'t take it' }); }
+        return void res.json({ ok: true, ...(said.name ? { name: said.name } : {}) });
+      }
       if (p.kind === 'panel.assistant.invite') {
         // Fifteen minutes, one use: long enough to paste into a chat with your agent.
         const code = randomBytes(9).toString('base64url');
@@ -1010,6 +1056,7 @@ export class OwnerDesk {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
+      connects: [...this.connects].filter(([, c]) => Date.now() - c.at < 15 * 60_000).map(([id, c]) => ({ id, app: c.app, from: c.from, number: c.number, at: new Date(c.at).toISOString() })),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).

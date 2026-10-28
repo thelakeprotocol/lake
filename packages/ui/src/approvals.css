@@ -276,3 +276,6 @@ select.tz { max-width: 220px; }
 
 /* An AI that isn't reading while people wait */
 .amber-text { color: var(--amber); }
+
+/* A sign-in's number, to match with the page that asks */
+.connect-number { font: 700 32px var(--f-mono); letter-spacing: .12em; margin: 4px 0 10px; }

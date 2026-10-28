@@ -203,9 +203,11 @@ type Note = { id: string; from: string; text: string; at: string; offer?: string
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
-interface ListView { webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
+interface Connect { id: string; app: string; from: string; number: string; at: string }
+interface ListView { connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 
 function Home({ go }: { go: (t: Tab) => void }) {
+  const bump = useBump();
   const o = useHouse<any>({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() });
   const feed = useHouse<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
   const list = useHouse<ListView>({ kind: 'list' });
@@ -216,6 +218,9 @@ function Home({ go }: { go: (t: Tab) => void }) {
   // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
   const waiting = list.data.requests.length;
   const needs = [
+    ...(connectedNote ? [{ k: 'connected', v: () => h('li', { key: 'connected', class: 'item' }, h('p', { class: 'item-text' }, connectedNote), h('div', { class: 'item-actions' }, h('button', { class: 'btn small quiet', type: 'button', onClick: () => { connectedNote = ''; bump(); } }, 'OK'))) }] : []),
+    // An AI app signing in through this house, from its own browser: approved here, where the key is.
+    ...(list.data.connects ?? []).map((c) => ({ k: `c-${c.id}`, v: () => h(ConnectRequest, { key: `c-${c.id}`, c }) })),
     // Your AI isn't reading and people are waiting for it: only you can open it again.
     ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
@@ -1195,6 +1200,23 @@ const connecting = (() => {
   return { ask, back, app: (q.get('app') ?? 'An AI app').slice(0, 60), from: (q.get('from') ?? '').slice(0, 100) };
 })();
 const houseBase = () => location.origin + location.pathname.replace(/\/owner\/.*$/, '');
+
+/**
+ * An AI app asks, from its sign-in page, to become your assistant here. The page shows a number; so does this, so you
+ * approve the sign-in you started and not someone else's.
+ */
+// What the last sign-in answer did, kept past the refetch that takes the request away (else the yes left no trace).
+let connectedNote = '';
+function ConnectRequest({ c }: { c: Connect }) {
+  const setDone = (t: string) => { connectedNote = t; };
+  return h('li', { class: 'item amber' },
+    h('p', { class: 'item-text' }, `${c.app} wants to connect to your house as your assistant${c.from ? ` (signing in from ${c.from})` : ''}. It sees what comes to your door and suggests; only you decide.`),
+    h('p', { class: 'item-meta' }, 'Connect only if your sign-in page shows this number:'),
+    h('div', { class: 'connect-number' }, c.number),
+    h('div', { class: 'item-actions' },
+      h(Act, { label: 'Connect', cls: 'primary', run: async () => { const r = await call<{ ok?: boolean; name?: string; error?: string }>({ kind: 'panel.connect.answer', id: c.id, yes: true }); if (!r.ok) throw new Error(r.error ?? 'not connected'); setDone(`Connected${r.name ? `: ${shortName(r.name)}` : ''}. Go back to ${c.app}.`); } }),
+      h(Act, { label: 'No', cls: 'quiet', run: async () => { await call({ kind: 'panel.connect.answer', id: c.id, yes: false }); setDone('Turned down.'); } })));
+}
 
 /** "Connect Claude to your house?": one tap with your key makes it your assistant here, and sends you back to it. */
 function ConnectAI({ c, done }: { c: NonNullable<typeof connecting>; done: () => void }) {

@@ -131,6 +131,9 @@ button{width:100%;padding:13px;border-radius:12px;font:600 16px system-ui;cursor
     return { redirect: to.href, principal: id, app: a.client.client_name ?? 'assistant' };
   }
 
+  /** A sign-in its person turned down: its page stops working. */
+  cancel(ask: string) { this.asks.delete(ask); }
+
   /** A principal whose sign-in didn't finish (its house said no): gone, with anything issued to it. */
   forget(id: string) {
     delete this.people.get()[id];

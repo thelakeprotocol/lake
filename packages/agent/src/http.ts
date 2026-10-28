@@ -118,15 +118,73 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
     app.use(`${path}/oauth/revoke`, revocationHandler({ provider: auth }));
     const page = (res: express.Response, status: number, title: string, text: string) => void res.status(status).set('cache-control', 'no-store').type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;background:#070B12;color:#E8EEF4;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:440px;margin:0 auto;padding:36px 20px}p{color:#93A3B6}</style></head><body><main><h1>${title}</h1><p>${text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)}</p></main></body></html>`);
     const form = express.urlencoded({ extended: false, limit: '4kb' });
-    // Through the person's house: off to their own panel, which asks them with their key and comes back with a code.
-    app.post(`${path}/oauth/house`, form, (req, res) => {
+    // Through the person's house. The sign-in may be in an AI app's own browser, which doesn't hold the owner's key, so the
+    // house is asked and its panel, wherever the key is, shows the request with a number to match (as other services
+    // approve a sign-in on a device that's already signed in). A browser that holds the key can open the panel here too.
+    const pending = new Map<string, { house: string; number: string; state: 'waiting' | 'done' | 'refused' | 'failed'; redirect?: string; error?: string; at: number }>();
+    const sweepPending = () => { for (const [k, x] of pending) if (Date.now() - x.at > 20 * 60_000) pending.delete(k); };
+    app.post(`${path}/oauth/house`, form, async (req, res) => {
       const ask = String(req.body?.ask ?? ''), asked = auth.asked(ask);
       if (!asked) return page(res, 400, 'Start again', 'This sign-in page has expired: start again from your AI app.');
       let house: URL;
       try { house = new URL(String(req.body?.house ?? '').trim()); } catch { return page(res, 400, 'Not an address', 'Paste your house\'s address, like https://sandbox.lake.doneinfifty.com/t/your-house.'); }
       if (!/^https?:$/.test(house.protocol)) return page(res, 400, 'Not an address', 'A house\'s address starts with https://.');
       const base = `${house.origin}${house.pathname.replace(/\/(a2a|owner\/?.*)?$/, '').replace(/\/$/, '')}`;
-      res.redirect(303, `${base}/owner/#${new URLSearchParams({ connect: ask, app: asked.app, from: asked.back, back: `${resource}/oauth/approve` })}`);
+      const number = String(1000 + (randomBytes(2).readUInt16BE(0) % 9000));
+      const told = await fetch(`${base}/owner/connect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ask, app: asked.app, from: asked.back, number, back: `${resource}/oauth/house/answer` }), signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      const said = told ? ((await told.json().catch(() => ({}))) as { error?: string }) : { error: 'it didn\'t answer' };
+      if (!told?.ok) return page(res, 400, 'Not connected', `Your house said: ${said.error ?? told?.status}.`);
+      sweepPending();
+      pending.set(ask, { house: base, number, state: 'waiting', at: Date.now() });
+      const here = `${base}/owner/#${new URLSearchParams({ connect: ask, app: asked.app, from: asked.back, back: `${resource}/oauth/approve` })}`;
+      const nonce = randomBytes(12).toString('base64url');
+      res.set({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'` });
+      res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Approve in your house</title><style>
+body{margin:0;background:#070B12;color:#E8EEF4;font:16px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}main{max-width:440px;margin:0 auto;padding:36px 20px}
+h1{font-size:26px;line-height:1.2;margin:0 0 10px}p{color:#93A3B6}.num{font:700 44px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:#E8EEF4;margin:18px 0}
+a{color:#3DDC97}.small{font-size:13px;color:#5C6B7E}#state{color:#E8EEF4}</style></head><body><main>
+<h1>Approve it in your house</h1>
+<p>Open your house's panel where you usually do (your phone's browser) and tap <b>Connect</b> on the request from ${asked.app.replace(/[&<>"']/g, '')}. It shows this number:</p>
+<div class="num" aria-label="Number to match">${number}</div>
+<p id="state">Waiting for your OK…</p>
+<p class="small">Is your house's key in this browser? <a href="${here.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">Open it here</a> instead. The request lasts 15 minutes.</p>
+</main><script nonce="${nonce}">
+(function(){var u=${JSON.stringify(`${resource}/oauth/house/status?ask=${encodeURIComponent(ask)}`)},s=document.getElementById('state');
+function look(){fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).then(function(x){
+if(x.redirect){s.textContent='Approved. Back to your app…';location.href=x.redirect;return}
+if(x.state==='refused'){s.textContent='Your house said no. You can close this.';return}
+if(x.state==='failed'){s.textContent='It didn\u2019t work: '+(x.error||'try again from your app');return}
+if(x.state==='gone'){s.textContent='This sign-in has expired: start again from your app.';return}
+setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
+</script></body></html>`);
+    });
+    // The house's answer, from the house itself (the owner tapped Connect or No in their panel).
+    app.post(`${path}/oauth/house/answer`, express.json({ limit: '4kb' }), async (req, res) => {
+      const q = (req.body ?? {}) as { ask?: string; house?: string; code?: string; refused?: boolean };
+      const w = pending.get(String(q.ask ?? ''));
+      if (!w || w.state !== 'waiting') return void res.status(404).json({ error: 'no sign-in waiting for that' });
+      if (String(q.house ?? '').replace(/\/$/, '') !== w.house) return void res.status(403).json({ error: 'that sign-in asked another house' });
+      if (q.refused) { w.state = 'refused'; auth.cancel(String(q.ask)); return void res.json({ ok: true }); }
+      const r = auth.approve(String(q.ask));
+      if ('error' in r) { w.state = 'failed'; w.error = r.error; return void res.status(400).json({ error: r.error }); }
+      try {
+        const l = await agentFor(r.principal);
+        const { name } = await l.agent.connectHouse(w.house, String(q.code ?? ''), r.app);
+        w.state = 'done';
+        w.redirect = r.redirect;
+        res.json({ ok: true, name });
+      } catch (e) {
+        const l = live.get(r.principal);
+        if (l) await sleep(l);
+        auth.forget(r.principal);
+        w.state = 'failed';
+        w.error = (e as Error).message;
+        res.status(400).json({ error: (e as Error).message });
+      }
+    });
+    app.get(`${path}/oauth/house/status`, (req, res) => {
+      const w = pending.get(String(req.query.ask ?? ''));
+      res.set('cache-control', 'no-store').json(w ? { state: w.state, ...(w.redirect ? { redirect: w.redirect } : {}), ...(w.error ? { error: w.error } : {}) } : { state: 'gone' });
     });
     app.post(`${path}/oauth/approve`, form, async (req, res) => {
       const r = auth.approve(String(req.body?.ask ?? ''));

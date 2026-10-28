@@ -326,19 +326,35 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const mcp = new URL(`${house}/mcp`);
     const first = new StreamableHTTPClientTransport(mcp, { authProvider: provider });
     await expect(new Client({ name: 'Claude', version: '0' }).connect(first)).rejects.toThrow(UnauthorizedError);
-    // The sign-in page knows this browser's house; through it, the panel asks with the owner's key.
-    await page.goto(goTo!.href);
-    await page.getByRole('heading', { name: /Connect Claude to/ }).waitFor();
-    expect(await page.locator('input[name=house]').inputValue()).toBe(house);
-    await page.getByRole('button', { name: 'Continue in my house' }).click();
-    await page.getByRole('heading', { name: 'Connect Claude to your house?' }).waitFor();
+    // The sign-in opens in the app's own browser (here: another browser, with no key and no house of its own), so the
+    // house asks the owner where the key is, with a number to match, as other services approve a sign-in elsewhere.
+    const appCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const app = await appCtx.newPage();
+    app.on('pageerror', (e) => errors.push(e.message));
+    await app.goto(goTo!.href);
+    await app.getByRole('heading', { name: /Connect Claude to/ }).waitFor();
+    await app.locator('input[name=house]').fill(house);
+    await app.getByRole('button', { name: 'Continue in my house' }).click();
+    await app.getByRole('heading', { name: 'Approve it in your house' }).waitFor();
+    const number = (await app.locator('.num').textContent())!.trim();
+    expect(number).toMatch(/^\d{4}$/);
+    // A browser that does hold the key could open the panel right there instead.
+    expect(await app.getByRole('link', { name: 'Open it here' }).getAttribute('href')).toMatch(/\/owner\/#connect=/);
+    // On the owner's phone, Home asks, showing the same number.
+    await page.goto(`${house}/owner/`);
+    const asked = page.locator('li.item', { hasText: 'Claude wants to connect to your house' });
+    await asked.waitFor({ timeout: 10_000 });
+    expect((await asked.locator('.connect-number').textContent())!.trim()).toBe(number);
     await tidy();
-    // Back to the app with a code (the browser then leaves for the app, which isn't real here).
-    const approved = page.waitForResponse((r) => r.url().endsWith('/mcp/oauth/approve'));
-    await page.getByRole('button', { name: 'Connect' }).click();
-    const back = new URL((await approved).headers().location!);
+    await app.route(`${cb}**`, (r) => r.fulfill({ body: 'back in the app' }));
+    await asked.getByRole('button', { name: 'Connect' }).click();
+    await page.getByText(/Connected.*Go back to Claude/).waitFor({ timeout: 15_000 });
+    // The sign-in page sees the yes and goes back to the app with a code.
+    await app.waitForURL(/app\.example\/callback/, { timeout: 15_000 });
+    const back = new URL(app.url());
     expect(back.origin + back.pathname).toBe(cb);
     const code = back.searchParams.get('code')!;
+    await appCtx.close();
     await first.finishAuth(code);
     const chat = async () => {
       const c = new Client({ name: 'Claude', version: '0' });
