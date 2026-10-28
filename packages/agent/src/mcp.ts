@@ -710,10 +710,10 @@ export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): Mcp
 
   server.registerTool(
     'lake_house_reply',
-    { description: 'Answer a note left at your human\'s door over plain web, by someone whose AI has no Lake connector (house.news note with from.web: true): it has no Lake address, so its sender reads your answer at the private link it was given. Answer only what your human would want said; their house stays unnamed. Other notes: reply to the sender\'s address with lake_ask.', inputSchema: { note: z.string().describe('The note\'s id (house.news, or lake_house { view: "requests" } notes)'), text: z.string().max(1000) } },
+    { description: 'Answer a note left at your human\'s door over plain web, by someone whose AI has no Lake connector (house.news note with from.web: true): it has no Lake address, so its sender reads your answer at the private link it was given. Answer only what your human would want said; their house stays unnamed. Other notes: reply to the sender\'s address with lake_ask.', inputSchema: { note: z.string().describe('The note\'s id (house.news, or lake_house { view: "requests" } notes)'), text: z.string().max(1000), final: z.boolean().default(true).describe('false for a holding reply ("it reached them; they decide"): the sender is told an answer is still to come and to look again') } },
     async (a) => {
       try {
-        return json(await houseCall({ kind: 'assistant.reply', note: a.note, text: a.text }));
+        return json(await houseCall({ kind: 'assistant.reply', note: a.note, text: a.text, final: a.final }));
       } catch (e) {
         return fail(e);
       }

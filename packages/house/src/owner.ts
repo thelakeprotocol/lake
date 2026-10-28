@@ -404,7 +404,7 @@ export class OwnerDesk {
    * Notes left over plain web (an AI that can only open links, SPEC §9.0): each has a private link where its sender reads
    * the answer. The secret in that link is all it takes to read it, so it's only ever given to whoever left the note.
    */
-  private webNotes = new Map<string, { key: string; answer?: { text: string; at: string; by: string } }>();
+  private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[] }>();
   addWebNote(n: { text: string; from?: string; purpose: string }): { id: string; key: string } | null {
     const id = this.addNote({ from: { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false }, text: n.text, purpose: n.purpose });
     if (!id) return null;
@@ -413,18 +413,22 @@ export class OwnerDesk {
     return { id, key };
   }
   /** What became of a web note, for whoever holds its link. */
-  webNoteState(id: string, key: string): { status: string; answer?: { text: string; at: string } } | null {
+  webNoteState(id: string, key: string): { status: string; answer?: { text: string; at: string }; answers?: { text: string; at: string; final: boolean }[]; check_again?: string } | null {
     const w = this.webNotes.get(id);
     if (!w || w.key !== key) return null;
-    if (w.answer) return { status: 'answered', answer: { text: w.answer.text, at: w.answer.at } };
-    return { status: this.notes.some((x) => x.id === id) ? 'with the owner, not answered yet' : (this.closedNotes.get(id)?.state ?? 'seen') };
+    const answers = (w.answers ?? []).map(({ text, at, final }) => ({ text, at, final }));
+    const last = answers.at(-1);
+    // A holding reply isn't the answer (run 54: "answered" made the sender's AI stop looking 25 s before the decision).
+    if (last?.final) return { status: 'answered', answer: { text: last.text, at: last.at }, answers };
+    const open = this.notes.some((x) => x.id === id);
+    return { status: last ? 'replied, and the answer is still to come' : open ? 'with the owner, not answered yet' : (this.closedNotes.get(id)?.state ?? 'seen'), ...(last ? { answer: { text: last.text, at: last.at }, answers } : {}), ...(open || last ? { check_again: 'in a few minutes: a person may take a while' } : {}) };
   }
-  private answerWebNote(id: string, text: string, by: string): { ok: true } | { error: string } {
+  private answerWebNote(id: string, text: string, by: string, final = true): { ok: true } | { error: string } {
     const w = this.webNotes.get(id);
     if (!w) return { error: 'no note from the web with that id: answer a Lake agent at its own address instead' };
     const t = text.trim().slice(0, 1000);
     if (!t) return { error: 'text: the answer, up to 1000 characters' };
-    w.answer = { text: t, at: new Date().toISOString(), by };
+    w.answers = [...(w.answers ?? []), { text: t, at: new Date().toISOString(), by, final }].slice(-10);
     this.touch();
     return { ok: true };
   }
@@ -683,8 +687,8 @@ export class OwnerDesk {
         }
         // An answer to a note left over plain web: its sender reads it at the private link it was given.
         if (p.kind === 'assistant.reply') {
-          const q = p as unknown as { note?: string; text?: string };
-          const r = this.answerWebNote(String(q.note ?? ''), String(q.text ?? ''), assistant.label);
+          const q = p as unknown as { note?: string; text?: string; final?: boolean };
+          const r = this.answerWebNote(String(q.note ?? ''), String(q.text ?? ''), assistant.label, q.final !== false);
           return void res.status('error' in r ? 400 : 200).json('error' in r ? r : { ...r, note: 'they read it at the link they were given; your human sees it with the note' });
         }
         if (p.kind === 'assistant.forward') {
@@ -910,7 +914,7 @@ export class OwnerDesk {
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
-      notes: this.notes.map((n) => { const a = this.webNotes.get(n.id)?.answer; return a ? { ...n, answered: a } : n; }),
+      notes: this.notes.map((n) => { const a = this.webNotes.get(n.id)?.answers?.at(-1); return a ? { ...n, answered: a } : n; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

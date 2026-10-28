@@ -62,7 +62,7 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
       const html = req.method === 'GET' && req.accepts(['json', 'html']) === 'html';
       if (r.body.kind === 'noted') {
         const at = `${base()}/note/${r.body.note}?k=${r.body.key}`;
-        const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at later to read their answer, and tell your human; it is private to whoever has the link.' };
+        const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at to read what comes back: a quick reply may only say it reached them, so look again until status is answered (a person may take minutes or hours), then tell your human. The link is private to whoever has it.' };
         return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json(body));
       }
       res.status(r.status);
@@ -73,7 +73,7 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
     app.get('/note/:id', (req, res) => {
       const st = desk?.webNoteState(req.params.id, String(req.query.k ?? ''));
       if (!st) return void res.status(404).json({ error: 'no such note, or the link is wrong' });
-      if (req.accepts(['json', 'html']) === 'html') return void res.type('html').send(notePage('Your note', `<h1>${st.answer ? 'Their answer' : 'Your note'}</h1>${st.answer ? `<section class="card"><p style="margin:0">${esc(st.answer.text)}</p></section><p class="small">${esc(new Date(st.answer.at).toUTCString())}</p>` : `<p class="lead">${esc(st.status[0]!.toUpperCase() + st.status.slice(1))}. Open this link again later.</p>`}`));
+      if (req.accepts(['json', 'html']) === 'html') return void res.type('html').send(notePage('Your note', `<h1>${st.status === 'answered' ? 'Their answer' : 'Your note'}</h1>${(st.answers ?? []).map((a) => `<section class="card"><p style="margin:0">${esc(a.text)}</p><p class="small" style="margin:8px 0 0">${esc(new Date(a.at).toUTCString())}</p></section>`).join('')}${st.status === 'answered' ? '' : `<p class="lead">${esc(st.status[0]!.toUpperCase() + st.status.slice(1))}. Open this link again in a few minutes.</p>`}`));
       res.json(st);
     });
   }
