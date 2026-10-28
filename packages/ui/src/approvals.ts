@@ -201,7 +201,7 @@ type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[
 type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
-interface Assistant { kid: string; label: string; addedAt: string; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
+interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 interface ListView { webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 
 function Home({ go }: { go: (t: Tab) => void }) {
@@ -860,6 +860,16 @@ function Visitors() {
 /** The code you hand your agent, kept here so a tab change doesn't lose it while you copy it. */
 let invite: { msg: string; until: number } | null = null;
 
+/** When an agent last used its key, as people say it: "here now", "here 3 hours ago". */
+function lastHere(at?: string): { text: string; now: boolean } {
+  const ms = at ? Date.now() - Date.parse(at) : NaN;
+  if (Number.isNaN(ms)) return { text: 'Not here yet', now: false };
+  if (ms < 15 * 60_000) return { text: 'Here now', now: true };
+  const rel = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  const [n, unit] = ms < 3_600_000 ? [Math.round(ms / 60_000), 'minute'] : ms < 86_400_000 ? [Math.round(ms / 3_600_000), 'hour'] : [Math.round(ms / 86_400_000), 'day'];
+  return { text: `Here ${rel.format(-n, unit as Intl.RelativeTimeFormatUnit)}`, now: false };
+}
+
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
 function MyAgent() {
   const v = useHouse<ListView>({ kind: 'list' });
@@ -877,11 +887,13 @@ function MyAgent() {
   return h('div', {},
     h('p', { class: 'lede' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
-      h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), h('span', { class: 'chip ok' }, 'Connected')),
+      h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), ((l) => h('span', { class: `chip${l.now ? ' ok' : ''}`, title: 'When it last used its key' }, l.text))(lastHere(a.seenAt))),
       h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests${a.allowance ? ` · may spend ${money$(a.allowance.amount, a.allowance.currency)} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
+      // Its money on one line, the agent itself on another: side by side, "Revoke" read as taking the money back.
       h('div', { class: 'item-foot' },
-        a.allowance || !a.canHaveAllowance ? h('span', {}, h(Allowance, { a })) : h('details', { class: 'more' }, h('summary', {}, 'Give it spending money'), h(Allowance, { a })),
-        h(Act, { label: 'Revoke', cls: 'danger', confirm: 'Tap again: it can no longer look or suggest', run: () => call({ kind: 'panel.assistant.revoke', kid: a.kid }) })))))) : null,
+        a.allowance || !a.canHaveAllowance ? h('span', {}, h(Allowance, { a })) : h('details', { class: 'more' }, h('summary', {}, 'Give it spending money'), h(Allowance, { a }))),
+      h('div', { class: 'item-foot agent-remove' },
+        h(Act, { label: 'Remove this AI', cls: 'danger quiet', confirm: 'Tap again: its key stops working', run: () => call({ kind: 'panel.assistant.revoke', kid: a.kid }) })))))) : null,
     invite ? h('section', { class: 'block start' }, h('h2', {}, 'Paste this to your AI'),
       h('p', { class: 'muted' }, `It needs the Lake connector. The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`),
       h('textarea', { readonly: true, rows: 5, class: 'copybox', value: invite.msg, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),

@@ -135,7 +135,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(paired).toMatchObject({ paired: true });
     // No reload: the house says something changed, and the panel shows it.
     await page.getByRole('button', { name: 'Done' }).click();
-    await page.locator('.item', { hasText: 'Nova' }).locator('.chip', { hasText: 'Connected' }).waitFor({ timeout: 5000 });
+    await page.locator('.item', { hasText: 'Nova' }).locator('.chip', { hasText: 'Here now' }).waitFor({ timeout: 5000 });
     await tidy();
   });
 
@@ -248,6 +248,17 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await ctx.setOffline(false);
     await page.locator('#nav > button', { hasText: 'Home' }).click();
     await page.locator('.dot.live').waitFor({ timeout: 10_000 });
+    await tidy();
+  });
+
+  it('removes the owner\'s AI with two taps, and its key stops working', async () => {
+    await tab('My agent');
+    // The agent's own card (its suggestions name it too).
+    const card = page.locator('.item', { has: page.getByRole('button', { name: /Remove this AI|Tap again/ }) });
+    await card.getByRole('button', { name: 'Remove this AI' }).click();
+    await card.getByRole('button', { name: /Tap again/ }).click();
+    await card.waitFor({ state: 'detached', timeout: 5000 });
+    expect((await asAssistant({ kind: 'list' })).error).toMatch(/no key/);
     await tidy();
   });
 

@@ -91,7 +91,7 @@ const MAX_GRANT_MS = 48 * 3_600_000;
  * offers, activity, data, rules) and suggest; it may never Allow, change rules, accept, revoke or export. Only
  * the owner's key cuts keys.
  */
-export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
+export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
@@ -570,7 +570,7 @@ export class OwnerDesk {
       this.invites.delete(String(code));
       const kid = String(publicJwk.kid);
       if (kid === this.ownerJwk?.kid) return void res.status(400).json({ error: 'that is the owner\'s own key' });
-      const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
+      const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       const badge = await this.assistantBadge(a).catch(() => undefined);
@@ -616,6 +616,12 @@ export class OwnerDesk {
       // The owner's own key only: an assistant reading the panel isn't the owner looking.
       if (!assistant) this.seen();
       if (assistant) {
+        // "Connected" only says it holds a key; when it last used it is what the owner can judge by (an AI app may drop
+        // its connection and come back as another agent).
+        if (!assistant.seenAt || Date.now() - Date.parse(assistant.seenAt) > 600_000) {
+          assistant.seenAt = new Date().toISOString();
+          await this.o.saveAssistants?.([...this.assistants.values()]);
+        }
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         if (p.kind === 'assistant.suggest') {
           const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown }; rules?: unknown };
@@ -972,7 +978,7 @@ export class OwnerDesk {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
-      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, seenAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
       notes: this.notes.map((n) => { const a = this.webNotes.get(n.id)?.answers?.at(-1); return a ? { ...n, answered: a } : n; }),
       agenda: this.agenda,

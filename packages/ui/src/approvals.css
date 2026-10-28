@@ -253,3 +253,4 @@ input.recovery-input { flex: 1; min-width: 12em; font-family: var(--f-mono); tex
 .window .times { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .window input[type=time] { background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; color-scheme: dark; }
 select.tz { max-width: 220px; }
+.agent-remove { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; justify-content: flex-end; }
