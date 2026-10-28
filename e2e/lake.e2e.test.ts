@@ -499,7 +499,8 @@ describe('the owner', () => {
     // Advice is a field, never read out of the words; a question has choices to tap, and the answer goes back.
     expect(await asHelper({ kind: 'assistant.suggest', text: 'Hold off for now', pledge: { tally: `${specialistsUrl}/tally`, id: 'street-solar' }, advice: 'dont' })).toMatchObject({ ok: true });
     expect((await ownerCall({ kind: 'list' })).suggestions[0]).toMatchObject({ advice: 'dont' });
-    expect(await asHelper({ kind: 'assistant.suggest', text: 'just words', advice: 'do' })).toMatchObject({ error: expect.stringMatching(/^advice is about/) });
+    // Advice with nothing to act on is left off; the words still reach the owner.
+    expect(await asHelper({ kind: 'assistant.suggest', text: 'just words', advice: 'do' })).toMatchObject({ ok: true, note: expect.stringMatching(/advice is for a request/) });
     const q = await asHelper({ kind: 'assistant.suggest', text: 'Priya asks if you can take in her parcel at 3 pm', ask: { choices: ['Yes', 'No'], recommend: 0 } });
     expect(await ownerCall({ kind: 'panel.assistant.answer', id: q.id, choice: 'Maybe' })).toMatchObject({ error: expect.any(String) });
     expect(await ownerCall({ kind: 'panel.assistant.answer', id: q.id, choice: 'Yes' })).toMatchObject({ ok: true, answered: 'Yes' });

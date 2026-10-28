@@ -425,7 +425,7 @@ export class OwnerDesk {
   }
   private answerWebNote(id: string, text: string, by: string, final = true): { ok: true } | { error: string } {
     const w = this.webNotes.get(id);
-    if (!w) return { error: 'no note from the web with that id: answer a Lake agent at its own address instead' };
+    if (!w) return { error: 'that note came from a Lake agent, not the web: answer it with lake_ask to the from.url in its house.news (this tool is for notes left over plain web)' };
     const t = text.trim().slice(0, 1000);
     if (!t) return { error: 'text: the answer, up to 1000 characters' };
     w.answers = [...(w.answers ?? []), { text: t, at: new Date().toISOString(), by, final }].slice(-10);
@@ -628,7 +628,10 @@ export class OwnerDesk {
           // Or about a note at the door (run 42: "don't answer this one" had nowhere to go).
           const aboutNote = typeof (q as { note?: unknown }).note === 'string' ? this.notes.find((n) => n.id === (q as { note: string }).note)?.id : undefined;
           if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id' });
-          if (q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door) return void res.status(400).json({ error: 'advice is about a request, an offer, a pledge, a note, rules or a door line: name it' });
+          // Advice with nothing to act on is dropped, and the note still goes (run 55: three refusals, and the owner was never
+          // told): an FYI is words for the owner.
+          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door;
+          if (adviceDropped) delete q.advice;
           let ask: Suggestion['ask'];
           if (q.ask) {
             // Refused, not cut (run 40 stored "…return fa"): the assistant shortens its own words.
@@ -641,7 +644,7 @@ export class OwnerDesk {
           }
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
-          return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: 'your human sees it in their control panel' });
+          return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }
         if (p.kind === 'assistant.spent') {
           // The assistant hands back the receipt for what it spent: the owner sees it with their money, and the order turns paid.
@@ -890,7 +893,7 @@ export class OwnerDesk {
         if (answer !== undefined && p.kind === 'panel.offer.accept' && !(answer as { error?: string }).error) {
           // The assistant that suggested it is the one to pay: what was accepted, from whom, and the quoter's answer (its order).
           const x = answer as { id: string; title: string; quoter: { name: string; url: string }; result: { outputs: Record<string, number> }; labels?: Record<string, { label: string; unit?: string }>; currency?: string; answer?: Record<string, unknown> };
-          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer: pay it with lake_pay, naming the order. That pays outright: an accepted offer is no cart, so nothing holds the money, and the delivery itself happens outside the Lake (run 39: assistants promised "held until delivery")' });
+          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer: pay it with lake_pay, naming the order. That pays outright: an accepted offer is no cart, so nothing holds the money, and the delivery itself happens outside the Lake: don\'t tell your human it is held until delivery' });
         }
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }
