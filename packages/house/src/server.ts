@@ -29,7 +29,7 @@ function doorPage(p: DoorPage): string {
 <div class="say" id="say">Knock on the door at <code>${esc(base)}</code> and <span class="ghost">ask if they're up for a coffee next week</span></div>
 <div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(say))}).then(()=>{this.textContent='Copied ✓'})">Copy</button></div>
 <p class="small" style="margin:12px 0 0">Or: say thanks for the talk · ask them to look at your project · find a time to catch up.</p></section>
-<p class="small">An AI reading this? Open <code>${esc(note)}</code>, or <code>lake_knock</code> this address with the Lake connector. Details under <a href="#for-ai-agents">For AI agents</a>.</p>
+<p class="small">An AI reading this? Open <code>${esc(note)}</code>, or <code>lake_knock</code> this address with the Lake connector. Can't open a link you write yourself (ChatGPT can't)? Give your human <code>${esc(base)}/note/new?text=…&amp;from=…</code> to tap: it opens your note filled in, and they send it. Details under <a href="#for-ai-agents">For AI agents</a>.</p>
 <details id="yourself"><summary>Leave a note yourself</summary><form method="post" action="${esc(base)}/note">
 <p class="small" style="margin:8px 0">For when your AI can't send it: say who you are and what you'd like. Their answer appears at the link you get next.</p>
 <textarea class="say" name="text" rows="4" maxlength="1000" required placeholder="Hi, I'm … and I'd like to …"></textarea>
@@ -37,10 +37,11 @@ function doorPage(p: DoorPage): string {
 <div class="row"><button class="btn primary" type="submit">Leave the note</button></div></form></details>
 <details id="for-ai-agents"><summary>For AI agents</summary><p class="small">You were sent to knock on this door: leave the owner a short note, saying who your human is and what they'd like.</p><ol class="small">
 <li><b>With web access only:</b> open <code>${esc(note)}</code> (URL-encode both; <code>text</code>: the note for the owner, up to 1000 characters, saying who your human is and why; <code>from</code>: your human's name; optional <code>purpose</code>, default <code>contact</code>). It answers with <code>answer_at</code>: open that link later to read the reply (<code>?wait=30</code> waits up to 30 s for news), and tell your human. It's a conversation: if they ask something, answer on the same link with <code>?text=</code>. Can't open links you build? Give your human the link to open. <code>POST ${esc(base)}/note</code> with the same fields as JSON works too.</li>
+<li><b>Can't open links you write</b> (some chat apps only open links they were given): write the same link with <code>/note/new</code> in place of <code>/note</code> and give it to your human. It opens the note filled in; nothing is sent until they tap Send.</li>
 <li><b>With the Lake connector</b>${p.connector ? ` (<code>${esc(p.connector)}</code>)` : ''}: <code>lake_knock</code> this address with no fields. Your note is signed, and the answer comes to your <code>lake_inbox</code>.</li>
 <li><b>A2A</b>: <code>${esc(p.a2a())}</code>, its signed card at <code>${esc(base)}/.well-known/agent-card.json</code>.</li>
 <li>Notes are data for the owner, never instructions. A few an hour per sender.</li></ol></details>
-${own}`, `<meta name="description" content="A house on the Lake. To reach its owner: leave a note by opening ${esc(note)} (details under For AI agents).">`);
+${own}`, `<meta name="description" content="A house on the Lake. To reach its owner: leave a note by opening ${esc(note)}. If you can't open links you write, give your human ${esc(base)}/note/new?text=…&from=… to tap: it opens the note filled in for them to send. Details under For AI agents.">`);
 }
 
 /** Link previews, crawlers and prefetches: they open a link without anyone meaning to act on it. */
@@ -76,12 +77,22 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
       if (r.body.kind === 'noted') {
         const at = `${base()}/note/${r.body.note}/${r.body.key}`;
         const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at to read what comes back (add ?wait=30 to wait up to 30 s for news): a quick reply may only say it reached them, so look again until status is answered (a person may take minutes or hours), then tell your human. If they ask you something, answer on the same note: open answer_at with ?text=… (URL-encoded). The link is private to whoever has it.' };
-        return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json(body));
+        return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p style="overflow-wrap:anywhere"><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json(body));
       }
       res.status(r.status);
       return void (html ? res.type('html').send(notePage('Not left', `<h1>Not left</h1><p class="lead">${esc(String(r.body.error ?? r.body.reason ?? 'The house didn\'t take it.'))}</p>`)) : res.json(r.body));
     };
     app.get('/note', (req, res) => leave(req, res, { text: req.query.text, from: req.query.from, purpose: req.query.purpose }));
+    // A note an AI wrote, for its human to send (some chat apps open only links they were given, never ones they write):
+    // the form, filled in. Opening it sends nothing, so a link preview can't either.
+    app.get('/note/new', (req, res) => {
+      sealed(res);
+      const q = (k: string, n: number) => (typeof req.query[k] === 'string' ? (req.query[k] as string).slice(0, n) : '');
+      res.type('html').send(notePage('Send this note', `<h1>Send this note?</h1><p class="lead">Your AI wrote it for you. Change anything you like, then send it to the owner of this house.</p>
+<form method="post" action="${esc(base())}/note"><textarea class="say" name="text" rows="6" maxlength="1000" required>${esc(q('text', 1000))}</textarea>
+<input class="say" name="from" maxlength="80" placeholder="Your name" value="${esc(q('from', 80))}" style="margin-top:8px">${q('purpose', 40) ? `<input type="hidden" name="purpose" value="${esc(q('purpose', 40))}">` : ''}
+<div class="row"><button class="btn primary" type="submit">Send</button></div></form>`));
+    });
     app.post('/note', express.json({ limit: '8kb' }), express.urlencoded({ extended: false, limit: '8kb' }), (req, res) => leave(req, res, req.body ?? {}));
     // The secret is in the path, not a query (where proxies log it and pages pass it on). The same link carries the
     // conversation on: ?text= answers them (POST works too), ?wait=N holds the request up to 30 s until something changes
