@@ -88,7 +88,8 @@ const checks = [
   ['houses', houses.length >= Number(tenants) && count(mine, 'house') >= Number(tenants), `${houses.length} hosted, ${count(mine, 'house')} registered with this node`],
   ['specialists', specialists > 0, `${specialists} on the node`],
   ['grocers', grocers > 0, `${grocers} on the node`],
-  ['mcp', mcp === '200', `initialize -> ${mcp || 'no answer'}`],
+  // 401 is the connector asking for sign-in (with a data folder): up and well.
+  ['mcp', mcp === '200' || mcp === '401', `initialize -> ${mcp || 'no answer'}${mcp === '401' ? ' (sign-in on)' : ''}`],
   ['federation', count(peers, 'house') > 0, `sees ${peers.length} of the other Lake's agents (${count(peers, 'house')} houses) via --follow`],
 ];
 for (const [k, good, text] of checks) console.log(`  ${good ? 'ok  ' : 'FAIL'} ${k.padEnd(12)} ${text}`);
