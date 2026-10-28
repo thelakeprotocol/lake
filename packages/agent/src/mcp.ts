@@ -1623,16 +1623,18 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // human never knew): the house is told how many, from whom and since when, so the panel can say "open your AI app".
   // The AI app can't be woken from here; its human can. Said again when it changes, and once more when it's read.
   let toldWaiting = '';
+  // Two minutes unread (shorter in tests: LAKE_MCP_QUIET_MS); looked at every minute, or twice in that time if shorter.
+  const quietMs = Number(process.env.LAKE_MCP_QUIET_MS) || 120_000;
   const waiting = setInterval(() => void (async () => {
     if (!house) return;
     const others = inbox.filter((m) => !(m.from as { your_house?: boolean }).your_house);
-    const away = Date.now() - Math.max(lastRead, lastActive) > 2 * 60_000;
+    const away = Date.now() - Math.max(lastRead, lastActive) > quietMs;
     const now = others.length && away ? { count: others.length, senders: new Set(others.map((m) => m.from.domain)).size, since: others[0]!.at } : { count: 0 };
     const said = JSON.stringify(now);
     if (said === toldWaiting || (!toldWaiting && !now.count)) return;
     await houseCall({ kind: 'assistant.waiting', ...now, ...(lastRead ? { last_read: new Date(lastRead).toISOString() } : {}) });
     toldWaiting = said;
-  })().catch(() => {}), 60_000);
+  })().catch(() => {}), Math.min(60_000, quietMs / 2));
   waiting.unref();
   return {
     session: () => {

@@ -78,7 +78,7 @@ beforeAll(async () => {
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
     '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/);
   // The connector, with sign-in on.
-  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20' });
+  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   page = await ctx.newPage();
@@ -368,6 +368,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.goto(`${house}/owner/`);
     await tab('My agent');
     await page.locator('.item', { hasText: me.name.split(' (')[0] }).locator('.chip', { hasText: 'Here now' }).waitFor({ timeout: 5000 });
+    // Its chats are closed and the buyer's messages sit unread: its connector tells the house, and the owner is told.
+    await page.locator('.item', { hasText: me.name.split(' (')[0] }).getByText(/waiting since .*open your AI app/).waitFor({ timeout: 15_000 });
     await tidy();
     // Money says what it was for and who paid, held until the buyer accepts; a tap opens the receipt.
     await tab('Money');
