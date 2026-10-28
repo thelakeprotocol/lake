@@ -87,6 +87,7 @@ services:
     <<: *small
     image: lake-local/lake:${LAKE_TAG:-dev}
     hostname: mcp
+    volumes: [mcp:/data/mcp]
     command: ["mcp", "--http", "4800", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}"]
     environment:
       NODE_OPTIONS: "--max-old-space-size=${LAKE_MCP_HEAP:-200}"
@@ -98,6 +99,9 @@ services:
       LAKE_ARBITERS: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s/arbiter,http://lake-${PEER_ID}.localhost:${PEER_PORT}/s/arbiter"
       LAKE_PUBLIC_NODE_URL: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}"
       LAKE_PACKS: "health,shopping"
+      # Signed-in agents (an AI keeps one agent from chat to chat and across deploys), their keys sealed with LAKE_MCP_KEK.
+      LAKE_MCP_DATA: "/data/mcp"
+      LAKE_MCP_KEK: "${LAKE_MCP_KEK:-}"
       LAKE_ALLOWANCE_USD: "50"
     depends_on: [caddy, houses]
     mem_limit: ${LAKE_MCP_MEM:-260m}
@@ -140,4 +144,4 @@ services:
 networks:
   lake-local: { external: true, name: lake-local }
 
-volumes: { node: {}, specialists: {}, houses: {}, cli: {} }
+volumes: { node: {}, specialists: {}, houses: {}, cli: {}, mcp: {} }

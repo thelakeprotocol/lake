@@ -18,6 +18,10 @@
 			}
 		}
 	}
+	# Where an MCP client learns how to sign in (RFC 9728, RFC 8414): the connector answers for /mcp.
+	handle /.well-known/oauth-* {
+		reverse_proxy 127.0.0.1:4800
+	}
 	handle /mcp* {
 		reverse_proxy 127.0.0.1:4800 {
 			flush_interval -1

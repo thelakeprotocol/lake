@@ -448,7 +448,9 @@ function panelFor(x: {
       const vc = receiptCache.get(f)?.vc;
       const s = vc?.credentialSubject;
       // Sold by the owner's assistant for this house (SPEC §6.5): the receipt names it as seller.
-      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.seller && s.seller !== owner.webId ? { via: String(s.seller) } : {}) } : null;
+      // With what it was for and the names the signed cards gave, where the receipt says (older ones don't).
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), from: String(vc!.issuer), payer: s.payer ? String(s.payer) : undefined, at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.seller && s.seller !== owner.webId ? { via: String(s.seller) } : {}),
+        ...(Array.isArray(s.items) ? { items: s.items } : {}), ...(s.payer_name ? { payerName: String(s.payer_name) } : {}), ...(s.seller_name ? { viaName: String(s.seller_name) } : {}), ...(s.heldUntil ? { heldUntil: String(s.heldUntil) } : {}) } : null;
     }).filter(Boolean) as { amount: number; at: string; settlement: string }[];
     // On a leased house, money is counted from this owner's claim: the last owner's earnings were never theirs.
     const since = x.desk().claimedAt();

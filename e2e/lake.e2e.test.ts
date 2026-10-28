@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -608,7 +608,8 @@ describe('the owner', () => {
       for (let i = 0; i < 20 && (await ownerCall({ kind: 'panel.money' })).total === before; i++) await new Promise((r) => setTimeout(r, 250));
       const money = await ownerCall({ kind: 'panel.money' });
       expect(money.total - before).toBe(8);
-      expect(money.receipts).toContainEqual(expect.objectContaining({ amount: 8, via: seller.webId }));
+      // And says what for and who, as the signed cart and cards said ("$4 from claude-code-2299….mcp.example" told nobody).
+      expect(money.receipts).toContainEqual(expect.objectContaining({ amount: 8, via: seller.webId, payerName: 'Candle shop', viaName: 'Mia helper', items: [{ label: '55 words of candle copy', amount: { currency: 'USD', value: 8 } }] }));
       // A note that says which house its sender speaks for carries the house's word, and the house checks it (run 42); an
       // impostor's same claim, with nothing to show, says so.
       const proof = { house: paired.webId, url: paired.badge.issuer, vouch: paired.badge };
@@ -792,6 +793,72 @@ describe('the open door', () => {
     expect(res.isError).toBeFalsy();
     expect(out.participants).toBeGreaterThan(0);
     expect(out.steps.some((s: string) => s.startsWith('pay:'))).toBe(true);
+  });
+
+  it('Claude over HTTP, signed in: the standard sign-in, then one agent for every chat and after a restart', async () => {
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`, data = join(dir, 'mcp-signed-in');
+    const env = { LAKE_NODE_URL: node, LAKE_MCP_DATA: data, LAKE_MCP_KEK: 'a test secret' };
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, env);
+    // No token: 401, and where to learn how to get one (RFC 9728).
+    const bare = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '0' } } }) });
+    expect(bare.status).toBe(401);
+    const prmUrl = /resource_metadata="([^"]+)"/.exec(bare.headers.get('www-authenticate') ?? '')![1]!;
+    const prm = await (await fetch(prmUrl)).json();
+    expect(prm).toMatchObject({ resource: url, authorization_servers: [url] });
+    // The authorization server's metadata, path-inserted for an issuer with a path (RFC 8414).
+    const as = await (await fetch(`http://localhost:${port}/.well-known/oauth-authorization-server/mcp`)).json();
+    expect(as).toMatchObject({ issuer: url, code_challenge_methods_supported: ['S256'] });
+    // Dynamic client registration (RFC 7591), then the code flow with PKCE, as claude.ai does it.
+    const cb = 'http://localhost:1/callback';
+    const client = await (await fetch(as.registration_endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client_name: 'Claude', redirect_uris: [cb], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'] }) })).json();
+    const verifier = randomBytes(32).toString('base64url'), challenge = createHash('sha256').update(verifier).digest('base64url');
+    const signIn = async (resource = url) => {
+      const page = await (await fetch(`${as.authorization_endpoint}?${new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: cb, code_challenge: challenge, code_challenge_method: 'S256', state: 'st8', resource })}`)).text();
+      expect(page).toMatch(/Connect Claude to/);
+      const ask = /name="ask" value="([^"]+)"/.exec(page)![1]!;
+      return fetch(`${url}/oauth/approve`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ask }) });
+    };
+    // A token for another server isn't made here (RFC 8707).
+    expect((await signIn('https://elsewhere.example/mcp')).status).toBe(400);
+    const back = new URL((await signIn()).headers.get('location')!);
+    expect(back.searchParams.get('state')).toBe('st8');
+    const tokenCall = async (body: Record<string, string>) => (await fetch(as.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: client.client_id, ...body }) })).json();
+    // The code works once, and only with its verifier.
+    expect(await tokenCall({ grant_type: 'authorization_code', code: back.searchParams.get('code')!, code_verifier: 'wrong'.repeat(9), redirect_uri: cb })).toMatchObject({ error: 'invalid_grant' });
+    const signInAgain = new URL((await signIn()).headers.get('location')!);
+    const tokens = await tokenCall({ grant_type: 'authorization_code', code: signInAgain.searchParams.get('code')!, code_verifier: verifier, redirect_uri: cb });
+    expect(tokens).toMatchObject({ token_type: expect.stringMatching(/bearer/i), access_token: expect.any(String), refresh_token: expect.any(String) });
+    const chat = async (access: string) => {
+      const c = new Client({ name: 'claude-ai', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${access}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(((await c.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text);
+      return { c, call };
+    };
+    // Two chats at once (the phone and the web): the same agent, both working.
+    const one = await chat(tokens.access_token), two = await chat(tokens.access_token);
+    const me = (await one.call('lake_overview')).you;
+    await one.call('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips.' });
+    expect((await two.call('lake_overview')).you).toMatchObject({ name: me.name, url: me.url });
+    expect((await one.call('lake_overview')).you.url).toBe(me.url);
+    await one.c.close(); await two.c.close();
+    // A restart (a deploy): the agent comes back as itself, with what it had said about itself; the refresh token rotates.
+    const proc = procs.at(-1)!;
+    await new Promise((r) => { proc.once('exit', r); proc.kill('SIGTERM'); });
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, env);
+    const fresh = await tokenCall({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
+    expect(fresh.access_token).toEqual(expect.any(String));
+    expect(await tokenCall({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token })).toMatchObject({ error: 'invalid_grant' });
+    const after = await chat(fresh.access_token);
+    expect((await after.call('lake_overview')).you).toMatchObject({ name: me.name, url: me.url });
+    expect((await after.call('lake_search', { tag: 'game' })).some((x: { url: string }) => x.url === me.url)).toBe(true);
+    await after.c.close();
+    // Its key is sealed at rest: the folder alone doesn't give it away.
+    expect(await readFile(join(data, 'auth', 'principals.json'), 'utf8')).not.toMatch(/privateJwk|"d":/);
+    // A script without a browser signs in the same way, minus the tap.
+    const anon = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+    const script = await chat(anon.access_token);
+    expect((await script.call('lake_overview')).you.url).not.toBe(me.url);
+    await script.c.close();
   });
 
   it('Claude over HTTP: every conversation is its own signed agent, registered on the Lake, and runs a paid study', async () => {

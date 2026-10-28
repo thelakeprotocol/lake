@@ -190,6 +190,7 @@ function signOut() {
   forgetting = true;
   try {
     localStorage.removeItem(`lake-owner-key:${location.host}`);
+    localStorage.setItem('lake-houses', JSON.stringify((JSON.parse(localStorage.getItem('lake-houses') ?? '[]') as string[]).filter((x) => x !== houseBase())));
     for (const k of Object.keys(sessionStorage)) if (k.startsWith(CACHE)) sessionStorage.removeItem(k);
   } catch { /* nothing kept */ }
   location.reload();
@@ -952,16 +953,38 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
 }
 
 // ---- Money ----
+type Receipt = { amount: number; currency: string; agreement: string; from: string; payer?: string; payerName?: string; via?: string; viaName?: string; at: string; settlement: string; heldUntil?: string; items?: { label: string; amount: { currency: string; value: number } }[] };
+/** What a payment was for, as its receipt says: the cart's items, or the order it paid. */
+const forWhat = (r: Receipt) => r.items?.length ? r.items.map((i) => i.label.replace(/^1 × /, '')).join(', ') : r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40);
+const named = (name: string | undefined, addr: string | undefined) => (name ? name.replace(/ \((.+), via MCP\)$/, ' ($1)') : addr ? who(addr) : 'someone');
+
 function Money() {
-  const m = useHouse<{ total: number; receipts: { amount: number; currency: string; agreement: string; from: string; payer?: string; at: string; settlement: string }[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string }[] }>({ kind: 'panel.money' });
+  const m = useHouse<{ total: number; held?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string }[] }>({ kind: 'panel.money' });
   if (!m.data) return h(Failed, { error: m.error });
   const when = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const status = (r: Receipt) => r.settlement === 'held' ? 'held' : r.settlement === 'voided' ? 'refunded' : 'paid';
   return h('div', {},
     h('p', { class: 'lede' }, 'Every payment comes with a signed receipt, filed in your pod. On the sandbox, money is simulated.'),
-    h('dl', { class: 'tiles' }, h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.data.total}`)), h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.data.receipts.length)))),
-    m.data.receipts.length ? h('div', { style: 'margin-top:14px' }, h(Paged, { items: m.data.receipts, cls: 'rows', render: (r: (typeof m.data.receipts)[number]) => h('li', { key: `${r.at}-${r.agreement}` },
-      h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `${money$(r.amount, r.currency)} from ${who(r.payer)}` : money$(r.amount, r.currency)), h('div', { class: 'r-meta' }, `${when(r.at)} · signed by ${who(r.from)} · ${r.settlement}`)),
-      h('span', { class: 'chip share' }, 'signed')) })) : h('p', { class: 'empty' }, 'No payments yet.'),
+    h('dl', { class: 'tiles' },
+      h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.data.total}`)),
+      // Paid, but held until the buyer accepts what they got (or the time to answer runs out): not counted in Earned yet.
+      m.data.held ? h('div', { class: 'tile' }, h('dt', {}, 'Held for now'), h('dd', {}, `$${m.data.held}`)) : null,
+      h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.data.receipts.length)))),
+    m.data.held ? h('p', { class: 'muted', style: 'margin-top:10px' }, 'Held money is yours once the buyer accepts what they got, or when their time to answer runs out. Then it moves to Earned.') : null,
+    m.data.receipts.length ? h('div', { style: 'margin-top:14px' }, h(Paged, { items: m.data.receipts, cls: 'rows', render: (r: Receipt) => h('li', { key: `${r.at}-${r.agreement}`, class: 'pay' },
+      // Tap for the whole receipt: what, who, and where the money stands.
+      h('details', {},
+        h('summary', {},
+          h('div', {}, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} · ${forWhat(r)}`),
+            h('div', { class: 'r-meta' }, `from ${named(r.payerName, r.payer)}${r.via ? ` · sold by ${named(r.viaName, r.via)}` : ''} · ${when(r.at)}`)),
+          h('span', { class: `chip ${status(r) === 'held' ? '' : 'share'}` }, status(r))),
+        h('dl', { class: 'pay-detail' },
+          r.items?.length ? [h('dt', {}, 'For'), h('dd', {}, ...r.items.map((i) => h('div', {}, `${i.label}: ${money$(i.amount.value, i.amount.currency)}`)))] : null,
+          h('dt', {}, 'Paid by'), h('dd', {}, named(r.payerName, r.payer), r.payer ? h('div', { class: 'r-meta' }, r.payer) : null),
+          r.via ? [h('dt', {}, 'Sold by'), h('dd', {}, `${named(r.viaName, r.via)}, your AI, for your house`)] : null,
+          h('dt', {}, 'Money'), h('dd', {}, status(r) === 'held' ? `Held until the buyer accepts${r.heldUntil ? `, or ${when(r.heldUntil)} at the latest` : ''}` : status(r) === 'refunded' ? 'Refunded to the buyer' : `Paid (${r.settlement})`),
+          h('dt', {}, 'Order'), h('dd', { class: 'r-meta' }, r.agreement),
+          h('dt', {}, 'Receipt signed by'), h('dd', {}, who(r.from))))) })) : h('p', { class: 'empty' }, 'No payments yet.'),
     // What your own agent paid for you, under the allowance you signed: its receipts, handed back to your house.
     m.data.spent?.length ? h('div', {}, h('h2', {}, 'Spent by your agent'), h('ul', { class: 'rows' }, ...m.data.spent.map((r, i) => h('li', { key: i },
       h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('div', { class: 'r-meta' }, `${when(r.at)} · under your allowance · ${r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40)}`)),
@@ -1139,6 +1162,46 @@ function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) {
           h('button', { class: 'btn', type: 'button', onClick: () => { const c = recovery.current!.value.trim(); if (c) void pair(c); } }, 'Use it'))))));
 }
 
+/**
+ * An AI app signing in through this house (the connector's sign-in page sent the person here): read once, before
+ * pairing (which may clear the address), so it survives it.
+ */
+const connecting = (() => {
+  const q = new URLSearchParams(location.hash.slice(1));
+  const ask = q.get('connect'), back = q.get('back');
+  if (!ask || !back) return null;
+  history.replaceState(null, '', location.pathname);
+  return { ask, back, app: (q.get('app') ?? 'An AI app').slice(0, 60), from: (q.get('from') ?? '').slice(0, 100) };
+})();
+const houseBase = () => location.origin + location.pathname.replace(/\/owner\/.*$/, '');
+
+/** "Connect Claude to your house?": one tap with your key makes it your assistant here, and sends you back to it. */
+function ConnectAI({ c, done }: { c: NonNullable<typeof connecting>; done: () => void }) {
+  // The code goes only to a sign-in on this house's own Lake: a link from anywhere else can't collect one.
+  let ok = false;
+  try { const u = new URL(c.back, location.href); ok = u.origin === location.origin && u.pathname.endsWith('/oauth/approve'); } catch { /* not a URL */ }
+  const go = async () => {
+    const r = await call<{ code: string }>({ kind: 'panel.assistant.invite', label: c.app });
+    const f = document.createElement('form');
+    f.method = 'post';
+    f.action = c.back;
+    for (const [k, v] of Object.entries({ ask: c.ask, house: houseBase(), code: r.code })) {
+      const i = document.createElement('input');
+      i.type = 'hidden'; i.name = k; i.value = v;
+      f.append(i);
+    }
+    document.body.append(f);
+    f.submit();
+    await new Promise(() => {}); // leaving the page
+  };
+  return h('div', { class: 'shell unpaired' }, h('main', {},
+    h('header', { class: 'top' }, h('div', { class: 'eyebrow' }, h('span', { class: 'dot' }), h('span', {}, 'Your house on the Lake')), h('h1', {}, `Connect ${c.app} to your house?`)),
+    ok ? h('section', {},
+      h('p', { class: 'muted' }, `It becomes your assistant here: it sees what comes to your door and suggests, and sells for you if you ask it to (what it earns comes here). Only you decide anything. Remove it any time on My agent.${c.from ? ` It goes back to ${c.from}.` : ''}`),
+      h('div', { class: 'row' }, h(Act, { label: 'Connect', cls: 'primary', run: go }), h('button', { class: 'btn small quiet', type: 'button', onClick: done }, 'Not now')))
+      : h('section', {}, h('p', { class: 'muted' }, 'This sign-in didn\'t come from this house\'s own Lake, so it isn\'t offered here.'), h('button', { class: 'btn small', type: 'button', onClick: done }, 'Back to my house'))));
+}
+
 function Root() {
   // Paired before on this device (its last answers are kept): open straight away and check behind.
   const seen = cached<{ webId: string; until?: string }>(JSON.stringify({ kind: 'list' }));
@@ -1158,7 +1221,14 @@ function Root() {
     addEventListener('lake:not-the-key', lost);
     return () => removeEventListener('lake:not-the-key', lost);
   }, []);
+  // This browser knows this house: the connector's sign-in page offers it next time (same site only).
+  useEffect(() => {
+    if (state !== 'paired') return;
+    try { const all = (JSON.parse(localStorage.getItem('lake-houses') ?? '[]') as string[]).filter((x) => x !== houseBase()); localStorage.setItem('lake-houses', JSON.stringify([...all, houseBase()].slice(-5))); } catch { /* not kept */ }
+  }, [state]);
+  const [connect, setConnect] = useState(connecting);
   if (state === 'checking') return null;
+  if (state === 'paired' && connect) return h(ConnectAI, { c: connect, done: () => setConnect(null) });
   return state === 'paired' ? h(App, {}) : h(Pair, { onPaired: () => setState('paired'), why });
 }
 

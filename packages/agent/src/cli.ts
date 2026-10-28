@@ -15,6 +15,8 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     node: env.LAKE_NODE_URL ?? 'http://lake-node:7000', publicUrl: a['public-url'] ?? `http://localhost:${port}`, packs: env.LAKE_PACKS?.split(',').map((x) => x.trim()).filter(Boolean),
     ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL, ...trade(env),
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
+    // A data folder turns sign-in on: an AI keeps one agent from chat to chat (and across restarts).
+    data: env.LAKE_MCP_DATA, kek: env.LAKE_MCP_KEK,
     log: (m) => console.log(m),
   });
   const { keepAliveBehindProxy } = await import('@thelakeprotocol/core');

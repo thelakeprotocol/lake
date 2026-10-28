@@ -1,10 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer as httpServer, request, type Server } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { generateIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
 
 // The owner's panel as a person uses it, on a phone, against a real house: pairing, the door, the owner's own AI and its
@@ -21,9 +25,10 @@ let page: Page;
 const errors: string[] = [];
 
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
-function start(args: string[], ready: RegExp): Promise<void> {
+let proxy: Server;
+function start(args: string[], ready: RegExp, env: Record<string, string> = {}): Promise<void> {
   return new Promise((ok, fail) => {
-    const p = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
     procs.push(p);
     let out = '';
     const timer = setTimeout(() => fail(new Error(`timed out:\n${out}`)), 120_000);
@@ -56,14 +61,24 @@ const asAssistant = async (payload: Record<string, unknown>) => (await fetch(`${
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'lake-panel-'));
-  const [np, sp, pp, hp] = [await freePort(), await freePort(), await freePort(), await freePort()];
+  const [np, sp, pp, hp, mp, xp] = [await freePort(), await freePort(), await freePort(), await freePort(), await freePort(), await freePort()];
   const node = `http://localhost:${np}`;
+  // One site for the house and the connector, as on the sandbox (the panel hands its code only to its own Lake's sign-in).
+  const site = `http://localhost:${xp}`;
+  proxy = httpServer((req, res) => {
+    const to = /^\/(mcp|\.well-known\/oauth-)/.test(req.url ?? '') ? mp : hp;
+    const fwd = request({ host: 'localhost', port: to, path: req.url, method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
+    fwd.on('error', () => { res.writeHead(502); res.end(); });
+    req.pipe(fwd);
+  }).listen(xp);
   await start(['packages/lake/dist/main.js', '--port', String(np), '--data', join(dir, 'node'), '--feed-batch-ms', '200'], /Lake node on/);
   await start(['packages/specialists/dist/main.js', 'all', '--port', String(sp), '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,shopping'], /register registered with the Lake node/);
-  house = `http://localhost:${hp}`;
+  house = site;
   // A sandbox house: the first device to open its panel becomes its owner, as on the public sandbox.
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
-    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing'], /joined the Lake/);
+    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/);
+  // The connector, with sign-in on.
+  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   page = await ctx.newPage();
@@ -74,6 +89,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close();
+  proxy?.close();
   procs.forEach((p) => p.kill('SIGTERM'));
   await new Promise((r) => setTimeout(r, 500));
   await rm(dir, { recursive: true, force: true });
@@ -253,7 +269,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('heading', { name: 'Needs you' }).waitFor();
     expect(Date.now() - t).toBeLessThan(2000);
     // What the house holds stays out of the device's lasting storage: the quick start is for this tab only.
-    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => !k.startsWith('lake-owner-key:') && !k.startsWith('lake.start')))).toEqual([]);
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => !k.startsWith('lake-owner-key:') && !k.startsWith('lake.start') && k !== 'lake-houses'))).toEqual([]);
     await page.unroute('**/owner/api');
     await tidy();
   });
@@ -276,6 +292,76 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await card.getByRole('button', { name: /Tap again/ }).click();
     await card.waitFor({ state: 'detached', timeout: 5000 });
     expect((await asAssistant({ kind: 'list' })).error).toMatch(/no key/);
+    await tidy();
+  });
+
+  it('signs an AI app in through the house: no code to copy, the same agent in every chat', async () => {
+    // The MCP SDK's own OAuth client, as AI apps use it: it registers itself, and sends the person to sign in.
+    const cb = 'https://app.example/callback';
+    let goTo: URL | undefined, verifier = '', info: unknown, tokens: unknown;
+    const provider: OAuthClientProvider = {
+      redirectUrl: cb,
+      clientMetadata: { client_name: 'Claude', redirect_uris: [cb], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' },
+      clientInformation: () => info as never, saveClientInformation: (i) => { info = i; },
+      tokens: () => tokens as never, saveTokens: (t) => { tokens = t; },
+      redirectToAuthorization: (u) => { goTo = u; },
+      saveCodeVerifier: (v) => { verifier = v; }, codeVerifier: () => verifier,
+    };
+    const mcp = new URL(`${house}/mcp`);
+    const first = new StreamableHTTPClientTransport(mcp, { authProvider: provider });
+    await expect(new Client({ name: 'Claude', version: '0' }).connect(first)).rejects.toThrow(UnauthorizedError);
+    // The sign-in page knows this browser's house; through it, the panel asks with the owner's key.
+    await page.goto(goTo!.href);
+    await page.getByRole('heading', { name: /Connect Claude to/ }).waitFor();
+    expect(await page.locator('input[name=house]').inputValue()).toBe(house);
+    await page.getByRole('button', { name: 'Continue in my house' }).click();
+    await page.getByRole('heading', { name: 'Connect Claude to your house?' }).waitFor();
+    await tidy();
+    // Back to the app with a code (the browser then leaves for the app, which isn't real here).
+    const approved = page.waitForResponse((r) => r.url().endsWith('/mcp/oauth/approve'));
+    await page.getByRole('button', { name: 'Connect' }).click();
+    const back = new URL((await approved).headers().location!);
+    expect(back.origin + back.pathname).toBe(cb);
+    const code = back.searchParams.get('code')!;
+    await first.finishAuth(code);
+    const chat = async () => {
+      const c = new Client({ name: 'Claude', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(mcp, { authProvider: provider }));
+      return { c, call: async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); expect(r.isError, JSON.stringify(r.content)).toBeFalsy(); return JSON.parse((r.content as { text: string }[])[0]!.text); } };
+    };
+    const one = await chat();
+    const me = (await one.call('lake_overview')).you;
+    // Already its human's assistant: it looks inside without lake_house_connect.
+    expect(await one.call('lake_house', { view: 'overview' })).toMatchObject({ name: 'panel' });
+    // Another chat later is the same agent, still connected.
+    const two = await chat();
+    expect((await two.call('lake_overview')).you.url).toBe(me.url);
+    await two.call('lake_house', { view: 'overview' });
+    // It sells for the house: another AI (a script, signed in without a browser) orders and pays, held until it accepts.
+    await one.call('lake_sell', { action: 'menu', items: [{ sku: 'summary', label: 'A short summary', price: 4, currency: 'USD' }] });
+    const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();
+    const shopper = new Client({ name: 'Claude Code', version: '0' });
+    await shopper.connect(new StreamableHTTPClientTransport(mcp, { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
+    const shop = async (args: Record<string, unknown>) => { const r = await shopper.callTool({ name: 'lake_buy', arguments: args }); expect(r.isError, JSON.stringify(r.content)).toBeFalsy(); return JSON.parse((r.content as { text: string }[])[0]!.text); };
+    const shopperName = JSON.parse(((await shopper.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.name.split(' (')[0];
+    const order = await shop({ action: 'order', seller_url: me.url, sku: 'summary' });
+    const cartId = order.cart?.id ?? order.cart ?? order.id;
+    await shop({ action: 'pay', cart: String(cartId) });
+    await shopper.close();
+    await one.c.close(); await two.c.close();
+    // And the owner sees it on My agent, here now.
+    await page.goto(`${house}/owner/`);
+    await tab('My agent');
+    await page.locator('.item', { hasText: me.name.split(' (')[0] }).locator('.chip', { hasText: 'Here now' }).waitFor({ timeout: 5000 });
+    await tidy();
+    // Money says what it was for and who paid, held until the buyer accepts; a tap opens the receipt.
+    await tab('Money');
+    const sale = page.locator('li.pay', { hasText: 'A short summary' });
+    await sale.waitFor({ timeout: 10_000 });
+    expect(await sale.locator('summary').textContent()).toMatch(new RegExp(`\\$4 · A short summary.*from ${shopperName}.*sold by ${me.name.split(' (')[0]}`));
+    await page.getByText('Held for now').waitFor();
+    await sale.locator('summary').click();
+    await sale.getByText(/Held until the buyer accepts/).waitFor();
     await tidy();
   });
 

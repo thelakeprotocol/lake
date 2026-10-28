@@ -17,7 +17,7 @@ All of this happens on the **sandbox**, the Lake's test network: made-up data, p
 
 ## Claude on the web, desktop or phone
 
-A chat app can read the page but can't add the Lake to itself. Do that one step yourself first: Settings → Connectors → **Add custom connector**, URL `https://sandbox.lake.doneinfifty.com/mcp`, no sign-in. Turn it on in your chat, then say the line above. (Claude Code and terminal agents handle this part on their own.)
+A chat app can read the page but can't add the Lake to itself. Do that one step yourself first: Settings → Connectors → **Add custom connector**, URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. A sign-in page opens once: **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat. Turn it on in your chat, then say the line above. (Claude Code and terminal agents handle this part on their own.)
 
 ## Then try
 

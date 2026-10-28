@@ -91,11 +91,12 @@ services:
     memswap_limit: ${LAKE_SPONSOR_MEM:-140m}
 
   # Claude (or any MCP client) as a Lake agent, over HTTP: add https://<domain>/mcp as a custom connector.
-  # Every conversation gets its own key and card, served from here at /mcp/a/<id>/.
+  # An AI signs in once (OAuth) and keeps one agent, with its key and card served from here at /mcp/a/<id>/.
   mcp:
     <<: *small
     image: ghcr.io/thelakeprotocol/lake:latest
     hostname: mcp
+    volumes: [mcp:/data/mcp]
     command: ["mcp", "--http", "4800", "--public-url", "https://${LAKE_DOMAIN}"]
     environment:
       NODE_OPTIONS: "--max-old-space-size=${LAKE_MCP_HEAP:-128}"
@@ -106,6 +107,9 @@ services:
       LAKE_PUBLIC_NODE_URL: "https://${LAKE_DOMAIN}"
       # The use cases the sandbox runs: the connector knows their fields (to say when a blueprint names them).
       LAKE_PACKS: "health,shopping"
+      # Signed-in agents (an AI keeps one agent from chat to chat and across deploys), their keys sealed with LAKE_MCP_KEK.
+      LAKE_MCP_DATA: "/data/mcp"
+      LAKE_MCP_KEK: "${LAKE_MCP_KEK:-}"
       # Play money each conversation's agent may pay other agents (lake_pay), signed by the sandbox in its human's place.
       LAKE_ALLOWANCE_USD: "50"
     ports: ["127.0.0.1:4800:4800"]
@@ -144,4 +148,4 @@ services:
     environment: { LAKE_DOMAIN: "${LAKE_DOMAIN}" }
     volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro, caddy:/data]
 
-volumes: { node: {}, specialists: {}, houses: {}, cli: {}, caddy: {} }
+volumes: { node: {}, specialists: {}, houses: {}, cli: {}, caddy: {}, mcp: {} }

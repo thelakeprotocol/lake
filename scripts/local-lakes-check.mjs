@@ -13,10 +13,13 @@ const B = (process.argv[3] ?? process.env.LAKE_B ?? 'http://lake-b.localhost:808
 /** One MCP conversation over streamable HTTP: initialize, then tools/call. Answers come as JSON or as SSE. */
 async function session(lake, client) {
   let sid, n = 0;
+  // Signed in like a script would be, when the connector has sign-in on (404 means it hasn't).
+  const t = await fetch(`${lake}/mcp/oauth/anonymous`, { method: 'POST' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const auth = t?.access_token ? { authorization: `Bearer ${t.access_token}` } : {};
   const rpc = async (method, params, notify = false) => {
     const res = await fetch(`${lake}/mcp`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(sid ? { 'mcp-session-id': sid } : {}) },
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...auth, ...(sid ? { 'mcp-session-id': sid } : {}) },
       body: JSON.stringify({ jsonrpc: '2.0', method, params, ...(notify ? {} : { id: ++n }) }),
       signal: AbortSignal.timeout(90_000),
     });

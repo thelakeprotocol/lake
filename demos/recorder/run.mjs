@@ -47,6 +47,17 @@ if (page) {
   await page.waitForTimeout(4000);
 }
 
+// Each player its own connector config. A connector with sign-in on (the sandbox) gives each a token of its own, so
+// every player is its own agent, as two people's AIs would be; without sign-in (404 here), none is needed.
+const mcpFor = {};
+for (const p of config.players) {
+  const url = `${(p.lake ?? lake).replace(/\/$/, '')}/mcp`;
+  const r = await fetch(`${url}/oauth/anonymous`, { method: 'POST' }).catch(() => null);
+  const t = r?.ok ? await r.json() : null;
+  mcpFor[p.id] = join(run, `mcp-${p.id}.json`);
+  writeFileSync(mcpFor[p.id], JSON.stringify({ mcpServers: { lake: { type: 'http', url, ...(t?.access_token ? { headers: { Authorization: `Bearer ${t.access_token}` } } : {}) } } }));
+}
+
 const t0 = Date.now();
 const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() => {
   const prompt = fillVars(fill(readFileSync(join(root, demo, p.prompt), 'utf8'))).replaceAll('{{start}}', new Date().toTimeString().slice(0, 8));
@@ -54,8 +65,7 @@ const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() =
   // `tools` only pre-approves; `deny` takes tools out of a player's sight altogether (a control that mustn't see a door);
   // `model` runs this player on another model (opus, sonnet, haiku, fable), so look-alike agents can differ.
   // `lake` puts this player on another Lake (cross-Lake runs on the two local staging Lakes): its own connector.
-  const mcp = p.lake ? join(run, `mcp-${p.id}.json`) : join(run, 'mcp.json');
-  if (p.lake) writeFileSync(mcp, JSON.stringify({ mcpServers: { lake: { type: 'http', url: `${p.lake.replace(/\/$/, '')}/mcp` } } }));
+  const mcp = mcpFor[p.id];
   const c = spawn('claude', ['-p', prompt, '--mcp-config', mcp, '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
     { cwd: join(outside, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
   // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
