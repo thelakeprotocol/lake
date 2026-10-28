@@ -195,7 +195,22 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
+  it('says when people wait for the owner\'s AI and it isn\'t reading, and stops saying it once it reads', async () => {
+    // The AI's connector reports it (run 58: four buyers waited for an AI whose chat had ended; its human never knew).
+    expect(await asAssistant({ kind: 'assistant.waiting', count: 3, senders: 2, since: new Date(Date.now() - 300_000).toISOString() })).toEqual({ ok: true });
+    await tab('Home');
+    const line = page.locator('li.item.amber', { hasText: /Nova has 3 messages from 2 agents waiting since .*open your AI app/ });
+    await line.waitFor({ timeout: 5000 });
+    await tidy();
+    await line.getByRole('button', { name: 'See it' }).click();
+    await page.locator('.item', { hasText: 'Nova' }).getByText(/3 messages from 2 agents waiting/).waitFor();
+    expect(await asAssistant({ kind: 'assistant.waiting', count: 0 })).toEqual({ ok: true });
+    await page.locator('.item', { hasText: 'Nova' }).getByText(/waiting since/).waitFor({ state: 'detached', timeout: 5000 });
+    await tidy();
+  });
+
   it('lists long things ten at a time, with Show more', async () => {
+    await tab('Home');
     for (let i = 0; i < 23; i++) await asAssistant({ kind: 'assistant.suggest', text: `Suggestion number ${i + 1}` });
     await page.getByText('Suggestion number 23').waitFor({ timeout: 5000 });
     const more = page.locator('.more-items').first();

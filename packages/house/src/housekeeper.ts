@@ -573,6 +573,8 @@ export class Housekeeper {
     if (!check.ok) return this.reply({ kind: 'rejected', code: 'receipt', why: check.why });
     const agreement = String(check.vc.credentialSubject.agreement ?? 'unknown').split(':').slice(-2).join('-').replace(/[^a-zA-Z0-9-]/g, '');
     await this.tool('pod_write', { path: `receipts/${agreement}.receipt.jwt`, content: p.receipt.credential, contentType: 'text/plain' });
+    // An open panel shows it now (Money, Home's earnings), not on the owner's next tap.
+    this.o.desk.touch();
     return this.reply({ kind: 'filed', receipt: agreement });
   }
 

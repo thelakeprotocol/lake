@@ -127,7 +127,7 @@ export interface AgendaItem {
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
 const MAX_ALLOWANCE = 500;
 const MAX_ALLOWANCE_DAYS = 31;
@@ -157,6 +157,8 @@ export class OwnerDesk {
   private clearRecovery = () => rm(this.recoveryFile(), { force: true }).catch(() => {});
   private operatorToken = '';
   readonly assistants = new Map<string, AssistantKey>();
+  /** What waits unread for each assistant, as its connector last said (kept in memory: it's said again). */
+  private waitingFor = new Map<string, { count: number; senders: number; since: string; lastRead?: string }>();
   private invites = new Map<string, { label: string; until: number }>();
   suggestions: Suggestion[] = [];
   /** When the owner's own key last called the desk (the panel polls while open; answers come through it too). */
@@ -644,6 +646,15 @@ export class OwnerDesk {
           await this.o.saveAssistants?.([...this.assistants.values()]);
         }
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
+        // Messages waiting for it while nobody reads (its chat ended): its human's panel says so (run 58).
+        if (p.kind === 'assistant.waiting') {
+          const q = p as unknown as { count?: number; senders?: number; since?: string; last_read?: string };
+          const count = Math.max(0, Math.min(999, Number(q.count) || 0));
+          if (count) this.waitingFor.set(assistant.kid, { count, senders: Math.max(1, Math.min(count, Number(q.senders) || 1)), since: String(q.since ?? new Date().toISOString()).slice(0, 40), ...(q.last_read ? { lastRead: String(q.last_read).slice(0, 40) } : {}) });
+          else this.waitingFor.delete(assistant.kid);
+          this.touch();
+          return void res.json({ ok: true });
+        }
         if (p.kind === 'assistant.suggest') {
           const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown }; rules?: unknown };
           const text = String(q.text ?? '').trim().slice(0, 1500);
@@ -999,7 +1010,7 @@ export class OwnerDesk {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
-      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid); return { kid, label, addedAt, seenAt, canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); return a ? { ...n, answered: a } : n; }),

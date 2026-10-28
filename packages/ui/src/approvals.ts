@@ -202,7 +202,7 @@ type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[
 type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
-interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
+interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 interface ListView { webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 
 function Home({ go }: { go: (t: Tab) => void }) {
@@ -216,6 +216,8 @@ function Home({ go }: { go: (t: Tab) => void }) {
   // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
   const waiting = list.data.requests.length;
   const needs = [
+    // Your AI isn't reading and people are waiting for it: only you can open it again.
+    ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
     ...(notes ?? []).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
   ];
@@ -861,6 +863,12 @@ function Visitors() {
 /** The code you hand your agent, kept here so a tab change doesn't lose it while you copy it. */
 let invite: { msg: string; until: number; made: number } | null = null;
 
+/** "Pike has 4 messages from 3 agents waiting since 03:56: open your AI app and ask it to check the Lake." */
+const waitingLine = (a: Assistant) => {
+  const w = a.waiting!;
+  return `${shortName(a.label)} has ${w.count === 1 ? 'a message' : `${w.count} messages`}${w.senders > 1 ? ` from ${w.senders} agents` : ''} waiting since ${time(w.since)}, and isn't reading: open your AI app and ask it to check the Lake.`;
+};
+
 /** When an agent last used its key, as people say it: "here now", "here 3 hours ago". */
 function lastHere(at?: string): { text: string; now: boolean } {
   const ms = at ? Date.now() - Date.parse(at) : NaN;
@@ -892,6 +900,7 @@ function MyAgent() {
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
       h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), ((l) => h('span', { class: `chip${l.now ? ' ok' : ''}`, title: 'When it last used its key' }, l.text))(lastHere(a.seenAt))),
       h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests`),
+      a.waiting ? h('p', { class: 'item-text amber-text' }, waitingLine(a)) : null,
       // Its money in a box of its own, the agent's removal below a line: side by side, "Revoke" read as taking the money back.
       h(Allowance, { a }),
       h('div', { class: 'item-foot agent-remove' },

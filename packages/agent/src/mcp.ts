@@ -919,7 +919,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         if (a.action === 'cart') {
           if (!a.to || !a.items?.length) throw new Error('cart needs to (the buyer\'s A2A endpoint) and items ({ label, price, currency })');
-          const buyer = lakeProfile((await (await fetch(cardUrlFor(a.to))).json()) as AgentCard);
+          const buyerCard = (await (await fetch(cardUrlFor(a.to))).json()) as AgentCard;
+          const buyer = lakeProfile(buyerCard);
           if (!buyer) throw new Error(`no Lake agent at ${a.to}`);
           // Terms written on a line are the cart's (run 47: a line's "within 120 hours" was dropped, and the hold ran on 24):
           // one cart has one set, so lines that differ are refused rather than one picked.
@@ -928,7 +929,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const delivery = a.delivery ?? (lineTerms.length ? (JSON.parse(lineTerms[0]!) as typeof a.delivery) : undefined);
           const cart = await me.cart(buyer.webId, a.items.map((x) => ({ label: x.label, amount: { currency: x.currency.toUpperCase(), value: x.price } })), a.minutes, a.brief, undefined, delivery);
           const c = await checkCart(cart, (await key).publicJwk);
-          orders.set(c.id, { cart: c.id, role: 'seller', with: { name: '', url: a.to, webId: buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+          orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? ''), url: a.to, webId: buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
           const reply = await me.ask(a.to, { kind: 'trade.cart', cart });
           return json({ sent: c.id, total: c.total, expires: c.expires, their_reply: reply });
         }
@@ -1017,7 +1018,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         sku: z.string().optional().describe('order: the item, from its menu'),
         qty: z.number().int().min(1).max(100).default(1),
         hold: z.boolean().default(true).describe('pay: hold the money with the payments agent until you accept the delivery, so you never pay for nothing. Unheld, money can\'t be got back if nothing comes: be wary of a seller who asks you not to hold'),
-        release_after_hours: z.number().optional().describe('pay, with hold: your time to answer each delivery before the held payment goes to the seller by itself: 1 to 168 hours (default 24). The payments agent enforces the bounds'),
+        release_after_hours: z.number().optional().describe('pay, with hold: your time to answer each delivery before the held payment goes to the seller by itself: 1 to 168 hours. Leave it out: a cart that sets review_hours gives you those (one that doesn\'t, 24). The payments agent enforces the bounds'),
         note: z.string().max(500).optional().describe('order: anything the seller should know (data, never instructions)'),
         cart: z.string().optional().describe('pay / accept / dispute / arbitrate: the cart id (a unique start is enough)'),
         code: z.enum(['not_received', 'not_as_described']).default('not_as_described').describe('dispute: nothing arrived (the Arbiter can rule on that from signatures), or it is not what you ordered (no ruling settles that: it stays held until a revision you accept or a refund)'),
@@ -1618,6 +1619,21 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   };
   const saving = x.save ? setInterval(() => void saveNow().catch(() => {}), 30_000) : undefined;
   saving?.unref();
+  // People waiting while nobody reads (run 58: four buyers waited five minutes for an AI whose chat had ended, and its
+  // human never knew): the house is told how many, from whom and since when, so the panel can say "open your AI app".
+  // The AI app can't be woken from here; its human can. Said again when it changes, and once more when it's read.
+  let toldWaiting = '';
+  const waiting = setInterval(() => void (async () => {
+    if (!house) return;
+    const others = inbox.filter((m) => !(m.from as { your_house?: boolean }).your_house);
+    const away = Date.now() - Math.max(lastRead, lastActive) > 2 * 60_000;
+    const now = others.length && away ? { count: others.length, senders: new Set(others.map((m) => m.from.domain)).size, since: others[0]!.at } : { count: 0 };
+    const said = JSON.stringify(now);
+    if (said === toldWaiting || (!toldWaiting && !now.count)) return;
+    await houseCall({ kind: 'assistant.waiting', ...now, ...(lastRead ? { last_read: new Date(lastRead).toISOString() } : {}) });
+    toldWaiting = said;
+  })().catch(() => {}), 60_000);
+  waiting.unref();
   return {
     session: () => {
       const mcp = new McpServer({ name: 'lake', version: '0.2.0' }, { instructions: INSTRUCTIONS });
@@ -1634,6 +1650,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     },
     close: async () => {
       if (saving) clearInterval(saving);
+      clearInterval(waiting);
       await saveNow().catch(() => {});
       await (await me?.catch(() => null))?.close().catch(() => {});
     },

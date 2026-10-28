@@ -273,3 +273,6 @@ select.tz { max-width: 220px; }
 .pay-detail { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 12px 0 2px; font-size: 14px; }
 .pay-detail dt { color: var(--muted); }
 .pay-detail dd { margin: 0; overflow-wrap: anywhere; }
+
+/* An AI that isn't reading while people wait */
+.amber-text { color: var(--amber); }
