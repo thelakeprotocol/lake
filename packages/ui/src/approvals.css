@@ -254,3 +254,14 @@ input.recovery-input { flex: 1; min-width: 12em; font-family: var(--f-mono); tex
 .window input[type=time] { background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; color-scheme: dark; }
 select.tz { max-width: 220px; }
 .agent-remove { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; justify-content: flex-end; }
+
+/* Spending money, inside an agent's card */
+.spend { background: var(--raised-2); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.spend-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.spend-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spend-amount { font-weight: 600; font-size: 17px; }
+.spend-acts { display: flex; gap: 6px; align-items: center; }
+.spend-edit .days { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.spend-edit .day { min-width: 52px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 14px; cursor: pointer; }
+.spend-edit .day.on { background: var(--mint); border-color: var(--mint); color: var(--mint-ink); font-weight: 600; }
+.spend-other { width: 80px; background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }

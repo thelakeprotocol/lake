@@ -133,18 +133,35 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     assistant = await generateIdentity('panel-assistant');
     const paired = await (await fetch(`${house}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: assistant.publicJwk, code, label: 'Nova (Claude, via MCP)', webId: 'https://panel-assistant.example/#agent' }) })).json();
     expect(paired).toMatchObject({ paired: true });
-    // No reload: the house says something changed, and the panel shows it.
-    await page.getByRole('button', { name: 'Done' }).click();
+    // No reload: the house says something changed, and the panel shows it; the code's box has done its job and goes.
     await page.locator('.item', { hasText: 'Nova' }).locator('.chip', { hasText: 'Here now' }).waitFor({ timeout: 5000 });
+    await box.waitFor({ state: 'detached', timeout: 3000 });
     await tidy();
   });
 
   it('signs spending money for it, and the AI sees it', async () => {
-    await page.getByText('Give it spending money').click();
-    await page.locator('.item input[type=number]').fill('500');
-    await page.getByRole('button', { name: 'Sign and give' }).click();
-    await page.getByText(/may spend \$500/).waitFor({ timeout: 5000 });
+    const spend = page.locator('.spend');
+    await spend.getByRole('button', { name: 'Give some' }).click();
+    // Amounts and periods are taps; the sentence says what will be signed.
+    await spend.getByRole('button', { name: '$100' }).click();
+    await spend.getByRole('button', { name: 'A week' }).click();
+    await spend.getByText(/may spend up to \$100 in all, for a week/).waitFor();
+    await spend.getByRole('button', { name: 'Sign and give' }).click();
+    await spend.locator('.spend-amount', { hasText: 'Up to $100' }).waitFor({ timeout: 5000 });
+    // Changed in place: a typed amount, signed again (the old one is revoked by the house).
+    await spend.getByRole('button', { name: 'Change' }).click();
+    await spend.getByLabel('Other amount').fill('500');
+    await spend.getByRole('button', { name: 'Sign the change' }).click();
+    await spend.locator('.spend-amount', { hasText: 'Up to $500' }).waitFor({ timeout: 5000 });
     expect(await asAssistant({ kind: 'assistant.allowance' })).toMatchObject({ amount: 500, currency: 'USD', intent: { credential: expect.any(String) } });
+    // Stopped with two taps, and given back.
+    await spend.getByRole('button', { name: 'Stop' }).click();
+    await spend.getByRole('button', { name: /Tap again/ }).click();
+    await spend.getByText(/None\. It asks you/).waitFor({ timeout: 5000 });
+    await spend.getByRole('button', { name: 'Give some' }).click();
+    await spend.getByLabel('Other amount').fill('500');
+    await spend.getByRole('button', { name: 'Sign and give' }).click();
+    await spend.locator('.spend-amount', { hasText: 'Up to $500' }).waitFor({ timeout: 5000 });
     await tidy();
   });
 

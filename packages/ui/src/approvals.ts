@@ -858,7 +858,7 @@ function Visitors() {
 
 // ---- My agent ----
 /** The code you hand your agent, kept here so a tab change doesn't lose it while you copy it. */
-let invite: { msg: string; until: number } | null = null;
+let invite: { msg: string; until: number; made: number } | null = null;
 
 /** When an agent last used its key, as people say it: "here now", "here 3 hours ago". */
 function lastHere(at?: string): { text: string; now: boolean } {
@@ -879,19 +879,20 @@ function MyAgent() {
   if (!v.data) return h(Failed, { error: v.error });
   const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
   if (invite && invite.until < Date.now()) invite = null;
+  // Its AI has used the code: the box has done its job.
+  if (invite && v.data.assistants.some((a) => Date.parse(a.addedAt) >= invite!.made - 1000)) invite = null;
   const give = h(Act, { label: v.data.assistants.length ? 'Connect another AI' : 'Give my AI a key', cls: v.data.assistants.length ? '' : 'primary', run: async () => {
     const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant' });
-    invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until) };
+    invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until), made: Date.now() };
   } });
   const mins = invite ? Math.max(1, Math.round((invite.until - Date.now()) / 60_000)) : 0;
   return h('div', {},
     h('p', { class: 'lede' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
       h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), ((l) => h('span', { class: `chip${l.now ? ' ok' : ''}`, title: 'When it last used its key' }, l.text))(lastHere(a.seenAt))),
-      h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests${a.allowance ? ` · may spend ${money$(a.allowance.amount, a.allowance.currency)} until ${new Date(a.allowance.until).toLocaleDateString()}` : ''}`),
-      // Its money on one line, the agent itself on another: side by side, "Revoke" read as taking the money back.
-      h('div', { class: 'item-foot' },
-        a.allowance || !a.canHaveAllowance ? h('span', {}, h(Allowance, { a })) : h('details', { class: 'more' }, h('summary', {}, 'Give it spending money'), h(Allowance, { a }))),
+      h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests`),
+      // Its money in a box of its own, the agent's removal below a line: side by side, "Revoke" read as taking the money back.
+      h(Allowance, { a }),
       h('div', { class: 'item-foot agent-remove' },
         h(Act, { label: 'Remove this AI', cls: 'danger quiet', confirm: 'Tap again: its key stops working', run: () => call({ kind: 'panel.assistant.revoke', kid: a.kid }) })))))) : null,
     invite ? h('section', { class: 'block start' }, h('h2', {}, 'Paste this to your AI'),
@@ -909,21 +910,45 @@ function MyAgent() {
  * date, or once you take it back.
  */
 function Allowance({ a }: { a: Assistant }) {
-  const amount = useRef<HTMLInputElement>(null), currency = useRef<HTMLSelectElement>(null), days = useRef<HTMLSelectElement>(null);
-  if (a.allowance) return h(Act, { label: 'Take the spending money back', cls: 'quiet', run: () => call({ kind: 'panel.allowance.revoke', kid: a.kid }) });
-  if (!a.canHaveAllowance) return h('div', { class: 'r-meta' }, 'To give it spending money, connect it again with a new code.');
-  return h('div', { class: 'row' },
-    // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
-    h('select', { ref: currency }, ...CURRENCIES.map((c) => h('option', { value: c }, c))),
-    h('input', { ref: amount, type: 'number', min: 1, max: 500, step: 1, defaultValue: '10' }),
-    h('span', { class: 'muted' }, 'for'),
-    h('select', { ref: days }, ...[1, 3, 7, 30].map((d) => h('option', { value: String(d), selected: d === 7 }, `${d} day${d === 1 ? '' : 's'}`))),
-    h(Act, { label: 'Sign and give', run: async () => {
-      const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amount: Number(amount.current!.value), currency: currency.current!.value, days: Number(days.current!.value) });
-      if (d.error) throw new Error(d.error);
-      const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
-      if (!r.ok) throw new Error(r.error ?? 'refused');
-    } }));
+  const [editing, setEditing] = useState(false);
+  if (!a.canHaveAllowance) return h('div', { class: 'spend' }, h('div', { class: 'spend-label' }, 'Spending money'), h('p', { class: 'r-meta', style: 'margin:0' }, 'To give it spending money, connect it again with a new code.'));
+  const until = a.allowance ? new Date(a.allowance.until).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+  return h('div', { class: 'spend' },
+    h('div', { class: 'spend-label' }, 'Spending money'),
+    editing ? h(AllowanceEditor, { a, done: () => setEditing(false) })
+      : a.allowance ? h('div', { class: 'spend-row' },
+        h('div', {}, h('div', { class: 'spend-amount' }, `Up to ${money$(a.allowance.amount, a.allowance.currency)}`), h('div', { class: 'r-meta' }, `until ${until}`)),
+        h('div', { class: 'spend-acts' },
+          h('button', { class: 'btn small', type: 'button', onClick: () => setEditing(true) }, 'Change'),
+          h(Act, { label: 'Stop', cls: 'quiet', confirm: 'Tap again: it can\'t spend', run: () => call({ kind: 'panel.allowance.revoke', kid: a.kid }) })))
+      : h('div', { class: 'spend-row' }, h('span', { class: 'r-meta' }, 'None. It asks you before paying for anything.'), h('button', { class: 'btn small', type: 'button', onClick: () => setEditing(true) }, 'Give some')));
+}
+
+/** Amount and how long, in taps: a few amounts and periods as chips, any other amount typed. Signed on this device. */
+function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
+  const guess = /-AU$/i.test(navigator.language) ? 'AUD' : /-NZ$/i.test(navigator.language) ? 'NZD' : /-GB$/i.test(navigator.language) ? 'GBP' : /-CA$/i.test(navigator.language) ? 'CAD' : 'USD';
+  const [currency, setCurrency] = useState(a.allowance?.currency ?? guess);
+  const [amount, setAmount] = useState(a.allowance?.amount ?? 50);
+  const [days, setDays] = useState(7);
+  const chip = (on: boolean, label: string, pick: () => void) => h('button', { type: 'button', class: `day${on ? ' on' : ''}`, 'aria-pressed': on, onClick: pick }, label);
+  return h('div', { class: 'spend-edit' },
+    h('div', { class: 'days', role: 'group', 'aria-label': 'Amount' }, ...[20, 50, 100, 200].map((n) => chip(amount === n, money$(n, currency), () => setAmount(n))),
+      h('input', { type: 'number', min: 1, max: 500, step: 1, value: amount, 'aria-label': 'Other amount', class: 'spend-other', onInput: (e: Event) => setAmount(Number((e.target as HTMLInputElement).value)) })),
+    h('div', { class: 'days', role: 'group', 'aria-label': 'For how long' }, ...[[1, 'A day'], [7, 'A week'], [30, 'A month']].map(([d, l]) => chip(days === d, l as string, () => setDays(d as number)))),
+    h('div', { class: 'row', style: 'margin:0' },
+      // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
+      h('label', { class: 'inline' }, 'In ', h('select', { value: currency, onChange: (e: Event) => setCurrency((e.target as HTMLSelectElement).value) }, ...CURRENCIES.map((c) => h('option', { value: c }, c))))),
+    h('p', { class: 'r-meta', style: 'margin:8px 0' }, `${shortName(a.label)} may spend up to ${money$(amount || 0, currency)} in all, for ${days === 1 ? 'a day' : days === 7 ? 'a week' : 'a month'}. Signed on this phone; stop it any time.`),
+    h('div', { class: 'row', style: 'margin:0' },
+      h(Act, { label: a.allowance ? 'Sign the change' : 'Sign and give', cls: 'primary', run: async () => {
+        if (!(amount >= 1 && amount <= 500)) throw new Error('An amount from 1 to 500.');
+        const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amount, currency, days });
+        if (d.error) throw new Error(d.error);
+        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
+        if (!r.ok) throw new Error(r.error ?? 'refused');
+        done();
+      } }),
+      h('button', { class: 'btn small quiet', type: 'button', onClick: done }, 'Cancel')));
 }
 
 // ---- Money ----
