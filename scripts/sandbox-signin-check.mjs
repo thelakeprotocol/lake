@@ -92,7 +92,7 @@ try {
   const sale = page.locator('li.pay', { hasText: 'Sign-in check item' });
   // A receipt reaches the house from the payments agent and is read from the pod: allow a slow server a minute,
   // looking again (the screen refetches when it opens).
-  for (let i = 0; i < 6 && !(await sale.isVisible()); i++) {
+  for (let i = 0; i < Number(process.env.WAIT_TRIES ?? 6) && !(await sale.isVisible()); i++) {
     await page.waitForTimeout(10_000);
     await page.locator('#nav > button', { hasText: 'Home' }).click();
     await page.locator('#nav .more-btn').click();
