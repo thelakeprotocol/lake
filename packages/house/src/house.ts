@@ -493,13 +493,16 @@ function panelFor(x: {
     const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}) });
     return payload;
   };
+  let recordCheck: { at: number; claims: Awaited<ReturnType<ReturnType<typeof x.keeper>['allClaims']>>; chain: Awaited<ReturnType<ReturnType<typeof x.keeper>['verifyOwnRecord']>> } | null = null;
   return {
     async overview(tzOffset?: number) {
       // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
       const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;
       const midnight = (() => { const d = new Date(Date.now() - offset * 60_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() + offset * 60_000; })();
-      const claims = await x.keeper().allClaims();
-      const chain = await x.keeper().verifyOwnRecord();
+      // The record and its check change only when a new record is filed: checked at most once a minute (the panel's Home
+      // waited the better part of a second for it on every look).
+      if (!recordCheck || Date.now() - recordCheck.at > 60_000) recordCheck = { at: Date.now(), claims: await x.keeper().allClaims(), chain: await x.keeper().verifyOwnRecord() };
+      const { claims, chain } = recordCheck;
       const view = x.desk().view();
       return {
         name: x.o.name, webId: owner.webId, podRoot: owner.podRoot,

@@ -30,10 +30,11 @@ function doorPage(p: DoorPage): string {
 <div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(say))}).then(()=>{this.textContent='Copied ✓'})">Copy</button></div>
 <p class="small" style="margin:12px 0 0">Or: say thanks for the talk · ask them to look at your project · find a time to catch up.</p></section>
 <p class="small">An AI reading this? Open <code>${esc(note)}</code>, or <code>lake_knock</code> this address with the Lake connector. Details under <a href="#for-ai-agents">For AI agents</a>.</p>
-<details><summary>Why not just email?</summary><ul class="small">
-<li>Their AI answers right away, by their own rules, and asks them only what it should.</li>
-<li>It knows when they're free, so a meeting can be agreed in one go.</li>
-<li>No email address or phone number changes hands, and nothing lands in a crowded inbox.</li></ul></details>
+<details id="yourself"><summary>Leave a note yourself</summary><form method="get" action="${esc(base)}/note">
+<p class="small" style="margin:8px 0">For when your AI can't send it: say who you are and what you'd like. Their answer appears at the link you get next.</p>
+<textarea class="say" name="text" rows="4" maxlength="1000" required placeholder="Hi, I'm … and I'd like to …"></textarea>
+<input class="say" name="from" maxlength="80" placeholder="Your name" style="margin-top:8px">
+<div class="row"><button class="btn primary" type="submit">Leave the note</button></div></form></details>
 <details id="for-ai-agents"><summary>For AI agents</summary><p class="small">You were sent to knock on this door: leave the owner a short note, saying who your human is and what they'd like.</p><ol class="small">
 <li><b>With web access only:</b> open <code>${esc(note)}</code> (URL-encode both; <code>text</code>: the note for the owner, up to 1000 characters, saying who your human is and why; <code>from</code>: your human's name; optional <code>purpose</code>, default <code>contact</code>). It answers with <code>answer_at</code>: open that link later to read the reply, and tell your human. Can't open links you build? Give your human the link to open. <code>POST ${esc(base)}/note</code> with the same fields as JSON works too.</li>
 <li><b>With the Lake connector</b>${p.connector ? ` (<code>${esc(p.connector)}</code>)` : ''}: <code>lake_knock</code> this address with no fields. Your note is signed, and the answer comes to your <code>lake_inbox</code>.</li>

@@ -26,11 +26,25 @@ let webId = '';
 let leaseUntil: string | null = null;
 
 // ---- talking to the house ----
+/** Whether the house is answering, as the last call found: the status dot. */
+let reachable = true;
+const reachWatchers = new Set<(ok: boolean) => void>();
+const reached = (ok: boolean) => { if (ok !== reachable) { reachable = ok; for (const w of reachWatchers) w(ok); } };
 async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signEnvelope(payload, key, webId || 'owner')) });
+  let res: Response;
+  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signEnvelope(payload, key, webId || 'owner')) }); } catch (e) { reached(false); throw e; }
+  reached(true);
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? String(res.status));
   return res.json();
 }
+
+/**
+ * What each screen last showed, kept on this device: shown at once next time while it's fetched again
+ * (stale-while-revalidate), so opening the panel isn't a blank page while the house answers.
+ */
+const CACHE = `lake-panel:${location.pathname}:`;
+const cached = <T>(k: string): T | undefined => { try { const v = localStorage.getItem(CACHE + k); return v ? (JSON.parse(v) as T) : undefined; } catch { return undefined; } };
+const remember = (k: string, v: unknown) => { try { localStorage.setItem(CACHE + k, JSON.stringify(v)); } catch { /* full or private: just not kept */ } };
 
 /**
  * What the house holds changes (a note arrives, you tap Allow): every screen refetches. `version` goes up when the house
@@ -45,11 +59,11 @@ const useRedraw = () => { const [, set] = useState(0); return () => set((n) => n
 /** One signed call, fetched again whenever something changed. Keeps what it had while it fetches, so nothing flickers. */
 function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {
   const { version } = useContext(Version);
-  const [state, set] = useState<{ data?: T; error?: string }>({});
   const k = JSON.stringify(payload);
+  const [state, set] = useState<{ data?: T; error?: string }>(() => ({ data: cached<T>(k) }));
   useEffect(() => {
     let live = true;
-    call<T>(payload).then((data) => live && set({ data }), (e: Error) => live && set((s) => ({ ...s, error: e.message })));
+    call<T>(payload).then((data) => { remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((s) => ({ ...s, error: e.message })));
     return () => { live = false; };
   }, [k, version]);
   return state;
@@ -89,6 +103,14 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   return h('button', { class: 'btn small', type: 'button', onClick: async () => {
     try { await navigator.clipboard.writeText(text); setSaid('Copied ✓'); setTimeout(() => setSaid(label), 1500); } catch { setSaid('Copy failed'); }
   } }, said);
+}
+
+/** A long list, ten at a time, with Show more (and how many are left). */
+function Paged<T>({ items, render, size = 10, tag = 'ul', cls = 'items' }: { items: T[]; render: (x: T) => VNode; size?: number; tag?: string; cls?: string }) {
+  const [shown, setShown] = useState(size);
+  const left = items.length - shown;
+  return h('div', {}, h(tag, { class: cls }, ...items.slice(0, shown).map(render)),
+    left > 0 ? h('button', { class: 'btn small more-items', type: 'button', onClick: () => setShown(shown + size) }, `Show ${Math.min(size, left)} more`, h('span', { class: 'muted' }, ` of ${left}`)) : null);
 }
 
 function Failed({ error }: { error?: string }) {
@@ -132,7 +154,8 @@ function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; p
  */
 function signOut() {
   if (!confirm('Sign out on this device?\n\nYour house\'s key is only on this device. Once it\'s gone, you need a new pairing link to get back in (on the sandbox, from whoever runs it).')) return;
-  try { localStorage.removeItem(`lake-owner-key:${location.host}`); } catch { /* nothing kept */ }
+  // The key, and what the screens last showed (else the panel would open as if still paired).
+  try { for (const k of Object.keys(localStorage)) if (k === `lake-owner-key:${location.host}` || k.startsWith(CACHE)) localStorage.removeItem(k); } catch { /* nothing kept */ }
   location.reload();
 }
 
@@ -151,30 +174,35 @@ function Home({ go }: { go: (t: Tab) => void }) {
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
   const free = useHouse<FreeState>({ kind: 'panel.free' });
-  if (!o.data || !list.data) return h(Failed, { error: o.error ?? list.error });
+  if (!list.data) return h(Failed, { error: list.error });
   const { suggestions, assistants, notes, agenda } = list.data;
-  const waiting = (o.data.pending as number) || 0;
+  // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
+  const waiting = list.data.requests.length;
+  const needs = [
+    ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
+    ...(notes ?? []).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
+  ];
   const stat = (label: string, value: string | number, to: Tab, cls = '') =>
     h('button', { class: `stat ${cls}`, type: 'button', onClick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
   return h('div', {},
     h(StartCard, { door: door.data && !door.data.error ? door.data : null, hasAssistant: assistants.length > 0, free: free.data ?? { set: false, slots: [] }, go }),
     // What needs you, first and only: your agent's suggestions, notes at your door, requests your rules left to you.
     h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
-      waiting || suggestions.length || notes?.length
-        ? h('ul', { class: 'items' },
-            waiting ? h('li', { key: 'waiting', class: 'item amber' }, h('p', { class: 'item-text' }, `${waiting} request${waiting === 1 ? '' : 's'} your rules left to you`),
-              h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onClick: () => go('requests') }, 'Look at them'))) : null,
-            ...suggestions.map((x) => h(SuggestionItem, { key: `s-${x.id}`, x })),
-            ...(notes ?? []).map((n) => h(NoteItem, { key: `n-${n.id}`, n })))
+      waiting || needs.length
+        ? h('div', {},
+            waiting ? h('ul', { class: 'items', style: 'margin-bottom:10px' }, h('li', { key: 'waiting', class: 'item amber' }, h('p', { class: 'item-text' }, `${waiting} request${waiting === 1 ? '' : 's'} your rules left to you`),
+              h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onClick: () => go('requests') }, 'Look at them')))) : null,
+            needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
         : h('p', { class: 'empty' }, 'Nothing needs you. Your rules and your agent are handling it.')),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
-    h('div', { class: 'stats' },
+    door.data?.open ? h(ShareDoor, { address: door.data.address }) : null,
+    o.data ? h('div', { class: 'stats' },
       stat(o.data.knocksToday === 1 ? 'knock today' : 'knocks today', o.data.knocksToday, 'agents'),
       stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
       stat('earned', `$${o.data.earned}`, 'money'),
-      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null),
+      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null) : h('div', { class: 'stats' }, h('span', { class: 'stat skeleton' }, '…')),
     // Everything else, one tap away.
-    h('details', { class: 'fold' }, h('summary', {}, 'About your house'),
+    !o.data ? null : h('details', { class: 'fold' }, h('summary', {}, 'About your house'),
       h('dl', { class: 'facts' },
         h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.data.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.data.claims} claims (${o.data.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.data.record.why}.`)),
         h('div', {}, h('dt', {}, 'Your agent'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: looks and suggests; you decide.` : 'None yet.')),
@@ -183,7 +211,7 @@ function Home({ go }: { go: (t: Tab) => void }) {
       h(PersonCard, { p: o.data.person }),
       leaseUntil ? h(LeaseCard, {}) : null,
       h('h3', {}, 'Recent at your door'),
-      feed.data?.length ? h('ul', { class: 'feed' }, ...feed.data.slice(0, 12).map((a, i) => h('li', { key: `${a.at}-${i}` }, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text))))
+      feed.data?.length ? h(Paged, { items: feed.data, size: 12, tag: 'ul', cls: 'feed', render: (a: { at: string; kind: string; text: string }) => h('li', { key: `${a.at}-${a.text}` }, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text)) })
         : h('p', { class: 'muted' }, 'Quiet so far.')),
   );
 }
@@ -228,14 +256,14 @@ function FeedLine({ onShown }: { onShown?: () => void }) {
 /** What you agreed to, written in by your agent, with who agreed on the other side (or that nobody has yet). */
 function AgendaList({ agenda }: { agenda: AgendaItem[] }) {
   return h('div', {},
-    h('ul', { class: 'items' }, ...agenda.map((a) => h('li', { key: a.id, class: 'item' },
+    h(Paged, { items: agenda, render: (a: AgendaItem) => h('li', { key: a.id, class: 'item' },
       h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, a.what), h('span', { class: `chip ${a.agreed ? 'ok' : 'wait'}` }, a.agreed ? 'Agreed' : 'Proposed')),
       h('p', { class: 'item-meta' }, [a.when, a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · ')),
       h('div', { class: 'item-foot' },
         h('details', { class: 'more' }, h('summary', {}, 'Details'),
           h('p', { class: 'item-meta' }, a.agreed ? `${a.agreed.by}${a.agreed.speaks_for?.checked ? `, which speaks for ${a.agreed.speaks_for.house}` : ' (an agent; it showed no house it speaks for)'} said: “${a.agreed.said}”` : 'Nothing from their side says they agreed yet: it holds the time.'),
           a.note ? h('p', { class: 'item-meta' }, `${a.by}: “${a.note}”`) : null),
-        h(Act, { label: 'Remove', cls: 'quiet', run: () => call({ kind: 'panel.agenda.remove', id: a.id }) }))))),
+        h(Act, { label: 'Remove', cls: 'quiet', run: () => call({ kind: 'panel.agenda.remove', id: a.id }) }))) }),
     h('details', { class: 'fold' }, h('summary', {}, 'In your own calendar'),
       h('p', { class: 'muted' }, 'Subscribe to this address in your calendar app. Keep it to yourself: whoever has it can read your agenda.'), h(FeedLine, {})));
 }
@@ -405,12 +433,9 @@ function Keys() {
   const recorded = new Set(consents.map((x) => x.id));
   const loose = v.data.keys.filter((k) => !recorded.has(k.id));
   const live = consents.filter((x) => x.status === 'active').length + loose.length;
-  // A long history folds away on a phone; the newest stay in sight.
-  const [recent, older] = [consents.slice(0, 20), consents.slice(20)];
   return h('div', {},
     h('p', { class: 'lede' }, 'Everyone you’ve said yes to. Take one back any time: they’re cut off on their next request.'),
-    consents.length ? h('ul', { class: 'rows' }, ...recent.map(row)) : h('p', { class: 'empty' }, 'You haven’t said yes to anyone yet.'),
-    older.length ? h('details', { class: 'fold' }, h('summary', {}, `${older.length} older`), h('ul', { class: 'rows' }, ...older.map(row))) : null,
+    consents.length ? h(Paged, { items: consents, render: row, cls: 'rows' }) : h('p', { class: 'empty' }, 'You haven’t said yes to anyone yet.'),
     loose.length ? h('div', {}, h('h2', {}, 'Other keys'), h('ul', { class: 'rows' }, ...loose.map((k) => h('li', { key: k.id },
       h('div', {}, h('div', { class: 'r-title' }, `${k.visitor} · ${k.purpose}`), h('div', { class: 'r-meta' }, `${k.fields.map(nice).join(', ')} · ${hoursLeft(k.until)} left · ${k.authorizedBy}`)),
       takeBack(k.id, 'Revoke'))))) : null,
@@ -563,23 +588,37 @@ function RuleCard({ r, i, all, fields, purposes, redraw }: { r: Rule; i: number;
  */
 function DoorCard({ d }: { d: DoorState }) {
   const about = useRef<HTMLInputElement>(null), name = useRef<HTMLInputElement>(null);
-  const [qr, setQr] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
-  useEffect(() => { if (d.open) void QRCode.toDataURL(d.address, { margin: 1, width: 240 }).then(setQr); }, [d.open, d.address]);
   const save = (open: boolean) => async () => {
     const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.current!.value, name: name.current!.value });
     if (!r.ok) setMsg(r.error ?? 'not saved'); else { setMsg(''); rulesDraft = null; }
   };
   return h('section', { class: 'block', id: 'door' },
     h('h2', {}, d.open ? 'Your door is open' : 'Your door is closed'),
-    h('p', { class: 'muted' }, d.open ? 'Give this address out: in your signature, or as the QR code. Anyone\'s AI can leave you a note there; your rules and your agent answer.' : 'Open it to give your house\'s address out, so people can reach you through their AI. No name needed.'),
-    d.open ? h('div', { class: 'address' }, qr ? h('img', { alt: 'QR code of your house address', width: 120, height: 120, src: qr }) : null,
-      h('div', {}, h('code', {}, d.address), h('div', { class: 'row' }, h(CopyButton, { text: d.address }), h('a', { class: 'btn small', href: d.address, target: '_blank', rel: 'noopener' }, 'See it as others do')))) : null,
+    h('p', { class: 'muted' }, d.open ? 'Anyone\'s AI can leave you a note at your address; your rules and your agent answer. Share it from Home.' : 'Open it to give your house\'s address out, so people can reach you through their AI. No name needed.'),
+    d.open ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: d.address, target: '_blank', rel: 'noopener' }, 'See it as others do')) : null,
     h('details', { class: 'fold', open: !d.open }, h('summary', {}, d.open ? 'Change what it says' : 'What it says'),
       h('label', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door'), h('input', { ref: about, type: 'text', maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', defaultValue: d.about ?? '' })),
       h('label', { class: 'field' }, h('span', { class: 'lab' }, 'A name to show (optional)'), h('input', { ref: name, type: 'text', maxlength: 60, placeholder: 'Optional: the address is enough', defaultValue: d.name ?? '' })),
       h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Open my door', cls: 'primary', run: save(true) }),
         d.open ? h(Act, { label: 'Close my door', run: save(false) }) : null, msg ? h('span', { class: 'muted' }, msg) : null)));
+}
+
+/**
+ * Your door's address to hand out: your phone's own share sheet (Web Share), Copy, and a QR code a tap away, for a slide
+ * or a sign on the wall.
+ */
+function ShareDoor({ address }: { address: string }) {
+  const [qr, setQr] = useState<string | null>(null);
+  const share = 'share' in navigator;
+  return h('section', { class: 'block' }, h('h2', {}, 'Your door'),
+    h('div', { class: 'address' },
+      h('div', {}, h('code', {}, address),
+        h('div', { class: 'row' },
+          share ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Knock on my door', text: 'Talk to my agent:', url: address }).catch(() => {}) }, 'Share') : null,
+          h(CopyButton, { text: address }),
+          h('button', { class: 'btn small', type: 'button', onClick: async () => setQr(qr ? null : await QRCode.toDataURL(address, { margin: 1, width: 480 })) }, qr ? 'Hide QR code' : 'QR code'))),
+      qr ? h('img', { class: 'qr', alt: 'QR code of your door\'s address', width: 200, height: 200, src: qr }) : null));
 }
 
 /**
@@ -722,7 +761,7 @@ function Visitors() {
   const real = v.data.filter((a) => !junk.includes(a));
   return h('div', {},
     h('p', { class: 'lede' }, 'Agents that came to your door lately, and what your house told them.'),
-    real.length ? h('ul', { class: 'rows' }, ...real.map(row)) : h('p', { class: 'empty' }, 'No visitors yet.'),
+    real.length ? h(Paged, { items: real, render: row, cls: 'rows' }) : h('p', { class: 'empty' }, 'No visitors yet.'),
     junk.length ? h('details', { class: 'fold' }, h('summary', {}, `${junk.length} unproven key${junk.length === 1 ? '' : 's'} tried something and ${junk.length === 1 ? 'was' : 'were'} blocked`), h('ul', { class: 'rows' }, ...junk.map(row))) : null);
 }
 
@@ -792,9 +831,9 @@ function Money() {
   return h('div', {},
     h('p', { class: 'lede' }, 'Every payment comes with a signed receipt, filed in your pod. On the sandbox, money is simulated.'),
     h('dl', { class: 'tiles' }, h('div', { class: 'tile mint' }, h('dt', {}, 'Earned'), h('dd', {}, `$${m.data.total}`)), h('div', { class: 'tile' }, h('dt', {}, 'Receipts'), h('dd', {}, String(m.data.receipts.length)))),
-    m.data.receipts.length ? h('ul', { class: 'rows', style: 'margin-top:14px' }, ...m.data.receipts.map((r, i) => h('li', { key: i },
+    m.data.receipts.length ? h('div', { style: 'margin-top:14px' }, h(Paged, { items: m.data.receipts, cls: 'rows', render: (r: (typeof m.data.receipts)[number]) => h('li', { key: `${r.at}-${r.agreement}` },
       h('div', { title: r.agreement }, h('div', { class: 'r-title' }, r.payer ? `${money$(r.amount, r.currency)} from ${who(r.payer)}` : money$(r.amount, r.currency)), h('div', { class: 'r-meta' }, `${when(r.at)} · signed by ${who(r.from)} · ${r.settlement}`)),
-      h('span', { class: 'chip share' }, 'signed')))) : h('p', { class: 'empty' }, 'No payments yet.'),
+      h('span', { class: 'chip share' }, 'signed')) })) : h('p', { class: 'empty' }, 'No payments yet.'),
     // What your own agent paid for you, under the allowance you signed: its receipts, handed back to your house.
     m.data.spent?.length ? h('div', {}, h('h2', {}, 'Spent by your agent'), h('ul', { class: 'rows' }, ...m.data.spent.map((r, i) => h('li', { key: i },
       h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('div', { class: 'r-meta' }, `${when(r.at)} · under your allowance · ${r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40)}`)),
@@ -849,6 +888,9 @@ function App() {
   const [version, setVersion] = useState(0);
   // live: the house's stream is open; 'reconnecting' while a phone that went to another app gets it back (grey, not red).
   const [live, setLive] = useState<boolean | 'reconnecting'>(true);
+  // Whether the house answers at all, from every call: red only when it doesn't.
+  const [ok, setOk] = useState(reachable);
+  useEffect(() => { reachWatchers.add(setOk); return () => { reachWatchers.delete(setOk); }; }, []);
   const bump = () => setVersion((v) => v + 1);
   const [list, setList] = useState<{ requests: Request[] } | null>(null);
   const [name, setName] = useState('');
@@ -882,7 +924,7 @@ function App() {
       if (v.requests.some((r) => !seen.current.has(r.id)) && seen.current.size) navigator.vibrate?.([120, 60, 120]);
       seen.current = new Set(v.requests.map((r) => r.id));
       setList(v);
-    }).catch(() => setLive(false));
+    }).catch(() => {});
   }, [version]);
   useEffect(() => {
     void call<{ name: string }>({ kind: 'panel.overview' }).then((o) => setName(o.name)).catch(() => {});
@@ -894,7 +936,7 @@ function App() {
         h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers })),
       h('main', {},
         h('header', { class: 'top' },
-          h('div', { class: 'eyebrow' }, h('span', { class: `dot ${live === true ? 'live' : live === false ? 'down' : ''}`, title: live === true ? 'live' : live === false ? 'can\'t reach your house' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
+          h('div', { class: 'eyebrow' }, h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? 'live' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
           h('h1', {}, name ? `House ${name}` : 'Your house')),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));
 }
@@ -925,10 +967,13 @@ function Pair({ onPaired }: { onPaired: () => void }) {
 }
 
 function Root() {
-  const [state, setState] = useState<'checking' | 'paired' | 'unpaired'>('checking');
+  // Paired before on this device (its last answers are kept): open straight away and check behind.
+  const seen = cached<{ webId: string; until?: string }>(JSON.stringify({ kind: 'list' }));
+  if (seen && !webId) { webId = seen.webId; leaseUntil = seen.until ?? null; }
+  const [state, setState] = useState<'checking' | 'paired' | 'unpaired'>(seen ? 'paired' : 'checking');
   // Already paired? A signed "list" answers. Otherwise offer to pair (automatically when the link carries a token).
   useEffect(() => {
-    void call<{ webId: string; until?: string }>({ kind: 'list' }).then((v) => { webId = v.webId; leaseUntil = v.until ?? null; setState('paired'); }, () => setState('unpaired'));
+    void call<{ webId: string; until?: string }>({ kind: 'list' }).then((v) => { webId = v.webId; leaseUntil = v.until ?? null; remember(JSON.stringify({ kind: 'list' }), v); setState('paired'); }, (e: Error) => { if (reachable || !seen) setState('unpaired'); void e; });
   }, []);
   if (state === 'checking') return null;
   return state === 'paired' ? h(App, {}) : h(Pair, { onPaired: () => setState('paired') });

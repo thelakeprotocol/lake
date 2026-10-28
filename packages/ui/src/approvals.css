@@ -230,3 +230,9 @@ body.fetching::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .shell.unpaired { grid-template-columns: minmax(0, 1fr); }
 .shell.unpaired main { margin: 0 auto; }
 #nav .signout { color: var(--muted); border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 12px; }
+
+.more-items { margin-top: 10px; }
+.more-items .muted { font-weight: 400; margin-left: 4px; }
+.stat.skeleton { color: var(--faint); min-width: 120px; justify-content: center; }
+.address img.qr { display: block; margin: 12px auto 0; border-radius: 10px; background: #fff; padding: 8px; }
+.address { flex-direction: column; align-items: stretch; }
