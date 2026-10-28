@@ -50,12 +50,21 @@ try {
   await page.getByRole('heading', { name: /Connect Sign-in check to/ }).waitFor();
   must((await page.locator('input[name=house]').inputValue()) === house, 'the sign-in page knows this browser\'s house');
   await page.getByRole('button', { name: 'Continue in my house' }).click();
-  await page.getByRole('heading', { name: 'Connect Sign-in check to your house?' }).waitFor({ timeout: 15_000 });
-  ok('the house\'s panel asks');
-  const approved = page.waitForResponse((r) => r.url().endsWith('/mcp/oauth/approve'));
-  await page.getByRole('button', { name: 'Connect' }).click();
-  const back = new URL((await approved).headers().location);
+  await page.getByRole('heading', { name: 'Approve it in your house' }).waitFor({ timeout: 15_000 });
+  const number = (await page.locator('.num').textContent()).trim();
+  ok(`the sign-in page shows a number to match (${number})`);
+  // The owner's panel, in another tab of the browser that holds the key, asks with the same number.
+  const panel = await page.context().newPage();
+  await panel.goto(`${house}/owner/`);
+  const asked = panel.locator('li.item', { hasText: 'Sign-in check wants to connect to your house' });
+  await asked.waitFor({ timeout: 20_000 });
+  must((await asked.locator('.connect-number').textContent()).trim() === number, 'the house\'s panel asks, with the same number');
+  await page.route(`${cb}**`, (r) => r.fulfill({ body: 'back in the app' }));
+  await asked.getByRole('button', { name: 'Connect' }).click();
+  await page.waitForURL(/app\.example\/callback/, { timeout: 30_000 });
+  const back = new URL(page.url());
   must(back.origin + back.pathname === cb && back.searchParams.get('code'), 'back to the app with a code');
+  await panel.close();
   await first.finishAuth(back.searchParams.get('code'));
   ok('code exchanged for tokens (PKCE)');
 
