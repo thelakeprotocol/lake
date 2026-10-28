@@ -39,12 +39,21 @@ async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
 }
 
 /**
- * What each screen last showed, kept on this device: shown at once next time while it's fetched again
- * (stale-while-revalidate), so opening the panel isn't a blank page while the house answers.
+ * What each screen last showed, shown at once while it's fetched again (stale-while-revalidate), so a reload isn't a
+ * blank page while the house answers. Kept for this tab only (sessionStorage) and for at most 12 hours: what a house
+ * holds is private, and a phone may be shared, so none of it stays on the device once the tab is closed.
  */
 const CACHE = `lake-panel:${location.pathname}:`;
-const cached = <T>(k: string): T | undefined => { try { const v = localStorage.getItem(CACHE + k); return v ? (JSON.parse(v) as T) : undefined; } catch { return undefined; } };
-const remember = (k: string, v: unknown) => { try { localStorage.setItem(CACHE + k, JSON.stringify(v)); } catch { /* full or private: just not kept */ } };
+const CACHE_MS = 12 * 3_600_000;
+const cached = <T>(k: string): T | undefined => {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(CACHE + k) ?? 'null') as { at: number; v: T } | null;
+    return v && Date.now() - v.at < CACHE_MS ? v.v : undefined;
+  } catch { return undefined; }
+};
+const remember = (k: string, v: unknown) => { try { sessionStorage.setItem(CACHE + k, JSON.stringify({ at: Date.now(), v })); } catch { /* full or private: just not kept */ } };
+// What an earlier version kept on the device for good: gone.
+try { for (const k of Object.keys(localStorage)) if (k.startsWith('lake-panel:')) localStorage.removeItem(k); } catch { /* nothing kept */ }
 
 /**
  * What the house holds changes (a note arrives, you tap Allow): every screen refetches. `version` goes up when the house
@@ -155,7 +164,10 @@ function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; p
 function signOut() {
   if (!confirm('Sign out on this device?\n\nYour house\'s key is only on this device. Once it\'s gone, you need a new pairing link to get back in (on the sandbox, from whoever runs it).')) return;
   // The key, and what the screens last showed (else the panel would open as if still paired).
-  try { for (const k of Object.keys(localStorage)) if (k === `lake-owner-key:${location.host}` || k.startsWith(CACHE)) localStorage.removeItem(k); } catch { /* nothing kept */ }
+  try {
+    localStorage.removeItem(`lake-owner-key:${location.host}`);
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith(CACHE)) sessionStorage.removeItem(k);
+  } catch { /* nothing kept */ }
   location.reload();
 }
 

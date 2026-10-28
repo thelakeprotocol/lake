@@ -203,6 +203,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.reload();
     await page.getByRole('heading', { name: 'Needs you' }).waitFor();
     expect(Date.now() - t).toBeLessThan(2000);
+    // What the house holds stays out of the device's lasting storage: the quick start is for this tab only.
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => !k.startsWith('lake-owner-key:') && !k.startsWith('lake.start')))).toEqual([]);
     await page.unroute('**/owner/api');
     await tidy();
   });
@@ -225,7 +227,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('button', { name: 'Pair this device' }).waitFor({ timeout: 5000 });
     // The owner's key is gone from this device (a fresh one, not yet paired, is ready for pairing again).
     expect(await keyNow()).not.toBe(before);
-    expect(await page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('lake-panel:')))).toBe(false);
+    expect(await page.evaluate(() => Object.keys(sessionStorage).some((k) => k.startsWith('lake-panel:')))).toBe(false);
     await tidy();
   });
 });

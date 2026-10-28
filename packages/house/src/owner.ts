@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express from 'express';
@@ -235,6 +235,7 @@ export class OwnerDesk {
     this.notes = [];
     this.closedNotes.clear();
     this.webNotes.clear();
+    await this.saveWebNotes();
     this.muted.clear();
     await writeFile(join(this.o.dataDir, 'muted.json'), '[]').catch(() => {});
     this.agenda = [];
@@ -253,6 +254,7 @@ export class OwnerDesk {
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
+    this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'));
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
@@ -405,17 +407,21 @@ export class OwnerDesk {
    * the answer. The secret in that link is all it takes to read it, so it's only ever given to whoever left the note.
    */
   private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[] }>();
+  /** Kept on disk: a restart mustn't break every answer link given out. */
+  private saveWebNotes = () => writeFile(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes])).catch(() => {});
   addWebNote(n: { text: string; from?: string; purpose: string }): { id: string; key: string } | null {
     const id = this.addNote({ from: { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false }, text: n.text, purpose: n.purpose });
     if (!id) return null;
     const key = this.webNotes.get(id)?.key ?? randomBytes(12).toString('base64url');
     this.webNotes.set(id, { ...this.webNotes.get(id), key });
+    void this.saveWebNotes();
     return { id, key };
   }
   /** What became of a web note, for whoever holds its link. */
   webNoteState(id: string, key: string): { status: string; answer?: { text: string; at: string }; answers?: { text: string; at: string; final: boolean }[]; check_again?: string } | null {
     const w = this.webNotes.get(id);
-    if (!w || w.key !== key) return null;
+    // Compared in constant time: the secret is the only lock on this page.
+    if (!w || key.length !== w.key.length || !timingSafeEqual(Buffer.from(key), Buffer.from(w.key))) return null;
     const answers = (w.answers ?? []).map(({ text, at, final }) => ({ text, at, final }));
     const last = answers.at(-1);
     // A holding reply isn't the answer (run 54: "answered" made the sender's AI stop looking 25 s before the decision).
@@ -429,6 +435,7 @@ export class OwnerDesk {
     const t = text.trim().slice(0, 1000);
     if (!t) return { error: 'text: the answer, up to 1000 characters' };
     w.answers = [...(w.answers ?? []), { text: t, at: new Date().toISOString(), by, final }].slice(-10);
+    void this.saveWebNotes();
     this.touch();
     return { ok: true };
   }

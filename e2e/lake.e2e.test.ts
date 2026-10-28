@@ -412,9 +412,17 @@ describe('the owner', () => {
     expect(await (await fetch(houses.strict!, { headers: { accept: 'application/json' } })).json()).toMatchObject({ door: { about: 'Ask my agent about talks.' } });
     // Over plain web, for an AI without the connector: a note by opening one link, the answer at a private one.
     const left = await (await fetch(`${houses.strict}/note?text=${encodeURIComponent('Hi, Ana here: a short call about your talk?')}&from=Ana`)).json();
-    expect(left).toMatchObject({ kind: 'noted', answer_at: expect.stringMatching(/\/note\/\w+\?k=/) });
-    expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: expect.stringMatching(/^with the owner/) });
-    expect((await fetch(`${houses.strict}/note/${left.note}?k=wrong`)).status).toBe(404);
+    expect(left).toMatchObject({ kind: 'noted', answer_at: expect.stringMatching(/\/note\/\w+\/[\w-]+$/) });
+    const answerPage = await fetch(left.answer_at);
+    expect(answerPage.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(answerPage.headers.get('cache-control')).toBe('no-store');
+    expect(await answerPage.json()).toMatchObject({ status: expect.stringMatching(/^with the owner/) });
+    expect((await fetch(`${houses.strict}/note/${left.note}/wrong`)).status).toBe(404);
+    // A link preview opening the same kind of link leaves nothing (a pasted link would otherwise knock).
+    const notesNow = (await ownerCall({ kind: 'list' })).notes.length;
+    expect((await fetch(`${houses.strict}/note?text=${encodeURIComponent('Preview of a pasted link')}`, { headers: { 'user-agent': 'facebookexternalhit/1.1' } })).status).toBe(403);
+    expect((await fetch(`${houses.strict}/note?text=prefetched`, { headers: { 'sec-purpose': 'prefetch' } })).status).toBe(403);
+    expect((await ownerCall({ kind: 'list' })).notes).toHaveLength(notesNow);
     expect((await ownerCall({ kind: 'list' })).notes.find((x: { id: string }) => x.id === left.note).from).toMatchObject({ web: true, checked: false });
     expect(await ownerCall({ kind: 'panel.note.reply', id: left.note, text: 'Yes: Tuesday 10:00?' })).toEqual({ ok: true });
     expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
