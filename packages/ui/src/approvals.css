@@ -10,7 +10,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--ink); color: var(--fg); font: 400 16px/1.5 var(--f-body); -webkit-font-smoothing: antialiased; }
+html, body { margin: 0; overflow-x: hidden; background: var(--ink); color: var(--fg); font: 400 16px/1.5 var(--f-body); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--mint); }
 
@@ -204,15 +204,17 @@ ul.rows li > div:first-child { flex: 1 1 220px; min-width: 0; }
   .side { position: sticky; top: 0; z-index: 5; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; background: rgba(7,11,18,0.96); backdrop-filter: blur(8px); min-width: 0; }
   .brand { display: none; }
   main { padding-top: 16px; }
-  /* Phones: the four everyday tabs and More; the rest drop down from More. */
-  #nav { flex-direction: row; gap: 2px; position: relative; }
-  #nav button { padding: 9px 10px; font-size: 14px; white-space: nowrap; }
+  /* Phones: the four everyday tabs and More, always within the screen; the rest in a menu under More. */
+  #nav { flex-direction: row; gap: 0; justify-content: space-between; }
+  #nav button { padding: 9px 8px; font-size: 14px; white-space: nowrap; min-width: 0; }
+  #nav .badge { min-width: 18px; padding: 1px 6px; font-size: 11px; }
   #nav button.extra { display: none; }
-  #nav .more-btn { display: flex; margin-left: auto; }
+  #nav .more-btn { display: flex; }
+  #nav .more-btn::after { content: ''; width: 0; height: 0; margin-left: 6px; border: 4px solid transparent; border-top-color: currentColor; transform: translateY(2px); }
   #nav .more-btn.here { color: var(--fg); background: var(--raised-2); }
   .more-menu { display: none; }
-  #nav.more-open .more-menu { display: grid; position: absolute; right: 0; top: calc(100% + 6px); min-width: 200px; padding: 6px; background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); box-shadow: 0 12px 30px rgba(0,0,0,0.5); }
-  #nav.more-open .more-menu button.extra { display: flex; }
+  #nav.more-open .more-menu { display: grid; gap: 2px; position: fixed; right: 10px; top: 58px; width: min(240px, calc(100vw - 20px)); padding: 6px; background: var(--raised-2); border: 1px solid var(--line); border-radius: var(--r); box-shadow: 0 16px 40px rgba(0,0,0,0.55); z-index: 20; }
+  #nav.more-open .more-menu button.extra { display: flex; padding: 12px 14px; font-size: 15px; border-radius: 8px; }
   .more-label { display: none; }
   .grid2 { grid-template-columns: 1fr; }
   dl.facts div { grid-template-columns: 1fr; gap: 2px; }
@@ -225,6 +227,6 @@ body.fetching::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 @keyframes fetching { from { opacity: 1; background-position: -60% 0; } to { opacity: 1; background-position: 160% 0; } }
 
 /* Not claimed yet: no tabs, just the pairing. */
-body.unpaired .side { display: none; }
-body.unpaired .shell { grid-template-columns: minmax(0, 1fr); }
-body.unpaired main { margin: 0 auto; }
+.shell.unpaired { grid-template-columns: minmax(0, 1fr); }
+.shell.unpaired main { margin: 0 auto; }
+#nav .signout { color: var(--muted); border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 12px; }
