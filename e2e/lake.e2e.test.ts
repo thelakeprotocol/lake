@@ -953,6 +953,16 @@ describe('the open door', () => {
     let carts: { message?: { kind?: string }; checked?: { unsolicited?: boolean } }[] = [];
     for (let i = 0; i < 10 && !carts.some((m) => m.message?.kind === 'trade.cart'); i++) carts = [...carts, ...(await text('lake_inbox', { wait_seconds: 2 })).messages];
     expect(carts.find((m) => m.message?.kind === 'trade.cart')?.checked).toMatchObject({ verified: true, unsolicited: true, note: expect.stringMatching(/never wrote to this agent/) });
+    // Paying it takes its human's word (run 64: only judgement stood between a stranger's "fee" and the money).
+    const unasked = (carts.find((m) => m.message?.kind === 'trade.cart')!.checked as { cart: string }).cart;
+    const refused = await client.callTool({ name: 'lake_buy', arguments: { action: 'pay', cart: unasked } });
+    expect(refused.isError).toBe(true);
+    expect((refused.content as { text: string }[])[0]!.text).toMatch(/came unasked.*human_asked: true/);
+    // And a pest can be blocked by key: its next message is turned away (run 64: an assistant's "mute" went nowhere).
+    expect(await text('lake_block', { agent_url: theirs.you.url })).toMatchObject({ blocked: expect.any(String), key: expect.any(String) });
+    const turned = await theirText('lake_ask', { to: o.you.url, kind: 'message', text: 'Your parcel fee is overdue!' });
+    expect(JSON.stringify(turned)).toMatch(/does not take messages from you/);
+    expect(await text('lake_block', { agent_url: theirs.you.url, undo: true })).toMatchObject({ unblocked: expect.any(String) });
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
     // Forgiving search: a tag prefix, and words in a card's own line.

@@ -30,7 +30,7 @@ await new Promise((r) => setTimeout(r, Number(delay) * 1000));
 
 // Its marks: the other assistants on the Lake (agents, not houses or the Lake's own services), houses' assistants first.
 const found = (await call('lake_search', { role: 'agent' })).v;
-const marks = (Array.isArray(found) ? found : []).filter((c) => c.url && c.url !== me?.url && c.role !== 'specialist' && c.role !== 'house').slice(0, 8);
+const marks = (Array.isArray(found) ? found : []).filter((c) => c.url && c.url !== me?.url && c.role !== 'specialist' && c.role !== 'house').slice(0, 20);
 log('marks', marks.map((m) => ({ name: m.name, url: m.url })));
 
 for (const m of marks) {
