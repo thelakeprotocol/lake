@@ -282,6 +282,9 @@ export class OwnerDesk {
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
+    const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
+    this.notes = kept.notes ?? [];
+    this.closedNotes = new Map(kept.closed ?? []);
     this.ownerNos = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'owner-nos.json'), 'utf8').catch(() => '[]')));
     this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'));
     if (this.o.leaseHours) {
@@ -414,7 +417,10 @@ export class OwnerDesk {
   async mute(key: string) {
     if (!key) return;
     this.muted.add(key);
+    // Its notes leave the owner's list, and say so to their sender ("no such note" made a sender think it never arrived).
+    for (const n of this.notes.filter((x) => x.from.key === key)) this.closedNotes.set(n.id, { by: n.from.webId, state: 'seen and set aside by the owner' });
     this.notes = this.notes.filter((n) => n.from.key !== key);
+    void this.saveNotes();
     await writeFile(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted])).catch(() => {});
   }
 
@@ -437,6 +443,8 @@ export class OwnerDesk {
   private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[]; from?: NoteSender; thread?: string }>();
   /** Kept on disk: a restart mustn't break every answer link given out. */
   private saveWebNotes = () => writeFile(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes])).catch(() => {});
+  /** Notes and what became of them, kept on disk: a restart (a deploy) lost both, for the owner and for every sender. */
+  private saveNotes = () => writeFile(join(this.o.dataDir, 'notes.json'), JSON.stringify({ notes: this.notes, closed: [...this.closedNotes].slice(-500) })).catch(() => {});
   /**
    * The owner's own No, held against the asker's key and the purpose (run 62: denied a study, the owner's standing rule
    * let the same sender in four minutes later with the postcode left out). While it lasts, a standing rule that would let
@@ -517,7 +525,10 @@ export class OwnerDesk {
     if (again) return again.id;
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
+    // The newest fifty wait for the owner; one pushed out says so to its sender, rather than vanishing.
+    for (const old of this.notes.slice(49)) this.closedNotes.set(old.id, { by: old.from.webId, state: 'not read: too many notes came at once; send it again if it still matters' });
     this.notes = [note, ...this.notes].slice(0, 50);
+    void this.saveNotes();
     this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word' }) });
     return note.id;
   }
@@ -980,6 +991,7 @@ export class OwnerDesk {
         const gone = this.notes.find((x) => x.id === id);
         if (gone) this.closedNotes.set(id, { by: gone.from.webId, state: 'seen and set aside by the owner' });
         this.notes = this.notes.filter((x) => x.id !== id);
+        void this.saveNotes();
         return void res.json({ ok: true });
       }
       if (p.kind === 'panel.assistant.dismiss') {

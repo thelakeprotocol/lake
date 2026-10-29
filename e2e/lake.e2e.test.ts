@@ -568,8 +568,12 @@ describe('the owner', () => {
     expect((await ownerCall({ kind: 'list' })).agenda).toEqual([]);
     // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', rules: 'rules: [' })).toMatchObject({ error: expect.stringMatching(/^rules:/) });
+    // Its sender can check the note by either id, and hears when the owner last looked (run 62: "no such request from you").
+    expect((await ask(houses.strict!, neighbour, { kind: 'status', offerId: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'with the owner, not yet set aside', ownerActive: expect.stringMatching(/^owner last active/) });
     // A sender the owner won't hear from again, by key: its next note is declined at the door.
     expect(await ownerCall({ kind: 'panel.note.mute', id: twice.note })).toMatchObject({ ok: true, muted: 'neighbour.example' });
+    // And its notes don't vanish: they were seen and set aside (run 62: "no such note from you" after a mute).
+    expect((await ask(houses.strict!, neighbour, { kind: 'status', note: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'seen and set aside by the owner' });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Hello again?' })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });
     // A newcomer's hello is answered with what the door takes, not rejected and not delivered.
     const notesBefore = (await ownerCall({ kind: 'list' })).notes.length;
@@ -904,7 +908,7 @@ describe('the open door', () => {
 
   it('Claude over HTTP: every conversation is its own signed agent, registered on the Lake, and runs a paid study', async () => {
     const port = String(await freePort());
-    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '50' });
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '50', LAKE_MATCH_EVERY_MS: '500' });
     const client = new Client({ name: 'claude-ai', version: '0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
     const text = async (name: string, args: Record<string, unknown> = {}) => {
@@ -931,6 +935,14 @@ describe('the open door', () => {
     await other.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
     const theirs = JSON.parse((((await other.callTool({ name: 'lake_overview', arguments: {} })).content) as { text: string }[])[0]!.text);
     expect(theirs.you.name).not.toBe(o.you.name);
+    // Wanted and offered meet (run 62: a solar buyer and the organiser never did): the first hears when the second arrives.
+    const theirText = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(((await other.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text);
+    expect((await text('lake_set_tags', { tags: ['seeking:solar-group-buy'] })).matches).toEqual([]);
+    const offering = await theirText('lake_set_tags', { tags: ['offering:solar-group-buy'] });
+    expect(offering.matches).toContainEqual(expect.objectContaining({ tag: 'seeking:solar-group-buy', url: o.you.url }));
+    let matchNews: { message?: { kind?: string; them?: { url?: string } } }[] = [];
+    for (let i = 0; i < 10 && !matchNews.some((m) => m.message?.kind === 'lake.match'); i++) matchNews = [...matchNews, ...(await text('lake_inbox', { wait_seconds: 2 })).messages];
+    expect(matchNews).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ kind: 'lake.match', them: expect.objectContaining({ url: theirs.you.url, tag: 'offering:solar-group-buy' }) }) }));
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
     // Forgiving search: a tag prefix, and words in a card's own line.

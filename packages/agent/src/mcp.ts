@@ -1254,10 +1254,41 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     },
   );
 
+  // Wanted and offered, matched (saved-search style): seeking:<x> finds offering:<x>, and the other way round, now and
+  // whenever someone new turns up while the tag stands.
+  const matched = new Set<string>();
+  const findMatches = async (me: LakeAgent) => {
+    const out: { tag: string; name: string; url: string; last_active?: string }[] = [];
+    for (const t of tags) {
+      const m = /^(seeking|offering):(.+)$/.exec(t);
+      if (!m) continue;
+      const other = `${m[1] === 'seeking' ? 'offering' : 'seeking'}:${m[2]}`;
+      for (const c of await me.find({ tag: other }).catch(() => [])) {
+        if (c.webId === me.webId || !c.tags.includes(other)) continue;
+        out.push({ tag: other, name: c.name, url: c.url, ...((c as { last_active?: string }).last_active ? { last_active: (c as { last_active?: string }).last_active } : {}) });
+      }
+    }
+    return out.slice(0, 20);
+  };
+  const matchWatch = setInterval(() => void (async () => {
+    if (!me || !tags.some((t) => /^(seeking|offering):/.test(t))) return;
+    const a = await me;
+    for (const m of await findMatches(a)) {
+      if (matched.has(`${m.tag}|${m.url}`)) continue;
+      matched.add(`${m.tag}|${m.url}`);
+      // From this connector, not from another agent: nothing here is signed by anyone, and it says so.
+      const item = { id: nextId++, at: new Date().toISOString(), from: { name: 'Lake match (your connector, unsigned)', domain: 'lake' }, message: { kind: 'lake.match', them: m, note: `${m.name} says ${m.tag}: you may want to talk (lake_ask their url). It is a tag on their card, not a promise` } };
+      received.push(item);
+      inbox.push(item);
+      for (const w of wakers) w();
+    }
+  })().catch(() => {}), Number(process.env.LAKE_MATCH_EVERY_MS) || 180_000);
+  matchWatch.unref();
+
   server.registerTool(
     'lake_set_tags',
     {
-      description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Re-signs your card under the same key; your address stays the same. here_until: how long you mean to stay, shown next to your name in searches.',
+      description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Wanting or offering something? Tag it seeking:<thing> or offering:<thing> (e.g. seeking:babysitter, offering:solar-group-buy): you get back who is on the other side now, and hear in lake_inbox when someone new turns up. Re-signs your card under the same key; your address stays the same. here_until: how long you mean to stay, shown next to your name in searches.',
       inputSchema: { tags: z.array(z.string().regex(/^[a-z0-9:._-]{1,40}$/i)).max(8), about: z.string().max(200).optional().describe('One line on your card: what you offer or look for, in your own words (found by lake_search { q })'), here_until: z.union([z.string(), z.number()]).optional().describe('Until when you will be around: a time (ISO) or minutes from now') },
     },
     async (a) => {
@@ -1273,7 +1304,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         const now = await agent();
         await now.setTags(tags, about);
-        return json({ tags, url: now.card.supportedInterfaces[0]!.url, domain: now.domain });
+        // Who is on the other side now (run 62: a solar buyer and the solar organiser were on the Lake and never met).
+        const matches = await findMatches(now);
+        for (const m of matches) matched.add(`${m.tag}|${m.url}`);
+        return json({ tags, url: now.card.supportedInterfaces[0]!.url, domain: now.domain,
+          ...(tags.some((t) => /^(seeking|offering):/.test(t)) ? { matches, watching: 'while these tags stand, anyone who later says the other side (offering: for your seeking:, seeking: for your offering:) shows up in lake_inbox as kind "lake.match"' } : {}) });
       } catch (e) {
         return fail(e);
       }
@@ -1655,6 +1690,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     close: async () => {
       if (saving) clearInterval(saving);
       clearInterval(waiting);
+      clearInterval(matchWatch);
       await saveNow().catch(() => {});
       await (await me?.catch(() => null))?.close().catch(() => {});
     },

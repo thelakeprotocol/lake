@@ -600,9 +600,13 @@ export class Housekeeper {
   /** A visitor waiting on an "ask" checks back: has the owner answered? */
   private async status(p: StatusPayload, requester: string): Promise<LakeData> {
     // A note's status, for its sender only (run 45: "no such request from you" on a note id).
-    if (p.note) {
-      const state = this.o.desk.noteState(String(p.note), requester);
-      return state ? this.reply({ kind: 'note.status', note: String(p.note), status: state } as never) : this.reply({ kind: 'rejected', code: 'malformed', why: 'no such note from you' });
+    // Asked by either id (run 62: a sender checked its notes as requests and heard "no such request" for every one).
+    const noteId = String(p.note ?? (this.o.desk.pending.has(String(p.offerId ?? '')) ? '' : p.offerId ?? ''));
+    if (noteId) {
+      const state = this.o.desk.noteState(noteId, requester);
+      // When the owner last looked is said too: a sender can tell waiting a day from waiting in vain.
+      if (state) return this.reply({ kind: 'note.status', note: noteId, status: state, ownerActive: lastActive(this.o.desk.ownerActive()) } as never);
+      if (p.note) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such note from you (notes are kept by the key that sent them)' });
     }
     const req = this.o.desk.pending.get(String(p.offerId ?? ''));
     if (!req || req.visitor.webId !== requester) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such request from you' });
