@@ -387,6 +387,14 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const two = await chat();
     expect((await two.call('lake_overview')).you.url).toBe(me.url);
     await two.call('lake_house', { view: 'overview' });
+    // A favour to a house that knows its human goes with the house's word (run 61: two honest neighbours' assistants each
+    // called the other unverified). Knocking here on its own house only to see the word checked on arrival.
+    expect(await one.call('lake_knock', { house_url: house, purpose: 'contact', note: 'Hi, a neighbour here: could you take in a parcel this afternoon?', reveal_house: true })).toMatchObject({ kind: 'noted' });
+    await page.goto(`${house}/owner/`);
+    const parcel = page.locator('li.item', { hasText: 'could you take in a parcel' });
+    // Home lists ten at a time (an earlier test left many suggestions): show more until it's there.
+    for (let i = 0; i < 6 && !(await parcel.count()); i++) await page.locator('.more-items').first().click({ timeout: 3000 }).catch(() => {});
+    await page.locator('li.item', { hasText: 'could you take in a parcel' }).locator('.chip', { hasText: 'Speaks for a house' }).waitFor({ timeout: 10_000 });
     // It sells for the house: another AI (a script, signed in without a browser) orders and pays, held until it accepts.
     await one.call('lake_sell', { action: 'menu', items: [{ sku: 'summary', label: 'A short summary', price: 4, currency: 'USD' }] });
     const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();

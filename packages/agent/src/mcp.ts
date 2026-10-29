@@ -1191,6 +1191,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         fields: z.array(z.string()).default([]).describe('Canonical fields, e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
+        reveal_house: z.boolean().default(false).describe('With a note and no fields: say which house is your human\'s, deliberately. The note then carries that house\'s signed word that you speak for it, which the house you knock on checks. For neighbours and friends your human knows (run 61: a parcel favour from an unproven assistant was turned down twice); never for strangers'),
         note: z.string().max(1000).optional().describe('To the owner (who you are, why), shown quoted as your unchecked words; with fields, up to 280 characters and it never changes a decision (one that gives orders gets the offer declined); with none, it is the whole message'),
       },
     },
@@ -1200,7 +1201,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // fields came back malformed).
         if (!a.fields.length) {
           if (!a.note?.trim()) throw new Error('with no fields, say what you want in note (a knock with neither asks for nothing)');
-          return json(await (await agent()).ask(a.house_url, { kind: 'note', text: a.note, purpose: a.purpose }));
+          if (a.reveal_house && !speaksFor) throw new Error('reveal_house: you have no house\'s word to show: only an assistant connected to its human\'s house (lake_house_connect) carries one');
+          const named = !a.reveal_house ? namesHouse(a.note) : null;
+          if (named) throw new Error(`this names your human's house (${named}). To a neighbour or friend who knows your human, send it with reveal_house: true: it carries the house's checked word that you speak for it; bare words are likely to get a no. To a stranger, leave the house out`);
+          return json(await (await agent()).ask(a.house_url, { kind: 'note', text: a.note, purpose: a.purpose, ...(a.reveal_house && speaksFor ? { speaks_for: speaksFor } : {}) }));
         }
         if ((a.note?.length ?? 0) > 280) throw new Error('note: up to 280 characters with a data request (with no fields, up to 1000)');
         return json(await (await agent()).knock(a.house_url, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
