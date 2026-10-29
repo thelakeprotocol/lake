@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -339,7 +339,9 @@ function SuggestionItem({ x }: { x: Note }) {
   const fail = (r: { ok?: boolean; error?: string }) => { if (r.error) throw new Error(r.error); };
   return h('li', { class: 'item' },
     h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, `From ${shortName(x.from)}, your agent`),
-      x.advice ? h('span', { class: `chip ${x.advice === 'do' ? 'ok' : x.advice === 'dont' ? 'no' : ''}` }, { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice]) : null),
+      x.advice ? h('span', { class: `chip ${x.advice === 'do' ? 'ok' : x.advice === 'dont' ? 'no' : ''}` }, x.sender && x.advice === 'dont' ? 'Warning' : { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice]) : null),
+    // A warning about another agent (run 63: a scam): who it is about, so the owner knows the name if it turns up again.
+    x.sender ? h('p', { class: 'item-meta' }, `About: ${x.sender}`) : null,
     h('p', { class: 'item-text' }, x.text),
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.ask?.answered ? h('p', { class: 'item-meta' }, `You answered: ${x.ask.answered}`) : null,

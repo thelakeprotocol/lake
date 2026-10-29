@@ -101,6 +101,8 @@ export interface Suggestion {
   id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note. */ pledge?: { tally: string; id: string };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
+  /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
+  sender?: string;
   mute?: boolean;
   /** What the assistant advises on the request, offer or pledge it names, as a field: nobody (no panel, no bot) reads it out of the words (run 39). */
   advice?: Advice;
@@ -763,7 +765,9 @@ export class OwnerDesk {
           if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id' });
           // Advice with nothing to act on is dropped, and the note still goes (run 55: three refusals, and the owner was never
           // told): an FYI is words for the owner.
-          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door;
+          // A warning about another agent keeps its advice too (run 63: "don't pay this stranger" lost its "don't").
+          const sender = typeof (q as { sender?: unknown }).sender === 'string' ? String((q as { sender?: string }).sender).slice(0, 200) : '';
+          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door && !sender;
           if (adviceDropped) delete q.advice;
           let ask: Suggestion['ask'];
           if (q.ask) {
@@ -775,7 +779,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(sender ? { sender } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }
@@ -913,7 +917,7 @@ export class OwnerDesk {
         this.allowances.set(d.kid, { kid: d.kid, credential: String(q.credential), statusId: d.statusId, amount: s.budget.amount, currency: s.budget.currency, until: s.intent_expiry, at: new Date().toISOString() });
         this.allowanceDrafts.delete(d.statusId);
         await this.saveAllowances();
-        this.news({ about: 'allowance', amount: s.budget.amount, currency: s.budget.currency, until: s.intent_expiry, note: 'your human signed you a spending allowance: lake_pay spends under it, in this currency' }, d.kid);
+        this.news({ about: 'allowance', amount: s.budget.amount, currency: s.budget.currency, until: s.intent_expiry, note: 'your human signed you a spending allowance: lake_pay spends under it, in this currency. Within it, and in their free hours (lake_house free), you may say yes for them without asking: a booking, a purchase, a time to meet. Above it, about their data, or anything they would want to know first: ask them (lake_house_suggest)' }, d.kid);
         return void res.json({ ok: true, amount: s.budget.amount, currency: s.budget.currency, until: s.intent_expiry });
       }
       if (p.kind === 'panel.allowance.revoke') {

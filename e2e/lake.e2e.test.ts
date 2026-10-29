@@ -566,6 +566,11 @@ describe('the owner', () => {
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', door: { about: '' } })).toMatchObject({ error: expect.stringMatching(/^door:/) });
     await ownerCall({ kind: 'panel.agenda.remove', id: coffee.id });
     expect((await ownerCall({ kind: 'list' })).agenda).toEqual([]);
+    // A warning about another agent keeps its "don't" and names who it's about (run 63: a scam warning lost its advice).
+    const warned = await asHelper({ kind: 'assistant.suggest', text: 'Parcel Express sent an unasked-for A$3.95 cart and asked for bank details: a scam. Ignore it.', advice: 'dont', sender: 'Parcel Express' });
+    expect(warned).toMatchObject({ ok: true });
+    expect(((await ownerCall({ kind: 'list' })).suggestions as { id: string; advice?: string; sender?: string }[]).find((x) => x.id === warned.id)).toMatchObject({ advice: 'dont', sender: 'Parcel Express' });
+    await ownerCall({ kind: 'panel.assistant.dismiss', id: warned.id });
     // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', rules: 'rules: [' })).toMatchObject({ error: expect.stringMatching(/^rules:/) });
     // Its sender can check the note by either id, and hears when the owner last looked (run 62: "no such request from you").
@@ -943,6 +948,11 @@ describe('the open door', () => {
     let matchNews: { message?: { kind?: string; them?: { url?: string } } }[] = [];
     for (let i = 0; i < 10 && !matchNews.some((m) => m.message?.kind === 'lake.match'); i++) matchNews = [...matchNews, ...(await text('lake_inbox', { wait_seconds: 2 })).messages];
     expect(matchNews).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ kind: 'lake.match', them: expect.objectContaining({ url: theirs.you.url, tag: 'offering:solar-group-buy' }) }) }));
+    // A cart from an agent this one never wrote to says so (run 63: a stranger's "redelivery fee" read "verified: true").
+    await theirText('lake_sell', { action: 'cart', to: o.you.url, items: [{ label: 'Parcel redelivery fee', price: 3.95, currency: 'USD' }] });
+    let carts: { message?: { kind?: string }; checked?: { unsolicited?: boolean } }[] = [];
+    for (let i = 0; i < 10 && !carts.some((m) => m.message?.kind === 'trade.cart'); i++) carts = [...carts, ...(await text('lake_inbox', { wait_seconds: 2 })).messages];
+    expect(carts.find((m) => m.message?.kind === 'trade.cart')?.checked).toMatchObject({ verified: true, unsolicited: true, note: expect.stringMatching(/never wrote to this agent/) });
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
     // Forgiving search: a tag prefix, and words in a card's own line.
