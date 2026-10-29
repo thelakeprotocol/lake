@@ -1231,7 +1231,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // Which house is your human's is theirs to tell (run 40: assistants told strangers "Tom's agent (sb-1)"). A message
         // to anyone but the house itself that names it waits for a second, deliberate send.
         const named = !a.reveal_house && !(house && a.agent_url.startsWith(house)) ? namesHouse(a.message) : null;
-        if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. Leave it out, or send it with reveal_house: true if your human would want them to know`);
+        // Run 60: told only "leave it out", an assistant asking neighbours a favour for its human sent its words bare, and
+        // both neighbours' assistants (rightly) called it unverified: nobody took the parcel in. Say what each choice costs.
+        if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. If they know your human (a neighbour, a friend) and you're asking on your human's behalf, send it with reveal_house: true: it carries the house's own word that you speak for it, which their side checks; sent without it, you are only words to them, and an owner is likely to say no. To a stranger, leave the house out`);
         // A reply to someone who left a note at the human's door names it, as the house promised them.
         const noteRe = doorNotes.get(a.agent_url.replace(/\/$/, '')) ?? doorNotes.get(a.agent_url.replace(/\/a2a\/?$/, ''));
         if (noteRe && a.message.re === undefined) a.message = { ...a.message, re: noteRe };
