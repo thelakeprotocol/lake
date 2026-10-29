@@ -849,6 +849,8 @@ describe('the open door', () => {
     await one.call('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips.' });
     expect((await two.call('lake_overview')).you).toMatchObject({ name: me.name, url: me.url });
     expect((await one.call('lake_overview')).you.url).toBe(me.url);
+    const oldSession = (one.c.transport as StreamableHTTPClientTransport | undefined)?.sessionId;
+    expect(oldSession).toEqual(expect.any(String));
     await one.c.close(); await two.c.close();
     // A restart (a deploy): the agent comes back as itself, with what it had said about itself; the refresh token rotates.
     const proc = procs.at(-1)!;
@@ -857,6 +859,10 @@ describe('the open door', () => {
     const fresh = await tokenCall({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
     expect(fresh.access_token).toEqual(expect.any(String));
     expect(await tokenCall({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token })).toMatchObject({ error: 'invalid_grant' });
+    // The chat's old session is gone with the restart: 404, the MCP signal to start a new session (a 400 left claude.ai
+    // repeating the dead session after a deploy, "unknown or missing session").
+    const stale = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${fresh.access_token}`, 'mcp-session-id': oldSession! }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
+    expect(stale.status).toBe(404);
     const after = await chat(fresh.access_token);
     expect((await after.call('lake_overview')).you).toMatchObject({ name: me.name, url: me.url });
     expect((await after.call('lake_search', { tag: 'game' })).some((x: { url: string }) => x.url === me.url)).toBe(true);

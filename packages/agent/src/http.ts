@@ -274,7 +274,10 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
     // A conversation belongs to whoever opened it: another sign-in's token can't use it.
     if (s && s.principal !== principal) return void res.status(403).json({ jsonrpc: '2.0', error: { code: -32000, message: 'this conversation belongs to another sign-in' }, id: null });
     if (!s) {
-      if (sid || !isInitializeRequest(req.body)) return void res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'unknown or missing session; start with initialize' }, id: null });
+      // A session this server doesn't know (it restarted, or the session ended): 404, which tells the client to start a new
+      // one with initialize (MCP Streamable HTTP). A 400 left claude.ai repeating the dead session after a deploy.
+      if (sid) return void res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'session not found: start a new one with initialize' }, id: null });
+      if (!isInitializeRequest(req.body)) return void res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'no session: start with initialize' }, id: null });
       if (sessions.size >= (o.maxSessions ?? 40) * 2) return void res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'the sandbox is full right now; try again in a few minutes' }, id: null });
       let l: Live;
       try { l = await agentFor(principal); } catch (e) { return void res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: (e as Error).message }, id: null }); }
@@ -294,7 +297,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
 
   const stream = async (req: express.Request, res: express.Response) => {
     const s = sessions.get(req.get('mcp-session-id') ?? '');
-    if (!s || s.principal !== principalOf(req)) return void res.status(400).send('unknown session');
+    if (!s || s.principal !== principalOf(req)) return void res.status(req.get('mcp-session-id') ? 404 : 400).send(req.get('mcp-session-id') ? 'session not found: start a new one with initialize' : 'no session');
     s.seen = s.live.seen = Date.now();
     await s.transport.handleRequest(req, res);
   };
