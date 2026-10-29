@@ -167,10 +167,12 @@ A housekeeper answers every offer with exactly one of the following. What the vi
 
 | Decision | Means |
 |---|---|
-| `join` | A standing rule the owner wrote covers this. Counts as the owner's pre-approval. |
+| `join` | A standing rule the owner wrote covers this. Counts as the owner's pre-approval, unless the owner lately said No to this visitor's key for this purpose (below). |
 | `decline` | No. |
 | `ask` | The owner decides. A request goes to their approvals device. |
 | `counter` | The owner would join on different terms (fewer fields, higher price). |
+
+**The owner's No outranks their standing rule, for a while.** When the owner denies a request live, the house MUST hold that No against the visitor's key (not its name) and the purpose: for 7 days (30 after a second No), a standing rule that would `join` that key for that purpose yields `ask` instead, with a reason naming the earlier No. Allowing a request from that key for that purpose lifts it. It is structured state (key id, purpose, time), never the visitor's words.
 
 A request sent to the owner (`ask`) SHOULD say what to look at twice, worked out from codes, never from the sender's prose: fields that identify the owner (a pack's `identifying` fields), fields no loaded pack defines, and retention of a year or more. It MUST say so plainly when the request asks for **special-category** fields (a pack marks them `special`: health, beliefs…) for a purpose that decides something about the owner (insurance, credit), or for any purpose outside a certified study: no auditor or ethics body checked such a request, and allowing it lets the asker use the owner's own data, not a total. The purpose it names is the asker's word. When there is any, the housekeeper's recommendation leans to No.
 

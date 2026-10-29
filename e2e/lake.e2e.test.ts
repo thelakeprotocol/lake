@@ -585,8 +585,31 @@ describe('the owner', () => {
     expect(await pay(1)).toMatchObject({ kind: 'refused', problems: ['the owner has taken this allowance back'] });
   });
 
+  it("an owner's No outranks their standing rule for that key and purpose, for a while (run 62)", async () => {
+    // Run 62: denied a study, the owner's standing rule let the same sender in four minutes later with a field left out.
+    const rules = (await ownerCall({ kind: 'panel.rules' })).text as string;
+    expect(await ownerCall({ kind: 'panel.rules.set', text: 'owner: strict\ndevice: approvals-app\ndefault: ask\nrules:\n  - match: { requester: gp.example }\n    allow_fields: [medications]\n    min_price_usd: 4\n    decision: join\n' })).toEqual({ ok: true });
+    try {
+      const gp = await visitor('gp.example');
+      const low = (await knock(houses.strict!, gp, { ...presets().gp!, fields: ['medications'], priceUsd: 1 })).reply;
+      expect(low).toMatchObject({ decision: 'ask' });
+      const pending = ((await ownerCall({ kind: 'list' })).requests as { offerId: string; visitor: { webId: string } }[]).find((q) => q.visitor.webId === gp.webId)!;
+      expect(await ownerCall({ kind: 'answer', request: pending.offerId, answer: 'deny' })).toEqual({ ok: true });
+      // The same key, back with a price the rule takes: the owner is asked again, and told why.
+      const again = (await knock(houses.strict!, gp, { ...presets().gp!, fields: ['medications'], priceUsd: 5 })).reply;
+      expect(again).toMatchObject({ decision: 'ask' });
+      const asked = ((await ownerCall({ kind: 'list' })).requests as { visitor: { webId: string }; recommendation?: string; status?: string }[]).find((q) => q.visitor.webId === gp.webId && q.status === 'pending');
+      expect(asked?.recommendation).toMatch(/you said no to gp\.example's care request/);
+      // Another key from the same name is not held to it (blame keys, not names): the rule lets it in.
+      expect((await knock(houses.strict!, await visitor('gp.example'), { ...presets().gp!, fields: ['medications'], priceUsd: 5 })).reply).toMatchObject({ decision: 'join' });
+    } finally {
+      expect(await ownerCall({ kind: 'panel.rules.set', text: rules })).toEqual({ ok: true });
+    }
+  });
+
   it("an owner's assistant sells for the house: the house vouches for it on its card, carts name the house as payee, and the house is paid (SPEC §6.5)", async () => {
-    const seller = await joinLake({ name: 'Mia helper', domain: 'mia-helper.example', node, port: await freePort(), payments, onMessage: async () => ({ kind: 'received' }) });
+    const told: Record<string, unknown>[] = [];
+    const seller = await joinLake({ name: 'Mia helper', domain: 'mia-helper.example', node, port: await freePort(), payments, onMessage: async (m) => { told.push(m.payload); return { kind: 'received' }; } });
     const buyer = await joinLake({ name: 'Candle shop', domain: 'candles.example', node, port: await freePort(), payments, allowanceUsd: 20, onMessage: async () => ({ kind: 'received' }) });
     try {
       const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Mia helper' });
@@ -610,6 +633,9 @@ describe('the owner', () => {
       expect(money.total - before).toBe(8);
       // And says what for and who, as the signed cart and cards said ("$4 from claude-code-2299….mcp.example" told nobody).
       expect(money.receipts).toContainEqual(expect.objectContaining({ amount: 8, via: seller.webId, payerName: 'Candle shop', viaName: 'Mia helper', items: [{ label: '55 words of candle copy', amount: { currency: 'USD', value: 8 } }] }));
+      // Its assistant hears the money landed (run 62: an assistant told its human "In: A$0" with $10 earned).
+      for (let i = 0; i < 20 && !told.some((x) => x.kind === 'house.news' && x.about === 'money'); i++) await new Promise((r) => setTimeout(r, 250));
+      expect(told).toContainEqual(expect.objectContaining({ kind: 'house.news', about: 'money', amount: 8, from: 'Candle shop', for: ['55 words of candle copy'] }));
       // A note that says which house its sender speaks for carries the house's word, and the house checks it (run 42); an
       // impostor's same claim, with nothing to show, says so.
       const proof = { house: paired.webId, url: paired.badge.issuer, vouch: paired.badge };

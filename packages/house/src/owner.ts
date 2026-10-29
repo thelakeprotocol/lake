@@ -14,7 +14,7 @@ export type OwnerActive = 'within the hour' | 'today' | 'this week' | 'not this 
 export interface PendingRequest {
   id: string;
   offerId: string;
-  visitor: { webId: string; domain: string; name: string };
+  visitor: { webId: string; domain: string; name: string; /** Its key's id: what an owner's No is held against. */ key?: string };
   purpose: string;
   fields: string[];
   retention: string;
@@ -282,6 +282,7 @@ export class OwnerDesk {
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
+    this.ownerNos = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'owner-nos.json'), 'utf8').catch(() => '[]')));
     this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'));
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
@@ -436,6 +437,17 @@ export class OwnerDesk {
   private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[]; from?: NoteSender; thread?: string }>();
   /** Kept on disk: a restart mustn't break every answer link given out. */
   private saveWebNotes = () => writeFile(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes])).catch(() => {});
+  /**
+   * The owner's own No, held against the asker's key and the purpose (run 62: denied a study, the owner's standing rule
+   * let the same sender in four minutes later with the postcode left out). While it lasts, a standing rule that would let
+   * that key in for that purpose asks the owner instead. Seven days; a second No makes it thirty; Allow lifts it.
+   */
+  private ownerNos = new Map<string, { offerId: string; at: number; until: number }>();
+  private saveOwnerNos = () => writeFile(join(this.o.dataDir, 'owner-nos.json'), JSON.stringify([...this.ownerNos])).catch(() => {});
+  ownerSaidNo(key: string, purpose: string): { offerId: string; at: number } | null {
+    const n = key ? this.ownerNos.get(`${key}|${purpose}`) : undefined;
+    return n && n.until > Date.now() ? n : null;
+  }
   addWebNote(n: { text: string; from?: string; purpose: string }): { id: string; key: string } | null {
     const from: NoteSender = { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false };
     const id = this.addNote({ from, text: n.text, purpose: n.purpose });
@@ -1036,7 +1048,7 @@ export class OwnerDesk {
         if (answer !== undefined && p.kind === 'panel.offer.accept' && !(answer as { error?: string }).error) {
           // The assistant that suggested it is the one to pay: what was accepted, from whom, and the quoter's answer (its order).
           const x = answer as { id: string; title: string; quoter: { name: string; url: string }; result: { outputs: Record<string, number> }; labels?: Record<string, { label: string; unit?: string }>; currency?: string; answer?: Record<string, unknown> };
-          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer: pay it with lake_pay, naming the order. That pays outright: an accepted offer is no cart, so nothing holds the money, and the delivery itself happens outside the Lake: don\'t tell your human it is held until delivery' });
+          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer themselves, on their phone: pay it with lake_pay, naming the order. When you tell them, be exact: it pays outright (an accepted offer is no cart, so nothing holds the money until delivery), and the delivery happens outside the Lake.' });
         }
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }
@@ -1073,6 +1085,11 @@ export class OwnerDesk {
     if (!req || req.status !== 'pending') return { error: 'no such pending request' };
     if (answer === 'deny') {
       req.status = 'denied';
+      if (req.visitor.key) {
+        const k = `${req.visitor.key}|${req.purpose}`, again = this.ownerSaidNo(req.visitor.key, req.purpose);
+        this.ownerNos.set(k, { offerId: req.offerId, at: Date.now(), until: Date.now() + (again ? 30 : 7) * 86_400_000 });
+        void this.saveOwnerNos();
+      }
       this.o.emit(makeEvent('approval.answered', this.o.actor, `agent:${req.visitor.domain}`, { answer: 'Deny' }));
       this.news({ about: 'request.answered', request: id, by: req.visitor.domain, answer: 'deny' });
       return { ok: true };
@@ -1101,6 +1118,8 @@ export class OwnerDesk {
       status: (vc as { credentialStatus?: { id?: string } }).credentialStatus?.id, given: new Date().toISOString(), notice: digestSRI(JSON.stringify(req.grantDraft ?? {})),
     })).catch(() => {});
     this.record({ id: req.offerId, jws: grant, visitor: req.visitor.domain, fields: s!.fields, purpose: s!.purpose, until: new Date(until).toISOString(), authorizedBy: 'owner, live' });
+    // Yes lifts an earlier No for this key and purpose: the owner's standing rule applies to it again.
+    if (req.visitor.key && this.ownerNos.delete(`${req.visitor.key}|${req.purpose}`)) void this.saveOwnerNos();
     req.status = 'allowed';
     req.grant = grant;
     this.o.emit(makeEvent('approval.answered', this.o.actor, `agent:${req.visitor.domain}`, { answer: 'Allow' }));

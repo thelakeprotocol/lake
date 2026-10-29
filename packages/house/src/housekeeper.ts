@@ -300,7 +300,10 @@ export class Housekeeper {
     }
     if (waiting.length >= MAX_WAITING && !waiting.some((x) => x.purpose === offer.purpose && [...x.fields].sort().join() === [...offer.fields].sort().join())) return decide('decline', `already has ${waiting.length} requests waiting for the owner`, { code: 'too-many' }, `declined: you have ${waiting.length} requests waiting for this owner; withdraw one or wait for an answer`);
 
-    const d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() });
+    let d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() });
+    // The owner said No to this key for this purpose lately: their standing rule doesn't let it in now; they're asked.
+    const saidNo = d.decision === 'join' ? this.o.desk.ownerSaidNo(key, offer.purpose) : null;
+    if (saidNo) d = { ...d, decision: 'ask', reason: `you said no to ${domain}'s ${offer.purpose} request on ${new Date(saidNo.at).toUTCString().slice(5, 22)} UTC (request ${saidNo.offerId}), so your standing rule waits for you this time` };
     // Turned down for asking who the owner is, a visitor may ask again on that purpose without those fields.
     if (d.decision === 'decline' && d.code !== 'identifying') this.declinedAt.set(declinedKey, Date.now());
     let filed: { offerId: string; asked?: number; replaces?: string[] } | null = null;
@@ -317,7 +320,7 @@ export class Housekeeper {
       // The note is the visitor's words: never read by the rules, shown to the owner quoted, and only if it isn't trying to give orders.
       const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
       filed = this.o.desk.ask({
-        offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
+        offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain, ...(key ? { key } : {}) }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
         grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
         priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
@@ -426,6 +429,8 @@ export class Housekeeper {
     // What it was for, beside its agreement, so the owner's money can say which study paid (not just an agreement id).
     await this.tool('pod_write', { path: `agreements/${g.offer}.study.json`, content: JSON.stringify({ question: String(p.study.question ?? '').slice(0, 300), at: entry.at }), contentType: 'application/json' }).catch(() => {});
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
+    // And of a study it answered, under a key the owner or their rules gave.
+    this.o.desk.news({ about: 'study', question: String(p.study.question ?? '').slice(0, 300), requester, fieldsCounted: fields, recordsOut: 0, note: 'your human\'s house answered this study as two unreadable shares; no record left. Its payment comes as its own news' });
     if (g.uses === 1) await this.o.desk.spend(g.offer);
     return this.reply({ kind: 'counted', study: id, count: p.count, tellers: tellers.map((c) => c.domain) });
   }
@@ -585,6 +590,10 @@ export class Housekeeper {
     // An open panel shows it now (Money, Home's earnings), not on the owner's next tap, and not from a copy read before.
     this.o.onReceiptFiled?.(`receipts/${agreement}.receipt.jwt`);
     this.o.desk.touch();
+    // The owner's assistant hears of money in as it lands (run 62: one told its human "In: A$0" with $10 earned).
+    const cs = check.vc.credentialSubject as Record<string, any>;
+    const items = Array.isArray(cs.items) ? cs.items.map((i: { label?: string }) => String(i.label ?? '')).filter(Boolean) : [];
+    this.o.desk.news({ about: 'money', amount: Number(cs.amount?.value ?? 0), currency: String(cs.amount?.currency ?? 'USD'), settlement: String(cs.settlement ?? ''), from: String(cs.payer_name ?? cs.payer ?? ''), ...(items.length ? { for: items } : {}), agreement: String(cs.agreement ?? ''), note: cs.settlement === 'held' ? 'paid to your human\'s house, held until the buyer accepts: tell your human it is coming, not that it is theirs yet' : 'paid to your human\'s house: it shows on their Money' });
     return this.reply({ kind: 'filed', receipt: agreement });
   }
 
