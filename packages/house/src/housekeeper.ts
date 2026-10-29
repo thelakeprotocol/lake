@@ -29,6 +29,8 @@ export interface HousekeeperOptions {
   desk: OwnerDesk;
   /** Signals from the nodes this house follows: keys to drop on sight, agents' reputation. */
   signals?: () => { blocklist: Set<string>; reputation: Record<string, number> };
+  /** A receipt was filed at this path (a release replaces a held one there): whoever keeps a copy reads it again. */
+  onReceiptFiled?: (path: string) => void;
   emit: (e: LakeEvent) => void;
   say?: (msg: string) => void;
   /** The nodes this house follows, and its links to them (for intents). */
@@ -580,7 +582,8 @@ export class Housekeeper {
     const issued = (jws: string) => { try { const v = JSON.parse(Buffer.from(jws.split('.')[1] ?? '', 'base64url').toString()) as { validFrom?: string; vc?: { validFrom?: string } }; return Date.parse(v.validFrom ?? v.vc?.validFrom ?? '') || 0; } catch { return 0; } };
     if (typeof filed === 'string' && filed.startsWith('ey') && issued(filed) > issued(p.receipt.credential)) return this.reply({ kind: 'filed', receipt: agreement });
     await this.tool('pod_write', { path: `receipts/${agreement}.receipt.jwt`, content: p.receipt.credential, contentType: 'text/plain' });
-    // An open panel shows it now (Money, Home's earnings), not on the owner's next tap.
+    // An open panel shows it now (Money, Home's earnings), not on the owner's next tap, and not from a copy read before.
+    this.o.onReceiptFiled?.(`receipts/${agreement}.receipt.jwt`);
     this.o.desk.touch();
     return this.reply({ kind: 'filed', receipt: agreement });
   }

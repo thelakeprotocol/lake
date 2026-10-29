@@ -397,8 +397,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const order = await shop({ action: 'order', seller_url: me.url, sku: 'summary' });
     const cartId = order.cart?.id ?? order.cart ?? order.id;
     await shop({ action: 'pay', cart: String(cartId) });
-    await shopper.close();
-    await one.c.close(); await two.c.close();
+    await two.c.close();
     // And the owner sees it on My agent, here now.
     await page.goto(`${house}/owner/`);
     await tab('My agent');
@@ -416,6 +415,17 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(new Set(await page.locator('.tiles .tile').evaluateAll((ts) => ts.map((t) => (t as HTMLElement).offsetTop))).size).toBe(1);
     await sale.locator('summary').click();
     await sale.getByText(/Held until the buyer accepts/).waitFor();
+    await tidy();
+    // Delivered and accepted: the release replaces the held receipt, and Money counts it in Earned, though it had just
+    // read the held one (runs 58 and 59: Earned missed the last release for five minutes).
+    const earned = async () => Number((await page.locator('.tile.mint dd').textContent())!.replace(/[^\d.]/g, ''));
+    const before = await earned();
+    await one.call('lake_sell', { action: 'deliver', cart: String(cartId), content: 'A short summary: the Lake keeps your data at home.' });
+    await shop({ action: 'accept', cart: String(cartId) });
+    await sale.locator('.chip', { hasText: 'paid' }).waitFor({ timeout: 15_000 });
+    expect(await earned()).toBe(before + 4);
+    expect(await page.getByText('Held for now').count()).toBe(0);
+    await shopper.close(); await one.c.close();
     await tidy();
   });
 

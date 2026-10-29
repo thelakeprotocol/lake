@@ -317,6 +317,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const keeper = new Housekeeper({
     name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk,
     signals: () => signals,
+    // Run 58 and 59: a release replaced the held receipt in the pod, but Money kept its five-minute copy of the held one,
+    // so Earned missed it.
+    onReceiptFiled: (path) => panel.forgetReceipt?.(path),
   });
   keeperRef = keeper;
   const check = await keeper.verifyOwnRecord();
@@ -520,6 +523,7 @@ function panelFor(x: {
   };
   let recordCheck: { at: number; claims: Awaited<ReturnType<ReturnType<typeof x.keeper>['allClaims']>>; chain: Awaited<ReturnType<ReturnType<typeof x.keeper>['verifyOwnRecord']>> } | null = null;
   return {
+    forgetReceipt: (path: string) => void receiptCache.delete(path),
     async overview(tzOffset?: number) {
       // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
       const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;

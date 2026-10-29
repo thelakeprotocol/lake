@@ -52,6 +52,8 @@ export interface PanelProvider {
   activity(since?: number | string): { seq: number }[];
   agents(): unknown[];
   money(): Promise<unknown>;
+  /** A receipt was filed again at this path: a copy kept of it is stale. */
+  forgetReceipt?(path: string): void;
   /** The owner's consent records (one beside each agreement), newest first, each with where it stands now. */
   consents(): Promise<unknown>;
   data(): Promise<unknown>;
