@@ -958,6 +958,9 @@ describe('the open door', () => {
     let matchNews: { message?: { kind?: string; them?: { url?: string } } }[] = [];
     for (let i = 0; i < 10 && !matchNews.some((m) => m.message?.kind === 'lake.match'); i++) matchNews = [...matchNews, ...(await text('lake_inbox', { wait_seconds: 2 })).messages];
     expect(matchNews).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ kind: 'lake.match', them: expect.objectContaining({ url: theirs.you.url, tag: 'offering:solar-group-buy' }) }) }));
+    // Two seeking the same thing are told of each other, to find a seller or buy together (run 67: two honey seekers never met).
+    const alsoSeeking = await theirText('lake_set_tags', { tags: ['seeking:solar-group-buy'] });
+    expect(alsoSeeking.matches).toContainEqual(expect.objectContaining({ tag: 'seeking:solar-group-buy', url: o.you.url, together: true }));
     // A cart from an agent this one never wrote to says so (run 63: a stranger's "redelivery fee" read "verified: true").
     await theirText('lake_sell', { action: 'cart', to: o.you.url, items: [{ label: 'Parcel redelivery fee', price: 3.95, currency: 'USD' }] });
     let carts: { message?: { kind?: string }; checked?: { unsolicited?: boolean } }[] = [];
@@ -1979,6 +1982,18 @@ describe('the weekly shop, priced inside the house', () => {
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
     // Not eight weeks of receipts: the list.
     expect(entry).toMatchObject({ to: best.quoter.webId, released: ['claims: household_size, dietary_needs, staples'], consent: 'owner, live' });
+  });
+
+  it('a grocer sells single things from its signed menu, and says plainly what it doesn\'t stock (run 67)', async () => {
+    const offers = (await buyers[0]!.call({ kind: 'panel.market' })).offers as { quoter: { name: string; url: string } }[];
+    const corner = offers.find((o) => o.quoter.name === 'Corner Grocer')!.quoter.url;
+    const shopper = await visitor('fruit-lover.example');
+    const { reply: cart } = await ask(corner, shopper, { kind: 'trade.order', sku: 'persimmons', qty: 2 });
+    expect(cart).toMatchObject({ kind: 'trade.cart', cart: { contents: { payment_request: { details: { total: { amount: { currency: 'AUD', value: 13 } } } } } } });
+    const { reply: none } = await ask(corner, shopper, { kind: 'trade.order', sku: 'wool-socks' });
+    expect(none).toMatchObject({ kind: 'rejected', code: 'not-stocked', why: expect.stringMatching(/we don't sell "wool-socks".*Persimmons, bag of 4/) });
+    // On its signed card too, for search to find.
+    expect((await (await fetch(cardUrlFor(corner))).json()).capabilities.extensions[0].params.menu).toContainEqual(expect.objectContaining({ sku: 'raw-honey' }));
   });
 
   it('an accepted shop is paid through a cart the grocer signs, held until it ships (run 66: shops were paid outright)', async () => {

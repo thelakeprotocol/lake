@@ -117,6 +117,8 @@ export interface QuoterExample {
   /** What an acceptance becomes, and what happens next, in the quoter's words (default: a lender's conditional approval). */
   acceptedAs?: string;
   next?: string;
+  /** Single items it also sells, at fixed prices, on its signed card: ordered from it like any seller's menu (SPEC §6.5). */
+  menu?: import('./trade.js').MenuItem[];
 }
 
 export interface Claim {

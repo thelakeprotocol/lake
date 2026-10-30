@@ -70,7 +70,16 @@ export function grocerProgram(title: string, r: GrocerRules): QuoteProgram {
 
 const ALL = ['nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
 const grocer = (name: string, slug: string, r: GrocerRules): QuoterExample =>
-  ({ name, domain: `${slug}.lake.local`, program: grocerProgram(`${name}: your weekly shop`, r), currency: 'AUD', acceptedAs: 'order confirmed', next: 'pay the basket total to this shop (lake_pay, naming the order), and it is delivered on the day you asked for' });
+  ({ name, domain: `${slug}.lake.local`, ...(MENUS[slug] ? { menu: MENUS[slug] } : {}), program: grocerProgram(`${name}: your weekly shop`, r), currency: 'AUD', acceptedAs: 'order confirmed', next: 'pay the basket total to this shop (lake_pay, naming the order), and it is delivered on the day you asked for' });
+
+// Single things people want (run 67: persimmons, honey, a pomegranate, apricots), on each grocer's signed menu, in AUD.
+// Fictional prices; each shop stocks a little differently.
+const item = (sku: string, label: string, value: number, unit?: string) => ({ sku, label, price: { currency: 'AUD', value }, ...(unit ? { unit } : {}) });
+const MENUS: Record<string, ReturnType<typeof item>[]> = {
+  bigmart: [item('bananas', 'Bananas, 1 kg', 3.9, 'kg'), item('milk', 'Full cream milk, 2 L', 3.6), item('bread', 'White sandwich loaf', 3.2), item('eggs', 'Eggs, a dozen', 5.5), item('honey', 'Honey, 500 g jar', 8.5), item('apricots', 'Apricots, 500 g', 6.9)],
+  corner: [item('persimmons', 'Persimmons, bag of 4', 6.5), item('pomegranate', 'Pomegranate, each', 3.5), item('apricots', 'Ripe apricots, 500 g', 7.9), item('raw-honey', 'Local raw honey, 500 g jar', 12), item('basil', 'Basil plant, potted', 5), item('sourdough', 'Sourdough loaf', 8)],
+  greenbasket: [item('organic-apples', 'Organic apples, 1 kg', 7.5), item('raw-honey', 'Raw organic honey, 350 g jar', 14.9), item('eggs', 'Free-range eggs, a dozen', 8.2), item('oat-milk', 'Oat milk, 1 L', 4.4), item('persimmons', 'Organic persimmons, bag of 3', 7.8)],
+};
 
 /** Three fictional grocers that differ for real: cheap but narrow, local and flexible, dearer but serves every diet. */
 export const GROCERS: QuoterExample[] = [

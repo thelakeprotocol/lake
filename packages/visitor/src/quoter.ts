@@ -49,7 +49,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
   const cardWith = (badges?: Badge[]) => signCard(buildCard({
     name: ex.name, description: `Quotes for ${p.title.toLowerCase()} intents. Its program runs inside your house; only you see the result.`,
     url: `${o.publicUrl}/a2a`, skills: [{ id: `${p.id}-quote`, name: `${p.title} quotes`, description: ex.program.title }],
-    profile: { role: 'agent', webId, ownerDomain: ex.domain, tags: [p.id], ...(badges ? { badges } : {}) },
+    profile: { role: 'agent', webId, ownerDomain: ex.domain, tags: [p.id, ...(ex.menu?.length ? ['shop'] : [])], ...(ex.menu?.length ? { menu: ex.menu } : {}), ...(badges ? { badges } : {}) },
   }, id), id);
   let card = await cardWith();
   const me: Visitor = { id, card, webId, domain: ex.domain };
@@ -90,6 +90,21 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       return reply({ kind: 'received' });
     }
     if (m.kind === 'accept' && house) return reply(await accepted(m, v.profile.webId, house));
+    // A single item from our menu (run 67: six of ten everyday wants were one thing to buy, and an order got "malformed"):
+    // a cart signed for the buyer, held until we ship. Something we don't sell is said plainly, with what we do.
+    if (m.kind === 'trade.order') {
+      const item = ex.menu?.find((x) => x.sku === m.sku);
+      const stocked = (ex.menu ?? []).map((x) => `${x.label} (${x.sku}, ${x.price.currency} ${x.price.value})`).join('; ');
+      if (!item) return reply({ kind: 'rejected', code: 'not-stocked', why: `we don't sell "${String(m.sku ?? '')}"${stocked ? `. On our menu: ${stocked}` : ''}. Weekly shops: we price them inside your house, from its intent` });
+      if (!house || !o.payments) return reply({ kind: 'rejected', code: 'unavailable', why: 'we can\'t take orders just now' });
+      const qty = Number.isInteger(m.qty) && Number(m.qty) >= 1 && Number(m.qty) <= 20 ? Number(m.qty) : 1;
+      const payments = await cartParty((await (await fetch(cardUrlFor(`${o.payments}/a2a`))).json()) as AgentCard);
+      const label = `${qty} × ${item.label}`;
+      const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: card.name, buyerWebId: v.profile.webId, items: [{ label, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], minutes: 60, payments: [payments], menu: { items: ex.menu!, sku: item.sku }, delivery: item.delivery ?? { within_hours: 48, review_hours: 72 } });
+      const cartId = String((cart.contents as { id: string }).id);
+      ourCarts.set(cartId, { buyer: { webId: v.profile.webId, url: house }, label });
+      return reply({ kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${cartId}" }: the money is held until it arrives` });
+    }
     // Paid for an order: the payment's receipt arrives like any message; acknowledge it, naming the order. A cart of ours
     // paid with the money held: we "ship" (a dispatch note to the buyer) and file the delivery, so the hold can release.
     if (m.kind === 'receipt') {
@@ -104,7 +119,7 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       return reply({ kind: 'answer', from: ex.name, program: { title: pr.title, reads: pr.inputs, terms: pr.terms ?? [], says_when_it_cannot: (pr.notes ?? []).map((n) => n.say), shows: Object.fromEntries(Object.entries(pr.labels ?? {}).map(([k, v]) => [k, v.label + (v.unit ? ` (${v.unit})` : '')])) },
         note: 'what we offer is this certified program, run in your house on your data: it answers for us. Anything it doesn\'t say, it doesn\'t promise.' });
     }
-    return reply({ kind: 'rejected', code: 'malformed', why: 'send an intent, an authorisation request, an acceptance, or a question (answered with our certified program)' });
+    return reply({ kind: 'rejected', code: 'malformed', why: `send an intent, an authorisation request, an acceptance, or a question (answered with our certified program)${ex.menu?.length ? ', or an order from our menu: { kind: "trade.order", sku, qty }' : ''}` });
   }, id, { replay });
 
   // A few quotes at a time, and another try for a house that was busy: a hundred homes asking at once is normal.

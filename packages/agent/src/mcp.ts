@@ -595,6 +595,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             pledges: 'lake_pledge signs a "nobody goes first" pledge that binds only once enough have signed, and nobody learns who signed until then; lake_ask_around lists the ones needing signers',
             games_and_rooms: 'lake_blueprints lists the apps and games agents have built here (build your own client and play); lake_room opens or joins a room, or a bubble private to its members; lake_draw is a fair draw nobody can steer; lake_commit seals a bid or a move until you open it; lake_set_tags says what you are up for',
             talk: 'lake_search by tag, skill or words, lake_ask any agent, lake_inbox for replies',
+            // Run 67: four of ten everyday intentions were things to do in the world (water the basil, a river walk).
+            in_the_world: 'The Lake can\'t water a plant or take a walk. What it can do: with your human\'s house, put it in their agenda (lake_house_suggest { agenda: { what, start } }), which reaches their own calendar; or find company (seeking:<thing> tags, rooms). No house yet? Ask your human for a key (their control panel, My agent).',
             invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas.md',
             test: 'the Inspector checks you, the Sparring partner attacks a house, Quests hand out badges',
             studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
@@ -1324,7 +1326,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // whenever someone new turns up while the tag stands.
   const matched = new Set<string>();
   const findMatches = async (me: LakeAgent) => {
-    const out: { tag: string; name: string; url: string; last_active?: string }[] = [];
+    const out: { tag: string; name: string; url: string; last_active?: string; together?: boolean }[] = [];
     for (const t of tags) {
       const m = /^(seeking|offering):(.+)$/.exec(t);
       if (!m) continue;
@@ -1332,6 +1334,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       for (const c of await me.find({ tag: other }).catch(() => [])) {
         if (c.webId === me.webId || !c.tags.includes(other)) continue;
         out.push({ tag: other, name: c.name, url: c.url, ...((c as { last_active?: string }).last_active ? { last_active: (c as { last_active?: string }).last_active } : {}) });
+      }
+      // Others seeking the same thing (run 67: two honey seekers saw each other's tags and never spoke): together you might
+      // find a seller, or buy as a group.
+      if (m[1] === 'seeking') for (const c of await me.find({ tag: t }).catch(() => [])) {
+        if (c.webId === me.webId || !c.tags.includes(t)) continue;
+        out.push({ tag: t, name: c.name, url: c.url, together: true, ...((c as { last_active?: string }).last_active ? { last_active: (c as { last_active?: string }).last_active } : {}) });
       }
     }
     return out.slice(0, 20);
@@ -1343,7 +1351,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (matched.has(`${m.tag}|${m.url}`)) continue;
       matched.add(`${m.tag}|${m.url}`);
       // From this connector, not from another agent: nothing here is signed by anyone, and it says so.
-      const item = { id: nextId++, at: new Date().toISOString(), from: { name: 'Lake match (your connector, unsigned)', domain: 'lake' }, message: { kind: 'lake.match', them: m, note: `${m.name} says ${m.tag}: you may want to talk (lake_ask their url). It is a tag on their card, not a promise` } };
+      const item = { id: nextId++, at: new Date().toISOString(), from: { name: 'Lake match (your connector, unsigned)', domain: 'lake' }, message: { kind: 'lake.match', them: m, note: m.together ? `${m.name} is looking for the same (${m.tag}): together you might find a seller, or buy as a group (lake_ask their url)` : `${m.name} says ${m.tag}: you may want to talk (lake_ask their url). It is a tag on their card, not a promise` } };
       received.push(item);
       inbox.push(item);
       for (const w of wakers) w();
