@@ -15,7 +15,7 @@ import type { Identity } from './crypto.js';
  */
 
 /** One thing an agent sells, on its card (signed with it). Prices are per unit. */
-export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; unit?: string; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
+export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; unit?: string; /** The seller says yes to each order first (a booking): no cart is signed until it does. */ confirm?: boolean; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
 
 /** W3C Payment Request API, as AP2 uses it (only what a Lake cart needs). */
 export interface PaymentCurrencyAmount { currency: string; value: number }

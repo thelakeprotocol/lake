@@ -604,6 +604,8 @@ describe('the owner', () => {
       expect(low).toMatchObject({ decision: 'ask' });
       const pending = ((await ownerCall({ kind: 'list' })).requests as { offerId: string; visitor: { webId: string } }[]).find((q) => q.visitor.webId === gp.webId)!;
       expect(await ownerCall({ kind: 'answer', request: pending.offerId, answer: 'deny' })).toEqual({ ok: true });
+      // Asked again the same way: the owner's answer stands, and the visitor hears so (run 62: gp.example asked ten times).
+      expect((await knock(houses.strict!, gp, { ...presets().gp!, fields: ['medications'], priceUsd: 1 })).reply).toMatchObject({ decision: 'decline', code: 'owner-said-no' });
       // The same key, back with a price the rule takes: the owner is asked again, and told why.
       const again = (await knock(houses.strict!, gp, { ...presets().gp!, fields: ['medications'], priceUsd: 5 })).reply;
       expect(again).toMatchObject({ decision: 'ask' });
@@ -928,6 +930,8 @@ describe('the open door', () => {
     // everyday things to do before studies, which come last.
     expect(Object.keys(o).slice(0, 3)).toEqual(['lake', 'happening_now', 'what_you_can_do']);
     expect(o.lake).toMatch(/^Each person's data stays in their own house/);
+    // Lake times are UTC, and the overview says so (runs 56-60: times told a day off).
+    expect(o.time).toMatchObject({ now_utc: expect.stringMatching(/Z$/), note: expect.stringMatching(/UTC/) });
     const counts = Object.keys(o.happening_now);
     expect(counts.indexOf('cartsPaid')).toBeLessThan(counts.indexOf('attacksBlocked'));
     expect(o.happening_now.latest).toEqual(expect.any(Array));
@@ -963,6 +967,13 @@ describe('the open door', () => {
     const turned = await theirText('lake_ask', { to: o.you.url, kind: 'message', text: 'Your parcel fee is overdue!' });
     expect(JSON.stringify(turned)).toMatch(/does not take messages from you/);
     expect(await text('lake_block', { agent_url: theirs.you.url, undo: true })).toMatchObject({ unblocked: expect.any(String) });
+    // A menu item its seller confirms first (a booking): an order gets no cart, and the buyer hears why (run 61).
+    await theirText('lake_sell', { action: 'menu', items: [{ sku: 'tutoring', label: 'Maths tutoring, 1 hour', price: 45, currency: 'USD', confirm: true }] });
+    const booked = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'tutoring' });
+    expect(booked.reply?.note).toMatch(/confirms each order of "Maths tutoring, 1 hour" first/);
+    expect(booked.cart).toBeUndefined();
+    // The order waits in the seller's inbox for its yes (read here, so later checks of that inbox start clean).
+    expect((await theirText('lake_inbox', { wait_seconds: 2 })).messages.some((m: { message?: { kind?: string } }) => m.message?.kind === 'trade.order')).toBe(true);
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
     // Forgiving search: a tag prefix, and words in a card's own line.

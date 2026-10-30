@@ -302,6 +302,10 @@ export class Housekeeper {
 
     let d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() });
     // The owner said No to this key for this purpose lately: their standing rule doesn't let it in now; they're asked.
+    // Asked again after the owner said no to this key for this purpose: the owner's answer stands (run 62: gp.example asked
+    // one house ten times), and the visitor hears so. A request their standing rule would let in is put to them instead.
+    const noBefore = d.decision === 'ask' ? this.o.desk.ownerSaidNo(key, offer.purpose) : null;
+    if (noBefore) return decide('decline', `the owner said no to this sender's ${offer.purpose} request on ${new Date(noBefore.at).toUTCString().slice(5, 22)} UTC`, { code: 'owner-said-no' }, `declined: the owner said no to your ${offer.purpose} request ${noBefore.offerId}; asking again won't change it for now`);
     const saidNo = d.decision === 'join' ? this.o.desk.ownerSaidNo(key, offer.purpose) : null;
     if (saidNo) d = { ...d, decision: 'ask', reason: `you said no to ${domain}'s ${offer.purpose} request on ${new Date(saidNo.at).toUTCString().slice(5, 22)} UTC (request ${saidNo.offerId}), so your standing rule waits for you this time` };
     // Turned down for asking who the owner is, a visitor may ask again on that purpose without those fields.

@@ -346,6 +346,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: 'the seller is away; your order is in its inbox' },
           checked: { note: 'an order from your menu came while you were away, so no cart was signed: answer with lake_sell { action: "cart" } if you still want to sell it' } };
       }
+      // Each order asked first (run 61: "list it, but ask me before each booking" couldn't be kept: menu orders were signed
+      // at once): the order waits in the seller's inbox, and the buyer hears that a cart comes when the seller says yes.
+      if (item.confirm) {
+        return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), note: `the seller confirms each order of "${item.label}" first: a cart comes to your inbox when they say yes` },
+          checked: { note: `an order for "${item.label}" (${qty}) that waits for your yes (your menu says confirm): ask your human if you need to, then send the cart with lake_sell { action: "cart", to: "${peer.url}", items: [{ label: "${qty} × ${item.label}", price: ${Math.round(item.price.value * qty * 100) / 100}, currency: "${item.price.currency}" }] }, or tell them no` } };
+      }
       // The buyer says which currency it can pay in; nothing converts, so a menu price in another one would sign a cart
       // nobody can pay (runs 34b, 41: a dead AUD cart, a manual reissue). The order waits for the seller to answer.
       if (typeof p.pays_in === 'string' && /^[A-Z]{3}$/.test(p.pays_in) && p.pays_in !== item.price.currency) {
@@ -574,6 +580,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
           },
           you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
+          // Lake times are UTC (runs 56-60: assistants told their humans times a day off). Their human's zone, when their house knows it.
+          time: { now_utc: new Date().toISOString(), note: 'every time on the Lake is UTC (it ends in Z): say it in your human\'s time', ...(await humanZone().then((z) => (z ? { your_humans_zone: z, now_there: new Date().toLocaleString('en-AU', { timeZone: z, dateStyle: 'medium', timeStyle: 'short' }) } : {}))) },
           participants: roles, guilds: s.guilds, specialists,
           start: 'lake_ask the Guide with { "kind": "hello" }',
           map: o.publicNode ?? o.node.split(',')[0]!.trim(),
@@ -724,6 +732,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     }
   };
   // What this agent may spend, said the same way everywhere: its human's allowance once connected, else the sandbox's.
+  /** The time zone their human set with their free hours, if this assistant has their house; else nothing. */
+  const humanZone = async (): Promise<string | null> => {
+    if (!house) return null;
+    const r = (await houseCall({ kind: 'panel.rules' }).catch(() => null)) as { rules?: { availability?: { tz?: string } } } | null;
+    return r?.rules?.availability?.tz ?? null;
+  };
   const allowanceLine = async () => {
     if (house) {
       // Couldn't ask is not the same as none (a human signed $500 and heard "none yet").
@@ -916,7 +930,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. A menu item or a cart can carry delivery terms you promise (how soon, revisions, word or line counts): signed in the cart, counted by the buyer\'s connector, and ruled on by the Arbiter. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you, and the payments agent is told of each delivery by its sha256); content is what is hashed and checked, note rides beside it unhashed. The buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer asks for changes or disputes it, send a new delivery of the same cart (numbered, naming the one it replaces); they can accept it, which releases a held payment. refund: pay the buyer back, in full, or (with amount, while it is held) in part, the rest staying held for the buyer to accept: a way to settle a dispute. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
       inputSchema: {
         action: z.enum(['menu', 'cart', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
-        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), unit: z.string().optional(), delivery: DELIVERY.optional() })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
+        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
         delivery: DELIVERY.optional().describe('cart: what you promise about the delivery, signed into the cart (an order from your menu gets the item\'s)'),
         to: z.string().optional().describe('cart: the buyer\'s A2A endpoint'),
         minutes: z.number().min(1).max(1440).default(30).describe('cart: how long the price holds'),
@@ -932,7 +946,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       try {
         const me = await agent();
         if (a.action === 'menu') {
-          const items = (a.items ?? []).map((x) => ({ sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}) }));
+          const items = (a.items ?? []).map((x) => ({ sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}) }));
           await me.setMenu(items);
           menu = items;
           return json({ ok: true, menu: items, note: items.length ? 'on your signed card now: lake_search finds it, and an order for an item on it gets a signed cart back at once' : 'menu cleared' });
