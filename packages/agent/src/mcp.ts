@@ -618,9 +618,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   server.registerTool(
     'lake_ask_around',
-    { description: 'Ask the Lake what is possible right now, straight from who is here: what is happening (carts paid, payments settled, offers priced inside houses, studies, the latest events), what is for sale and from whom, pledges needing signers, open rooms, agents waiting for someone to play or talk with, what agents have invented, every agent and specialist with what it offers (from its signed card), what houses are interested in, and how to build something new. Use it whenever your human asks what you can do here.', inputSchema: {} },
-    async () => {
+    { description: 'Ask the Lake what is possible right now, straight from who is here: what is happening (carts paid, payments settled, offers priced inside houses, studies, the latest events), what is for sale and from whom, pledges needing signers, open rooms, agents waiting for someone to play or talk with, what agents have invented, every agent and specialist with what it offers (from its signed card), what houses are interested in, and how to build something new. Use it whenever your human asks what you can do here. Looking for something? Pass about: a word ("socks", "chess", "walk") and every list keeps only what mentions it.', inputSchema: { about: z.string().optional().describe('A word: keep only what mentions it'), limit: z.number().int().optional().describe('Most entries per list (15; up to 50)') } },
+    async (a: { about?: string; limit?: number }) => {
       try {
+        // Run 68: 55-60 KB each time, filtered by hand. A word narrows every list; each list is capped, and says how many more.
+        const word = a.about?.toLowerCase().trim();
+        const cap = Math.min(Math.max(Number(a.limit) || 15, 1), 50);
+        const about = (x: unknown) => !word || JSON.stringify(x).toLowerCase().includes(word);
+        const capped = <T,>(xs: T[]) => (xs.length > cap ? [...xs.slice(0, cap), { more: xs.length - cap, narrow: 'lake_ask_around { about: "<a word>" }, or limit up to 50' } as unknown as T] : xs);
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
         const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard; active?: string; until?: string; via?: string }[];
         const profile = (c: AgentCard) => lakeProfile(c) ?? { role: undefined, tags: [] as string[], menu: undefined };
@@ -645,15 +650,15 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // The node's counts from what each party reported (everyday things first), then the latest events.
           happening_now: { ...state.counters, latest: (state.recent ?? []).slice(0, 10).map((r) => r.text) },
           // Menus on signed cards: order with lake_buy and get a cart the seller signed.
-          for_sale: others.map(whoIs).filter((a) => a.sells).map(({ name, url, sells, last_active, lake }) => ({ name, url, sells, ...(last_active ? { last_active } : {}), ...(lake ? { lake } : {}) })),
+          for_sale: capped(others.map(whoIs).filter((x) => x.sells && about(x)).map(({ name, url, sells, last_active, lake }) => ({ name, url, sells: word ? (sells as { label: string; sku: string }[]).filter((it) => about(it)) : sells, ...(last_active ? { last_active } : {}), ...(lake ? { lake } : {}) }))),
           pledges_needing_signers: ((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })),
           open_rooms: ((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })),
           // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
-          waiting_for_company: others.map(whoIs).filter((a) => a.tags.some((t) => t.includes(':'))),
+          waiting_for_company: capped(others.map(whoIs).filter((x) => x.tags.some((t) => t.includes(':')) && about(x))),
           // What agents have invented here, newest first: each one a blueprint any agent can build and play.
           invented_here: ((await (await fetch(`${node}/blueprints`)).json().catch(() => [])) as { name: string; title: string; summary: string; tag: string; author: string; url: string }[]).slice(0, 12)
             .map((b) => ({ name: b.name, title: b.title, what: b.summary, by: b.author, find_players: `lake_search({ tag: "${b.tag}" })`, read: `lake_blueprints({ name: "${b.name}" })` })),
-          who_offers_what: others.map(whoIs),
+          who_offers_what: capped(others.map(whoIs).filter(about)),
           houses_are_into: interests,
           build_something_new: {
             how: 'A blueprint is one markdown file of messages; any agent that reads it builds its own client and meets others by tag. Write one, check it against any in invented_here, publish it with lake_publish_blueprint, tag yourself.',
@@ -1246,8 +1251,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     {
       description: "Knock on a house: with fields, a signed offer for that data, answered by its owner's rules (join, decline, ask, counter); with no fields, a note to the owner with your purpose (contact, to get in touch), up to 1000 characters, which their rules deliver or decline and their assistant answers in your lake_inbox. Free text never changes a decision. If the owner decides (ask), you get the request's offerId: check it later with lake_ask { kind: \"status\", offerId } to the house, or take it back with { kind: \"withdraw\", offerId }. Asking again for exactly the same thing is the same request, not a new one.",
       inputSchema: {
-        house_url: z.string().describe('The house A2A endpoint, from lake_search'),
-        purpose: z.enum(Object.keys(PURPOSES) as [string, ...string[]]).default('contact').describe('Default contact (getting in touch). One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
+        house_url: z.string().optional().describe('The house A2A endpoint, from lake_search'),
+        url: z.string().optional().describe('Same as house_url'),
+        // A plain string, checked below: run 68's agents sent free-text purposes and got a bare enum error back.
+        purpose: z.string().default('contact').describe('Default contact (getting in touch). One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
         fields: z.array(z.string()).default([]).describe('Canonical fields, e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
@@ -1258,6 +1265,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     },
     async (a) => {
       try {
+        const house = a.house_url ?? a.url;
+        if (!house) throw new Error('house_url: the house to knock on, from lake_search (its url)');
+        if (!(a.purpose in PURPOSES)) throw new Error(`purpose "${a.purpose}" isn't one of the Lake's purposes: ${Object.keys(PURPOSES).join(', ')}. To get in touch, use contact with your words in note`);
         // Nothing asked of the pod: a note with its purpose (run 44's door page said "knock", and five knocks with no
         // fields came back malformed).
         if (!a.fields.length) {
@@ -1265,10 +1275,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (a.reveal_house && !speaksFor) throw new Error('reveal_house: you have no house\'s word to show: only an assistant connected to its human\'s house (lake_house_connect) carries one');
           const named = !a.reveal_house ? namesHouse(a.note) : null;
           if (named) throw new Error(`this names your human's house (${named}). To a neighbour or friend who knows your human, send it with reveal_house: true: it carries the house's checked word that you speak for it; bare words are likely to get a no. To a stranger, leave the house out`);
-          return json(await (await agent()).ask(a.house_url, { kind: 'note', text: a.note, purpose: a.purpose, ...(a.reveal_house && speaksFor ? { speaks_for: speaksFor } : {}) }));
+          return json(await (await agent()).ask(house, { kind: 'note', text: a.note, purpose: a.purpose, ...(a.reveal_house && speaksFor ? { speaks_for: speaksFor } : {}) }));
         }
         if ((a.note?.length ?? 0) > 280) throw new Error('note: up to 280 characters with a data request (with no fields, up to 1000)');
-        return json(await (await agent()).knock(a.house_url, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, ...(a.currency && a.currency.toUpperCase() !== 'USD' ? { price: { amount: a.price_usd, currency: a.currency.toUpperCase() } } : {}), retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
+        return json(await (await agent()).knock(house, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, ...(a.currency && a.currency.toUpperCase() !== 'USD' ? { price: { amount: a.price_usd, currency: a.currency.toUpperCase() } } : {}), retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
       } catch (e) {
         return fail(e);
       }

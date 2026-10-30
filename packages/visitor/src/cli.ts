@@ -58,6 +58,8 @@ const { positionals, values: a } = parseArgs({
     pace: { type: 'string', default: '0' },
     budget: { type: 'string', default: '5000' },
     payments: { type: 'string', default: process.env.LAKE_PAYMENTS_URL ?? 'http://payments:4600' },
+    // Other Lakes' payments agents a quoter's carts also name (comma-separated), so their buyers can pay.
+    'accept-payments': { type: 'string', default: process.env.LAKE_ACCEPT_PAYMENTS ?? '' },
     unpaid: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     count: { type: 'string', default: '10' },
@@ -151,7 +153,7 @@ else if (cmd === 'quoters') {
     const authority = a.authority ?? `http://specialists:4300/${packs().find((p) => ex.program.pack.startsWith(`${p.id}@`))?.authority?.path ?? 'register'}`;
     let mounted: import('express').Express | null = null;
     root.use(`/${slug}`, (req, res, next) => (mounted ? mounted(req, res, next) : res.status(503).end()));
-    await startQuoter({ example: ex, node: a.node!, auditor: a.auditor!, authority, payments: a.payments, publicUrl: `${base}/${slug}`, mount: (app) => { mounted = app; }, log: (m) => console.log(m) })
+    await startQuoter({ example: ex, node: a.node!, auditor: a.auditor!, authority, payments: a.payments, acceptPayments: a['accept-payments']!.split(',').map((u) => u.trim()).filter(Boolean), publicUrl: `${base}/${slug}`, mount: (app) => { mounted = app; }, log: (m) => console.log(m) })
       .catch((e: Error) => console.log(`${ex.name}: ${e.message}`));
   }
   console.log(`${examples.length} quoters on :${port}`);

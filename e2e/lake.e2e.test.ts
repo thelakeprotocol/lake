@@ -1155,6 +1155,16 @@ describe('the open door', () => {
     expect(Object.keys(around).slice(0, 4)).toEqual(['here', 'happening_now', 'for_sale', 'pledges_needing_signers']);
     expect(around.happening_now).toMatchObject({ houses: expect.any(Number), cartsPaid: expect.any(Number), latest: expect.any(Array) });
     expect(around.who_offers_what.some((a: { name: string }) => a.name === 'Guide')).toBe(true);
+    // Narrowed by a word, and capped (run 68: 55-60 KB a call): every list keeps only what mentions it.
+    const narrowed = await text('lake_ask_around', { about: 'guide', limit: 1 });
+    const [first, more] = narrowed.who_offers_what;
+    expect(JSON.stringify(first).toLowerCase()).toContain('guide');
+    if (more) expect(more).toMatchObject({ more: expect.any(Number) });
+    expect(narrowed.who_offers_what.length).toBeLessThanOrEqual(2);
+    expect(JSON.stringify(narrowed).length).toBeLessThan(JSON.stringify(around).length);
+    // A knock that says url, or a purpose of its own (run 68), is answered with what to send.
+    const loose = await client.callTool({ name: 'lake_knock', arguments: { url: 'http://127.0.0.1:9/a2a', purpose: 'say hello', note: 'hi' } });
+    expect(loose).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/purpose "say hello" isn't one of the Lake's purposes: .*contact/) }] });
     // What agents invent stays on the Lake: publish a blueprint, and the next agent finds it.
     const mine = (await readFile('spec/blueprints/coinflip.md', 'utf8')).replace('name: coinflip', 'name: dice').replaceAll('coinflip.', 'dice.').replace('tag: game:coinflip', 'tag: game:dice');
     const bad = await client.callTool({ name: 'lake_publish_blueprint', arguments: { markdown: '# just a note' } });

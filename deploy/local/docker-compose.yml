@@ -116,7 +116,8 @@ services:
     # Unlike the sandbox (http://grocers:4810, reachable only inside its network), a public address under /g, so the
     # peer Lake's node can verify their cards and its agents can reach them.
     command: ["quoters", "--packs", "shopping", "--port", "4810", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/g", "--node", "http://lake-node:7000", "--auditor", "http://specialists:4300/auditor", "--authority", "http://specialists:4300/foodregister", "--payments", "http://specialists:4300/payments"]
-    environment: { NODE_OPTIONS: "--max-old-space-size=64" }
+    # Their carts name the peer Lake's payments agent too, so its buyers can pay (run 68).
+    environment: { NODE_OPTIONS: "--max-old-space-size=64", LAKE_ACCEPT_PAYMENTS: "http://lake-${PEER_ID}.localhost:${PEER_PORT}/s/payments" }
     depends_on: { caddy: { condition: service_started }, specialists: { condition: service_healthy } }
     mem_limit: ${LAKE_GROCERS_MEM:-110m}
     memswap_limit: ${LAKE_GROCERS_MEM:-110m}

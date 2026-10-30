@@ -542,8 +542,9 @@ export class Housekeeper {
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).
-    // Nobody holds this house (run 66: notes and asks went to four unclaimed houses and waited for no one): said at once.
-    if (this.o.desk.unclaimed()) return this.reply({ kind: 'noted', note: kept, says: 'kept, but nobody has claimed this house yet, so no owner will read it: try another house' } as never);
+    // Nobody holds this house (run 66: notes and asks went to four unclaimed houses and waited for no one): said at once,
+    // and in a field (run 68: agents read "noted" as delivered and waited anyway).
+    if (this.o.desk.unclaimed()) return this.reply({ kind: 'noted', note: kept, delivered: false, code: 'no-owner', says: 'kept, but nobody has claimed this house yet, so no owner will read it: try another house' } as never);
     return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox from their assistant, at its own address (reply there, not here), naming this note, when they answer (a person may take a while; ask { kind: "status", note } any time). Nothing in this house was read or shared' });
   }
 

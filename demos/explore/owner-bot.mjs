@@ -21,7 +21,12 @@ const call = (o) => async (p) => {
   }
 };
 
-for (const o of owners) if (intent.pack) log(`${o.house}: intent ${JSON.stringify(await call(o)({ kind: 'panel.intent.open', pack: intent.pack, terms: intent.terms }))}`);
+// A list of regions spreads the houses over them in turn (run 68: every house's shop was in VIC).
+for (const [i, o] of owners.entries()) {
+  if (!intent.pack) continue;
+  const terms = { ...intent.terms, ...(Array.isArray(intent.terms?.region) ? { region: intent.terms.region[i % intent.terms.region.length] } : {}) };
+  log(`${o.house}: intent ${JSON.stringify(await call(o)({ kind: 'panel.intent.open', pack: intent.pack, terms }))}`);
+}
 const until = Date.now() + Number(minutes) * 60_000;
 while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
   for (const o of owners) try {
@@ -64,6 +69,23 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
       if (sug.pledge && sug.advice === 'do' && !o.given.has(`pledge:${sug.pledge.id}`)) {
         o.given.add(`pledge:${sug.pledge.id}`);
         log(`${o.house}: signed pledge ${sug.pledge.id} on the assistant's advice: ${JSON.stringify(await c({ kind: 'panel.pledge.sign', tally: sug.pledge.tally, id: sug.pledge.id }))}`);
+      }
+      // A pledge left to the owner: decided after a while, like a question (run 68: two "your call" pledges sat unanswered).
+      if (sug.pledge && sug.advice === 'your_call' && Date.now() - Date.parse(sug.at) > 45_000 && !o.given.has(`pledge:${sug.pledge.id}`)) {
+        o.given.add(`pledge:${sug.pledge.id}`);
+        if (Math.random() < 0.5) log(`${o.house}: signed pledge ${sug.pledge.id} (its own call): ${JSON.stringify(await c({ kind: 'panel.pledge.sign', tally: sug.pledge.tally, id: sug.pledge.id }))}`);
+        else log(`${o.house}: let pledge ${sug.pledge.id} pass (its own call)`);
+      }
+      // A new allowance the assistant proposes (the button the panel shows): signed, unless it advises against or asks for
+      // more than twice what this owner gave at the start (run 68: two A$60 requests were never tapped).
+      if (sug.allowance && sug.advice !== 'dont' && sug.by && !o.given.has(`allowance:${sug.id}`)) {
+        o.given.add(`allowance:${sug.id}`);
+        if (sug.allowance.amount > 2 * Number(allowance)) log(`${o.house}: left the ${sug.allowance.currency} ${sug.allowance.amount} allowance request (too much)`);
+        else {
+          const d = await c({ kind: 'panel.allowance.draft', kid: sug.by, amount: sug.allowance.amount, currency: sug.allowance.currency, days: sug.allowance.days });
+          const r = d.draft ? await c({ kind: 'panel.allowance.set', id: d.id, credential: await issueCredential({ ...d.draft, validFrom: new Date().toISOString() }, o.id) }) : d;
+          log(`${o.house}: signed the ${sug.allowance.currency} ${sug.allowance.amount} allowance the assistant asked for: ${JSON.stringify(r)}`);
+        }
       }
       if (sug.ask && !sug.ask.answered && Number.isInteger(sug.ask.recommend) && !o.given.has(`ask:${sug.id}`)) {
         o.given.add(`ask:${sug.id}`);

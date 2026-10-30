@@ -99,7 +99,7 @@ afterAll(async () => {
 describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('tells a visitor at once that nobody has claimed the house yet (run 66: notes waited for no one)', async () => {
     const early = await makeVisitor(await generateIdentity(), 'early.example');
-    expect((await ask(house, early, { kind: 'note', text: 'Hello, anyone home?' })).reply).toMatchObject({ kind: 'noted', says: expect.stringMatching(/nobody has claimed this house/) });
+    expect((await ask(house, early, { kind: 'note', text: 'Hello, anyone home?' })).reply).toMatchObject({ kind: 'noted', delivered: false, code: 'no-owner', says: expect.stringMatching(/nobody has claimed this house/) });
   });
 
   it('pairs a fresh device: the house name, one button, then Home', async () => {

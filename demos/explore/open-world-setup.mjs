@@ -7,8 +7,9 @@ import { join } from 'node:path';
 const run = process.argv[2];
 const here = import.meta.dirname;
 const vars = JSON.parse(execFileSync(process.execPath, [join(here, 'claim.mjs'), run], { encoding: 'utf8', env: process.env }));
-const intent = JSON.stringify({ pack: 'shopping', terms: { region: 'vic', budget: 'auto', delivery: 'this-week' } });
+// The houses' regions, in turn: demo.json `regions` (default all in VIC).
+const { blackout, regions = ['vic'] } = JSON.parse(readFileSync(join(process.env.EXPLORE_DEMO, 'demo.json'), 'utf8'));
+const intent = JSON.stringify({ pack: 'shopping', terms: { region: regions, budget: 'auto', delivery: 'this-week' } });
 spawn(process.execPath, [join(here, 'owner-bot.mjs'), run, intent, '80', '40', 'AUD'], { detached: true, stdio: 'ignore' }).unref();
-const { blackout } = JSON.parse(readFileSync(join(process.env.EXPLORE_DEMO, 'demo.json'), 'utf8'));
 if (blackout) spawn(process.execPath, [join(here, 'blackout.mjs'), run, String(blackout.at), String(blackout.for)], { detached: true, stdio: 'ignore' }).unref();
 console.log(JSON.stringify(vars));

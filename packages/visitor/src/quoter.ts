@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import {
   buildCard, generateIdentity, GROUP_SIZE, lakeAgentApp, LakeLinks, loadOrCreateIdentity, pack as packOf, ReplayGuard, runProgram, sendLake, signCard, signIntentMandate, signMessage,
-  signPaymentMandate, verifyCredential, verifyLakeCard, verifyLakeData, signCart, cartParty, cardUrlFor,
+  signPaymentMandate, verifyCredential, verifyLakeCard, verifyLakeData, signCart, cartParty, cardUrlFor, type CartParty,
   type AgentCard, type Badge, type Claim, type Attachment, type Identity, type LakeData, type QuoterExample,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
@@ -21,6 +21,11 @@ export interface QuoterOptions {
   auditor: string;
   authority: string;
   payments?: string;
+  /**
+   * Other Lakes' payments agents its carts also name (base URLs, without /a2a): a buyer on a federated Lake pays through
+   * its own (run 68: a lake-b shop's cart named only lake-b's, and a lake-a buyer's money had nowhere to go).
+   */
+  acceptPayments?: string[];
   /** Where houses reach it, without /a2a. */
   publicUrl: string;
   port?: number;
@@ -98,9 +103,9 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       if (!item) return reply({ kind: 'rejected', code: 'not-stocked', why: `we don't sell "${String(m.sku ?? '')}"${stocked ? `. On our menu: ${stocked}` : ''}. Weekly shops: we price them inside your house, from its intent` });
       if (!house || !o.payments) return reply({ kind: 'rejected', code: 'unavailable', why: 'we can\'t take orders just now' });
       const qty = Number.isInteger(m.qty) && Number(m.qty) >= 1 && Number(m.qty) <= 20 ? Number(m.qty) : 1;
-      const payments = await cartParty((await (await fetch(cardUrlFor(`${o.payments}/a2a`))).json()) as AgentCard);
+      const payments = await cartParties();
       const label = `${qty} × ${item.label}`;
-      const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: card.name, buyerWebId: v.profile.webId, items: [{ label, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], minutes: 60, payments: [payments], menu: { items: ex.menu!, sku: item.sku }, delivery: item.delivery ?? { within_hours: 48, review_hours: 72 } });
+      const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: card.name, buyerWebId: v.profile.webId, items: [{ label, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], minutes: 60, payments, menu: { items: ex.menu!, sku: item.sku }, delivery: item.delivery ?? { within_hours: 48, review_hours: 72 } });
       const cartId = String((cart.contents as { id: string }).id);
       ourCarts.set(cartId, { buyer: { webId: v.profile.webId, url: house }, label });
       return reply({ kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${cartId}" }: the money is held until it arrives` });
@@ -169,23 +174,33 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     const payer = m.payer as { webId?: unknown; url?: unknown } | undefined;
     const total = ex.program.price ? outputs[ex.program.price] : undefined;
     if (!o.payments || typeof payer?.webId !== 'string' || typeof payer.url !== 'string' || typeof total !== 'number' || !(total > 0)) return undefined;
-    const payments = await cartParty((await (await fetch(cardUrlFor(`${o.payments}/a2a`))).json()) as AgentCard);
+    const payments = await cartParties();
     const label = `${ex.name}: ${ex.acceptedAs ?? 'your order'}`;
-    const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: card.name, buyerWebId: payer.webId, items: [{ label, amount: { currency, value: Math.round(total * 100) / 100 } }], minutes: 24 * 60, payments: [payments], delivery: { within_hours: 48, review_hours: 72 } });
+    const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: card.name, buyerWebId: payer.webId, items: [{ label, amount: { currency, value: Math.round(total * 100) / 100 } }], minutes: 24 * 60, payments, delivery: { within_hours: 48, review_hours: 72 } });
     const cartId = String((cart.contents as { id: string }).id);
     ourCarts.set(cartId, { buyer: { webId: payer.webId, url: payer.url }, label });
     // Sent once our acceptance is on its way back, so the house tells its assistant of the accept first.
     setTimeout(() => void ask(String(payer.url), me, { kind: 'trade.cart', cart, note: `${label}: pay with hold, and the money waits until it arrives` }).catch((e: Error) => log(`${ex.name}: could not send the cart: ${e.message}`)), 500);
     return { id: cartId };
   }
+  /** The payments agents our carts name: ours first, then the other Lakes' we take; one that can't be reached is left out. */
+  async function cartParties(): Promise<CartParty[]> {
+    const all = await Promise.all([o.payments!, ...(o.acceptPayments ?? [])].map((u) => fetch(cardUrlFor(`${u.replace(/\/$/, '')}/a2a`)).then(async (r) => cartParty((await r.json()) as AgentCard)).catch(() => null)));
+    if (!all[0]) throw new Error('our payments agent did not answer');
+    return all.filter((x): x is CartParty => !!x);
+  }
   /** Shipped: the dispatch note to the buyer, and its digest filed with the payments agent holding the money. */
   async function ship(cartId: string, sold: { buyer: { webId: string; url: string }; label: string }, receipt?: string) {
-    const said = receipt ? (JSON.parse(Buffer.from(receipt.split('.')[1] ?? '', 'base64url').toString()) as { credentialSubject?: { settlement?: string; settlementId?: string } }).credentialSubject : undefined;
+    const vc = receipt ? (JSON.parse(Buffer.from(receipt.split('.')[1] ?? '', 'base64url').toString()) as { iss?: string; issuer?: string | { id?: string }; credentialSubject?: { settlement?: string; settlementId?: string } }) : undefined;
+    const issuer = typeof vc?.issuer === 'string' ? vc.issuer : (vc?.issuer?.id ?? vc?.iss);
+    const said = vc?.credentialSubject;
     if (said?.settlement !== 'held' || !said.settlementId) return;
     const content = `Dispatched: ${sold.label}. It arrives within two days; accept it when it does.`;
     const sha256 = createHash('sha256').update(content).digest('hex');
     await ask(sold.buyer.url, me, { kind: 'trade.deliver', cart: cartId, content, sha256 });
-    await ask(`${o.payments}/a2a`, me, { kind: 'delivered', hold: said.settlementId, sha256 });
+    // Filed with the payments agent holding the money: whichever of the cart's issued the receipt.
+    const holder = (await cartParties()).find((x) => x.webId === issuer)?.url ?? `${o.payments}/a2a`;
+    await ask(holder, me, { kind: 'delivered', hold: said.settlementId, sha256 });
     ourCarts.delete(cartId);
   }
 
