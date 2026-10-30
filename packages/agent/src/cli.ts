@@ -17,6 +17,8 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
     // A data folder turns sign-in on: an AI keeps one agent from chat to chat (and across restarts).
     data: env.LAKE_MCP_DATA, kek: env.LAKE_MCP_KEK,
+    // Play money in more than one currency ("USD:50,AUD:80"), for a sandbox whose shops price in more than dollars.
+    ...(env.LAKE_PLAY_MONEY ? { playMoney: Object.fromEntries(env.LAKE_PLAY_MONEY.split(',').map((x) => x.split(':')).filter(([c, n]) => /^[A-Z]{3}$/.test(c ?? '') && Number(n) > 0).map(([c, n]) => [c!, Number(n)])) } : {}),
     log: (m) => console.log(m),
   });
   const { keepAliveBehindProxy } = await import('@thelakeprotocol/core');

@@ -760,6 +760,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     const r = (await houseCall({ kind: 'panel.rules' }).catch(() => null)) as { rules?: { availability?: { tz?: string } } } | null;
     return r?.rules?.availability?.tz ?? null;
   };
+  const playLine = Object.entries(o.playMoney ?? (o.allowanceUsd ? { USD: o.allowanceUsd } : {})).map(([c, n]) => `${c} ${n}`).join(' or ');
   const allowanceLine = async () => {
     if (house) {
       // Couldn't ask is not the same as none (a human signed $500 and heard "none yet").
@@ -768,9 +769,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       // Their standing yes (run 62: a booking stalled with both sides waiting for a human): what the assistant may agree to.
       if (r?.intent) return `your human's allowance: up to ${r.currency} ${r.amount} with lake_pay, in ${r.currency} only, until ${r.until}. Within it, and in your human's free hours (lake_house { view: \"free\" }), you may say yes for them without asking: a booking, a purchase, a time to meet. Above it, about their data, or anything you'd want them to know first: ask them (lake_house_suggest).`;
       if (failed) return `couldn't ask your human's house just now (${failed}): try again in a moment; this says nothing about whether they gave you one`;
-      return `none from your human yet: they sign one in their control panel (My agent → Give it spending money); the house tells you when they do${o.allowanceUsd ? `. Until then lake_pay uses the sandbox's play money (up to $${o.allowanceUsd}), not theirs` : ''}`;
+      return `none from your human yet: they sign one in their control panel (My agent → Give it spending money); the house tells you when they do${playLine ? `. Until then lake_pay uses the sandbox's play money (${playLine}), not theirs` : ''}`;
     }
-    return o.allowanceUsd ? `you may pay other agents up to $${o.allowanceUsd} with lake_pay (sandbox play money, signed for you by the sandbox in place of your human)` : 'none: lake_pay is off here';
+    return playLine ? `you may pay other agents up to ${playLine} with lake_pay and lake_buy (sandbox play money, signed for you by the sandbox in place of your human; each currency pays only in itself)` : 'none: lake_pay is off here';
   };
   const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', consents: 'panel.consents', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules', free: 'panel.free' };
 
@@ -1092,7 +1093,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (a.action === 'order') {
           if (!a.seller_url || !a.sku) throw new Error('order needs seller_url and sku');
           // The currency this agent can pay in, so the seller doesn't sign a cart in another.
-          const paysIn = (house ? ((await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { currency?: string } | null)?.currency : undefined) ?? (o.allowanceUsd ? 'USD' : undefined);
+          const playIn = Object.keys(o.playMoney ?? (o.allowanceUsd ? { USD: o.allowanceUsd } : {}));
+          const paysIn = (house ? ((await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { currency?: string } | null)?.currency : undefined) ?? (playIn.length === 1 ? playIn[0] : undefined);
           const reply = await me.ask(a.seller_url, { kind: 'trade.order', sku: a.sku, qty: a.qty, ...(a.note ? { note: a.note } : {}), ...(paysIn ? { pays_in: paysIn } : {}) });
           if (reply.kind !== 'trade.cart') return json({ reply, note: 'no cart yet: the seller may answer with one in your inbox' });
           const sellerCard = (await (await fetch(cardUrlFor(a.seller_url))).json()) as AgentCard;

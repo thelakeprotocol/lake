@@ -71,6 +71,8 @@ export interface LakeAgentOptions {
    * on their own device; a sandbox connector signs a play-money allowance in their place and says so. 0: none.
    */
   allowanceUsd?: number;
+  /** The sandbox's play money by currency (USD 50, AUD 80): nothing converts, so it pays in each of these only. Default: allowanceUsd in USD. */
+  playMoney?: Record<string, number>;
   /** The node's public address, when `node` is an internal one (shown to assistants as the map). */
   publicNode?: string;
 }
@@ -195,7 +197,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const link = new LakeLinks({ nodeUrls: nodes, card: visitor.card, identity: id, webId: visitor.webId });
   await link.register(10);
   if (o.onMessage) link.keepAlive(20_000, o.active, o.until); // an agent that takes messages stays findable
-  let allowance: Promise<{ credential: string; card: AgentCard }> | undefined;
+  // The sandbox's play money, one signed allowance per currency it holds (run 67: shops priced in AUD met USD-only play money).
+  const play: Record<string, number> = o.playMoney ?? (o.allowanceUsd ? { USD: o.allowanceUsd } : {});
+  const playAllowances = new Map<string, Promise<{ credential: string; card: AgentCard }>>();
   const paymentsBase = (o.payments ?? 'http://payments:4600').replace(/\/(a2a)?\/?$/, '');
   // Parties to a trade, from their own signed cards, by address: kept a few minutes (a rotated key shows up after that).
   const parties = new Map<string, { at: number; party: Promise<CartParty> }>();
@@ -299,19 +303,19 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       }
       // The human's own signed allowance, from their house, comes first; then the sandbox's play money (dollars), if any.
       const own = (await allowanceSource?.().catch(() => null)) ?? null;
-      if (!own && !o.allowanceUsd) throw new Error(`this agent has no allowance to pay from in ${unit}. Spending a person's money needs their house: they sign an allowance in its control panel (My agent → Give it spending money) and you connect with lake_house_connect. Or pay in another unit you agreed on.`);
-      const currency = own ? own.currency ?? 'USD' : 'USD';
+      if (!own && !Object.keys(play).length) throw new Error(`this agent has no allowance to pay from in ${unit}. Spending a person's money needs their house: they sign an allowance in its control panel (My agent → Give it spending money) and you connect with lake_house_connect. Or pay in another unit you agreed on.`);
+      const currency = own ? own.currency ?? 'USD' : play[unit] ? unit : Object.keys(play)[0]!;
       // Nothing converts: an allowance in one currency pays in that currency only.
-      if (unit !== currency) throw new Error(own ? `your human's allowance is in ${currency}, not ${unit}: pay in ${currency}, or ask them for an allowance in ${unit}` : `the sandbox's play money is in USD, not ${unit}`);
-      if (!own) allowance ??= (async () => {
+      if (unit !== currency) throw new Error(own ? `your human's allowance is in ${currency}, not ${unit}: pay in ${currency}, or ask them for an allowance in ${unit}` : `the sandbox's play money is in ${Object.keys(play).join(' and ')}, not ${unit}`);
+      if (!own && !playAllowances.has(currency)) playAllowances.set(currency, (async () => {
         const human = await makeHuman(await generateIdentity(), o.domain, `Spending allowance for ${o.domain}`);
         const credential = await signIntentMandate(human.id, human.webId, {
           id: visitor.webId, natural_language_description: `What ${o.domain} may pay other agents`, study: `urn:lake:allowance:${o.domain}`,
-          budget: { currency: 'USD', amount: o.allowanceUsd! }, intent_expiry: new Date(Date.now() + 86_400_000).toISOString(), user_cart_confirmation_required: false,
+          budget: { currency, amount: play[currency]! }, intent_expiry: new Date(Date.now() + 86_400_000).toISOString(), user_cart_confirmation_required: false,
         });
         return { credential, card: human.card };
-      })();
-      const intent = own ?? (await allowance!);
+      })());
+      const intent = own ?? (await playAllowances.get(currency)!);
       const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: cart ? `urn:ap2:cart:${order}` : order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 200)}`, currency, ...(cart ? { cart: { detailsId: cart.detailsId, hash: cart.hash } } : {}) });
       const payments = o.payments ?? 'http://payments:4600';
       const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment], ...(cart ? { cart: { mandate: cart.mandate, card: cart.card }, ...(cart.hold ? { hold: true, ...(cart.releaseAfterHours !== undefined ? { release_after_hours: cart.releaseAfterHours } : {}) } : {}) } : {}) })).reply;

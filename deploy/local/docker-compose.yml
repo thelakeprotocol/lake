@@ -103,6 +103,8 @@ services:
       LAKE_MCP_DATA: "/data/mcp"
       LAKE_MCP_KEK: "${LAKE_MCP_KEK:-}"
       LAKE_ALLOWANCE_USD: "50"
+      # And in the currencies the sandbox's shops price in (nothing converts): "USD:50,AUD:80".
+      LAKE_PLAY_MONEY: "USD:50,AUD:80"
     depends_on: [caddy, houses]
     mem_limit: ${LAKE_MCP_MEM:-260m}
     memswap_limit: ${LAKE_MCP_MEM:-260m}

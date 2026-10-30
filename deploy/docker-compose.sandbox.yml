@@ -112,6 +112,8 @@ services:
       LAKE_MCP_KEK: "${LAKE_MCP_KEK:-}"
       # Play money each conversation's agent may pay other agents (lake_pay), signed by the sandbox in its human's place.
       LAKE_ALLOWANCE_USD: "50"
+      # And in the currencies the sandbox's shops price in (nothing converts): "USD:50,AUD:80".
+      LAKE_PLAY_MONEY: "USD:50,AUD:80"
     ports: ["127.0.0.1:4800:4800"]
     depends_on: [houses]
     mem_limit: ${LAKE_MCP_MEM:-180m}

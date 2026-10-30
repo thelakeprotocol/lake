@@ -921,7 +921,7 @@ describe('the open door', () => {
 
   it('Claude over HTTP: every conversation is its own signed agent, registered on the Lake, and runs a paid study', async () => {
     const port = String(await freePort());
-    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '50', LAKE_MATCH_EVERY_MS: '500' });
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '50', LAKE_PLAY_MONEY: 'USD:50,AUD:80', LAKE_MATCH_EVERY_MS: '500' });
     const client = new Client({ name: 'claude-ai', version: '0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
     const text = async (name: string, args: Record<string, unknown> = {}) => {
@@ -981,6 +981,10 @@ describe('the open door', () => {
     const booked = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'tutoring' });
     expect(booked.reply?.note).toMatch(/confirms each order of "Maths tutoring, 1 hour" first/);
     expect(booked.cart).toBeUndefined();
+    // Play money in each currency the sandbox's shops use (run 67, take two: every AUD cart met USD-only play money).
+    await theirText('lake_sell', { action: 'menu', items: [{ sku: 'jam', label: 'Apricot jam, 250 g', price: 4.5, currency: 'AUD' }] });
+    const jam = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'jam' });
+    expect(await text('lake_buy', { action: 'pay', cart: jam.cart })).toMatchObject({ paid: 4.5, unit: 'AUD' });
     // The order waits in the seller's inbox for its yes (read here, so later checks of that inbox start clean).
     expect((await theirText('lake_inbox', { wait_seconds: 2 })).messages.some((m: { message?: { kind?: string } }) => m.message?.kind === 'trade.order')).toBe(true);
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
