@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import {
   buildCard, generateIdentity, GROUP_SIZE, lakeAgentApp, LakeLinks, loadOrCreateIdentity, pack as packOf, ReplayGuard, runProgram, sendLake, signCard, signIntentMandate, signMessage,
-  signPaymentMandate, verifyCredential, verifyLakeCard, verifyLakeData,
+  signPaymentMandate, verifyCredential, verifyLakeCard, verifyLakeData, signCart, cartParty, cardUrlFor,
   type AgentCard, type Badge, type Claim, type Attachment, type Identity, type LakeData, type QuoterExample,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
@@ -89,8 +90,13 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
       return reply({ kind: 'received' });
     }
     if (m.kind === 'accept' && house) return reply(await accepted(m, v.profile.webId, house));
-    // Paid for an order: the payment's receipt arrives like any message; acknowledge it, naming the order.
-    if (m.kind === 'receipt') return reply({ kind: 'received', note: `payment received${m.order ? ` for order ${String(m.order)}` : ''}; thank you` });
+    // Paid for an order: the payment's receipt arrives like any message; acknowledge it, naming the order. A cart of ours
+    // paid with the money held: we "ship" (a dispatch note to the buyer) and file the delivery, so the hold can release.
+    if (m.kind === 'receipt') {
+      const sold = typeof m.cart === 'string' ? ourCarts.get(m.cart) : undefined;
+      if (sold) setTimeout(() => void ship(String(m.cart), sold, (m.receipt as { credential?: string } | undefined)?.credential).catch((e: Error) => log(`${ex.name}: could not file the delivery: ${e.message}`)), 300);
+      return reply({ kind: 'received', note: `payment received${m.order ? ` for order ${String(m.order)}` : ''}; thank you${sold ? ': your order is on its way' : ''}` });
+    }
     // A question before accepting (run 24: "do you do halal beef?"): the answer is the certified program itself, which is
     // public: what it reads, what it says when it can't serve you, what the owner sees. Facts it stands behind, not chat.
     if (m.kind === 'question' || m.kind === 'note') {
@@ -138,6 +144,36 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     }
   }
 
+  // Carts we signed for accepted offers, by id: who pays, and what, until the delivery is filed.
+  const ourCarts = new Map<string, { buyer: { webId: string; url: string }; label: string }>();
+  /**
+   * An accepted offer, paid through a cart we sign (run 66: shops were paid outright, with nothing held until delivery):
+   * made out to the assistant the house names as payer, for exactly the offer's price, with our delivery terms.
+   */
+  async function cartFor(m: Record<string, unknown>, outputs: Record<string, number>): Promise<{ id: string } | undefined> {
+    const payer = m.payer as { webId?: unknown; url?: unknown } | undefined;
+    const total = ex.program.price ? outputs[ex.program.price] : undefined;
+    if (!o.payments || typeof payer?.webId !== 'string' || typeof payer.url !== 'string' || typeof total !== 'number' || !(total > 0)) return undefined;
+    const payments = await cartParty((await (await fetch(cardUrlFor(`${o.payments}/a2a`))).json()) as AgentCard);
+    const label = `${ex.name}: ${ex.acceptedAs ?? 'your order'}`;
+    const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: card.name, buyerWebId: payer.webId, items: [{ label, amount: { currency, value: Math.round(total * 100) / 100 } }], minutes: 24 * 60, payments: [payments], delivery: { within_hours: 48, review_hours: 72 } });
+    const cartId = String((cart.contents as { id: string }).id);
+    ourCarts.set(cartId, { buyer: { webId: payer.webId, url: payer.url }, label });
+    // Sent once our acceptance is on its way back, so the house tells its assistant of the accept first.
+    setTimeout(() => void ask(String(payer.url), me, { kind: 'trade.cart', cart, note: `${label}: pay with hold, and the money waits until it arrives` }).catch((e: Error) => log(`${ex.name}: could not send the cart: ${e.message}`)), 500);
+    return { id: cartId };
+  }
+  /** Shipped: the dispatch note to the buyer, and its digest filed with the payments agent holding the money. */
+  async function ship(cartId: string, sold: { buyer: { webId: string; url: string }; label: string }, receipt?: string) {
+    const said = receipt ? (JSON.parse(Buffer.from(receipt.split('.')[1] ?? '', 'base64url').toString()) as { credentialSubject?: { settlement?: string; settlementId?: string } }).credentialSubject : undefined;
+    if (said?.settlement !== 'held' || !said.settlementId) return;
+    const content = `Dispatched: ${sold.label}. It arrives within two days; accept it when it does.`;
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    await ask(sold.buyer.url, me, { kind: 'trade.deliver', cart: cartId, content, sha256 });
+    await ask(`${o.payments}/a2a`, me, { kind: 'delivered', hold: said.settlementId, sha256 });
+    ourCarts.delete(cartId);
+  }
+
   /** The owner said yes: check the released original with its issuer, confirm conditionally, pay the fee. */
   async function accepted(m: Record<string, unknown>, houseWebId: string, house: string): Promise<Record<string, unknown>> {
     const release = m.release as { original?: string; credential?: string; issuer?: { recordId: string; card: AgentCard }; claims?: Claim[] } | undefined;
@@ -147,7 +183,9 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     if (p!.release?.includes('claims')) {
       if (!Array.isArray(release?.claims)) return { kind: 'rejected', code: 'malformed', why: `expected the claims for ${(p!.releaseFields ?? []).join(', ')}` };
       const result = runProgram(ex.program, release.claims.filter((c) => p!.releaseFields?.includes(c.field)), terms);
-      return result.eligible ? agreed(result.outputs) : { kind: 'declined', why: 'that list no longer fits our offer' };
+      if (!result.eligible) return { kind: 'declined', why: 'that list no longer fits our offer' };
+      const cart = await cartFor(m, result.outputs).catch((e: Error) => { log(`${ex.name}: no cart: ${e.message}`); return undefined; });
+      return { ...agreed(result.outputs), ...(cart ? { cart: cart.id, next: 'we have sent your assistant a signed cart for exactly this: pay it with the money held, and it is ours only once you accept the delivery' } : {}) };
     }
     if (!release?.original || !release.credential || !release.issuer) return { kind: 'rejected', code: 'malformed', why: 'expected the original record, its credential and its issuer' };
     try {

@@ -25,6 +25,27 @@ describe('rules engine', () => {
     expect(d).toMatchObject({ decision: 'join', rule: 2, grantHours: 48 });
   });
 
+  it('takes a price in its own currency, and never converts (run 66: briefs in A$ met USD-only knock prices)', () => {
+    const aud = parseRules(`owner: test
+default: decline
+rules:
+  - match: { purpose: research }
+    allow_fields: [age_band, medications]
+    min_price: { amount: 4, currency: AUD }
+    decision: join
+`);
+    const offer = { ...study, fields: ['age_band'], priceUsd: 5, price: { amount: 5, currency: 'AUD' } };
+    expect(evaluate(aud, offer)).toMatchObject({ decision: 'join', rule: 1 });
+    // Too little in the same currency: a counter in it (with blocs) or ask, as for dollars.
+    expect(evaluate(aud, { ...offer, price: { amount: 3, currency: 'AUD' } })).toMatchObject({ decision: 'ask', reason: expect.stringMatching(/pay at least AUD 4/) });
+    // In another currency: the rule doesn't meet it, and the decline says why (nothing converts), not "pays too little".
+    const usd = evaluate(aud, { ...study, fields: ['age_band'], priceUsd: 50 });
+    expect(usd).toMatchObject({ decision: 'decline', code: 'price', reason: expect.stringMatching(/rule 1 prices in AUD, and this offer is in USD \(nothing converts\)/) });
+    // A dollar floor still works as before.
+    expect(evaluate(persona('stan'), { ...study, fields: ['age_band', 'medications'], priceUsd: 5 })).toMatchObject({ decision: 'join' });
+    expect(() => parseRules('owner: test\nrules:\n  - match: { purpose: research }\n    min_price: { amount: 4 }\n    decision: join\n')).toThrow(/min_price is \{ amount, currency \}/);
+  });
+
   it('declines marketing outright', () => {
     expect(evaluate(persona('stan'), { ...study, purpose: 'marketing' }).decision).toBe('decline');
   });

@@ -232,6 +232,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   let lastBatch: typeof inbox = [];
   let nextId = Math.max(0, ...received.map((r) => r.id)) + 1;
   const bySender = new Map<string, number>();
+  // Sellers whose cart this agent's human asked for by accepting their offer (not unasked, though never written to).
+  const expected = new Set<string>();
   // Messages to send on the human's answer, by suggestion: sent by the connector, so they go even if the AI is gone.
   const followUps = new Map<string, { choices: string[]; then: ({ to: string; text: string } | null)[] }>(x.saved?.followUps ?? []);
   // Senders this agent won't hear from again, by key: narrowing what it takes in needs nobody's say.
@@ -499,6 +501,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const card = (await (await fetch(cardUrlFor(url)).catch(() => null))?.json().catch(() => null)) as AgentCard | null;
           const kid = card ? String((await verifyLakeCard(card).catch(() => null))?.publicJwk.kid ?? '') : '';
           if (kid) { blocked.add(kid); for (let i = inbox.length - 1; i >= 0; i--) if (inbox[i]!.from.url === url) inbox.splice(i, 1); }
+        }
+        // An offer their human accepted: that quoter's cart is expected, not unasked.
+        if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'offer.accepted') {
+          const q = m.payload.from as { webId?: string } | undefined;
+          if (q?.webId) expected.add(q.webId);
         }
         // The human answered a question that carried messages for its choices: the chosen one goes now.
         if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'question.answered' && typeof m.payload.suggestion === 'string') {
@@ -1104,7 +1111,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (!url) throw new Error('no address for the seller');
           // Run 64: only an assistant's judgement (and, once, an empty allowance) stood between a stranger's "redelivery fee"
           // and the money. A cart nobody asked for is paid only on its human's word.
-          if (x.unsolicited && !a.human_asked) throw new Error(`cart ${x.cart} came unasked from ${x.with.name || 'an agent you never wrote to'}: anyone can sign a cart and send it. Pay it only if your human asked you to pay exactly this, then send again with human_asked: true. A "fee" for something nobody ordered is a classic scam: tell your human, don't pay`);
+          if (x.unsolicited && !a.human_asked && !expected.has(x.with.webId)) throw new Error(`cart ${x.cart} came unasked from ${x.with.name || 'an agent you never wrote to'}: anyone can sign a cart and send it. Pay it only if your human asked you to pay exactly this, then send again with human_asked: true. A "fee" for something nobody ordered is a classic scam: tell your human, don't pay`);
           const r = await me.payCart(url, x.mandate, a.hold, a.release_after_hours);
           const filed = await reportSpend(r);
           if (x.status === 'carted') x.status = 'paid';
@@ -1240,6 +1247,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         fields: z.array(z.string()).default([]).describe('Canonical fields, e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
+        currency: z.string().regex(/^[A-Za-z]{3}$/).optional().describe('The currency of price_usd\'s amount, when not US dollars (e.g. AUD): nothing converts; a house rule in another currency won\'t take it'),
         reveal_house: z.boolean().default(false).describe('With a note and no fields: say which house is your human\'s, deliberately. The note then carries that house\'s signed word that you speak for it, which the house you knock on checks. For neighbours and friends your human knows (run 61: a parcel favour from an unproven assistant was turned down twice); never for strangers'),
         note: z.string().max(1000).optional().describe('To the owner (who you are, why), shown quoted as your unchecked words; with fields, up to 280 characters and it never changes a decision (one that gives orders gets the offer declined); with none, it is the whole message'),
       },
@@ -1256,7 +1264,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           return json(await (await agent()).ask(a.house_url, { kind: 'note', text: a.note, purpose: a.purpose, ...(a.reveal_house && speaksFor ? { speaks_for: speaksFor } : {}) }));
         }
         if ((a.note?.length ?? 0) > 280) throw new Error('note: up to 280 characters with a data request (with no fields, up to 1000)');
-        return json(await (await agent()).knock(a.house_url, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
+        return json(await (await agent()).knock(a.house_url, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, ...(a.currency && a.currency.toUpperCase() !== 'USD' ? { price: { amount: a.price_usd, currency: a.currency.toUpperCase() } } : {}), retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
       } catch (e) {
         return fail(e);
       }

@@ -613,6 +613,10 @@ describe('the owner', () => {
       expect(again).toMatchObject({ decision: 'ask' });
       const asked = ((await ownerCall({ kind: 'list' })).requests as { visitor: { webId: string }; recommendation?: string; status?: string }[]).find((q) => q.visitor.webId === gp.webId && q.status === 'pending');
       expect(asked?.recommendation).toMatch(/you said no to gp\.example's care request/);
+      // Priced in another currency: the rule's dollar floor doesn't take it (nothing converts); it goes to the owner, priced as sent.
+      const aud = await visitor('aud-gp.example');
+      expect((await knock(houses.strict!, aud, { ...presets().gp!, fields: ['medications'], priceUsd: 5, price: { amount: 5, currency: 'AUD' } })).reply).toMatchObject({ decision: 'ask' });
+      expect(((await ownerCall({ kind: 'list' })).requests as { visitor: { webId: string }; price?: unknown }[]).find((q) => q.visitor.webId === aud.webId)).toMatchObject({ price: { amount: 5, currency: 'AUD' } });
       // Another key from the same name is not held to it (blame keys, not names): the rule lets it in.
       expect((await knock(houses.strict!, await visitor('gp.example'), { ...presets().gp!, fields: ['medications'], priceUsd: 5 })).reply).toMatchObject({ decision: 'join' });
     } finally {
@@ -1975,6 +1979,41 @@ describe('the weekly shop, priced inside the house', () => {
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
     // Not eight weeks of receipts: the list.
     expect(entry).toMatchObject({ to: best.quoter.webId, released: ['claims: household_size, dietary_needs, staples'], consent: 'owner, live' });
+  });
+
+  it('an accepted shop is paid through a cart the grocer signs, held until it ships (run 66: shops were paid outright)', async () => {
+    const b = buyers[1]!;
+    // The owner's assistant, with an allowance in the grocer's currency, signed on the owner's phone.
+    const told: Record<string, any>[] = [];
+    const aid = await generateIdentity('shop-helper');
+    const helper = await joinLake({ name: 'Shop helper', domain: 'shop-helper.example', node, port: await freePort(), payments, identity: aid, onMessage: async (m) => { told.push(m.payload); return { kind: 'received' }; } });
+    try {
+      const { code } = await b.call({ kind: 'panel.assistant.invite', label: 'Shop helper' });
+      expect(await (await fetch(`${b.url}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: aid.publicJwk, code, label: 'Shop helper', webId: helper.webId, url: helper.card.supportedInterfaces[0]!.url }) })).json()).toMatchObject({ paired: true });
+      const d = await b.call({ kind: 'panel.allowance.draft', kid: aid.publicJwk.kid, amount: 400, currency: 'AUD', days: 3 });
+      expect(await b.call({ kind: 'panel.allowance.set', id: d.id, credential: await issueCredential({ ...d.draft, validFrom: new Date().toISOString() }, b.phone) })).toMatchObject({ ok: true });
+      helper.setAllowanceSource(async () => {
+        const r = await (await fetch(`${b.url}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'assistant.allowance' }, aid, { iss: 'assistant' })) })).json();
+        return r.intent ? { ...r.intent, currency: r.currency } : null;
+      });
+      // The owner accepts: the grocer answers with a cart made out to the assistant, for exactly the offer's total.
+      const best = (await b.call({ kind: 'panel.market' })).offers.find((o: any) => o.result.eligible);
+      const accepted = await b.call({ kind: 'panel.offer.accept', offer: best.id });
+      expect(accepted.answer).toMatchObject({ kind: 'agreed', cart: expect.any(String) });
+      for (let i = 0; i < 40 && !told.some((x) => x.kind === 'trade.cart'); i++) await new Promise((r) => setTimeout(r, 250));
+      const cartMsg = told.find((x) => x.kind === 'trade.cart')!;
+      expect(cartMsg.cart.contents.payment_request.details.total.amount).toEqual({ currency: 'AUD', value: best.result.outputs.total });
+      // Paid with the money held; the grocer ships (a dispatch note to the buyer) and files the delivery.
+      const paid = await helper.payCart(best.quoter.url, cartMsg.cart, true);
+      expect(paid).toMatchObject({ unit: 'AUD', hold: { id: expect.any(String) } });
+      for (let i = 0; i < 40 && !told.some((x) => x.kind === 'trade.deliver'); i++) await new Promise((r) => setTimeout(r, 250));
+      expect(told.find((x) => x.kind === 'trade.deliver')).toMatchObject({ cart: accepted.answer.cart, content: expect.stringMatching(/^Dispatched:/), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    } finally {
+      // The household as it was for the tests after this one: no assistant, no allowance.
+      await b.call({ kind: 'panel.allowance.revoke', kid: aid.publicJwk.kid }).catch(() => {});
+      await b.call({ kind: 'panel.assistant.revoke', kid: aid.publicJwk.kid }).catch(() => {});
+      await helper.close();
+    }
   });
 
   it("the register guards the shopping fields at the door: an unregistered agent asking for a list is declined, and anyone can check the register", async () => {

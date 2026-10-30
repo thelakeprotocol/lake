@@ -61,6 +61,8 @@ export interface TurnedAway { agent: string; domain?: string; code: string; why:
 const TURNED_AWAY_KEPT = 6;
 
 interface Ctx {
+  /** Which of the owner's assistants pays an accepted offer, in its currency: the quoter makes its cart out to it. */
+  payer?: (currency?: string) => { webId: string; url: string } | undefined;
   actor: string;
   webId: string;
   id: Identity;
@@ -354,7 +356,10 @@ export class Market {
     else release.issuer = JSON.parse(await this.c.read(rec.paths.issuer));
     // The terms the offer was priced on, group size included, so the agent checks the same offer the owner saw.
     const terms = { ...(this.intents.get(offer.pack)?.terms ?? {}), [GROUP_SIZE]: offer.groupSize };
-    const answer = await this.send(offer.quoter.url, { kind: 'accept', ref: offer.id, terms, release });
+    // Who pays (run 66: shops were paid outright): the quoter may answer with a cart made out to this assistant, held until
+    // delivery.
+    const payer = this.c.payer?.(this.priceOf(offerId)?.currency);
+    const answer = await this.send(offer.quoter.url, { kind: 'accept', ref: offer.id, terms, release, ...(payer ? { payer } : {}) });
     offer.status = 'accepted';
     offer.answer = answer;
     await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));

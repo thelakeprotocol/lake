@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -110,6 +110,7 @@ export class Housekeeper {
       records: o.records, claims: (f) => this.claims(f), read: (p) => this.read(p),
       write: async (path, content) => { await this.tool('pod_write', { path, content }); },
       verifyRecord: (f) => this.verifyOwnRecord(f), emit: o.emit, say: o.say ?? (() => {}),
+      payer: (currency) => this.o.desk.payerFor(currency),
     });
   }
 
@@ -330,7 +331,7 @@ export class Housekeeper {
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain, ...(key ? { key } : {}) }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
         grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
-        priceUsd: offer.priceUsd, study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
+        priceUsd: offer.priceUsd, ...(offer.price ? { price: offerPrice(offer) } : {}), study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
       // The sender hears that its newer ask replaced its older ones, not that it now has several waiting.
@@ -668,9 +669,9 @@ export class Housekeeper {
 }
 
 /** What a visitor is told: the decision and anything it can act on (a counter's terms), never the owner's rules. */
-function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: number }, code?: string, purpose?: string): string {
+function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: number; currency?: string }, code?: string, purpose?: string): string {
   if (decision === 'join') return 'joined';
-  if (decision === 'counter' && counter) return `would join for $${counter.priceUsd}, with ${counter.fields.join(', ').replace(/_/g, ' ')}`;
+  if (decision === 'counter' && counter) return `would join for ${counter.currency && counter.currency !== 'USD' ? `${counter.currency} ` : '$'}${counter.priceUsd}, with ${counter.fields.join(', ').replace(/_/g, ' ')}`;
   if (decision === 'ask') return 'the owner decides this one; ask for its status later with { kind: "status", offerId }';
   // A coarse reason a visitor can act on (don't ask again for this), never the owner's rule, its number or its limits.
   return { purpose: `declined: this house doesn't take ${purpose} requests`, price: 'declined: it pays too little', retention: 'declined: this house keeps no data; ask with retention "none"', identifying: 'declined: this house gives out nothing that identifies its owner; ask without those fields', default: 'declined: nothing in its rules covers this' }[code ?? ''] ?? 'declined';
@@ -691,6 +692,9 @@ function offerProblem(o: unknown): string | null {
   if (!x.fields.every((f) => known.has(f))) return `fields must be ones the use cases here define: ${offerableFields().join(', ')}`;
   if (typeof x.retention !== 'string' || !RETENTION.test(x.retention)) return 'retention must be "none" or an ISO 8601 duration like "P30D"';
   if (typeof x.priceUsd !== 'number' || !Number.isFinite(x.priceUsd) || x.priceUsd < 0) return 'price must be zero or more';
+  // A price in its own currency (A$5): nothing converts, so it is checked as given.
+  const pr = (x as { price?: { amount?: unknown; currency?: unknown } }).price;
+  if (pr !== undefined && !(typeof pr?.amount === 'number' && Number.isFinite(pr.amount) && pr.amount >= 0 && typeof pr.currency === 'string' && /^[A-Z]{3}$/.test(pr.currency))) return 'price: { amount, currency }, e.g. { amount: 5, currency: "AUD" }';
   return null;
 }
 const CODE = /^[a-z][a-z0-9-]{0,39}$/;

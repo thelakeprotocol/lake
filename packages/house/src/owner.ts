@@ -19,6 +19,8 @@ export interface PendingRequest {
   fields: string[];
   retention: string;
   priceUsd: number;
+  /** Its price in its own currency, when it named one. */
+  price?: { amount: number; currency: string };
   study: string | null;
   question?: string;
   /** What to look at twice: identifying or unknown fields, keeping data for years (SPEC §5). */
@@ -458,6 +460,12 @@ export class OwnerDesk {
    */
   private ownerNos = new Map<string, { offerId: string; at: number; until: number }>();
   private saveOwnerNos = () => writeFile(join(this.o.dataDir, 'owner-nos.json'), JSON.stringify([...this.ownerNos])).catch(() => {});
+  /** The assistant that pays an accepted offer: one with an allowance in its currency, else any that can hold one. */
+  payerFor(currency?: string): { webId: string; url: string } | undefined {
+    const can = [...this.assistants.values()].filter((a) => a.webId && a.url);
+    const a = can.find((x) => { const al = this.allowanceFor(x.kid); return !!al && (!currency || al.currency === currency); }) ?? can[0];
+    return a ? { webId: a.webId!, url: a.url! } : undefined;
+  }
   /** A sandbox house nobody has claimed: nobody will answer until someone does (a house started for its owner waits for them). */
   unclaimed(): boolean { return this.o.openPairing && !this.ownerJwk; }
   ownerSaidNo(key: string, purpose: string): { offerId: string; at: number } | null {
@@ -1092,7 +1100,9 @@ export class OwnerDesk {
         if (answer !== undefined && p.kind === 'panel.offer.accept' && !(answer as { error?: string }).error) {
           // The assistant that suggested it is the one to pay: what was accepted, from whom, and the quoter's answer (its order).
           const x = answer as { id: string; title: string; quoter: { name: string; url: string }; result: { outputs: Record<string, number> }; labels?: Record<string, { label: string; unit?: string }>; currency?: string; answer?: Record<string, unknown> };
-          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: 'your human accepted this offer themselves, on their phone: pay it with lake_pay, naming the order. When you tell them, be exact: it pays outright (an accepted offer is no cart, so nothing holds the money until delivery), and the delivery happens outside the Lake.' });
+          this.news({ about: 'offer.accepted', offer: x.id, title: x.title, from: x.quoter, outputs: x.result.outputs, labels: x.labels, currency: x.currency, answer: x.answer, note: (x.answer as { cart?: string } | undefined)?.cart
+            ? `your human accepted this offer themselves, on their phone. The shop has sent you a signed cart for exactly it (cart ${(x.answer as { cart: string }).cart}): pay it with lake_buy { action: "pay", cart }, with the money held until you accept the delivery. Tell your human it is paid and held until it arrives.`
+            : 'your human accepted this offer themselves, on their phone: pay it with lake_pay, naming the order. When you tell them, be exact: it pays outright (an accepted offer is no cart, so nothing holds the money until delivery), and the delivery happens outside the Lake.' });
         }
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }

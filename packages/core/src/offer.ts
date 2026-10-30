@@ -13,7 +13,10 @@ export interface Offer {
   fields: string[];
   /** "none" or an ISO 8601 duration such as "P30D". */
   retention: string;
+  /** What it pays, in US dollars (kept for every offer that names no other currency). */
   priceUsd: number;
+  /** What it pays, in its own currency (A$5): when given, it is the price, and priceUsd is its amount only by name. Nothing converts. */
+  price?: { amount: number; currency: string };
   credentials: { ethicsApproved: boolean; sponsorVerified: boolean; auditCertified: boolean };
   /** Id of the study this offer is for (studyId of the declarative study), when there is one. */
   study?: string;
@@ -27,6 +30,13 @@ export interface Offer {
 }
 
 const LAKE = 'https://lake.doneinfifty.com/model/v0#';
+
+/** An offer's price in its own currency: price when it names one, else priceUsd in USD. */
+export const offerPrice = (o: Pick<Offer, 'priceUsd' | 'price'>): { amount: number; currency: string } =>
+  o.price && /^[A-Z]{3}$/.test(o.price.currency) && o.price.amount >= 0 ? o.price : { amount: o.priceUsd, currency: 'USD' };
+// The currency, as ODRL's examples name units (DBpedia); one not listed here by its ISO 4217 code.
+const CURRENCY_IRI: Record<string, string> = { USD: 'United_States_dollar', AUD: 'Australian_dollar', EUR: 'Euro', GBP: 'Pound_sterling', NZD: 'New_Zealand_dollar', CAD: 'Canadian_dollar' };
+const currencyIri = (c: string) => (CURRENCY_IRI[c] ? `https://dbpedia.org/resource/${CURRENCY_IRI[c]}` : `urn:iso:std:iso:4217:${c}`);
 
 /** Serialise an offer as an ODRL 2.2 Offer (JSON-LD). */
 export function toOdrl(o: Offer, assigner: string) {
@@ -44,7 +54,7 @@ export function toOdrl(o: Offer, assigner: string) {
           ...(o.minTier ? [{ leftOperand: 'lake:provenanceTier', operator: 'gteq', rightOperand: `lake:tier/${o.minTier}` }] : []),
         ],
         duty: [
-          { action: 'compensate', constraint: [{ leftOperand: 'payAmount', operator: 'eq', rightOperand: { '@value': o.priceUsd.toFixed(2), '@type': 'xsd:decimal' }, unit: 'https://dbpedia.org/resource/United_States_dollar' }] },
+          { action: 'compensate', constraint: [{ leftOperand: 'payAmount', operator: 'eq', rightOperand: { '@value': offerPrice(o).amount.toFixed(2), '@type': 'xsd:decimal' }, unit: currencyIri(offerPrice(o).currency) }] },
           o.retention === 'none'
             ? { action: 'delete', constraint: [{ leftOperand: 'event', operator: 'eq', rightOperand: 'lake:event/computationEnd' }] }
             : { action: 'delete', constraint: [{ leftOperand: 'elapsedTime', operator: 'lteq', rightOperand: { '@value': o.retention, '@type': 'xsd:duration' } }] },

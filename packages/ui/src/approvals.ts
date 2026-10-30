@@ -9,7 +9,7 @@ import { loadKey, signCredential, signEnvelope } from './owner-crypto';
 // this device with the owner's key, which never leaves it. Drawn with Preact: each screen is a function of what the house
 // said, redrawn when the house says something changed (a stream, SSE) or after anything you do here.
 
-interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; study: string | null; question?: string; warnings?: string[]; note?: string; asked?: number; recommendation: string; grantDraft?: unknown }
+interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; price?: { amount: number; currency: string }; study: string | null; question?: string; warnings?: string[]; note?: string; asked?: number; recommendation: string; grantDraft?: unknown }
 interface Key { id: string; visitor: string; fields: string[]; purpose: string; until: string; authorizedBy: string }
 type Decision = 'join' | 'ask' | 'decline';
 interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
@@ -449,7 +449,7 @@ function RequestCard({ all }: { all: Request[] }) {
     r.warnings?.length ? h('ul', { class: 'warn' }, ...r.warnings.map((w) => h('li', {}, `It ${w}`))) : null,
     r.note ? h('p', { class: 'note' }, h('b', {}, 'Their note, in their words (not checked): '), `“${r.note}”`) : null,
     h('dl', { class: 'facts' },
-      ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : `yes, for ${duration(r.retention)}`], ['Pays', `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
+      ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : `yes, for ${duration(r.retention)}`], ['Pays', r.price ? money$(r.price.amount, r.price.currency) : `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
         .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))),
     h('p', { class: 'advice' }, h('b', {}, 'Your housekeeper says'), r.recommendation),
     h('div', { class: 'actions' },

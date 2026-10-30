@@ -1,6 +1,6 @@
 import { parse } from 'yaml';
 import { DEFAULT_GRANT_HOURS } from './lake.js';
-import type { Offer } from './offer.js';
+import { offerPrice, type Offer } from './offer.js';
 import { isPurpose, PURPOSES, purposeWithin } from './purpose.js';
 import { availabilityProblems, type Availability } from './availability.js';
 
@@ -40,6 +40,8 @@ export interface Rule {
   allow_fields?: string[];
   deny_fields?: string[];
   min_price_usd?: number;
+  /** The least it joins for, in a currency (A$4): an offer in another currency doesn't meet it (nothing converts). */
+  min_price?: { amount: number; currency: string };
   retention?: string;
   grant_hours?: number;
   decision: 'join' | 'decline' | 'ask';
@@ -68,6 +70,8 @@ export function parseRules(text: string): Rules {
     // "Decline research paying under $5" needs a price test before the decision, not min_price_usd (a join rule's counter).
     const below = r.match?.price_below;
     if (below !== undefined && !(typeof below === 'number' && below > 0)) throw new RulesError(`rule ${i + 1}: price_below must be a positive number of dollars`);
+    const mp = (r as { min_price?: { amount?: unknown; currency?: unknown } }).min_price;
+    if (mp !== undefined && !(typeof mp?.amount === 'number' && mp.amount > 0 && typeof mp.currency === 'string' && /^[A-Z]{3}$/.test(mp.currency))) throw new RulesError(`rule ${i + 1}: min_price is { amount, currency }, e.g. { amount: 4, currency: AUD }`);
     const ids = r.match?.asks_identifying;
     if (ids !== undefined && typeof ids !== 'boolean') throw new RulesError(`rule ${i + 1}: asks_identifying must be true or false`);
     const purpose = r.match?.purpose;
@@ -106,7 +110,7 @@ export type Decision =
   | { decision: 'join'; rule: number | null; reason: string; grantHours: number; fields: string[] }
   | { decision: 'decline'; rule: number | null; reason: string; code?: DeclineCode }
   | { decision: 'ask'; rule: number | null; reason: string }
-  | { decision: 'counter'; rule: number; reason: string; counter: { fields: string[]; priceUsd: number } };
+  | { decision: 'counter'; rule: number; reason: string; counter: { fields: string[]; priceUsd: number; /** The amount's currency, when not USD. */ currency?: string } };
 
 /**
  * What a house knows besides the offer: the visitor's reputation from the signals it follows (0–1), and which fields
@@ -126,7 +130,7 @@ function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
   };
   // A rule about a broad purpose covers the narrower ones inside it: "marketing" catches "advertising".
   return Object.entries(m).every(([k, v]) =>
-    k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'price_below' ? o.priceUsd < Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
+    k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'price_below' ? offerPrice(o).currency === 'USD' && offerPrice(o).amount < Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
 }
 
 /**
@@ -159,7 +163,7 @@ export function nearMiss(rules: Rules, offer: Offer, ctx: Context = {}): string 
       r.match.audit_certified && !offer.credentials.auditCertified ? 'had a certified study' : '',
       r.match.sponsor_verified && !offer.credentials.sponsorVerified ? 'came from a verified sponsor' : '',
       r.match.reputation_at_least !== undefined && (ctx.reputation ?? 0.5) < Number(r.match.reputation_at_least) ? `had a reputation of at least ${r.match.reputation_at_least}` : '',
-      r.min_price_usd !== undefined && offer.priceUsd < r.min_price_usd ? `paid at least $${r.min_price_usd}` : '',
+      floorOf(r) && offerPrice(offer).currency !== floorOf(r)!.currency ? `were priced in ${floorOf(r)!.currency}` : floorOf(r) && offerPrice(offer).amount < floorOf(r)!.amount ? `paid at least ${money(floorOf(r)!)}` : '',
       r.retention === 'none' && offer.retention !== 'none' ? 'kept nothing' : '',
     ].filter(Boolean);
     // The whole truth: fields the rule wouldn't take are part of what's missing (run 18 told an owner a request for
@@ -179,33 +183,48 @@ export function nearMiss(rules: Rules, offer: Offer, ctx: Context = {}): string 
  * Decide an offer. Pure and deterministic: same rules + same offer = same answer.
  * The offer's free-text note is never read here, so prompt injection has nothing to grab.
  */
+/** A join rule's floor: min_price, or min_price_usd in USD. */
+const floorOf = (r: Rule): { amount: number; currency: string } | undefined =>
+  r.min_price ?? (r.min_price_usd !== undefined ? { amount: r.min_price_usd, currency: 'USD' } : undefined);
+const money = (m: { amount: number; currency: string }) => (m.currency === 'USD' ? `$${m.amount}` : `${m.currency} ${m.amount}`);
+
 export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decision {
+  const price = offerPrice(offer);
+  // A join rule with a floor in another currency doesn't meet this offer, and says so if nothing else does (Fable: a
+  // silent fall-through would look like "pays too little").
+  let otherCurrency = '';
   for (const [i, r] of rules.rules.entries()) {
     if (!matches(r.match, offer, ctx)) continue;
     const n = i + 1;
+    const floor = floorOf(r);
+    if (r.decision === 'join' && floor && floor.currency !== price.currency) {
+      otherCurrency ||= `your rule ${n} prices in ${floor.currency}, and this offer is in ${price.currency} (nothing converts)`;
+      continue;
+    }
     if (r.decision === 'decline') return { decision: 'decline', rule: n, reason: r.match.asks_identifying === true ? `your rule ${n} declines requests for fields that identify you` : `your rule ${n} declines ${offer.purpose} requests`, code: r.match.asks_identifying === true ? 'identifying' : r.match.price_below !== undefined ? 'price' : r.match.purpose !== undefined ? 'purpose' : 'rule' };
     if (r.decision === 'ask') return { decision: 'ask', rule: n, reason: `your rule ${n} says ask you first about ${offer.purpose} requests` };
 
     const denied = offer.fields.filter((f) => r.deny_fields?.includes(f));
     const unlisted = r.allow_fields ? offer.fields.filter((f) => !r.allow_fields!.includes(f) && !denied.includes(f)) : [];
-    const cheap = r.min_price_usd !== undefined && offer.priceUsd < r.min_price_usd;
+    const cheap = !!floor && price.amount < floor.amount;
     const keeps = r.retention === 'none' && offer.retention !== 'none';
 
     if (keeps) return { decision: 'decline', rule: n, reason: `it wants to keep your data (${offer.retention}); your rule ${n} allows no retention`, code: 'retention' };
     if (unlisted.length) return { decision: 'ask', rule: n, reason: `looks like a study you'd join, but it also wants ${list(unlisted)}` };
     if (denied.length || cheap) {
-      const counter = { fields: offer.fields.filter((f) => !denied.includes(f)), priceUsd: Math.max(offer.priceUsd, r.min_price_usd ?? 0) };
-      const why = [denied.length ? `drop ${list(denied)}` : '', cheap ? `pay at least $${r.min_price_usd}` : ''].filter(Boolean).join(' and ');
+      // In the offer's own currency (a floor here is in it too); priceUsd keeps its name for the amount.
+      const counter = { fields: offer.fields.filter((f) => !denied.includes(f)), priceUsd: Math.max(price.amount, floor?.amount ?? 0), ...(price.currency !== 'USD' ? { currency: price.currency } : {}) };
+      const why = [denied.length ? `drop ${list(denied)}` : '', cheap ? `pay at least ${money(floor!)}` : ''].filter(Boolean).join(' and ');
       if (rules.negotiation?.join_collectives && counter.fields.length) return { decision: 'counter', rule: n, reason: `you'd join if they ${why}`, counter };
       return { decision: 'ask', rule: n, reason: `you'd normally join, but they'd need to ${why}` };
     }
     return { decision: 'join', rule: n, reason: `matches your rule ${n}`, grantHours: r.grant_hours ?? DEFAULT_GRANT_HOURS, fields: offer.fields };
   }
   const d = rules.default;
-  const reason = `no rule covers ${offer.purpose} requests from ${offer.requester}; your default is ${d}`;
+  const reason = `no rule covers ${offer.purpose} requests from ${offer.requester}${otherCurrency ? ` (${otherCurrency})` : ''}; your default is ${d}`;
   // A default of "join" still needs fields to be bounded: with no rule, there is no allow list, so ask instead.
   if (d === 'join') return { decision: 'ask', rule: null, reason: `${reason}, but no rule limits the fields, so asking you` };
-  return d === 'decline' ? { decision: d, rule: null, reason, code: 'default' } : { decision: d, rule: null, reason };
+  return d === 'decline' ? { decision: d, rule: null, reason, code: otherCurrency ? 'price' : 'default' } : { decision: d, rule: null, reason };
 }
 
 /**

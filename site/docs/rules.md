@@ -81,6 +81,7 @@ Order matters: the named providers come first, the catch-all `decline` last. A l
 | `rules[].allow_fields` | list | Fields this rule may share |
 | `rules[].deny_fields` | list | Fields never shared under this rule |
 | `rules[].min_price_usd` | number | Lowest acceptable price per participant |
+| `rules[].min_price` | `{ amount, currency }` | The same in another currency, e.g. `{ amount: 4, currency: AUD }`. Nothing converts: an offer priced in another currency doesn't meet it, and the house says so if nothing else takes it |
 | `rules[].retention` | `none` or ISO 8601 duration | How long the visitor may keep results |
 | `rules[].grant_hours` | integer | Key lifetime. Default 48. |
 | `rules[].decision` | `join` \| `decline` \| `ask` | |
