@@ -103,6 +103,8 @@ export interface Suggestion {
   note?: string;
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
   sender?: string;
+  /** The assistant's key, so an answer goes back to the one that asked. */
+  by?: string;
   mute?: boolean;
   /** What the assistant advises on the request, offer or pledge it names, as a field: nobody (no panel, no bot) reads it out of the words (run 39). */
   advice?: Advice;
@@ -780,7 +782,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, text, ...(sender ? { sender } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }
@@ -997,6 +999,17 @@ export class OwnerDesk {
         if (gone) this.closedNotes.set(id, { by: gone.from.webId, state: 'seen and set aside by the owner' });
         this.notes = this.notes.filter((x) => x.id !== id);
         void this.saveNotes();
+        return void res.json({ ok: true });
+      }
+      // The owner's one tap on a warning (run 65: an assistant warned, and its human had no way to act on it): the
+      // assistant's connector is told, by this house, to turn that agent's messages away from now on.
+      if (p.kind === 'panel.assistant.block') {
+        const sug = this.suggestions.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
+        if (!sug?.sender) return void res.status(404).json({ error: 'no warning with that id' });
+        if (!/^https?:\/\//.test(sug.sender)) return void res.status(400).json({ error: 'the warning names no address to block: ask your agent to block it (lake_block)' });
+        this.news({ about: 'block', url: sug.sender, note: 'your human tapped Block on your warning: your connector turns its messages away from now on' }, sug.by);
+        this.suggestions = this.suggestions.filter((x) => x.id !== sug.id);
+        this.touch();
         return void res.json({ ok: true });
       }
       if (p.kind === 'panel.assistant.dismiss') {

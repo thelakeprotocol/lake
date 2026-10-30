@@ -350,6 +350,8 @@ function SuggestionItem({ x }: { x: Note }) {
     h('div', { class: 'item-actions' },
       // Each is still your tap, on your key.
       x.offer ? h(AcceptOffer, { offer: x.offer, after: dismiss }) : null,
+      // A warning about another agent, with its address: the owner blocks it in one tap (run 65).
+      x.sender && /^https?:\/\//.test(x.sender) ? h(Act, { label: 'Block them', cls: 'danger', confirm: 'Tap again: their messages are turned away', run: () => call({ kind: 'panel.assistant.block', id: x.id }) }) : null,
       x.note && x.mute ? h(Act, { label: 'Mute this sender', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }) : null,
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,

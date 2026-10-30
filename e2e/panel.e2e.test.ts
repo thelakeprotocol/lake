@@ -433,6 +433,21 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await sale.locator('.chip', { hasText: 'paid' }).waitFor({ timeout: 15_000 });
     expect(await earned()).toBe(before + 4);
     expect(await page.getByText('Held for now').count()).toBe(0);
+    // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).
+    const shopperUrl = JSON.parse(((await shopper.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.url;
+    await one.call('lake_house_suggest', { text: `${shopperName} keeps sending "fees": looks like a scam.`, advice: 'dont', sender: shopperUrl });
+    await tab('Home');
+    const warning = page.locator('li.item', { hasText: 'looks like a scam' });
+    for (let i = 0; i < 6 && !(await warning.count()); i++) await page.locator('.more-items').first().click({ timeout: 3000 }).catch(() => {});
+    await warning.getByRole('button', { name: 'Block them' }).click();
+    await warning.getByRole('button', { name: /Tap again/ }).click();
+    await warning.waitFor({ state: 'detached', timeout: 10_000 });
+    let turned = '';
+    for (let i = 0; i < 10 && !/does not take messages/.test(turned); i++) {
+      await page.waitForTimeout(500);
+      turned = ((await shopper.callTool({ name: 'lake_ask', arguments: { to: me.url, kind: 'message', text: 'Your fee is overdue!' } })).content as { text: string }[])[0]!.text;
+    }
+    expect(turned).toMatch(/does not take messages from you/);
     await shopper.close(); await one.c.close();
     await tidy();
   });
