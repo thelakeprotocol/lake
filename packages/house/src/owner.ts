@@ -762,7 +762,8 @@ export class OwnerDesk {
           const mute = (q as { mute?: unknown }).mute === true;
           // Or about a note at the door (run 42: "don't answer this one" had nowhere to go).
           const aboutNote = typeof (q as { note?: unknown }).note === 'string' ? this.notes.find((n) => n.id === (q as { note: string }).note)?.id : undefined;
-          if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id' });
+          // Run 65: an assistant tried to mute a scammer that had written to its own inbox, not to the door.
+          if ((q as { note?: unknown }).note !== undefined && !aboutNote) return void res.status(404).json({ error: 'no note at the door with that id: a message in your own lake_inbox is not a door note. To stop hearing from its sender, lake_block its url yourself (blocking needs nobody\'s say), and tell your human with sender and advice "dont"' });
           // Advice with nothing to act on is dropped, and the note still goes (run 55: three refusals, and the owner was never
           // told): an FYI is words for the owner.
           // A warning about another agent keeps its advice too (run 63: "don't pay this stranger" lost its "don't").
