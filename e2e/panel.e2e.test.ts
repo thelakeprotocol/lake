@@ -206,6 +206,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
+  it('gives the allowance its AI asks for, signed in one tap (run 66: "raise it" was answered and nothing changed)', async () => {
+    expect(await asAssistant({ kind: 'assistant.suggest', text: 'The sitter costs more than I may spend: may I have $60 for 3 days?', allowance: { amount: 60, currency: 'USD', days: 3 } })).toMatchObject({ ok: true });
+    await tab('Home');
+    await page.getByRole('button', { name: 'Give $60 for 3 days' }).click();
+    await tab('My agent');
+    await page.locator('.item', { hasText: 'Nova' }).locator('.spend-amount', { hasText: 'Up to $60' }).waitFor({ timeout: 5000 });
+    expect(await asAssistant({ kind: 'assistant.allowance' })).toMatchObject({ amount: 60, currency: 'USD' });
+    await tidy();
+  });
+
   it('shows a note from the web the moment it arrives, and the owner answers it', async () => {
     await tab('Home');
     const left = await (await fetch(`${house}/note?text=${encodeURIComponent('Hi, Ana here: coffee next week?')}&from=Ana`)).json();
@@ -407,7 +417,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const shopper = new Client({ name: 'Claude Code', version: '0' });
     await shopper.connect(new StreamableHTTPClientTransport(mcp, { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
     const shop = async (args: Record<string, unknown>) => { const r = await shopper.callTool({ name: 'lake_buy', arguments: args }); expect(r.isError, JSON.stringify(r.content)).toBeFalsy(); return JSON.parse((r.content as { text: string }[])[0]!.text); };
-    const shopperName = JSON.parse(((await shopper.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.name.split(' (')[0];
+    const shopperMe = JSON.parse(((await shopper.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you;
+    const shopperName = shopperMe.name.split(' (')[0], shopperUrl0 = shopperMe.url as string;
     const order = await shop({ action: 'order', seller_url: me.url, sku: 'summary' });
     const cartId = order.cart?.id ?? order.cart ?? order.id;
     await shop({ action: 'pay', cart: String(cartId) });
@@ -439,8 +450,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await sale.locator('.chip', { hasText: 'paid' }).waitFor({ timeout: 15_000 });
     expect(await earned()).toBe(before + 4);
     expect(await page.getByText('Held for now').count()).toBe(0);
+    // A question whose choices carry messages: the owner's pick is sent by the AI's connector, even with the AI gone (run 66).
+    const shopperInbox = async () => JSON.parse(((await shopper.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 2 } })).content as { text: string }[])[0]!.text).messages as { message?: { text?: string } }[];
+    await shopperInbox();
+    await one.call('lake_house_suggest', { text: 'The buyer paid for a summary: send them the brief now?', ask: { choices: ['Send the brief', 'Not yet'] }, then: [{ to: shopperUrl0, text: 'Brief: 3 bullets on the Lake, plain words.' }, null] });
+    await tab('Home');
+    const q = page.locator('li.item', { hasText: 'send them the brief now?' });
+    for (let i = 0; i < 6 && !(await q.count()); i++) await page.locator('.more-items').first().click({ timeout: 3000 }).catch(() => {});
+    await q.getByRole('button', { name: 'Send the brief' }).click();
+    let briefed: { message?: { text?: string } }[] = [];
+    for (let i = 0; i < 10 && !briefed.some((m) => m.message?.text?.startsWith('Brief:')); i++) briefed = [...briefed, ...(await shopperInbox())];
+    expect(briefed.some((m) => m.message?.text === 'Brief: 3 bullets on the Lake, plain words.')).toBe(true);
     // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).
-    const shopperUrl = JSON.parse(((await shopper.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.url;
+    const shopperUrl = shopperUrl0;
     await one.call('lake_house_suggest', { text: `${shopperName} keeps sending "fees": looks like a scam.`, advice: 'dont', sender: shopperUrl });
     await tab('Home');
     const warning = page.locator('li.item', { hasText: 'looks like a scam' });

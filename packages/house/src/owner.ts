@@ -105,6 +105,8 @@ export interface Suggestion {
   sender?: string;
   /** The assistant's key, so an answer goes back to the one that asked. */
   by?: string;
+  /** A new spending allowance the assistant proposes for itself: the owner's tap drafts and signs it on their phone. */
+  allowance?: { amount: number; currency: string; days: number };
   mute?: boolean;
   /** What the assistant advises on the request, offer or pledge it names, as a field: nobody (no panel, no bot) reads it out of the words (run 39). */
   advice?: Advice;
@@ -772,7 +774,17 @@ export class OwnerDesk {
           // told): an FYI is words for the owner.
           // A warning about another agent keeps its advice too (run 63: "don't pay this stranger" lost its "don't").
           const sender = typeof (q as { sender?: unknown }).sender === 'string' ? String((q as { sender?: string }).sender).slice(0, 200) : '';
-          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door && !sender;
+          // A new allowance it proposes (run 66: "raise it by A$60" was answered, and nothing changed): checked here, signed
+          // only by the owner's tap.
+          const al = (q as { allowance?: { amount?: unknown; currency?: unknown; days?: unknown } }).allowance;
+          let allowance: Suggestion['allowance'];
+          if (al !== undefined) {
+            const amount = Number(al.amount), days = al.days === undefined ? 7 : Number(al.days), currency = String(al.currency ?? 'USD').toUpperCase();
+            if (!(amount > 0 && amount <= MAX_ALLOWANCE) || !Number.isInteger(days) || days < 1 || days > MAX_ALLOWANCE_DAYS || !/^[A-Z]{3}$/.test(currency)) return void res.status(400).json({ error: `allowance: { amount: 1 to ${MAX_ALLOWANCE}, currency?, days?: 1 to ${MAX_ALLOWANCE_DAYS} }` });
+            if (!assistant.webId) return void res.status(400).json({ error: 'allowance: you connected before allowances existed: reconnect with a new code first' });
+            allowance = { amount: Math.round(amount * 100) / 100, currency, days };
+          }
+          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !aboutNote && !rules && !door && !sender && !allowance;
           if (adviceDropped) delete q.advice;
           let ask: Suggestion['ask'];
           if (q.ask) {
@@ -784,7 +796,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }

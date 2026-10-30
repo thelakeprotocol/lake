@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -350,6 +350,14 @@ function SuggestionItem({ x }: { x: Note }) {
     h('div', { class: 'item-actions' },
       // Each is still your tap, on your key.
       x.offer ? h(AcceptOffer, { offer: x.offer, after: dismiss }) : null,
+      // A new allowance your agent asks for: signed here, on this phone, like any other (run 66: the answer changed nothing).
+      x.allowance && x.by ? h(Act, { label: `Give ${money$(x.allowance.amount, x.allowance.currency)} for ${x.allowance.days} day${x.allowance.days === 1 ? '' : 's'}`, cls: 'primary', run: async () => {
+        const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: x.by, amount: x.allowance!.amount, currency: x.allowance!.currency, days: x.allowance!.days });
+        if (d.error) throw new Error(d.error);
+        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
+        if (!r.ok) throw new Error(r.error ?? 'refused');
+        await dismiss();
+      } }) : null,
       // A warning about another agent, with its address: the owner blocks it in one tap (run 65).
       x.sender && /^https?:\/\//.test(x.sender) ? h(Act, { label: 'Block them', cls: 'danger', confirm: 'Tap again: their messages are turned away', run: () => call({ kind: 'panel.assistant.block', id: x.id }) }) : null,
       x.note && x.mute ? h(Act, { label: 'Mute this sender', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }) : null,

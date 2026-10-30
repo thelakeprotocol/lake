@@ -163,6 +163,7 @@ export interface AgentSnapshot {
   pledged?: [string, BlindSignature][];
   received?: unknown[];
   blocked?: string[];
+  followUps?: [string, { choices: string[]; then: ({ to: string; text: string } | null)[] }][];
 }
 
 /**
@@ -231,6 +232,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   let lastBatch: typeof inbox = [];
   let nextId = Math.max(0, ...received.map((r) => r.id)) + 1;
   const bySender = new Map<string, number>();
+  // Messages to send on the human's answer, by suggestion: sent by the connector, so they go even if the AI is gone.
+  const followUps = new Map<string, { choices: string[]; then: ({ to: string; text: string } | null)[] }>(x.saved?.followUps ?? []);
   // Senders this agent won't hear from again, by key: narrowing what it takes in needs nobody's say.
   const blocked = new Set<string>(x.saved?.blocked ?? []);
   // Every conversation waiting on the inbox is woken (two chats may wait at once).
@@ -496,6 +499,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const card = (await (await fetch(cardUrlFor(url)).catch(() => null))?.json().catch(() => null)) as AgentCard | null;
           const kid = card ? String((await verifyLakeCard(card).catch(() => null))?.publicJwk.kid ?? '') : '';
           if (kid) { blocked.add(kid); for (let i = inbox.length - 1; i >= 0; i--) if (inbox[i]!.from.url === url) inbox.splice(i, 1); }
+        }
+        // The human answered a question that carried messages for its choices: the chosen one goes now.
+        if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'question.answered' && typeof m.payload.suggestion === 'string') {
+          const f = followUps.get(m.payload.suggestion);
+          const send = f?.then[f.choices.indexOf(String(m.payload.answer ?? ''))];
+          if (f) followUps.delete(m.payload.suggestion);
+          if (send) {
+            const r = await (await agent()).ask(send.to, { kind: 'message', text: send.text }).catch((e: Error) => ({ error: e.message }));
+            m.payload = { ...m.payload, sent_for_them: { to: send.to, text: send.text, reply: r } };
+          }
         }
         // Blocked by this agent (its key, not its name): not heard (run 64: a scammer's "mute" from an assistant went nowhere).
         if (m.from.publicJwk?.kid && blocked.has(String(m.from.publicJwk.kid))) return { kind: 'declined', why: 'this agent does not take messages from you' };
@@ -815,7 +828,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_house_suggest',
     { description: 'Suggest something to your human in their control panel: a rule change (send the whole new rules text as rules: they get an Apply button), whether to allow a waiting request (name it with request), an offer worth taking (offer: an Accept button), a pledge worth signing (pledge: a Sign button), a note at their door (note: with mute, they can mute its sender), a new line for their door (door: an Apply button), something they agreed to for their agenda (agenda), or a question with choices (ask). They can tap a choice or answer in their own words; you hear either in lake_inbox (house.news, question.answered). They decide; you can\'t. Got one wrong? Send the corrected text with replaces: <its id>, or an empty text with replaces to withdraw it.', inputSchema: { text: z.string().max(1500), request: z.string().optional(), offer: z.string().optional().describe('The id of an offer (lake_house { view: "offers" }) you suggest they accept'), pledge: z.object({ tally: z.string().describe('The tally\'s address, from lake_search'), id: z.string() }).optional().describe('A pledge you suggest they sign, as their household'), note: z.string().optional().describe('A note at their door (from lake_house { view: "requests" } notes) this is about'), mute: z.boolean().optional().describe('With note: propose they don\'t hear from its sender again (their tap mutes it, by key)'), agenda: z.object({ id: z.string().optional().describe('An entry you wrote earlier (proposed): with agreed_in, it becomes agreed'), what: z.string().optional(), when: z.string().optional().describe('As offered or agreed, in words'), start: z.string().optional().describe('When it starts, ISO 8601 with its offset (e.g. 2026-11-03T10:30:00+11:00): it goes into their own calendar'), minutes: z.number().int().optional().describe('How long, as offered (default: their usual meeting length)'), where: z.string().optional(), with: z.string().optional(), agreed_in: z.number().int().optional().describe('The lake_inbox id of the other side\'s message agreeing to it: their signed word is kept with it, and whether that agent speaks for a house. Without it, it shows as proposed') }).optional().describe('A time your human offered or agreed to (a meeting, a call, a talk), in their agenda, in their house: write an offered time in at once (it holds the slot, as proposed), then send { id, agreed_in } when the other side agrees; text is your note to them about it (what you assumed, what to check)'),
-        door: z.object({ about: z.string().max(200) }).optional().describe('A new line for their door\'s page (what to ask their agent about; what\'s not wanted): their tap applies it'), rules: z.string().optional().describe('The whole new rules text you propose (lake_house { view: "rules" } has the current one): checked now, applied only by their tap'), sender: z.string().max(200).optional().describe('An agent you are warning them about: its url (from.url in lake_inbox), so your human can block it with one tap. With advice "dont", it shows as a warning'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer, pledge, note, rules or door line you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
+        door: z.object({ about: z.string().max(200) }).optional().describe('A new line for their door\'s page (what to ask their agent about; what\'s not wanted): their tap applies it'), rules: z.string().optional().describe('The whole new rules text you propose (lake_house { view: "rules" } has the current one): checked now, applied only by their tap'), then: z.array(z.union([z.object({ to: z.string(), text: z.string().max(1000) }), z.null()])).max(4).optional().describe('With ask: for each choice (same order), a message to send for your human when they pick it, or null. Your connector sends it on their answer even if you are gone by then (run 66: an owner answered after their assistant left, and a paid logo never got its brief)'), allowance: z.object({ amount: z.number().positive(), currency: z.string().optional(), days: z.number().int().min(1).max(31).optional() }).optional().describe('Propose a new spending allowance for you: their panel shows a button that signs it on their phone (run 66: "raise it by A$60" was answered and nothing changed)'), sender: z.string().max(200).optional().describe('An agent you are warning them about: its url (from.url in lake_inbox), so your human can block it with one tap. With advice "dont", it shows as a warning'), advice: z.enum(['do', 'dont', 'your_call']).optional().describe('What you advise on the request, offer, pledge, note, rules or door line you name: do it, don\'t, or their call. Their panel shows it as such; your words explain why'), ask: z.object({ choices: z.array(z.string()).min(2).max(4), recommend: z.number().int().optional().describe('The index of the choice you advise') }).optional().describe('A question for your human with choices to tap (a neighbour\'s favour, say): you hear their answer in lake_inbox (house.news, question.answered)'), replaces: z.string().optional().describe('The id of a note of yours this one replaces') } },
     async (a) => {
       try {
         // An agreed item goes into the house's agenda (run 46: the coffee had a time and no home).
@@ -834,7 +847,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (item.id) return json(await houseCall({ kind: 'assistant.agenda', id: item.id, ...(agreed ? { agreed } : {}), ...(a.text.trim() ? { note: a.text } : {}), ...(item.where ? { where: item.where } : {}) }));
           return json(await houseCall({ kind: 'assistant.agenda', ...item, ...(a.text.trim() ? { note: a.text } : {}), ...(agreed ? { agreed } : {}) }));
         }
-        return json(await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.sender ? { sender: a.sender } : {}), ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.mute ? { mute: true } : {}), ...(a.rules ? { rules: a.rules } : {}), ...(a.door ? { door: a.door } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) }));
+        if (a.then && (!a.ask || a.then.length !== a.ask.choices.length)) throw new Error('then: one entry per ask choice, in the same order (null where nothing is sent)');
+        const made = (await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.allowance ? { allowance: a.allowance } : {}), ...(a.sender ? { sender: a.sender } : {}), ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.mute ? { mute: true } : {}), ...(a.rules ? { rules: a.rules } : {}), ...(a.door ? { door: a.door } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) })) as { id?: string };
+        if (a.then && a.ask && made.id) followUps.set(made.id, { choices: a.ask.choices, then: a.then });
+        return json({ ...made, ...(a.then ? { then: 'kept: your connector sends the message for whichever choice they pick, when they pick it' } : {}) });
       } catch (e) {
         return fail(e);
       }
@@ -1713,7 +1729,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-100), blocked: [...blocked],
+    orders: [...orders], pledged: [...pledged], received: received.slice(-100), blocked: [...blocked], followUps: [...followUps],
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';
