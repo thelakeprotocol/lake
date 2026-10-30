@@ -580,6 +580,8 @@ describe('the owner', () => {
     // And its notes don't vanish: they were seen and set aside (run 62: "no such note from you" after a mute).
     expect((await ask(houses.strict!, neighbour, { kind: 'status', note: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'seen and set aside by the owner' });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Hello again?' })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });
+    // Nor its knocks (run 66: a muted sender's knock was still weighed).
+    expect((await knock(houses.strict!, neighbour, { ...presets().gp!, fields: ['medications'] })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });
     // A newcomer's hello is answered with what the door takes, not rejected and not delivered.
     const notesBefore = (await ownerCall({ kind: 'list' })).notes.length;
     expect((await ask(houses.strict!, helper, { kind: 'hello' })).reply).toMatchObject({ kind: 'door', example: { kind: 'note' } });

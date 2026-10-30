@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { generateIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
+import { ask, makeVisitor } from '../packages/visitor/src/knock.js';
 
 // The owner's panel as a person uses it, on a phone, against a real house: pairing, the door, the owner's own AI and its
 // spending money, notes arriving live, rules, More, signing out, long lists, a slow or dropped connection. Every step
@@ -96,6 +97,11 @@ afterAll(async () => {
 });
 
 describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
+  it('tells a visitor at once that nobody has claimed the house yet (run 66: notes waited for no one)', async () => {
+    const early = await makeVisitor(await generateIdentity(), 'early.example');
+    expect((await ask(house, early, { kind: 'note', text: 'Hello, anyone home?' })).reply).toMatchObject({ kind: 'noted', says: expect.stringMatching(/nobody has claimed this house/) });
+  });
+
   it('pairs a fresh device: the house name, one button, then Home', async () => {
     await page.goto(`${house}/owner/`);
     // Not claimed yet: what it is, and the one thing to do.

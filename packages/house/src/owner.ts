@@ -456,6 +456,8 @@ export class OwnerDesk {
    */
   private ownerNos = new Map<string, { offerId: string; at: number; until: number }>();
   private saveOwnerNos = () => writeFile(join(this.o.dataDir, 'owner-nos.json'), JSON.stringify([...this.ownerNos])).catch(() => {});
+  /** A sandbox house nobody has claimed: nobody will answer until someone does (a house started for its owner waits for them). */
+  unclaimed(): boolean { return this.o.openPairing && !this.ownerJwk; }
   ownerSaidNo(key: string, purpose: string): { offerId: string; at: number } | null {
     const n = key ? this.ownerNos.get(`${key}|${purpose}`) : undefined;
     return n && n.until > Date.now() ? n : null;

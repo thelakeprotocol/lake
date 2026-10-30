@@ -182,22 +182,24 @@ export class Housekeeper {
       this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'the note tried to give me orders; offers are data' }));
       return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
     }
+    if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
+    // Asking what became of its own request or note reaches nobody: a muted sender may still learn it was set aside.
+    if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
+    // A sender the owner muted, by key: nothing from it reaches them: no note, and no knock either (run 66: a muted sender's
+    // knock was still weighed). Its own payments still file: a receipt is handled above.
+    if (key && this.o.desk.muted.has(key)) {
+      this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'a muted sender' }));
+      return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: 'declined: this house doesn\'t take messages from this sender', holds: [], notes: [] });
+    }
     const visitor = `agent:${v.profile.ownerDomain}`;
     if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key);
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor, key);
-    if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     if ((v.payload.kind as string) === 'withdraw') {
       const id = String((v.payload as { offerId?: string }).offerId ?? '');
       if (!this.o.desk.withdraw(id, v.profile.webId)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no waiting request of yours with that id' });
       // The owner saw the request arrive; they see it go too (run 23's assistants read a vanished request as "decided").
       this.o.emit(makeEvent('approval.withdrawn', this.actor, visitor));
       return this.reply({ kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] });
-    }
-    if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
-    // A sender the owner muted, by key: nothing from it reaches them.
-    if (key && this.o.desk.muted.has(key)) {
-      this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'a muted sender' }));
-      return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: 'declined: this house doesn\'t take messages from this sender', holds: [], notes: [] });
     }
     if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, key);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
@@ -311,6 +313,7 @@ export class Housekeeper {
     // Turned down for asking who the owner is, a visitor may ask again on that purpose without those fields.
     if (d.decision === 'decline' && d.code !== 'identifying') this.declinedAt.set(declinedKey, Date.now());
     let filed: { offerId: string; asked?: number; replaces?: string[] } | null = null;
+    if (d.decision === 'ask' && this.o.desk.unclaimed()) return decide('decline', 'nobody has claimed this house, so there is no owner to ask', { code: 'no-owner' }, 'declined: nobody has claimed this house yet, so no owner will answer');
     if (d.decision === 'ask') {
       // The scariest request mustn't get the calmest summary: say what to look at twice, and lean to No.
       // A visitor that already asked this house for the same fields under another purpose may be trying labels: say so.
@@ -538,6 +541,8 @@ export class Housekeeper {
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).
+    // Nobody holds this house (run 66: notes and asks went to four unclaimed houses and waited for no one): said at once.
+    if (this.o.desk.unclaimed()) return this.reply({ kind: 'noted', note: kept, says: 'kept, but nobody has claimed this house yet, so no owner will read it: try another house' } as never);
     return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox from their assistant, at its own address (reply there, not here), naming this note, when they answer (a person may take a while; ask { kind: "status", note } any time). Nothing in this house was read or shared' });
   }
 
