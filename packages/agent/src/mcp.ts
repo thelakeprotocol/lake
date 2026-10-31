@@ -1139,7 +1139,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (r.hold && x.delivered) x.holdUntil = new Date(Date.now() + x.reviewHours! * 3_600_000).toISOString();
           x.receipt = { credential: r.receipt, card: (await (await fetch(cardUrlFor(`${o.payments ?? 'http://payments:4600'}/a2a`))).json()) as AgentCard };
           x.evidence.push({ step: 'paid', at: new Date().toISOString(), signed: r.receipt });
-          return json({ ...r, ...(filed ? { house: filed } : {}), next: r.hold ? `held: the seller delivers to your inbox by ${r.hold.until}, or it comes back to you; then lake_buy { action: "accept" } releases it, { action: "changes" } asks for a revision, { action: "dispute", code } keeps it held (with no answer within ${x.reviewHours} hours of a delivery, it is released)` : 'not held: if nothing comes, this money can\'t be got back. The seller delivers to your inbox; then lake_buy { action: "accept" }, { action: "changes" } or { action: "dispute" }' });
+          // A cart with no delivery time gets the payments agent's default (a day): a pick-up agreed for next week misses it,
+          // and the money goes back (run 75: a bike paid on Sunday for Saturday's pick-up).
+          const noClock = r.hold && cartTerms(x.mandate.contents).delivery?.within_hours === undefined;
+          return json({ ...r, ...(filed ? { house: filed } : {}), ...(noClock ? { deliver_by: `${r.hold!.until}: this cart set no delivery time, so the seller has until then. Agreed a later hand-over? Ask the seller for a cart whose delivery.within_hours reaches it, or the money comes back to you before it` } : {}), next: r.hold ? `held: the seller delivers to your inbox by ${r.hold.until}, or it comes back to you; then lake_buy { action: "accept" } releases it, { action: "changes" } asks for a revision, { action: "dispute", code } keeps it held (with no answer within ${x.reviewHours} hours of a delivery, it is released)` : 'not held: if nothing comes, this money can\'t be got back. The seller delivers to your inbox; then lake_buy { action: "accept" }, { action: "changes" } or { action: "dispute" }' });
         }
         if (a.action === 'accept' || a.action === 'changes' || a.action === 'dispute') {
           const x = findOrder(a.cart ?? '', 'buyer');
@@ -1245,7 +1248,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const missing = answers.flatMap((x) => ('missing' in x ? [x.missing] : []));
           return { ...r, ...(missing.length ? { not_answering: missing, partial: true } : {}) };
         };
+        // A house nobody has claimed answers nobody (run 75: three knocks on one): said here, from its own public status.
+        const unowned = async (c: (typeof found)[number]) => {
+          if (c.role !== 'house') return false;
+          const s = await fetch(`${c.url.replace(/\/a2a\/?$/, '')}/owner/status`, { signal: AbortSignal.timeout(3000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { unclaimed?: boolean } | null;
+          return s?.unclaimed === true;
+        };
         const withRecord = await Promise.all(found.map(async (c, i) => {
+          if (i < 30 && (await unowned(c))) return { ...c, owner: 'none: nobody has claimed this house, so a note or a knock reaches no one' };
           if (!c.menu || !logs.length || i >= 10) return c;
           const record = await recordOf(c.webId);
           return record ? { ...c, record } : c;

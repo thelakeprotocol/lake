@@ -678,7 +678,7 @@ export class OwnerDesk {
       if (!this.ownerJwk || !this.feedKey || String(req.query.key ?? '') !== this.feedKey) return void res.status(404).send('no such calendar');
       res.type('text/calendar').send(agendaIcs(this.agenda, this.o.webId));
     });
-    r.get('/status', (_req, res) => void res.json({ claimed: !!this.ownerJwk, until: this.leaseUntil()?.toISOString() ?? null, leaseHours: this.o.leaseHours ?? null }));
+    r.get('/status', (_req, res) => void res.json({ claimed: !!this.ownerJwk, ...(this.unclaimed() ? { unclaimed: true } : {}), until: this.leaseUntil()?.toISOString() ?? null, leaseHours: this.o.leaseHours ?? null }));
 
     // The panel's live stream: opened with a token from a signed panel.stream (EventSource can't sign), good for a minute.
     r.get('/stream', (req, res) => {

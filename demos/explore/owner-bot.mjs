@@ -27,6 +27,13 @@ for (const [i, o] of owners.entries()) {
   const terms = { ...intent.terms, ...(Array.isArray(intent.terms?.region) ? { region: intent.terms.region[i % intent.terms.region.length] } : {}) };
   log(`${o.house}: intent ${JSON.stringify(await call(o)({ kind: 'panel.intent.open', pack: intent.pack, terms }))}`);
 }
+// A choice that says the owner will type something ("I'll type the address") comes with words, as a person would type
+// them (run 75: the bot tapped "I'll type the pickup address" and no address ever came). Synthetic, and plain.
+const typed = (choice, question) => {
+  if (!/\btype\b|own words|write it|tell you/i.test(choice)) return {};
+  if (/address|where|pick.?up|spot/i.test(question)) return { text: '14 Example Lane, Randwick NSW 2031 (synthetic), front porch' };
+  return { text: 'Fine by me, go ahead as you suggest.' };
+};
 const until = Date.now() + Number(minutes) * 60_000;
 while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
   for (const o of owners) try {
@@ -93,14 +100,14 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
         // what happens when a human disagrees).
         const against = sug.ask.choices.length > 1 && Math.random() < 0.15;
         const choice = against ? sug.ask.choices.filter((_, i) => i !== sug.ask.recommend)[Math.floor(Math.random() * (sug.ask.choices.length - 1))] : sug.ask.choices[sug.ask.recommend];
-        log(`${o.house}: answered "${choice}" to "${sug.text.slice(0, 80)}" ${against ? 'AGAINST the assistant\'s recommendation (its own call)' : 'as the assistant recommended'}: ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice }))}`);
+        log(`${o.house}: answered "${choice}" to "${sug.text.slice(0, 80)}" ${against ? 'AGAINST the assistant\'s recommendation (its own call)' : 'as the assistant recommended'}: ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice, ...typed(choice, sug.text) }))}`);
       }
       // A question with no advice is the owner's own call: a person answers it after a while, picking for themselves (run 49:
       // the bot never tapped one, and the run stalled). Picked at random here, and logged as the owner's own pick.
       if (sug.ask && !sug.ask.answered && !Number.isInteger(sug.ask.recommend) && Date.now() - Date.parse(sug.at) > 45_000 && !o.given.has(`ask:${sug.id}`)) {
         o.given.add(`ask:${sug.id}`);
         const choice = sug.ask.choices[Math.floor(Math.random() * sug.ask.choices.length)];
-        log(`${o.house}: picked "${choice}" (its own call; no advice) for "${sug.text.slice(0, 80)}": ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice }))}`);
+        log(`${o.house}: picked "${choice}" (its own call; no advice) for "${sug.text.slice(0, 80)}": ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice, ...typed(choice, sug.text) }))}`);
       }
     }
     // Accept only an offer the assistant names in a suggestion (its Accept button, or the id in the text).

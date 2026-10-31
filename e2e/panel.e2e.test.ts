@@ -100,6 +100,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('tells a visitor at once that nobody has claimed the house yet (run 66: notes waited for no one)', async () => {
     const early = await makeVisitor(await generateIdentity(), 'early.example');
     expect((await ask(house, early, { kind: 'note', text: 'Hello, anyone home?' })).reply).toMatchObject({ kind: 'noted', delivered: false, code: 'no-owner', says: expect.stringMatching(/nobody has claimed this house/) });
+    // And says so before anyone writes, in its public status, for search to show (run 75: three knocks on such a house).
+    expect(await (await fetch(`${house}/owner/status`)).json()).toMatchObject({ claimed: false, unclaimed: true });
   });
 
   it('pairs a fresh device: the house name, one button, then Home', async () => {
