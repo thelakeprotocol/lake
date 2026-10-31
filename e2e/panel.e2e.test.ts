@@ -79,7 +79,7 @@ beforeAll(async () => {
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
     '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/);
   // The connector, with sign-in on.
-  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000' });
+  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   page = await ctx.newPage();
@@ -468,6 +468,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     let still: unknown = [];
     for (let i = 0; i < 10 && still; i++) still = (await one.call('lake_inbox', { wait_seconds: 1 })).your_human_has_not_answered;
     expect(still).toBeUndefined();
+    // A need left standing outlives its assistant: someone who offers it later reaches the owner's phone (run 76).
+    await one.call('lake_set_tags', { tags: ['seeking:lift-to-cool-room'] });
+    await page.waitForTimeout(3500);
+    await shopper.callTool({ name: 'lake_set_tags', arguments: { tags: ['offering:lift-to-cool-room'] } });
+    await tab('Home');
+    const match = page.locator('li.item', { hasText: 'offering:lift-to-cool-room' });
+    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); await page.locator('.more-items').first().click({ timeout: 1000 }).catch(() => {}); }
+    expect(await match.count()).toBeGreaterThan(0);
+    await one.call('lake_set_tags', { tags: [] });
     // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).
     const shopperUrl = shopperUrl0;
     await one.call('lake_house_suggest', { text: `${shopperName} keeps sending "fees": looks like a scam.`, advice: 'dont', sender: shopperUrl });
