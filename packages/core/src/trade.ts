@@ -90,7 +90,9 @@ export function deliveryProblems(d: unknown): string[] {
   const out: string[] = [];
   const int = (v: unknown, lo: number, hi: number) => v === undefined || (Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi);
   for (const k of Object.keys(t)) if (!['within_hours', 'review_hours', 'revisions', 'words', 'lines'].includes(k)) out.push(`delivery: no term called ${k}`);
-  if (!int(t.within_hours, 1, 168)) out.push('delivery.within_hours: 1 to 168 hours');
+  // Up to 30 days: a cake for next Saturday is paid now and held until then (run 71: a 7-day ceiling and the 24-hour
+  // default had the baker file a written confirmation as its delivery).
+  if (!int(t.within_hours, 1, 720)) out.push('delivery.within_hours: 1 to 720 hours (30 days)');
   if (!int(t.review_hours, 1, 168)) out.push('delivery.review_hours: 1 to 168 hours');
   if (!int(t.revisions, 0, 5)) out.push('delivery.revisions: 0 to 5');
   for (const [k, hi] of [['words', 10_000], ['lines', 1_000]] as const) {

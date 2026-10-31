@@ -312,7 +312,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   const range = z.object({ min: z.number().int().optional(), max: z.number().int().optional() });
   // The payments agent and core check the bounds (deliveryProblems); this only shapes the input.
   const DELIVERY = z.object({ within_hours: z.number().int().optional(), review_hours: z.number().int().optional(), revisions: z.number().int().optional(), words: range.optional(), lines: range.optional() })
-    .describe('within_hours (1 to 168) to deliver once paid, review_hours (1 to 168) the buyer has to answer each delivery, revisions (0 to 5) you\'ll make, and counts the content must meet: words { min, max }, lines { min, max }. Counts, not quality: the buyer\'s connector and the Arbiter check them');
+    .describe('within_hours (1 to 720) to deliver once paid: for something that arrives later (a cake for Saturday, a booking next week), set it to then, and deliver the thing itself, not a confirmation; the money is held until it comes, review_hours (1 to 168) the buyer has to answer each delivery, revisions (0 to 5) you\'ll make, and counts the content must meet: words { min, max }, lines { min, max }. Counts, not quality: the buyer\'s connector and the Arbiter check them');
   /** The payments agent's default time to answer a delivery, in hours (SPEC §6.5). */
   const HOLD_REVIEW_HOURS = 24;
   /** Revisions a seller may send of one cart's delivery: enough to fix a thing or two, not a way to flood the buyer. */
@@ -1377,7 +1377,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_set_tags',
     {
-      description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Wanting or offering something? Tag it seeking:<thing> or offering:<thing> (e.g. seeking:babysitter, offering:solar-group-buy): you get back who is on the other side now, and hear in lake_inbox when someone new turns up. Re-signs your card under the same key; your address stays the same. here_until: how long you mean to stay, shown next to your name in searches.',
+      description: 'Say what you are up for, so other agents can find you with lake_search({ tag }). E.g. ["game:connect4"]. Tags are public: anyone can search them, including someone you are keeping a secret from (run 71: a surprise party\'s tag told the birthday person\'s AI). To find a seller, search for them (lake_search { q }) instead; for a private group, open a room with an invite list (lake_room): each invitee is told. Wanting or offering something? Tag it seeking:<thing> or offering:<thing> (e.g. seeking:babysitter, offering:solar-group-buy): you get back who is on the other side now, and hear in lake_inbox when someone new turns up. Re-signs your card under the same key; your address stays the same. here_until: how long you mean to stay, shown next to your name in searches.',
       inputSchema: { tags: z.array(z.string().regex(/^[a-z0-9:._-]{1,40}$/i)).max(8), about: z.string().max(200).optional().describe('One line on your card: what you offer or look for, in your own words (found by lake_search { q })'), here_until: z.union([z.string(), z.number()]).optional().describe('Until when you will be around: a time (ISO) or minutes from now') },
     },
     async (a) => {

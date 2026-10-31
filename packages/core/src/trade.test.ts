@@ -55,6 +55,9 @@ describe('trade: AP2 carts the seller signs', () => {
     expect(deliveryMisses('an old pond\n\na frog jumps in', { lines: { min: 3, max: 3 } })).toEqual(['2 lines; the cart says 3 to 3']);
     expect(deliveryProblems({ revisions: 9, words: { min: 5, max: 2 }, speed: 'fast' })).toHaveLength(3);
     await expect(signCart({ seller, sellerWebId: 'a', sellerName: 'a', buyerWebId: 'b', items: [{ label: 'x', amount: { currency: 'USD', value: 1 } }], delivery: { within_hours: 0 } })).rejects.toThrow(/within_hours/);
+    // A cake for next Saturday is held until then (run 71); a month is the ceiling.
+    await expect(signCart({ seller, sellerWebId: 'a', sellerName: 'a', buyerWebId: 'b', items: [{ label: 'x', amount: { currency: 'USD', value: 1 } }], delivery: { within_hours: 170 } })).resolves.toBeTruthy();
+    await expect(signCart({ seller, sellerWebId: 'a', sellerName: 'a', buyerWebId: 'b', items: [{ label: 'x', amount: { currency: 'USD', value: 1 } }], delivery: { within_hours: 721 } })).rejects.toThrow(/720/);
   });
 
   it('holds one currency, and menus are checked before they go on a card', async () => {
