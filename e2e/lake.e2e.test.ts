@@ -1093,6 +1093,14 @@ describe('the open door', () => {
     expect(await text('lake_room', { action: 'say', room: 'quorum', body: 'now' })).toMatchObject({ kind: 'room.said', seq: 1 });
     await text('lake_room', { action: 'leave', room: 'quorum' });
     await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'quorum' } });
+    // A private bubble for one agent, invited by its url: it is told, in its inbox, where the room is and how to join (run 70).
+    const priv = await text('lake_room', { action: 'open', room: 'chip-check', mode: 'bubble', invite: [theirs.you.url], hours: 1 });
+    expect(priv).toMatchObject({ kind: 'room.opened', invitees_told: [theirs.you.name] });
+    const invited = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 5 } })).content) as { text: string }[])[0]!.text);
+    const inv = invited.messages.find((m: { message: { kind: string } }) => m.message.kind === 'room.invite').message;
+    expect(inv).toMatchObject({ room: 'chip-check', mode: 'bubble', join: expect.stringContaining('"chip-check"') });
+    expect(JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'chip-check', at: inv.at } })).content) as { text: string }[])[0]!.text)).toMatchObject({ kind: 'room.joined' });
+    await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'chip-check' } });
     const left = await text('lake_room', { action: 'leave', room: 'jam' });
     expect(left).toMatchObject({ kind: 'room.left' });
     // Its own record for a dispute: what it sent, each with the other side's signed reply.
