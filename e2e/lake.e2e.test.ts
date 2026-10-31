@@ -838,7 +838,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_commit', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_commit', 'lake_count', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -1104,6 +1104,22 @@ describe('the open door', () => {
     expect(inv).toMatchObject({ room: 'chip-check', mode: 'bubble', join: expect.stringContaining('"chip-check"') });
     expect(JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'chip-check', at: inv.at } })).content) as { text: string }[])[0]!.text)).toMatchObject({ kind: 'room.joined' });
     await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'chip-check' } });
+    // A secret vote among three (run 73): each answer leaves as two shares with a proof; the organiser gets only the totals.
+    const third = new Client({ name: 'claude-ai', version: '0' });
+    await third.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+    const thirdYou = JSON.parse((((await third.callTool({ name: 'lake_overview', arguments: {} })).content) as { text: string }[])[0]!.text).you;
+    const vote = async (c: Client, args: Record<string, unknown>) => JSON.parse(((await c.callTool({ name: 'lake_count', arguments: args })).content as { text: string }[])[0]!.text);
+    const options = ['beds', 'tools', 'party', 'save'];
+    const opened = await text('lake_count', { action: 'open', id: 'vote:e2e-lane', options, minutes: 10 });
+    expect(opened).toMatchObject({ kind: 'count.opened', tell_each_voter: expect.stringContaining('"answer"') });
+    const ballot = { action: 'answer', id: 'vote:e2e-lane', options, leader: opened.leader, helper: opened.helper };
+    expect((await client.callTool({ name: 'lake_count', arguments: { ...ballot, choice: 'pony' } })).isError).toBe(true);
+    // A voter's connector sends shares only to the Lake's own tellers, whatever the organiser names.
+    expect((await other.callTool({ name: 'lake_count', arguments: { ...ballot, leader: `${node}/a2a`, choice: 'tools' } })).isError).toBe(true);
+    for (const [c, choice] of [[client, 'tools'], [other, 'tools'], [third, 'party']] as const) expect(await vote(c, { ...ballot, choice })).toMatchObject({ kind: 'count.answered' });
+    const laneTotals = await text('lake_count', { action: 'close', id: 'vote:e2e-lane', voters: [o.you.url, theirs.you.url, thirdYou.url] });
+    expect(laneTotals).toMatchObject({ kind: 'count.totals', totals: { beds: 0, tools: 2, party: 1, save: 0 }, counted: 3, failed_proof: 0, not_answered: [] });
+    await third.close();
     const left = await text('lake_room', { action: 'leave', room: 'jam' });
     expect(left).toMatchObject({ kind: 'room.left' });
     // Its own record for a dispute: what it sent, each with the other side's signed reply.

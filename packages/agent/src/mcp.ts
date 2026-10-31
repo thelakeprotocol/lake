@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
 import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
-import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -1540,6 +1540,74 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const checked = await verifyEvidence(a.evidence, (await agent()).webId);
       const credential = typeof a.evidence.credential === 'string' ? a.evidence.credential : undefined;
       return json(credential && checked.verified ? { ...checked, on_record: await onRecord(credential) } : checked);
+    },
+  );
+
+  // Counts this agent opened: their tellers and options, to close them (run 73: four households ran a secret vote of
+  // their own invention, which couldn't prove a ballot was one vote, and an AI said its human's vote in a plain note).
+  const countsOpened = new Map<string, { leader: { url: string; domain: string }; helper: { url: string; domain: string }; options: string[] }>();
+  server.registerTool(
+    'lake_count',
+    {
+      description: 'A secret count: a vote, a poll, "how many of us want X". Nobody can read a single answer, the organiser included: each answer leaves as two unreadable shares, with a proof that it is exactly one of the options, one share for each of the Lake\'s two tellers (IETF DAP with Prio3, the way studies count); only the totals come out, from at least 3 answers. open { id, options, minutes } (the organiser) gives the line each voter runs; answer { id, options, choice, leader, helper } (each voter, once; your choice goes only as shares); close { id, voters } (the organiser, when everyone has answered or the time is up): the totals over the voters you list (webIds or urls), and which of them answered. Never say anyone\'s choice in a message: the count is the only place it goes.',
+      inputSchema: {
+        action: z.enum(['open', 'answer', 'close']),
+        id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,119}$/).describe('The count\'s id, e.g. vote:rosemary-lane'),
+        options: z.array(z.string().max(100)).min(2).max(16).optional().describe('open and answer: the choices, in the same order for everyone'),
+        minutes: z.number().min(5).max(4320).optional().describe('open: how long voters have (default 60)'),
+        choice: z.string().optional().describe('answer: your human\'s choice, one of the options'),
+        leader: z.string().optional().describe('answer: the Leader teller\'s address, from the organiser'),
+        helper: z.string().optional().describe('answer: the Helper teller\'s address, from the organiser'),
+        voters: z.array(z.string()).optional().describe('close: who may vote (webIds or urls); answers from anyone else are left out'),
+      },
+    },
+    async (a) => {
+      try {
+        const me = await agent();
+        // Only the Lakes' own tellers (registered specialists): an organiser can't name two agents of its own and read the shares.
+        const tellers = (await me.find({ skill: 'teller' })).filter((t) => t.role === 'specialist');
+        const bare = (u: string) => u.replace(/\/+$/, '').replace(/\/a2a$/, '');
+        if (a.action === 'open') {
+          if (!a.options) throw new Error('options: the choices, in order');
+          const own = tellers.filter((t) => !t.lake);
+          const [leader, helper] = [own[0], own.find((t) => t.domain !== own[0]?.domain)];
+          if (!leader || !helper) throw new Error('this Lake runs no pair of tellers');
+          const deadline = new Date(Date.now() + (a.minutes ?? 60) * 60_000).toISOString();
+          const r = await me.ask(leader.url, { kind: 'count.open', id: a.id, length: a.options.length, min: 3, deadline, helper: { url: helper.url, domain: helper.domain } });
+          if (r.kind !== 'count.opened') throw new Error(`the Leader would not open it: ${((r.problems as string[] | undefined) ?? [String(r.kind)]).join('; ')}`);
+          countsOpened.set(a.id, { leader: { url: leader.url, domain: leader.domain }, helper: { url: helper.url, domain: helper.domain }, options: a.options });
+          const line = `lake_count { action: "answer", id: "${a.id}", options: ${JSON.stringify(a.options)}, leader: "${leader.url}", helper: "${helper.url}", choice: "<one of the options>" }`;
+          return json({ kind: 'count.opened', id: a.id, options: a.options, deadline, leader: leader.url, helper: helper.url, tell_each_voter: line, then: 'when all have answered (or at the deadline): lake_count { action: "close", id, voters: [their webIds or urls] }' });
+        }
+        if (a.action === 'answer') {
+          if (!a.options || a.choice === undefined || !a.leader || !a.helper) throw new Error('answer: id, options, choice, leader and helper, as the organiser gave them');
+          const cell = a.options.indexOf(a.choice);
+          if (cell < 0) throw new Error(`choice: one of ${a.options.map((x) => JSON.stringify(x)).join(', ')}`);
+          const named = [a.leader, a.helper].map((u) => tellers.find((t) => bare(t.url) === bare(u)));
+          if (!named[0] || !named[1]) throw new Error('leader and helper must be tellers the Lake runs (lake_search { skill: "teller" }): your answer goes nowhere else');
+          if (named[0].domain === named[1].domain) throw new Error('leader and helper must be two different tellers');
+          const report = await shardAnswer(a.options.length, cell);
+          const sent = await Promise.all(named.map((t, i) => me.ask(t!.url, { kind: 'count.report', id: a.id, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] })));
+          const refused = sent.find((r) => r.kind !== 'count.received');
+          if (refused) throw new Error(`a teller refused it: ${((refused.problems as string[] | undefined) ?? [String(refused.kind)]).join('; ')}`);
+          return json({ kind: 'count.answered', id: a.id, note: 'sent as two shares, one to each teller: neither can read it, and nobody else ever sees it. Tell the organiser you have answered, never what.' });
+        }
+        const c = countsOpened.get(a.id);
+        if (!c) throw new Error(`you didn't open a count called "${a.id}" (only its organiser closes it)`);
+        const reported = ((await me.ask(c.leader.url, { kind: 'count.members', id: a.id })).members as string[] | undefined) ?? [];
+        const cards = a.voters ? await me.find().catch(() => []) : [];
+        const allowed = a.voters?.map((v) => cards.find((x) => x.webId === v || bare(x.url) === bare(v))?.webId ?? v);
+        const members = reported.filter((w) => !allowed || allowed.includes(w)).sort();
+        const lead = await me.ask(c.leader.url, { kind: 'count.close', id: a.id, members });
+        if (lead.kind !== 'count.share') throw new Error(`the Leader: ${((lead.problems as string[] | undefined) ?? [String(lead.kind)]).join('; ')}`);
+        const help = await me.ask(c.helper.url, { kind: 'count.collect', id: a.id });
+        if (help.kind !== 'count.share') throw new Error(`the Helper: ${((help.problems as string[] | undefined) ?? [String(help.kind)]).join('; ')}`);
+        const cells = unshardCounts(c.options.length, [lead.share, help.share], Number(lead.count));
+        const nameOf = (w: string) => cards.find((x) => x.webId === w)?.name ?? w;
+        return json({ kind: 'count.totals', id: a.id, totals: Object.fromEntries(c.options.map((o, i) => [o, cells[i]])), counted: lead.count, failed_proof: lead.rejected, answered: members.map(nameOf), ...(allowed ? { not_answered: allowed.filter((w) => !members.includes(w)).map(nameOf) } : {}), ...(reported.length > members.length ? { left_out: `${reported.length - members.length} answer(s) from outside the voters you listed` } : {}) });
+      } catch (e) {
+        return fail(e);
+      }
     },
   );
 
