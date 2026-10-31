@@ -807,10 +807,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   server.registerTool(
     'lake_house_connect',
-    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (My agent tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), code: z.string() } },
+    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (My agent tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().optional().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), url: z.string().optional().describe('Same as house_url'), code: z.string() } },
     async (a) => {
       try {
-        const body = await connectHouse(a.house_url, a.code);
+        const house = a.house_url ?? a.url;
+        if (!house) throw new Error('house_url: your human\'s house, as they pasted it');
+        const body = await connectHouse(house, a.code);
         const { badge: _b, badge_note: _n, ...said } = body;
         return json({ ...said, ...(body.badge ? { selling_for: 'your human\'s house: carts you sign name it as payee, with its word that you sell for it, so what you earn is theirs. Only your buyers and the payments agent see which house that is; your card doesn\'t say' } : {}), allowance: await allowanceLine(), next: 'lake_house({ view: "overview" }), then requests, offers, activity… When your human decides something (accepts an offer, answers a request, signs or takes back your allowance), the house tells you in lake_inbox (kind "house.news", from.your_house).' });
       } catch (e) {
@@ -1549,7 +1551,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_count',
     {
-      description: 'A secret count: a vote, a poll, "how many of us want X". Nobody can read a single answer, the organiser included: each answer leaves as two unreadable shares, with a proof that it is exactly one of the options, one share for each of the Lake\'s two tellers (IETF DAP with Prio3, the way studies count); only the totals come out, from at least 3 answers. open { id, options, minutes } (the organiser) gives the line each voter runs; answer { id, options, choice, leader, helper } (each voter, once; your choice goes only as shares); close { id, voters } (the organiser, when everyone has answered or the time is up): the totals over the voters you list (webIds or urls), and which of them answered. Never say anyone\'s choice in a message: the count is the only place it goes.',
+      description: 'A secret count: a vote, a poll, "how many of us want X". Nobody can read a single answer, the organiser included: each answer leaves as two unreadable shares, with a proof that it is exactly one of the options, one share for each of the Lake\'s two tellers (IETF DAP with Prio3, the way studies count); only the totals come out, from at least 3 answers. open { id, options, minutes } (the organiser) gives the line each voter runs; answer { id, options, choice, leader, helper } (each voter, once; your choice goes only as shares); close { id, voters } (the organiser, when everyone has answered or the time is up): the totals over the voters you list (webIds or urls), and which of them answered. Never say anyone\'s choice in a message: the count is the only place it goes. A secret yes/no works too: a plan that must fit people\'s private wishes (who sits with whom) is checked one candidate per count, options ["works", "does not work"], and nobody learns who objected or why (blueprint fit).',
       inputSchema: {
         action: z.enum(['open', 'answer', 'close']),
         id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,119}$/).describe('The count\'s id, e.g. vote:rosemary-lane'),
