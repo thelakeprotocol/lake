@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import type { AgentCard, LakeData } from '@thelakeprotocol/core';
+import { canonicalize, type AgentCard, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -87,6 +88,19 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     if (r.mode !== 'room') return;
     r.said.push({ seq: r.said.length + 1, at: new Date().toISOString(), from: 'room', body, lobby: !r.startedAt && !!r.startWith && body.event !== 'started' });
     wake(r.id);
+  };
+  // A hash chain over everything said (SPEC §11.6), so members who compare the head they read can tell whether the rooms
+  // agent dropped, changed or reordered anything for one of them (run 72: a time bank's ledger lived in a room, and
+  // nothing showed a member that the copy they read was the copy the others read). Computed as read, kept per length.
+  const chains = new WeakMap<Room, string[]>();
+  const chainOf = (r: Room) => {
+    const c = chains.get(r) ?? [];
+    for (let i = c.length; i < r.said.length; i++) {
+      const { seq, at, from, body } = r.said[i]!;
+      c.push(createHash('sha256').update(`${c[i - 1] ?? ''}|${canonicalize({ seq, at, from, body: body ?? null })}`).digest('hex'));
+    }
+    chains.set(r, c);
+    return c;
   };
   const view = (r: Room) => {
     const waitingFor = r.startWith && !started(r) ? Math.max(0, r.startWith - present(r)) : 0;
@@ -199,9 +213,10 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
     const stillWaiting = r.startWith && !started(r) ? Math.max(0, r.startWith - present(r)) : 0;
     const page = r.said.filter((x) => x.seq > after).slice(0, 200);
     const withSigned = p.signed === true && r.mode === 'room';
-    const messages = page.map(({ signed, ...m }) => (withSigned && signed ? { ...m, signed } : m));
+    const chain = chainOf(r);
+    const messages = page.map(({ signed, ...m }) => ({ ...m, chain: chain[m.seq - 1], ...(withSigned && signed ? { signed } : {}) }));
     const cards = withSigned ? Object.fromEntries([...new Set(page.map((m) => m.signed?.card).filter((k): k is string => !!k))].map((k) => [k, r.cards?.[k]])) : undefined;
-    return { kind: 'room.messages', id, messages, ...(cards ? { cards, note: 'each message\'s signed: { card: <key in cards>, envelope }; to check or forward one, pass { card: cards[key], envelope } to lake_verify' } : {}), members: memberList(r), last: r.said.length, ...(r.startWith ? { started: !stillWaiting, ...(stillWaiting ? { needs: stillWaiting } : {}) } : {}) };
+    return { kind: 'room.messages', id, messages, ...(cards ? { cards, note: 'each message\'s signed: { card: <key in cards>, envelope }; to check or forward one, pass { card: cards[key], envelope } to lake_verify' } : {}), members: memberList(r), last: r.said.length, head: { seq: r.said.length, chain: chain[r.said.length - 1] ?? '' }, ...(r.startWith ? { started: !stillWaiting, ...(stillWaiting ? { needs: stillWaiting } : {}) } : {}) };
     // Quiet, like the tally: who talks in which room, and when, is the members' business (the first bubble's handles were
     // matched to names through the feed).
   }, [], true);

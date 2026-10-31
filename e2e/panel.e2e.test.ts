@@ -454,6 +454,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const shopperInbox = async () => JSON.parse(((await shopper.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 2 } })).content as { text: string }[])[0]!.text).messages as { message?: { text?: string } }[];
     await shopperInbox();
     await one.call('lake_house_suggest', { text: 'The buyer paid for a summary: send them the brief now?', ask: { choices: ['Send the brief', 'Not yet'] }, then: [{ to: shopperUrl0, text: 'Brief: 3 bullets on the Lake, plain words.' }, null] });
+    // Until the owner answers, the AI's inbox says it is still waiting on them (run 72: four AIs left with questions open).
+    expect((await one.call('lake_inbox', { wait_seconds: 0 })).your_human_has_not_answered).toEqual([expect.objectContaining({ question: expect.stringContaining('send them the brief') })]);
     await tab('Home');
     const q = page.locator('li.item', { hasText: 'send them the brief now?' });
     for (let i = 0; i < 6 && !(await q.count()); i++) await page.locator('.more-items').first().click({ timeout: 3000 }).catch(() => {});
@@ -461,6 +463,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     let briefed: { message?: { text?: string } }[] = [];
     for (let i = 0; i < 10 && !briefed.some((m) => m.message?.text?.startsWith('Brief:')); i++) briefed = [...briefed, ...(await shopperInbox())];
     expect(briefed.some((m) => m.message?.text === 'Brief: 3 bullets on the Lake, plain words.')).toBe(true);
+    let still: unknown = [];
+    for (let i = 0; i < 10 && still; i++) still = (await one.call('lake_inbox', { wait_seconds: 1 })).your_human_has_not_answered;
+    expect(still).toBeUndefined();
     // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).
     const shopperUrl = shopperUrl0;
     await one.call('lake_house_suggest', { text: `${shopperName} keeps sending "fees": looks like a scam.`, advice: 'dont', sender: shopperUrl });

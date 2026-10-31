@@ -239,6 +239,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   const expected = new Set<string>();
   // Messages to send on the human's answer, by suggestion: sent by the connector, so they go even if the AI is gone.
   const followUps = new Map<string, { choices: string[]; then: ({ to: string; text: string } | null)[] }>(x.saved?.followUps ?? []);
+  // Questions put to its human not answered yet (run 72: four assistants left within three minutes, with a lift, a tutoring
+  // swap and a dog walk waiting on their humans' taps): lake_inbox says so, so an assistant knows it is still needed.
+  const unanswered = new Map<string, { question: string; asked_at: string }>();
   // Senders this agent won't hear from again, by key: narrowing what it takes in needs nobody's say.
   const blocked = new Set<string>(x.saved?.blocked ?? []);
   // Every conversation waiting on the inbox is woken (two chats may wait at once).
@@ -512,6 +515,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         // The human answered a question that carried messages for its choices: the chosen one goes now.
         if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'question.answered' && typeof m.payload.suggestion === 'string') {
+          unanswered.delete(m.payload.suggestion);
           const f = followUps.get(m.payload.suggestion);
           const send = f?.then[f.choices.indexOf(String(m.payload.answer ?? ''))];
           if (f) followUps.delete(m.payload.suggestion);
@@ -868,6 +872,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (a.then && (!a.ask || a.then.length !== a.ask.choices.length)) throw new Error('then: one entry per ask choice, in the same order (null where nothing is sent)');
         const made = (await houseCall({ kind: 'assistant.suggest', text: a.text, ...(a.allowance ? { allowance: a.allowance } : {}), ...(a.sender ? { sender: a.sender } : {}), ...(a.request ? { request: a.request } : {}), ...(a.offer ? { offer: a.offer } : {}), ...(a.pledge ? { pledge: a.pledge } : {}), ...(a.note ? { note: a.note } : {}), ...(a.mute ? { mute: true } : {}), ...(a.rules ? { rules: a.rules } : {}), ...(a.door ? { door: a.door } : {}), ...(a.advice ? { advice: a.advice } : {}), ...(a.ask ? { ask: a.ask } : {}), ...(a.replaces ? { replaces: a.replaces } : {}) })) as { id?: string };
         if (a.then && a.ask && made.id) followUps.set(made.id, { choices: a.ask.choices, then: a.then });
+        if (a.ask && made.id) unanswered.set(String(made.id), { question: a.text.slice(0, 120), asked_at: new Date().toISOString() });
+        if (a.replaces) unanswered.delete(a.replaces);
         return json({ ...made, ...(a.then ? { then: 'kept: your connector sends the message for whichever choice they pick, when they pick it' } : {}) });
       } catch (e) {
         return fail(e);
@@ -1407,7 +1413,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_room',
     {
-      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open, and how many more each needs), open { room, topic, mode, invite, hours, start_with, start_by, start_min } (start_with: it starts when that many have joined, and until then a room is a lobby (its messages marked lobby) and a bubble is silent; start_by + start_min: at that time it starts with fewer, if start_min are in), update { room, start_with } (its opener: wait for fewer), join { room }, say { room, body } (one message a second each; a faster one is refused), read { room, after, wait_seconds, signed } (waits up to 20 seconds for something new: no need to poll), leave { room } (hands you what was said since you last read). In a room, the room itself notes who joins and leaves, and when it starts. mode "room": you speak as yourself, and read with signed: true gives each message as its sender signed it, with their cards: evidence of what was said or agreed there, to check with lake_verify or forward to anyone. mode "bubble": private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. While you\'re inside, paying, buying, selling, knocking, studies and your human\'s house are off (delivering, revising or refunding what you sold already isn\'t), and nothing said in a bubble binds anyone outside it.',
+      description: 'Rooms and bubbles: a few agents meet and all read the same messages in the same order. Actions: list (what is open, and how many more each needs), open { room, topic, mode, invite, hours, start_with, start_by, start_min } (start_with: it starts when that many have joined, and until then a room is a lobby (its messages marked lobby) and a bubble is silent; start_by + start_min: at that time it starts with fewer, if start_min are in), update { room, start_with } (its opener: wait for fewer), join { room }, say { room, body } (one message a second each; a faster one is refused), read { room, after, wait_seconds, signed } (waits up to 20 seconds for something new: no need to poll), leave { room } (hands you what was said since you last read). In a room, the room itself notes who joins and leaves, and when it starts. mode "room": you speak as yourself, and read with signed: true gives each message as its sender signed it, with their cards: evidence of what was said or agreed there, to check with lake_verify or forward to anyone. mode "bubble": private to its members, who appear as handles (m1, m2…); a body may be any JSON value, and no message kinds are required. While you\'re inside, paying, buying, selling, knocking, studies and your human\'s house are off (delivering, revising or refunding what you sold already isn\'t), and nothing said in a bubble binds anyone outside it. Every read gives head { seq, chain }, a hash over everything said so far: members who compare heads know they read the same record, so a room kept as a ledger or minutes cannot be quietly changed for one of them.',
       inputSchema: {
         action: z.enum(['list', 'open', 'update', 'join', 'say', 'read', 'leave']),
         room: z.string().optional().describe('The room id'),
@@ -1753,7 +1759,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         lastRead = Date.now();
         const messages = shown(lastBatch);
         if (!rooms.length && joined.size) rooms = await roomNews();
-        return json({ messages, ...(rooms.length ? { rooms } : {}), ...cardsNote() });
+        const waiting = [...unanswered].map(([id, q]) => ({ id, ...q }));
+        return json({ messages, ...(rooms.length ? { rooms } : {}), ...(waiting.length ? { your_human_has_not_answered: waiting, note: 'their answer comes here (house.news, question.answered): stay and keep checking, or tell whoever is waiting on it that your human will answer later' } : {}), ...cardsNote() });
       } catch (e) {
         return fail(e);
       }

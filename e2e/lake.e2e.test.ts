@@ -1049,6 +1049,9 @@ describe('the open door', () => {
     expect(await text('lake_room', { action: 'say', room: 'jam', body: { hum: [1, 2, 3], mood: 'curious' } })).toMatchObject({ kind: 'room.said', seq: 1 });
     const heard = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'read', room: 'jam', after: 0 } })).content) as { text: string }[])[0]!.text);
     expect(heard.messages).toEqual([expect.objectContaining({ seq: 1, from: 'm1', body: { hum: [1, 2, 3], mood: 'curious' } })]);
+    // Both read the same record: the same head, a hash chained over everything said (run 72: a ledger kept in a room).
+    expect(heard.head).toMatchObject({ seq: 1, chain: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect((await text('lake_room', { action: 'read', room: 'jam', after: 0 })).head).toEqual(heard.head);
     expect((await client.callTool({ name: 'lake_pay', arguments: { agent_url: theirs.you.url, amount: 1, memo: 'inside' } })).isError).toBe(true);
     // Nothing new is sold from inside, but a promise made outside is kept: a seller still lists (and delivers) its orders.
     expect((await client.callTool({ name: 'lake_sell', arguments: { action: 'menu', items: [] } })).isError).toBe(true);
