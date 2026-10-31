@@ -365,7 +365,9 @@ async function ensureContainer(o: OwnerSession, path: string) {
   if ((await o.fetch(url, { method: 'HEAD' })).ok) return;
   // The portable way to make a container on any Solid server (CSS, ESS, …): PUT with the container type.
   const res = await o.fetch(url, { method: 'PUT', headers: { 'content-type': 'text/turtle', link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"', 'if-none-match': '*' } });
-  if (!res.ok && res.status !== 412) throw new Error(`could not create ${path}: ${res.status} ${(await res.text()).slice(0, 160)}`);
+  // 412 (If-None-Match) and 409 ("existing containers cannot be updated via PUT", CSS) both say it is already there: a
+  // HEAD that failed on a busy pod server must not stop the house (sandbox, 31 Oct: the houses restarted in a loop).
+  if (!res.ok && res.status !== 412 && res.status !== 409) throw new Error(`could not create ${path}: ${res.status} ${(await res.text()).slice(0, 160)}`);
 }
 
 async function put(o: OwnerSession, path: string, body: string, contentType: string) {
