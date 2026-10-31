@@ -89,8 +89,11 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
       }
       if (sug.ask && !sug.ask.answered && Number.isInteger(sug.ask.recommend) && !o.given.has(`ask:${sug.id}`)) {
         o.given.add(`ask:${sug.id}`);
-        const choice = sug.ask.choices[sug.ask.recommend];
-        log(`${o.house}: answered "${choice}" to "${sug.text.slice(0, 80)}" as the assistant recommended: ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice }))}`);
+        // Now and then a person picks otherwise (run 69: every phone took the recommended answer within 5 s, so nobody saw
+        // what happens when a human disagrees).
+        const against = sug.ask.choices.length > 1 && Math.random() < 0.15;
+        const choice = against ? sug.ask.choices.filter((_, i) => i !== sug.ask.recommend)[Math.floor(Math.random() * (sug.ask.choices.length - 1))] : sug.ask.choices[sug.ask.recommend];
+        log(`${o.house}: answered "${choice}" to "${sug.text.slice(0, 80)}" ${against ? 'AGAINST the assistant\'s recommendation (its own call)' : 'as the assistant recommended'}: ${JSON.stringify(await c({ kind: 'panel.assistant.answer', id: sug.id, choice }))}`);
       }
       // A question with no advice is the owner's own call: a person answers it after a while, picking for themselves (run 49:
       // the bot never tapped one, and the run stalled). Picked at random here, and logged as the owner's own pick.

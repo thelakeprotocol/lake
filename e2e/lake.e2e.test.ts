@@ -1065,6 +1065,11 @@ describe('the open door', () => {
     expect((await client.callTool({ name: 'lake_room', arguments: { action: 'say', room: 'jam', body: inbox.messages[0].message.receipt } })).isError).toBe(true);
     // Leaving hands over what was said since the member last read (run 15 lost a message that way), opened for it.
     await text('lake_room', { action: 'say', room: 'jam', body: 'bye for now' });
+    // Its inbox says the room has news, at once rather than after the wait (run 69: an AI sat on its inbox while the room talked).
+    const o0 = Date.now();
+    const otherInbox = JSON.parse((((await other.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 20 } })).content) as { text: string }[])[0]!.text);
+    expect(otherInbox.rooms).toEqual([expect.objectContaining({ room: 'jam', unread: 1 })]);
+    expect(Date.now() - o0).toBeLessThan(5000);
     const otherLeft = JSON.parse((((await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'jam' } })).content) as { text: string }[])[0]!.text);
     expect(otherLeft).toMatchObject({ kind: 'room.left', unread: [expect.objectContaining({ seq: 3, from: 'm1', body: 'bye for now' })] });
     // Blind: the rooms agent holds only ciphertext; members' keys there are fresh for this bubble, not their cards' keys.

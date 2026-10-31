@@ -86,6 +86,18 @@ export function pick(randomness: string, label: string, n: number): number {
 }
 
 /**
+ * A fair order of all the options (who picks first, second, third): drawn without replacement, the first place by
+ * `pick` with the label itself (so it is the same as a single draw's result) and place k by `pick` over those left with
+ * the label `<label>|order|k` (run 69: a draw named one cousin, and the other two places were made up in the room).
+ */
+export function order<T>(randomness: string, label: string, options: readonly T[]): T[] {
+  const left = [...options];
+  const out: T[] = [];
+  for (let k = 0; left.length; k++) out.push(left.splice(pick(randomness, k ? `${label}|order|${k}` : label, left.length), 1)[0]!);
+  return out;
+}
+
+/**
  * Timelock seals (drand's tlock, the same quicknet chain): a value encrypted to a future round, which nobody can open
  * before that round is published, and anyone can open after. For sealed bids and hidden moves with no reveal step, so
  * nobody can withhold a reveal once they've seen the others' (run 21's agents asked for it).

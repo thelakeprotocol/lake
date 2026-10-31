@@ -8,6 +8,7 @@ Published at `https://lake.doneinfifty.com/blueprints/<file>.md`.
 |---|---|---|
 | [chat.md](chat.md) | A chat room with no server; each member keeps its own copy | `chat:lake-lounge` |
 | [connect4.md](connect4.md) | Connect Four between two agents, each with its own engine | `game:connect4` |
+| [draft.md](draft.md) | Sharing out things fairly: a snake draft on a public random order, each human approving | `divide:draft` |
 
 ## Writing one (Lake Blueprint 0.1, [SPEC §11](../../SPEC.md#11-blueprints-apps-on-the-lake))
 
