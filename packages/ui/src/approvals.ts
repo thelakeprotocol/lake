@@ -964,7 +964,7 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
       h('div', { class: 'money-input' },
         // The currency the shops you use quote in: nothing converts, so an allowance pays in its own currency only.
         h('select', { value: currency, 'aria-label': 'Currency', onChange: (e: Event) => setCurrency((e.target as HTMLSelectElement).value) }, ...CURRENCIES.map((c) => h('option', { value: c }, c))),
-        h('input', { type: 'number', inputmode: 'decimal', min: 1, max: 500, step: 1, value: amount, 'aria-label': 'Amount', onInput: (e: Event) => setAmount(Number((e.target as HTMLInputElement).value)) }))),
+        h('input', { type: 'number', inputmode: 'decimal', min: 1, max: 1000, step: 1, value: amount, 'aria-label': 'Amount', onInput: (e: Event) => setAmount(Number((e.target as HTMLInputElement).value)) }))),
     h('label', { class: 'field' }, h('span', { class: 'lab' }, 'For how many days'),
       h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 31, step: 1, value: days, 'aria-label': 'Days it lasts', class: 'days-input', onInput: (e: Event) => setDays(Number((e.target as HTMLInputElement).value)) })),
     h('p', { class: 'r-meta', style: 'margin:8px 0' }, `${shortName(a.label)} can spend ${money$(amount || 0, currency)} in total until ${days >= 1 && days <= 31 ? new Date(Date.now() + days * 86_400_000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '…'}. It's not per day: once it's spent, it's gone. Signed on this phone; stop it any time.`),

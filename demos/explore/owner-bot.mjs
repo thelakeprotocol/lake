@@ -43,7 +43,8 @@ while (Date.now() < until && !existsSync(join(run, 'stop-owner-bot'))) {
     for (const a of v.assistants ?? []) {
       if (!a.canHaveAllowance || a.allowance || o.given.has(a.kid)) continue;
       const d = await c({ kind: 'panel.allowance.draft', kid: a.kid, amount: Number(allowance), currency, days: 3 });
-      if (!d.draft) { log(`${o.house}: draft refused: ${JSON.stringify(d)}`); continue; }
+      // Refused once is refused: not asked again every pass (run 78 logged 233 refusals).
+      if (!d.draft) { o.given.add(a.kid); log(`${o.house}: draft refused: ${JSON.stringify(d)}`); continue; }
       const r = await c({ kind: 'panel.allowance.set', id: d.id, credential: await issueCredential({ ...d.draft, validFrom: new Date().toISOString() }, o.id) });
       o.given.add(a.kid);
       log(`${o.house}: allowance ${currency} ${allowance} for ${a.label}: ${JSON.stringify(r)}`);

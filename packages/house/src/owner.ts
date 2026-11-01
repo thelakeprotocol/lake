@@ -138,8 +138,9 @@ export interface AgendaItem {
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
-// Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings.
-const MAX_ALLOWANCE = 500;
+// Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
+// or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
+const MAX_ALLOWANCE = 1000;
 const MAX_ALLOWANCE_DAYS = 31;
 
 /**
