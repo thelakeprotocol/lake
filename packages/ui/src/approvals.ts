@@ -218,6 +218,7 @@ function Home({ go }: { go: (t: Tab) => void }) {
   // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
   const waiting = list.data.requests.length;
   const needs = [
+    ...(notifyOffer() ? [{ k: 'notify', v: () => h(NotifyItem, { key: 'notify' }) }] : []),
     ...(connectedNote ? [{ k: 'connected', v: () => h('li', { key: 'connected', class: 'item' }, h('p', { class: 'item-text' }, connectedNote), h('div', { class: 'item-actions' }, h('button', { class: 'btn small quiet', type: 'button', onClick: () => { connectedNote = ''; bump(); } }, 'OK'))) }] : []),
     // An AI app signing in through this house, from its own browser: approved here, where the key is.
     ...(list.data.connects ?? []).map((c) => ({ k: `c-${c.id}`, v: () => h(ConnectRequest, { key: `c-${c.id}`, c }) })),
@@ -334,6 +335,36 @@ function Reply({ label, placeholder, send }: { label: string; placeholder: strin
 }
 
 /** Your agent's suggestions: what it says, what it advises, and your tap. */
+// ---- notifications (Web Push) ----
+// Offered once on a device that can take them and hasn't turned them on; "Not now" is remembered on this device.
+const pushable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const iosNotInstalled = () => /iPhone|iPad/.test(navigator.userAgent) && !(navigator as unknown as { standalone?: boolean }).standalone && !matchMedia('(display-mode: standalone)').matches;
+const notifyOffer = () => {
+  try { if (localStorage.getItem('lake-notify') === 'dismissed') return false; } catch { /* private mode */ }
+  return (pushable() && Notification.permission !== 'granted') || iosNotInstalled();
+};
+const b64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
+async function turnOnNotifications(): Promise<string> {
+  const reg = await navigator.serviceWorker.register('./owner-sw.js', { scope: './' });
+  if ((await Notification.requestPermission()) !== 'granted') return 'Notifications are blocked for this site: allow them in your browser settings.';
+  const { publicKey } = await call<{ publicKey: string }>({ kind: 'panel.push.key' });
+  const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64url(publicKey) }));
+  await call({ kind: 'panel.push.subscribe', subscription: sub.toJSON() });
+  await call({ kind: 'panel.push.test' });
+  return 'Notifications are on for this device. A test one is on its way.';
+}
+function NotifyItem() {
+  const bump = useBump();
+  const [said, setSaid] = useState('');
+  const ios = iosNotInstalled();
+  const dismiss = () => { try { localStorage.setItem('lake-notify', 'dismissed'); } catch { /* private mode */ } bump(); };
+  return h('li', { class: 'item' },
+    h('p', { class: 'item-text' }, said || (ios ? 'Get a notification when something needs you: on iPhone, tap Share, then Add to Home Screen, and open your house from there.' : 'Get a notification on this device when something needs you: a request, a note at your door, a question from your AI.')),
+    h('div', { class: 'item-actions' },
+      !ios && !said ? h(Act, { label: 'Turn on', cls: 'primary', run: async () => setSaid(await turnOnNotifications()) }) : null,
+      h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss }, said ? 'OK' : 'Not now')));
+}
+
 function SuggestionItem({ x }: { x: Note }) {
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   const fail = (r: { ok?: boolean; error?: string }) => { if (r.error) throw new Error(r.error); };

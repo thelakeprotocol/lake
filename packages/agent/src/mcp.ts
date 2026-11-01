@@ -166,7 +166,16 @@ export interface AgentSnapshot {
   received?: unknown[];
   blocked?: string[];
   followUps?: [string, { choices: string[]; then: ({ to: string; text: string } | null)[] }][];
+  /** What it did besides trade, for its passport: draws, votes and counts, pledges. */
+  doings?: Doing[];
 }
+
+/** One thing an agent did on the Lake besides trading, as its passport lists it (never a vote's choice). */
+export type Doing =
+  | { kind: 'draw'; at: string; round: number; label: string; options: number; result: string }
+  | { kind: 'vote'; at: string; id: string }
+  | { kind: 'count'; at: string; id: string; counted: number; totals: Record<string, number> }
+  | { kind: 'pledge'; at: string; tally: string; id: string; revealed: boolean };
 
 /**
  * One agent, for as many conversations as its AI has open (an AI app may hold two chats at once, on the phone and the
@@ -195,6 +204,13 @@ export interface Passport {
   counts: { sold: number; bought: number; counterparties: number; disputes: number; refunded: number };
   log?: Record<string, unknown>;
   blueprints: { name: string; title: string; url: string }[];
+  /** Fair draws it took part in (drand: anyone can draw again and get the same), secret votes (never the choice), counts it ran, pledges it stood by in public. */
+  played: { round: number; label: string; result: string; at: string }[];
+  voted: { id: string; at: string }[];
+  counts_run: { id: string; counted: number; at: string }[];
+  signed_up: { tally: string; id: string; at: string }[];
+  /** Its shares of team carts, each with the payments agent's receipt. */
+  team_shares: { cart: string; amount: number; currency: string; at: string; receipt: { credential: string; card: unknown } }[];
   note: string;
 }
 
@@ -219,6 +235,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // Blind pledges: unspent passes, and this conversation's signatures (their salts and withdraw secrets).
   const passes = new Map<string, Pass>();
   const pledged = new Map<string, BlindSignature>();
+  const doings: Doing[] = (x.saved?.doings as Doing[] | undefined) ?? [];
+  const did = (d: Doing) => { doings.push(d); if (doings.length > 100) doings.shift(); };
   // The last message this conversation read in each room: leaving hands over what came after it.
   const roomSeen = new Map<string, number>();
   // Rooms this agent is in: where each lives (run 69: every call to a room on the other Lake needed its at, and without
@@ -1708,6 +1726,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const sent = await Promise.all(named.map((t, i) => me.ask(t!.url, { kind: 'count.report', id: a.id, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] })));
           const refused = sent.find((r) => r.kind !== 'count.received');
           if (refused) throw new Error(`a teller refused it: ${((refused.problems as string[] | undefined) ?? [String(refused.kind)]).join('; ')}`);
+          did({ kind: 'vote', at: new Date().toISOString(), id: a.id });
           return json({ kind: 'count.answered', id: a.id, note: 'sent as two shares, one to each teller: neither can read it, and nobody else ever sees it. Tell the organiser you have answered, never what.' });
         }
         const c = countsOpened.get(a.id);
@@ -1722,6 +1741,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (help.kind !== 'count.share') throw new Error(`the Helper: ${((help.problems as string[] | undefined) ?? [String(help.kind)]).join('; ')}`);
         const cells = unshardCounts(c.options.length, [lead.share, help.share], Number(lead.count));
         const nameOf = (w: string) => cards.find((x) => x.webId === w)?.name ?? w;
+        did({ kind: 'count', at: new Date().toISOString(), id: a.id, counted: Number(lead.count), totals: Object.fromEntries(c.options.map((o, i) => [o, cells[i]!])) });
         return json({ kind: 'count.totals', id: a.id, totals: Object.fromEntries(c.options.map((o, i) => [o, cells[i]])), counted: lead.count, failed_proof: lead.rejected, answered: members.map(nameOf), ...(allowed ? { not_answered: allowed.filter((w) => !members.includes(w)).map(nameOf) } : {}), ...(reported.length > members.length ? { left_out: `${reported.length - members.length} answer(s) from outside the voters you listed` } : {}) });
       } catch (e) {
         return fail(e);
@@ -1763,6 +1783,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const index = pick(beacon.randomness, a.label, a.options.length);
         // The whole order too, for a draft or a rota; its first place is the result.
         const all = a.options.length > 1 ? order(beacon.randomness, a.label, a.options) : undefined;
+        did({ kind: 'draw', at: new Date().toISOString(), round: a.round, label: a.label, options: a.options.length, result: a.options[index]! });
         return json({ round: a.round, label: a.label, result: a.options[index], index, ...(all ? { order: all } : {}), beacon, check: 'Anyone can repeat this: lake_draw with the same round, label and options, or check the beacon with lake_draw { beacon }.' });
       } catch (e) {
         return fail(e);
@@ -1835,6 +1856,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const count = await me.ask(a.tally, { kind: 'tally.count', id: a.id }).catch(() => null);
           if (count && count.kind !== 'refused' && !count.blind) {
             const r = await me.ask(a.tally, { kind: 'tally.sign', id: a.id });
+            if (r.kind === 'tally.signed' || r.kind === 'tally.triggered') did({ kind: 'pledge', at: new Date().toISOString(), tally: a.tally, id: a.id, revealed: true });
             return json(r);
           }
           const issuer = (await me.find({ skill: 'passes' }))[0];
@@ -1852,7 +1874,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         const s = pledged.get(slot);
         if (!s) throw new Error('you have no blind signature on that pledge in this conversation');
-        if (a.action === 'reveal') return json(await revealBlind(a.tally, (url, payload) => me.ask(url, payload as { kind: string }), s));
+        if (a.action === 'reveal') {
+          const r = await revealBlind(a.tally, (url, payload) => me.ask(url, payload as { kind: string }), s);
+          // Only a pledge it stood by in public goes on its passport; a blind signature it never revealed stays unknown.
+          if ((r as { kind?: string }).kind === 'tally.revealed') did({ kind: 'pledge', at: new Date().toISOString(), tally: a.tally, id: a.id, revealed: true });
+          return json(r);
+        }
         const r = await withdrawBlind(a.tally, s);
         if (r.kind === 'tally.withdrawn') pledged.delete(slot);
         return json(r);
@@ -2000,7 +2027,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-60), blocked: [...blocked], followUps: [...followUps],
+    orders: [...orders], pledged: [...pledged], received: received.slice(-60), doings, blocked: [...blocked], followUps: [...followUps],
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';
@@ -2057,6 +2084,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         counts: { sold: deals.filter((d) => d.role === 'seller' && d.ended !== 'refunded').length, bought: deals.filter((d) => d.role === 'buyer' && d.ended !== 'refunded').length, counterparties: new Set(deals.map((d) => d.with_webId)).size, disputes: done.filter((x) => x.dispute).length, refunded: deals.filter((d) => d.ended === 'refunded').length },
         ...(record ? { log: { sales: record.sales, purchases: record.purchases, distinct_buyers: record.buyers?.length ?? 0, distinct_sellers: record.sellers?.length ?? 0, released: record.released, disputes: record.disputes, refunds_given: record.refunds_given, logs: record.logs } } : {}),
         blueprints: authored,
+        played: doings.filter((d): d is Extract<Doing, { kind: 'draw' }> => d.kind === 'draw').map(({ round, label, result, at }) => ({ round, label, result, at })).reverse().slice(0, 30),
+        voted: doings.filter((d): d is Extract<Doing, { kind: 'vote' }> => d.kind === 'vote').map(({ id, at }) => ({ id, at })).reverse(),
+        counts_run: doings.filter((d): d is Extract<Doing, { kind: 'count' }> => d.kind === 'count').map(({ id, counted, at }) => ({ id, counted, at })).reverse(),
+        signed_up: [...new Map(doings.filter((d): d is Extract<Doing, { kind: 'pledge' }> => d.kind === 'pledge' && d.revealed).map((d) => [`${d.tally}|${d.id}`, { tally: d.tally, id: d.id, at: d.at }])).values()].reverse(),
+        team_shares: received.filter((m) => m.message.kind === 'receipt' && typeof (m.message.receipt as { credential?: unknown } | undefined)?.credential === 'string' && /share of cart/.test(String(m.message.memo ?? ''))).map((m) => ({ cart: String(m.message.cart ?? ''), amount: Number(m.message.amount ?? 0), currency: String(m.message.currency ?? ''), at: m.at, receipt: m.message.receipt as { credential: string; card: unknown } })),
         note: 'What this agent bought and sold, and who with. Each deal links the payments agent\'s signed receipt (check it with lake_verify { evidence: { credential, card } }); the log counts are from the Lake\'s transparency logs, not from this agent.',
       };
     },

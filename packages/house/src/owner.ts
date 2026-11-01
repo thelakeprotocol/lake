@@ -1,5 +1,6 @@
 import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
+import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
 import {
@@ -135,6 +136,8 @@ export interface AgendaItem {
   by: string; at: string;
 }
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
+/** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
+type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
@@ -405,8 +408,55 @@ export class OwnerDesk {
     for (const w of this.watchers) w(this.version);
   }
 
+  /**
+   * Web Push to the owner's phones (RFC 8030, VAPID RFC 8292, the payload encrypted to the device, RFC 8291): a short,
+   * vague line when something needs them; the details are in the panel. Without it the owner answered late or never,
+   * and their AI's questions sat (runs 66-83).
+   */
+  private pushState: PushState | undefined;
+  private pushedAt = new Map<string, number>();
+  private async pushes() {
+    if (this.pushState) return this.pushState;
+    const f = join(this.o.dataDir, 'push.json');
+    const st = JSON.parse(await readFile(f, 'utf8').catch(() => '{"subs":[]}')) as PushState;
+    this.pushState = st;
+    if (!st.keys) {
+      st.keys = webpush.generateVAPIDKeys();
+      await this.savePushes();
+    }
+    return st;
+  }
+  private savePushes = () => writeFile(join(this.o.dataDir, 'push.json'), JSON.stringify(this.pushState), { mode: 0o600 }).catch(() => {});
+  /** Tell the owner's phones, at most once every two minutes for each kind of thing. */
+  notifyOwner(tag: string, body: string) {
+    void (async () => {
+      const st = await this.pushes();
+      // Counted only when sent: a note before any phone was signed up mustn't silence the first one after.
+      if (!st.subs.length || Date.now() - (this.pushedAt.get(tag) ?? 0) < 120_000) return;
+      this.pushedAt.set(tag, Date.now());
+      // VAPID's contact for the push service: the house's own https address, else a mailbox (an http address isn't taken).
+      const subject = this.o.publicUrl?.startsWith('https://') ? new URL(this.o.publicUrl).origin : 'mailto:sandbox@lake.doneinfifty.com';
+      const gone: string[] = [];
+      // The library builds the request (the payload encrypted to the device, RFC 8291; the VAPID signature, RFC 8292); the
+      // house sends it itself, so a push service is reached the same way whatever its address.
+      await Promise.all(st.subs.map(async (sub) => {
+        try {
+          const d = webpush.generateRequestDetails(sub, JSON.stringify({ title: 'Your house', body, tag }), { vapidDetails: { subject, publicKey: st.keys!.publicKey, privateKey: st.keys!.privateKey }, TTL: 6 * 3600 });
+          const r = await fetch(d.endpoint, { method: d.method, headers: d.headers as Record<string, string>, body: d.body as unknown as BodyInit, signal: AbortSignal.timeout(10_000) });
+          if (r.status === 404 || r.status === 410) gone.push(sub.endpoint);
+          else if (!r.ok) console.log(`push to a device: ${r.status}`);
+        } catch (e) {
+          console.log(`push to a device failed: ${(e as Error).message}`);
+        }
+      }));
+      if (gone.length) { st.subs = st.subs.filter((x) => !gone.includes(x.endpoint)); await this.savePushes(); }
+    })().catch(() => {});
+  }
+
   news(payload: Record<string, unknown>, onlyKid?: string) {
     this.touch();
+    if (payload.about === 'request.waiting') this.notifyOwner('request', 'A request is waiting for your answer.');
+    if (payload.about === 'note') this.notifyOwner('note', 'Someone left a note at your door.');
     if (!this.o.tell) return;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;
@@ -807,6 +857,7 @@ export class OwnerDesk {
           }
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions].slice(0, 50);
+          this.notifyOwner('suggestion', ask ? 'Your AI has a question for you.' : 'Your AI left you a note.');
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }
         if (p.kind === 'assistant.spent') {
@@ -985,6 +1036,29 @@ export class OwnerDesk {
         this.token = await secret(join(this.o.dataDir, 'pairing-token'), true);
         this.tokenUntil = Date.now() + 30 * 60_000;
         return void res.json({ hash: `#pair=${this.token}`, until: new Date(this.tokenUntil).toISOString() });
+      }
+      // Notifications on this device: the house's public key to subscribe with, then the device's subscription (its push
+      // service's address and keys), kept for up to five devices; a test; and off.
+      if (p.kind === 'panel.push.key') return void res.json({ publicKey: (await this.pushes()).keys!.publicKey });
+      if (p.kind === 'panel.push.subscribe') {
+        const sub = (p as { subscription?: webpush.PushSubscription }).subscription;
+        if (!sub || typeof sub.endpoint !== 'string' || !(/^https:\/\//.test(sub.endpoint) || (process.env.LAKE_PUSH_ALLOW_HTTP === '1' && /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(sub.endpoint))) || typeof sub.keys?.p256dh !== 'string' || typeof sub.keys?.auth !== 'string') return void res.status(400).json({ error: 'subscription: { endpoint (https), keys: { p256dh, auth } }' });
+        const st = await this.pushes();
+        st.subs = [...st.subs.filter((x) => x.endpoint !== sub.endpoint), { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } }].slice(-5);
+        await this.savePushes();
+        return void res.json({ ok: true, devices: st.subs.length });
+      }
+      if (p.kind === 'panel.push.off') {
+        const st = await this.pushes();
+        const endpoint = String((p as { endpoint?: unknown }).endpoint ?? '');
+        st.subs = endpoint ? st.subs.filter((x) => x.endpoint !== endpoint) : [];
+        await this.savePushes();
+        return void res.json({ ok: true, devices: st.subs.length });
+      }
+      if (p.kind === 'panel.push.test') {
+        this.pushedAt.delete('test');
+        this.notifyOwner('test', 'Notifications are on. This is what they look like.');
+        return void res.json({ ok: true, devices: (await this.pushes()).subs.length });
       }
       if (p.kind === 'panel.stream') {
         const t = randomBytes(16).toString('base64url');

@@ -9,7 +9,8 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import { generateIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
+import { generateIdentity, importIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
+import { createECDH, createPrivateKey, randomBytes } from 'node:crypto';
 import { ask, makeVisitor } from '../packages/visitor/src/knock.js';
 
 // The owner's panel as a person uses it, on a phone, against a real house: pairing, the door, the owner's own AI and its
@@ -77,7 +78,7 @@ beforeAll(async () => {
   house = site;
   // A sandbox house: the first device to open its panel becomes its owner, as on the public sandbox.
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
-    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/);
+    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
   // The connector, with sign-in on.
   await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500', LAKE_MCP_SLEEP_MS: '3000' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
@@ -581,6 +582,35 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     page = phone3;
     ctx = ctx3;
     await tidy();
+  });
+
+  it('notifies the owner\'s devices by Web Push when something needs them: a note at the door (1 Nov)', async () => {
+    // The owner's key as this browser keeps it, to sign as the owner from here (the panel's own calls do the same).
+    const saved = JSON.parse(await page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))![1]));
+    const seed = Buffer.from(saved.secret, 'hex');
+    const jwk = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' }).export({ format: 'jwk' });
+    const owner = await importIdentity({ kid: saved.kid, privateJwk: { ...jwk, kid: saved.kid }, publicJwk: { kty: 'OKP', crv: 'Ed25519', x: jwk.x, kid: saved.kid } } as never);
+    const asOwner = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: 'owner' })) })).json();
+    // A stand-in push service: what the house sends there is the encrypted push (RFC 8291) with its VAPID signature.
+    const got: { auth?: string; encoding?: string; ttl?: string; bytes: number }[] = [];
+    const svc = httpServer((req, res) => { let n = 0; req.on('data', (c) => (n += c.length)); req.on('end', () => { got.push({ auth: req.headers.authorization, encoding: req.headers['content-encoding'] as string, ttl: req.headers.ttl as string, bytes: n }); res.writeHead(201); res.end(); }); });
+    await new Promise<void>((ok) => svc.listen(0, ok));
+    const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
+    const subscription = { endpoint: `http://localhost:${(svc.address() as { port: number }).port}/push/device-1`, keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') } };
+    expect((await asOwner({ kind: 'panel.push.key' })).publicKey).toMatch(/^[A-Za-z0-9_-]{80,}$/);
+    // An assistant can't turn it on or read it; the owner can.
+    expect((await asAssistant({ kind: 'panel.push.subscribe', subscription })).error ?? '').not.toBe('');
+    expect(await asOwner({ kind: 'panel.push.subscribe', subscription })).toMatchObject({ ok: true, devices: 1 });
+    expect(await asOwner({ kind: 'panel.push.test' })).toMatchObject({ ok: true });
+    for (let i = 0; i < 20 && !got.length; i++) await page.waitForTimeout(250);
+    expect(got[0]).toMatchObject({ auth: expect.stringMatching(/^vapid t=.+, k=.+/), encoding: 'aes128gcm' });
+    // A note at the door: the owner's phone hears of it (vaguely: the details are in the panel).
+    const neighbour = await makeVisitor(await generateIdentity(), 'neighbour.example');
+    await ask(house, neighbour, { kind: 'note', text: 'Your parcel is on my porch.' });
+    for (let i = 0; i < 20 && got.length < 2; i++) await page.waitForTimeout(250);
+    expect(got.length).toBe(2);
+    expect(await asOwner({ kind: 'panel.push.off' })).toMatchObject({ ok: true, devices: 0 });
+    svc.close();
   });
 
   it('signs out on this device: back to the pairing screen', async () => {
