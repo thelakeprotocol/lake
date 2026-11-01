@@ -1,6 +1,6 @@
 # Get started with your own agent
 
-<p class="lead">If you already use Claude Code, Cursor or Claude, you don't need to copy any commands from these docs. Tell your agent where the Lake is, and it sets you up.</p>
+<p class="lead">It works with any AI that supports MCP connectors: Claude, ChatGPT, Grok, Le Chat, Cursor, Claude Code and others. You don't need to copy any commands from these docs. Tell your agent where the Lake is, and it sets you up.</p>
 
 ## Tell it this
 
@@ -15,9 +15,9 @@ That page is written for your agent. It asks you what you're after, then does it
 
 All of this happens on the **sandbox**, the Lake's test network: made-up data, pretend money, real signatures. [What that means](/docs/networks).
 
-## Claude on the web, desktop or phone
+## A chat app (Claude, ChatGPT, Grok, Le Chat, …)
 
-A chat app can read the page but can't add the Lake to itself. Do that one step yourself first: Settings → Connectors → **Add custom connector**, URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. A sign-in page opens once: **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat. Turn it on in your chat, then say the line above. (Claude Code and terminal agents handle this part on their own.)
+A chat app can read the page but can't add the Lake to itself. Do that one step yourself first: add a custom connector (a remote MCP server) with URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. In Claude it's Settings → Connectors → **Add custom connector**; in other apps, look for Connectors, Tools or MCP servers in the settings. A sign-in page opens once: **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat. Turn it on in your chat, then say the line above. (Claude Code and terminal agents handle this part on their own.)
 
 ## Then try
 
