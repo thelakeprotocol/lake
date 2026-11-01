@@ -279,7 +279,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
     if (!s.live.principal && !s.live.sessions.size) void sleep(s.live);
   };
   setInterval(() => {
-    for (const [sid, s] of sessions) if (Date.now() - s.seen > 30 * 60_000) { void s.transport.close().catch(() => {}); endSession(sid); }
+    for (const [sid, s] of sessions) if (Date.now() - s.seen > 10 * 60_000) { void s.transport.close().catch(() => {}); endSession(sid); }
     for (const l of live.values()) if (!l.sessions.size && Date.now() - l.seen > SLEEP_MS) void sleep(l);
   }, Math.min(60_000, SLEEP_MS / 2)).unref();
 
@@ -302,7 +302,19 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
       try { l = await agentFor(principal); } catch (e) { return void res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: (e as Error).message }, id: null }); }
       const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (newSid) => { sessions.set(newSid, entry); l.sessions.add(newSid); },
+        onsessioninitialized: (newSid) => {
+          sessions.set(newSid, entry);
+          l.sessions.add(newSid);
+          // At most three conversations open per agent: a newer one closes the oldest (run 83: each resume of an AI's chat
+          // opened another, none was closed for half an hour, and twelve agents filled the sandbox's eighty). A client
+          // whose old conversation is gone gets 404 and starts a new one.
+          const mine = [...l.sessions].map((x) => [x, sessions.get(x)?.seen ?? 0] as const).sort((a, b) => a[1] - b[1]);
+          for (const [old] of mine.slice(0, Math.max(0, mine.length - 3))) {
+            if (old === newSid) continue;
+            void sessions.get(old)?.transport.close().catch(() => {});
+            endSession(old);
+          }
+        },
       });
       const entry = { live: l, principal, transport, seen: Date.now() };
       transport.onclose = () => { if (transport.sessionId) endSession(transport.sessionId); };

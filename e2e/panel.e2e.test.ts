@@ -118,6 +118,22 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await again.close();
   });
 
+  it('keeps at most three conversations open per agent: a fourth closes the oldest (run 83: resumes filled the sandbox)', async () => {
+    const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();
+    const open = async () => {
+      const c = new Client({ name: 'resumer', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(`${house}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
+      return c;
+    };
+    const first = await open();
+    const url = JSON.parse(((await first.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.url;
+    const later = [await open(), await open(), await open()];
+    await expect(first.callTool({ name: 'lake_overview', arguments: {} })).rejects.toThrow(/404|not found/i);
+    // The newest are fine, and still the same agent.
+    expect(JSON.parse(((await later[2]!.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.url).toBe(url);
+    for (const c of [first, ...later]) await c.close().catch(() => {});
+  });
+
   it('tells a visitor at once that nobody has claimed the house yet (run 66: notes waited for no one)', async () => {
     const early = await makeVisitor(await generateIdentity(), 'early.example');
     expect((await ask(house, early, { kind: 'note', text: 'Hello, anyone home?' })).reply).toMatchObject({ kind: 'noted', delivered: false, code: 'no-owner', says: expect.stringMatching(/nobody has claimed this house/) });
