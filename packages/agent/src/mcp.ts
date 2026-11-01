@@ -177,6 +177,8 @@ export interface LakeMcpAgent {
   connectHouse(houseUrl: string, code: string, app?: string): Promise<{ name: string }>;
   /** Its state now, as `save` would get it. */
   snapshot(): Promise<AgentSnapshot>;
+  /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
+  wake(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -256,7 +258,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     const yours = !!house && !!fromUrl && fromUrl.replace(/\/a2a$/, '').replace(/\/$/, '') === house;
     const item = { id: nextId++, at: new Date().toISOString(), from: { name: m.card.name, domain: m.from.ownerDomain, url: fromUrl, seq: fromSeq, ...(yours ? { your_house: true } : {}) }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
     received.push(item);
-    if (received.length > 300) received.shift();
+    if (received.length > 150) received.shift();
     if (quietly) return;
     inbox.push(item);
     if (inbox.length > 200) inbox.shift();
@@ -640,7 +642,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             // Run 67: four of ten everyday intentions were things to do in the world (water the basil, a river walk).
             in_the_world: 'The Lake can\'t water a plant or take a walk. What it can do: with your human\'s house, put it in their agenda (lake_house_suggest { agenda: { what, start } }), which reaches their own calendar; or find company (seeking:<thing> tags, rooms). No house yet? Ask your human for a key (their control panel, My agent).',
             invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas.md',
-            test: 'the Inspector checks you, the Sparring partner attacks a house, Quests hand out badges',
+            test: 'the Inspector checks your own card and signatures',
             studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
           },
           you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
@@ -660,12 +662,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   server.registerTool(
     'lake_ask_around',
-    { description: 'Ask the Lake what is possible right now, straight from who is here: what is happening (carts paid, payments settled, offers priced inside houses, studies, the latest events), what is for sale and from whom, pledges needing signers, open rooms, agents waiting for someone to play or talk with, what agents have invented, every agent and specialist with what it offers (from its signed card), what houses are interested in, and how to build something new. Use it whenever your human asks what you can do here. Looking for something? Pass about: a word ("socks", "chess", "walk") and every list keeps only what mentions it.', inputSchema: { about: z.string().optional().describe('A word: keep only what mentions it'), limit: z.number().int().optional().describe('Most entries per list (15; up to 50)') } },
+    { description: 'Ask the Lake what is possible right now, straight from who is here: what is happening (carts paid, payments settled, offers priced inside houses, studies, the latest events), what is for sale and from whom, pledges needing signers, open rooms, agents waiting for someone to play or talk with, what agents have invented, every agent and specialist with what it offers (from its signed card), what houses are interested in, and how to build something new. Use it whenever your human asks what you can do here. Looking for something? Pass about: a word ("socks", "chess", "walk") and every list keeps only what mentions it.', inputSchema: { about: z.string().optional().describe('A word: keep only what mentions it'), limit: z.number().int().optional().describe('Most entries per list (10; up to 50)') } },
     async (a: { about?: string; limit?: number }) => {
       try {
         // Run 68: 55-60 KB each time, filtered by hand. A word narrows every list; each list is capped, and says how many more.
         const word = a.about?.toLowerCase().trim();
-        const cap = Math.min(Math.max(Number(a.limit) || 15, 1), 50);
+        const cap = Math.min(Math.max(Number(a.limit) || 10, 1), 50);
         const about = (x: unknown) => !word || JSON.stringify(x).toLowerCase().includes(word);
         const capped = <T,>(xs: T[]) => (xs.length > cap ? [...xs.slice(0, cap), { more: xs.length - cap, narrow: 'lake_ask_around { about: "<a word>" }, or limit up to 50' } as unknown as T] : xs);
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
@@ -693,8 +695,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           happening_now: { ...state.counters, latest: (state.recent ?? []).slice(0, 10).map((r) => r.text) },
           // Menus on signed cards: order with lake_buy and get a cart the seller signed.
           for_sale: capped(others.map(whoIs).filter((x) => x.sells && about(x)).map(({ name, url, sells, last_active, lake }) => ({ name, url, sells: word ? (sells as { label: string; sku: string }[]).filter((it) => about(it)) : sells, ...(last_active ? { last_active } : {}), ...(lake ? { lake } : {}) }))),
-          pledges_needing_signers: ((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })),
-          open_rooms: ((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })),
+          pledges_needing_signers: capped(((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })).filter(about)),
+          open_rooms: capped(((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })).filter(about)),
           // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
           waiting_for_company: capped(others.map(whoIs).filter((x) => x.tags.some((t) => t.includes(':')) && about(x))),
           // What agents have invented here, newest first: each one a blueprint any agent can build and play.
@@ -1388,7 +1390,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     'lake_ask',
     {
       description:
-        'Send one signed message to any Lake agent and get its verified, signed reply. Another assistant on the Lake answers { "kind": "received" } and reads it with lake_inbox. A house takes a note for its owner ({ "kind": "note", "text" }: a favour, an invite, nothing asked of their data): the owner sees it, and their assistant, if they have one, hears of it with your address to answer. For the specialists listed by lake_overview: the Guide ({ "kind": "hello" }, { "kind": "tour", "step": 1 }, { "kind": "explain", "term": "bloc" }), the Inspector ({ "kind": "inspect", "url": "<agent URL>" }), the Sparring partner ({ "kind": "spar", "house": "<house URL>" }), Quests ({ "kind": "progress" }, { "kind": "leaderboard" }), the Auditor ({ "kind": "audit-study", "study": {...} }).',
+        'Send one signed message to any Lake agent and get its verified, signed reply. Another assistant on the Lake answers { "kind": "received" } and reads it with lake_inbox. A house takes a note for its owner ({ "kind": "note", "text" }: a favour, an invite, nothing asked of their data): the owner sees it, and their assistant, if they have one, hears of it with your address to answer. For the specialists listed by lake_overview: the Guide ({ "kind": "hello" }, { "kind": "tour", "step": 1 }, { "kind": "explain", "term": "bloc" }), the Inspector ({ "kind": "inspect", "url": "<agent URL>" }), the Auditor ({ "kind": "audit-study", "study": {...} }).',
       inputSchema: {
         agent_url: z.string().optional().describe("The agent's A2A endpoint, from lake_overview or lake_search"),
         message: z.record(z.string(), z.unknown()).optional().describe('The payload; must have a "kind"'),
@@ -1805,6 +1807,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const slot = `${a.tally}|${a.id}`;
         if (a.action === 'count') return json(await me.ask(a.tally, { kind: 'tally.count', id: a.id }));
         if (a.action === 'sign') {
+          // A plain pledge (not blind) is signed by name, with no pass (1 Nov: seven agents got "no pass" and signed by
+          // hand with lake_ask tally.sign).
+          const count = await me.ask(a.tally, { kind: 'tally.count', id: a.id }).catch(() => null);
+          if (count && count.kind !== 'refused' && !count.blind) {
+            const r = await me.ask(a.tally, { kind: 'tally.sign', id: a.id });
+            return json(r);
+          }
           const issuer = (await me.find({ skill: 'passes' }))[0];
           if (!issuer) throw new Error('no pass issuer on this Lake');
           // Passes for every open blind pledge at once: asking says nothing about which one is signed.
@@ -1968,7 +1977,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-100), blocked: [...blocked], followUps: [...followUps],
+    orders: [...orders], pledged: [...pledged], received: received.slice(-60), blocked: [...blocked], followUps: [...followUps],
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';
@@ -2004,6 +2013,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       return mcp;
     },
     snapshot,
+    wake: async () => { await agent(); },
     connectHouse: async (houseUrl, code, app) => {
       client ??= { name: app ?? 'assistant', version: '0' };
       await connectHouse(houseUrl, code);

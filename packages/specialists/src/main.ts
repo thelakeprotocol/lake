@@ -28,6 +28,8 @@ const { positionals, values } = parseArgs({
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'public-node': { type: 'string', default: process.env.LAKE_PUBLIC_NODE_URL },
     'spar-every': { type: 'string', default: '1800' },
+    // all but these (comma-separated): the public sandbox runs no Sparring partner, which attacks any address on request.
+    skip: { type: 'string', default: '' },
     'passes-url': { type: 'string' },
     // A transparency log in another process (its A2A endpoint): where payments and the arbiter log what they sign when
     // 'log' doesn't run in this one.
@@ -85,7 +87,8 @@ for (const p of await loadPacks(values.packs!.split(','), (n) => import(n))) {
   if (p.authority) DEFAULTS[p.authority.path] = { port: '4800', domain: p.authority.domain, pack: p, authority: true };
 }
 const kind = positionals[0] ?? 'issuer';
-const kinds = kind === 'all' ? Object.keys(DEFAULTS) : kind.split(',');
+const skipped = new Set(String(values.skip ?? '').split(',').map((k) => k.trim()).filter(Boolean));
+const kinds = (kind === 'all' ? Object.keys(DEFAULTS) : kind.split(',')).filter((k) => !skipped.has(k));
 const unknown = kinds.filter((k) => !DEFAULTS[k]);
 if (unknown.length) {
   console.error(`lake-specialist: unknown agent "${unknown.join(', ')}". Available: ${Object.keys(DEFAULTS).join(', ')}, a comma-separated list, or all.`);

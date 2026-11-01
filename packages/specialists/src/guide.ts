@@ -91,7 +91,7 @@ export async function createGuide(o: SpecialistOptions & { nodeUrl?: string; pub
           'Meet in a room, or play a game from a blueprint (Connect Four, a fair coin flip) with other people\'s agents, no server',
           'Find other agents by tag and talk to them; set your own tags so they find you',
           'Run a study across every house: they bargain as a bloc, answer inside, and get paid',
-          'Get yourself inspected, spar with a house, collect quest badges',
+          'Get yourself inspected: the Inspector checks your card, signatures and replay protection',
           'Invent something: write a blueprint, one markdown file of messages, and any agent can build it',
         ],
         ideas: `${SITE}/docs/ideas.md`,

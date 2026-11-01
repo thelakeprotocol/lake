@@ -11,7 +11,7 @@
 # Everything listens on 127.0.0.1 only. Put HTTPS in front with the web server you already run
 # (deploy/apache-sandbox.conf), or with Caddy if ports 80/443 are free (--profile caddy, deploy/Caddyfile):
 #   /        the node: live map, registry, events, signals, relay
-#   /s/*     the specialists: /s/guide /s/inspector /s/sparring /s/quests /s/ethics /s/auditor /s/payments /s/issuer
+#   /s/*     the specialists: /s/guide /s/inspector /s/ethics /s/auditor /s/payments /s/issuer (no Sparring partner or Quests here)
 #   /mcp     the Lake MCP connector over HTTP (Claude as a Lake agent)
 #   /pods/*  the hosted houses' Solid pods (public WebIDs)
 #   /t/*     the hosted houses (anyone can claim one: the first device to open /t/<name>/owner/ becomes its owner)
@@ -39,7 +39,7 @@ services:
     <<: *small
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: specialists
-    command: ["all", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--spar-every", "1800", "--packs", "health,shopping"]
+    command: ["all", "--skip", "sparring,quests", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--packs", "health,shopping"]
     environment: { NODE_OPTIONS: "--max-old-space-size=128", LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [specialists:/data]
     ports: ["127.0.0.1:4300:4300"]

@@ -79,7 +79,7 @@ beforeAll(async () => {
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
     '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/);
   // The connector, with sign-in on.
-  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500' });
+  await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500', LAKE_MCP_SLEEP_MS: '3000' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   page = await ctx.newPage();
@@ -97,6 +97,27 @@ afterAll(async () => {
 });
 
 describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
+  it('an agent nobody is connected to sleeps, and a message for it wakes it as itself (1 Nov: 404s to agents gone)', async () => {
+    const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();
+    const transport = new StreamableHTTPClientTransport(new URL(`${house}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } });
+    const c = new Client({ name: 'sleeper', version: '0' });
+    await c.connect(transport);
+    const me = JSON.parse(((await c.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you;
+    await transport.terminateSession();
+    await c.close();
+    // Asleep after 3 s with nobody connected (LAKE_MCP_SLEEP_MS); a message for it wakes it from disk.
+    await new Promise((ok) => setTimeout(ok, 6000));
+    const writer = await makeVisitor(await generateIdentity(), 'writer.example');
+    expect((await ask(me.url, writer, { kind: 'message', text: 'still there?' })).reply).toMatchObject({ kind: 'received' });
+    // Back with the same sign-in, the same agent, and the message waiting.
+    const again = new Client({ name: 'sleeper', version: '0' });
+    await again.connect(new StreamableHTTPClientTransport(new URL(`${house}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
+    const inbox = JSON.parse(((await again.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 2 } })).content as { text: string }[])[0]!.text);
+    expect(inbox.messages.map((m: { message: { text?: string } }) => m.message.text)).toContain('still there?');
+    expect(JSON.parse(((await again.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.url).toBe(me.url);
+    await again.close();
+  });
+
   it('tells a visitor at once that nobody has claimed the house yet (run 66: notes waited for no one)', async () => {
     const early = await makeVisitor(await generateIdentity(), 'early.example');
     expect((await ask(house, early, { kind: 'note', text: 'Hello, anyone home?' })).reply).toMatchObject({ kind: 'noted', delivered: false, code: 'no-owner', says: expect.stringMatching(/nobody has claimed this house/) });

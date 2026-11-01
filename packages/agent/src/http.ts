@@ -22,8 +22,11 @@ import { LakeOAuth } from './auth.js';
  */
 // Short, distinct names (no two share a first letter), so a reader can tell four agents apart at a glance.
 const CREATURES = ['Atlas', 'Blaze', 'Cinder', 'Delta', 'Echo', 'Fable', 'Gale', 'Halo', 'Indigo', 'Juno', 'Kite', 'Lumen', 'Moss', 'Nova', 'Onyx', 'Pike', 'Quill', 'Rook', 'Sable', 'Tango'];
-/** A signed-in agent nobody has used for a day is put to sleep (memory), and woken from disk on its next use. */
-const SLEEP_MS = 24 * 3_600_000;
+// With the plain names all taken, two words (1 Nov: three "Tango"s, told apart only by hex, took each other for impostors).
+const KINDS = ['Amber', 'Brisk', 'Coral', 'Dusky', 'Ember', 'Fern', 'Glass', 'Harbor', 'Ivory', 'Jade', 'Kelp', 'Linen', 'Maple', 'Night', 'Opal', 'Pebble', 'Quiet', 'River', 'Salt', 'Tidal'];
+// Asleep after half an hour with nobody connected: its state is on disk, and a message for it wakes it (it was a day,
+// and forty agents nobody was using filled the sandbox).
+const SLEEP_MS = Number(process.env.LAKE_MCP_SLEEP_MS) || 30 * 60_000;
 
 type Live = { id: string; principal?: string; agent: LakeMcpAgent; sessions: Set<string>; seen: number };
 
@@ -63,15 +66,31 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
       const n = CREATURES[(start + k) % CREATURES.length]!;
       if (!taken.has(n)) { named.set(id, n); return n; }
     }
-    // More agents than names: the name and a few letters of its own.
+    const second = parseInt(id.slice(8, 12) || '0', 16) % KINDS.length;
+    for (let k = 0; k < KINDS.length * CREATURES.length; k++) {
+      const n = `${KINDS[(second + Math.floor(k / CREATURES.length)) % KINDS.length]} ${CREATURES[(start + k) % CREATURES.length]}`;
+      if (!taken.has(n)) { named.set(id, n); return n; }
+    }
+    // More agents than four hundred names: the name and a few letters of its own.
     const n = `${CREATURES[start]} ${id.slice(0, 3)}`;
     named.set(id, n);
     return n;
   };
 
   // Each agent's card and A2A door, at <path>/a/<id>/: open to anyone (the node fetches cards), never behind sign-in.
-  app.use(`${path}/a/:id`, (req, res, next) => {
-    const sub = cards.get(String(req.params.id));
+  // A signed-in agent asleep (nobody connected for a while) is woken from its saved state when a message comes for it,
+  // so a seller whose chat ended still takes an order and a buyer still gets its delivery (1 Nov: 404s to agents gone).
+  app.use(`${path}/a/:id`, async (req, res, next) => {
+    const id = String(req.params.id);
+    let sub = cards.get(id);
+    if (!sub && auth?.principal(`p-${id}`)) {
+      try {
+        await (await agentFor(`p-${id}`)).agent.wake();
+        sub = cards.get(id);
+      } catch (e) {
+        return void res.status(503).json({ error: (e as Error).message });
+      }
+    }
     return sub ? sub(req, res, next) : void res.status(404).json({ error: 'no such agent (its conversation ended)' });
   });
 
@@ -262,7 +281,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
   setInterval(() => {
     for (const [sid, s] of sessions) if (Date.now() - s.seen > 30 * 60_000) { void s.transport.close().catch(() => {}); endSession(sid); }
     for (const l of live.values()) if (!l.sessions.size && Date.now() - l.seen > SLEEP_MS) void sleep(l);
-  }, 60_000).unref();
+  }, Math.min(60_000, SLEEP_MS / 2)).unref();
 
   const principalOf = (req: express.Request) => (req as express.Request & { auth?: { extra?: { principal?: string } } }).auth?.extra?.principal;
   const signedIn: express.RequestHandler[] = bearer ? [bearer] : [];

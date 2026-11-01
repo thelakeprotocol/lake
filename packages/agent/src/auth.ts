@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
 import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
@@ -53,6 +53,12 @@ export class LakeOAuth implements OAuthServerProvider {
     this.clients = store(join(o.dir, 'clients.json'), {});
     this.tokens = store(join(o.dir, 'tokens.json'), {});
     this.people = store(join(o.dir, 'principals.json'), {});
+    // Each agent's state in a file of its own (sandbox, 1 Nov: one principals.json held every agent's and reached 15 MB,
+    // rewritten whole each time any of forty agents saved, and the connector ran out of memory). Moved out once.
+    mkdirSync(join(o.dir, 'agents'), { recursive: true });
+    const inline = Object.values(this.people.get()).filter((x) => x.agent);
+    for (const x of inline) { this.writeAgent(x.id, x.agent!); delete x.agent; }
+    if (inline.length) this.people.save();
     this.sweep();
     setInterval(() => this.sweep(), 3_600_000).unref();
   }
@@ -60,7 +66,7 @@ export class LakeOAuth implements OAuthServerProvider {
   /** Expired tokens, and principals past their lease (with their tokens). */
   private sweep() {
     const t = this.tokens.get(), p = this.people.get();
-    for (const [id, x] of Object.entries(p)) if (Date.now() - Date.parse(x.usedAt) > PRINCIPAL_LEASE_MS) delete p[id];
+    for (const [id, x] of Object.entries(p)) if (Date.now() - Date.parse(x.usedAt) > PRINCIPAL_LEASE_MS) { delete p[id]; rmSync(this.agentFile(id), { force: true }); }
     for (const [h, x] of Object.entries(t)) if (x.exp < now() || !p[x.principal]) delete t[h];
     this.tokens.save();
     this.people.save();
@@ -199,15 +205,24 @@ button{width:100%;padding:13px;border-radius:12px;font:600 16px system-ui;cursor
     return id;
   }
 
-  principal(id: string): Principal | undefined { return this.people.get()[id]; }
+  principal(id: string): Principal | undefined {
+    const p = this.people.get()[id];
+    if (!p) return undefined;
+    try { return { ...p, agent: JSON.parse(readFileSync(this.agentFile(id), 'utf8')) as Record<string, unknown> }; } catch { return p; }
+  }
+  private agentFile(id: string) { return join(this.o.dir, 'agents', `${id.replace(/[^a-zA-Z0-9-]/g, '')}.json`); }
+  private writeAgent(id: string, agent: Record<string, unknown>) {
+    const f = this.agentFile(id);
+    writeFileSync(`${f}.tmp`, JSON.stringify(agent));
+    renameSync(`${f}.tmp`, f);
+  }
   /** Used now: its lease starts again. Saved at most every ten minutes. */
   touch(id: string) {
     const p = this.people.get()[id];
     if (p && Date.now() - Date.parse(p.usedAt) > 600_000) { p.usedAt = new Date().toISOString(); this.people.save(); }
   }
   saveAgent(id: string, agent: Record<string, unknown>) {
-    const p = this.people.get()[id];
-    if (p) { p.agent = agent; this.people.save(); }
+    if (this.people.get()[id]) this.writeAgent(id, agent);
   }
 }
 
