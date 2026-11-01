@@ -1,9 +1,9 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
 import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
-import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, checkSplitConsent, splitHash, keyThumbprint, type CartShare, type DeliveryTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
@@ -288,7 +288,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     cart: string; role: 'seller' | 'buyer'; with: { name: string; url?: string; webId: string };
     /** A cart that came unasked from an agent this one never wrote to: paid only when its human asked for it. */
     unsolicited?: boolean;
-    status: 'carted' | 'paid' | 'delivered' | 'accepted' | 'disputed' | 'refunded';
+    status: 'carted' | 'paid' | 'delivered' | 'accepted' | 'disputed' | 'refunded' | 'withdrawn';
     total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string;
     mandate: CartMandate; sellerCard: AgentCard;
     evidence: { step: string; at: string; signed: unknown }[];
@@ -339,6 +339,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     if (x.payment === 'released') return seller ? 'paid, and released to you' : 'paid, and released to the seller';
     return x.payment === 'paid' ? 'paid' : 'not paid yet';
   };
+  // Team carts this agent leads, waiting for its members' consents (run 77): sent to the buyer when all have said yes.
+  type Team = { id: string; to: string; buyer: { name: string; webId: string }; items: { label: string; amount: { currency: string; value: number } }[]; minutes?: number; brief?: string; delivery?: DeliveryTerms; splitHash: string; shares: (Omit<CartShare, 'consent'> & { name: string; consent?: string })[] };
+  const teams = new Map<string, Team>();
   /** A menu stops answering orders by itself after this long with nothing done here: its driver has gone. */
   const AWAY_AFTER_MS = 30 * 60_000;
   const onTrade = async (m: Incoming):Promise<{ reply?: Record<string, unknown>; checked?: Record<string, unknown> } | null> => {
@@ -374,6 +377,38 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const c = await checkCart(cart, (await key).publicJwk);
       orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
       return { reply: { kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${c.id}" }` }, checked: { note: `from your menu: you sent cart ${c.id} (${c.total.currency} ${c.total.value}) automatically; deliver once it's paid (lake_sell { action: "deliver" })` } };
+    }
+    // A team's cart: a member asked to agree its share, a member's consent back to the lead, and a seller's withdrawal.
+    if (p.kind === 'trade.split.ask') {
+      return { checked: { note: `${peer.name} asks you to join a team's cart ${String(p.cart)}: your share ${String(p.currency)} ${String(p.amount)} of ${String(p.total)}, for ${String(p.for ?? 'the job')}. Agree (your human's say, if it's theirs to give) with lake_sell { action: "consent", cart: "${String(p.cart)}" }; nothing is paid until the buyer pays and accepts` } };
+    }
+    if (p.kind === 'trade.split.consent' && teams.has(String(p.cart))) {
+      const t = teams.get(String(p.cart))!;
+      const share = t.shares.find((x) => x.webId === m.from.webId);
+      if (!share) return { checked: { note: `a consent for cart ${t.id} from someone not in its team` } };
+      try {
+        await checkSplitConsent({ ...share, consent: String(p.consent) }, m.from.publicJwk, { cart: t.id, splitHash: t.splitHash, currency: t.items[0]!.amount.currency });
+      } catch (e) {
+        return { checked: { note: `${peer.name}'s consent for cart ${t.id} didn't check: ${(e as Error).message}` } };
+      }
+      share.consent = String(p.consent);
+      const waiting = t.shares.filter((x) => !x.consent).map((x) => x.name);
+      if (waiting.length) return { checked: { note: `${peer.name} agreed its share of cart ${t.id}; still waiting for ${waiting.join(', ')}` } };
+      teams.delete(t.id);
+      const cart = await me.cart(t.buyer.webId, t.items, t.minutes, t.brief, undefined, t.delivery, { id: t.id, split: t.shares.map(({ name: _n, ...x }) => x as CartShare) });
+      const c = await checkCart(cart, (await key).publicJwk);
+      orders.set(c.id, { cart: c.id, role: 'seller', with: { name: t.buyer.name, url: t.to, webId: t.buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'team agreed and cart signed', at: new Date().toISOString(), signed: cart }] });
+      const reply = await me.ask(t.to, { kind: 'trade.cart', cart, team: t.shares.map((x) => ({ name: x.name, amount: x.amount })) }).catch((e: Error) => ({ error: e.message }));
+      return { checked: { note: `everyone agreed: the team's cart ${t.id} (${c.total.currency} ${c.total.value}) went to ${t.buyer.name}, paid held; when they accept, each member gets its share`, buyer_said: reply } };
+    }
+    if (p.kind === 'trade.withdraw') {
+      const o = orders.get(String(p.cart));
+      if (o?.role === 'buyer' && o.with.webId === m.from.webId && o.status === 'carted') {
+        o.status = 'withdrawn';
+        o.evidence.push({ step: 'withdrawn by the seller', at: new Date().toISOString(), signed: m.signed });
+        return { checked: { note: `${peer.name} withdrew cart ${o.cart}: it can't be paid now` } };
+      }
+      return { checked: { note: 'a withdrawal of a cart you have no unpaid copy of' } };
     }
     if (p.kind === 'trade.cart' && p.cart) {
       try {
@@ -969,9 +1004,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_sell',
     {
-      description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. A menu item or a cart can carry delivery terms you promise (how soon, revisions, word or line counts): signed in the cart, counted by the buyer\'s connector, and ruled on by the Arbiter. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you, and the payments agent is told of each delivery by its sha256); content is what is hashed and checked, note rides beside it unhashed. The buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer asks for changes or disputes it, send a new delivery of the same cart (numbered, naming the one it replaces); they can accept it, which releases a held payment. refund: pay the buyer back, in full, or (with amount, while it is held) in part, the rest staying held for the buyer to accept: a way to settle a dispute. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
+      description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. team: several of you did one job for one buyer: one cart, one held payment, each member paid its share when the buyer accepts; give members [{ url, amount }] (you among them); each agrees its share with consent, and the cart goes to the buyer when the last does. withdraw: take back a cart nobody has paid. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. A menu item or a cart can carry delivery terms you promise (how soon, revisions, word or line counts): signed in the cart, counted by the buyer\'s connector, and ruled on by the Arbiter. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you, and the payments agent is told of each delivery by its sha256); content is what is hashed and checked, note rides beside it unhashed. The buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer asks for changes or disputes it, send a new delivery of the same cart (numbered, naming the one it replaces); they can accept it, which releases a held payment. refund: pay the buyer back, in full, or (with amount, while it is held) in part, the rest staying held for the buyer to accept: a way to settle a dispute. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
       inputSchema: {
-        action: z.enum(['menu', 'cart', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
+        action: z.enum(['menu', 'cart', 'team', 'consent', 'withdraw', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
+        members: z.array(z.object({ url: z.string(), amount: z.number() })).min(2).max(5).optional().describe('team: each member\'s A2A address (yours too) and its share; the shares add up to the total'),
         items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
         delivery: DELIVERY.optional().describe('cart: what you promise about the delivery, signed into the cart (an order from your menu gets the item\'s)'),
         to: z.string().optional().describe('cart: the buyer\'s A2A endpoint'),
@@ -992,6 +1028,47 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           await me.setMenu(items);
           menu = items;
           return json({ ok: true, menu: items, note: items.length ? 'on your signed card now: lake_search finds it, and an order for an item on it gets a signed cart back at once' : 'menu cleared' });
+        }
+        // A team's cart (run 77): one cart, one payment held whole, each member paid its share on release. Each member
+        // agrees its share first; the cart goes to the buyer by itself when the last one has.
+        if (a.action === 'team') {
+          if (!a.to || !a.items?.length || !a.members) throw new Error('team needs to (the buyer), items and members [{ url, amount }] (you among them)');
+          const buyerCard = (await (await fetch(cardUrlFor(a.to))).json()) as AgentCard;
+          const buyer = lakeProfile(buyerCard);
+          if (!buyer) throw new Error(`no Lake agent at ${a.to}`);
+          const currency = a.items[0]!.currency.toUpperCase();
+          const total = a.items.reduce((n, x) => n + Math.round(x.price * 100), 0) / 100;
+          if (Math.round(a.members.reduce((n, x) => n + x.amount * 100, 0)) !== Math.round(total * 100)) throw new Error(`members: the shares add up to ${a.members.reduce((n, x) => n + x.amount, 0)}, the items to ${total}: they must be the same`);
+          const shares = await Promise.all(a.members.map(async (x) => {
+            const card = (await (await fetch(cardUrlFor(x.url))).json()) as AgentCard;
+            const prof = await verifyLakeCard(card);
+            return { webId: prof.webId, url: card.supportedInterfaces?.[0]?.url ?? x.url, jkt: await keyThumbprint(prof.publicJwk), amount: x.amount, name: String(card.name ?? x.url) } as Team['shares'][number];
+          }));
+          if (!shares.some((x) => x.webId === me.webId)) throw new Error('members: you lead the team, so you are one of them (your own url and share)');
+          const id = randomUUID();
+          const hash = splitHash(shares, currency, total);
+          const t: Team = { id, to: a.to, buyer: { name: String(buyerCard.name ?? ''), webId: buyer.webId }, items: a.items.map((x) => ({ label: x.label, amount: { currency, value: x.price } })), minutes: a.minutes, brief: a.brief, delivery: a.delivery, splitHash: hash, shares };
+          const mine = shares.find((x) => x.webId === me.webId)!;
+          mine.consent = await me.consentToShare({ cart: id, splitHash: hash, amount: mine.amount, currency });
+          teams.set(id, t);
+          const asked = await Promise.all(shares.filter((x) => x !== mine).map((x) => me.ask(x.url, { kind: 'trade.split.ask', cart: id, split_hash: hash, amount: x.amount, currency, total, for: t.items.map((i) => i.label).join(', '), buyer: t.buyer.name, team: shares.map((y) => ({ name: y.name, amount: y.amount })) }).then(() => x.name, (e: Error) => `${x.name} (not reached: ${e.message})`)));
+          return json({ team_cart: id, total: { currency, value: total }, asked, next: 'each member agrees with lake_sell { action: "consent", cart }; when the last does, the cart goes to the buyer by itself, and you hear of it in lake_inbox' });
+        }
+        if (a.action === 'consent') {
+          const ask = [...received].reverse().find((x) => x.message.kind === 'trade.split.ask' && x.message.cart === a.cart);
+          if (!ask) throw new Error('no request to join a team\'s cart with that id in your inbox');
+          const q = ask.message as Record<string, any>;
+          const consent = await me.consentToShare({ cart: String(q.cart), splitHash: String(q.split_hash), amount: Number(q.amount), currency: String(q.currency) });
+          const reply = await me.ask(String(ask.from.url), { kind: 'trade.split.consent', cart: q.cart, consent });
+          return json({ agreed: { cart: q.cart, share: `${q.currency} ${q.amount}` }, lead_said: reply, note: 'your share is paid to you when the buyer accepts the work; you get a receipt of your own' });
+        }
+        if (a.action === 'withdraw') {
+          const x = findOrder(a.cart ?? '', 'seller');
+          if (x.status !== 'carted') throw new Error(`cart ${x.cart} is ${x.status}: a paid cart is refunded, not withdrawn (lake_sell { action: "refund" })`);
+          x.status = 'withdrawn';
+          x.evidence.push({ step: 'withdrawn', at: new Date().toISOString(), signed: null });
+          const reply = x.with.url ? await me.ask(x.with.url, { kind: 'trade.withdraw', cart: x.cart }).catch((e: Error) => ({ error: e.message })) : null;
+          return json({ withdrawn: x.cart, buyer_said: reply, note: 'if they pay it anyway, refund it (lake_sell { action: "refund" })' });
         }
         if (a.action === 'cart') {
           if (!a.to || !a.items?.length) throw new Error('cart needs to (the buyer\'s A2A endpoint) and items ({ label, price, currency })');
@@ -1126,6 +1203,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (a.action === 'pay') {
           const x = findOrder(a.cart ?? '', 'buyer');
           // A cart may be delivered before it is paid (run 37: "delivered already" left it unpayable); paid is paid once.
+          if (x.status === 'withdrawn') throw new Error(`${x.with.name} withdrew cart ${x.cart}: it can't be paid; ask them for a new one`);
           if (x.payment || (x.status !== 'carted' && x.status !== 'delivered')) throw new Error(`cart ${x.cart} is ${x.payment ? 'paid' : x.status} already`);
           const url = x.with.url ?? x.sellerCard.supportedInterfaces?.[0]?.url;
           if (!url) throw new Error('no address for the seller');

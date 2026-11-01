@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cartParty, cardUrlFor, checkCart, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cartParty, cardUrlFor, checkCart, keyThumbprint, signSplitConsent, type CartShare, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
   deliverWithRetries,
 } from '@thelakeprotocol/core';
@@ -145,7 +145,11 @@ export interface LakeAgent {
    */
   sellFor(house: CartPayee | null): Promise<void>;
   /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
-  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string, sku?: string, delivery?: DeliveryTerms): Promise<CartMandate>;
+  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string, sku?: string, delivery?: DeliveryTerms, team?: { id: string; split: CartShare[] }): Promise<CartMandate>;
+  /** This agent's signed consent to its share of a team's cart (SPEC §6.5). */
+  consentToShare(o: { cart: string; splitHash: string; amount: number; currency: string }): Promise<string>;
+  /** The RFC 7638 thumbprint of this agent's card key, as a cart pins it. */
+  jkt(): Promise<string>;
   /**
    * Where this agent's spending allowance comes from, once it's connected to its human's house: the allowance the human
    * signed there (SPEC §6.2), in its currency. Without one, USD payments use the sandbox's play-money allowance, if any.
@@ -365,11 +369,17 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     async sellFor(house) {
       sellingFor = house ?? undefined;
     },
-    async cart(buyerWebId, items, minutes, brief, sku, delivery) {
+    async consentToShare(c) {
+      return signSplitConsent(id, { webId: visitor.webId, ...c });
+    },
+    async jkt() {
+      return keyThumbprint(id.publicJwk);
+    },
+    async cart(buyerWebId, items, minutes, brief, sku, delivery, team) {
       // Ordered from the menu: the cart names it (its digest, as on this card) and the item, inside what the seller signs,
       // with the item's delivery terms unless this cart gives its own.
       const item = sku ? menu.find((m) => m.sku === sku) : undefined;
-      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(item ? { menu: { items: menu, sku: item.sku } } : {}), ...(await sellerTerms()), ...(delivery ?? item?.delivery ? { delivery: delivery ?? item?.delivery } : {}), ...(sellingFor ? { payee: sellingFor } : {}) });
+      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(item ? { menu: { items: menu, sku: item.sku } } : {}), ...(await sellerTerms()), ...(delivery ?? item?.delivery ? { delivery: delivery ?? item?.delivery } : {}), ...(team ? { id: team.id, split: team.split } : sellingFor ? { payee: sellingFor } : {}) });
     },
     async payCart(sellerUrl, cart, hold, releaseAfterHours) {
       const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;

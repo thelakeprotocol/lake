@@ -1531,6 +1531,52 @@ describe('the open door', () => {
     expect(await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku' })).toMatchObject({ cart: expect.any(String) });
   }, 120_000);
 
+  it('a team sells as one: one cart, each member agreeing its share, one held payment, each paid on release (run 77)', async () => {
+    const port = String(await freePort());
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '20' });
+    const connect = async (name: string) => {
+      const c = new Client({ name, version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+      return async (tool: string, args: Record<string, unknown> = {}, ok = true) => {
+        const r = await c.callTool({ name: tool, arguments: args });
+        const text = (r.content as { text: string }[])[0]!.text;
+        expect(!!r.isError, text).toBe(!ok);
+        return ok ? JSON.parse(text) : text;
+      };
+    };
+    const [ana, mo, sid, wren] = [await connect('claude-ana'), await connect('claude-mo'), await connect('claude-sid'), await connect('claude-wren')];
+    const [a, m, s, w] = [(await ana('lake_overview')).you, (await mo('lake_overview')).you, (await sid('lake_overview')).you, (await wren('lake_overview')).you];
+    const items = [{ label: 'Brand pack: logo concept, three blurbs, one-page site', price: 6, currency: 'USD' }];
+    expect(await ana('lake_sell', { action: 'team', to: w.url, items, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 3 }] }, false)).toMatch(/add up/);
+    const team = await ana('lake_sell', { action: 'team', to: w.url, items, delivery: { within_hours: 2, review_hours: 1 }, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 2.5 }, { url: s.url, amount: 1.5 }] });
+    expect(team).toMatchObject({ team_cart: expect.any(String), asked: [m.name, s.name] });
+    // Each member is asked, and agrees; nothing goes to the buyer until the last one has.
+    for (const member of [mo, sid]) {
+      const asked = (await member('lake_inbox', { wait_seconds: 5 })).messages.find((x: any) => x.message.kind === 'trade.split.ask');
+      expect(asked.checked.note).toMatch(/lake_sell \{ action: "consent"/);
+      expect(await member('lake_sell', { action: 'consent', cart: team.team_cart })).toMatchObject({ agreed: { cart: team.team_cart } });
+    }
+    let carts: any[] = [];
+    for (let i = 0; i < 10 && !carts.length; i++) carts = (await wren('lake_inbox', { wait_seconds: 2 })).messages.filter((x: any) => x.message.kind === 'trade.cart');
+    expect(carts[0].message.team).toEqual([{ name: a.name, amount: 2 }, { name: m.name, amount: 2.5 }, { name: s.name, amount: 1.5 }]);
+    // Paid held, delivered by the lead, accepted: the payments agent pays each member its share, with a receipt of its own.
+    expect(await wren('lake_buy', { action: 'pay', cart: team.team_cart, hold: false, human_asked: true }, false)).toMatch(/hold: true/);
+    expect(await wren('lake_buy', { action: 'pay', cart: team.team_cart, human_asked: true })).toMatchObject({ paid: 6, hold: { id: expect.any(String) } });
+    await ana('lake_sell', { action: 'deliver', cart: team.team_cart, content: 'Logo: a wren on a cup rim, #4A3428 on #F5EBDD. Blurbs and site attached.' });
+    for (let i = 0; i < 10; i++) { const o = (await wren('lake_buy', { action: 'orders' })).orders[0]; if (o?.status === 'delivered') break; await new Promise((ok) => setTimeout(ok, 500)); }
+    await wren('lake_buy', { action: 'accept', cart: team.team_cart });
+    for (const [member, share] of [[mo, 2.5], [sid, 1.5]] as const) {
+      let got: any;
+      for (let i = 0; i < 10 && !got; i++) got = (await member('lake_inbox', { wait_seconds: 2 })).messages.find((x: any) => x.message.kind === 'receipt');
+      expect(got.message).toMatchObject({ amount: share, cart: team.team_cart });
+      expect(await member('lake_verify', { evidence: got.message.receipt })).toMatchObject({ verified: true, pays_you: true });
+    }
+    // A cart nobody has paid can be taken back, and then it can't be paid.
+    const cart = await ana('lake_sell', { action: 'cart', to: w.url, items: [{ label: 'Extra sticker sheet', price: 1, currency: 'USD' }] });
+    await ana('lake_sell', { action: 'withdraw', cart: cart.sent });
+    expect(await wren('lake_buy', { action: 'pay', cart: cart.sent, human_asked: true }, false)).toMatch(/withdrew/);
+  }, 90_000);
+
   it('a held payment survives the payments agent restarting: the hold, the cart paid once and the budget spent are kept', async () => {
     // A payments agent of its own, in its own process, so it can be stopped and started again on the same data.
     const pp = String(await freePort());

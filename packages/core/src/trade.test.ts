@@ -1,9 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { buildCard, signCard } from './card.js';
 import { generateIdentity } from './crypto.js';
-import { cartHash, cartParty, cartTerms, checkCart, deliveryMisses, deliveryProblems, isParty, keyThumbprint, LAKE_PAYMENT_METHOD, menuHash, menuProblems, signCart } from './trade.js';
+import { cartHash, cartParty, cartTerms, checkCart, deliveryMisses, deliveryProblems, isParty, keyThumbprint, LAKE_PAYMENT_METHOD, menuHash, menuProblems, signCart, signSplitConsent, checkSplitConsent, splitHash } from './trade.js';
 
 describe('trade: AP2 carts the seller signs', () => {
+  it('pays a team: each share with its member\'s own consent, adding up to the total (run 77)', async () => {
+    const lead = await generateIdentity(), mo = await generateIdentity(), sid = await generateIdentity();
+    const team = [
+      { webId: 'https://ana.example/#agent', url: 'https://ana.example/a2a', jkt: await keyThumbprint(lead.publicJwk), amount: 130 },
+      { webId: 'https://mo.example/#agent', url: 'https://mo.example/a2a', jkt: await keyThumbprint(mo.publicJwk), amount: 150 },
+      { webId: 'https://sid.example/#agent', url: 'https://sid.example/a2a', jkt: await keyThumbprint(sid.publicJwk), amount: 170 },
+    ];
+    const id = 'gig-1', hash = splitHash(team, 'AUD', 450);
+    const keys = [lead, mo, sid];
+    const split = await Promise.all(team.map(async (x, i) => ({ ...x, consent: await signSplitConsent(keys[i]!, { webId: x.webId, cart: id, splitHash: hash, amount: x.amount, currency: 'AUD' }) })));
+    const items = [{ label: 'Brand pack', amount: { currency: 'AUD', value: 450 } }];
+    const cart = await signCart({ seller: lead, sellerWebId: team[0]!.webId, sellerName: 'Ana', buyerWebId: 'https://wren.example/#agent', items, id, split });
+    const c = await checkCart(cart, lead.publicJwk);
+    expect(c.split?.map((x) => x.amount)).toEqual([130, 150, 170]);
+    expect(c.splitHash).toBe(hash);
+    for (const [i, x] of c.split!.entries()) await checkSplitConsent(x, keys[i]!.publicJwk, { cart: id, splitHash: hash, currency: 'AUD' });
+    // A share the member didn't agree to, or one signed by someone else, doesn't check.
+    await expect(checkSplitConsent({ ...split[1]!, amount: 100 }, mo.publicJwk, { cart: id, splitHash: hash, currency: 'AUD' })).rejects.toThrow(/another cart, split or share/);
+    await expect(checkSplitConsent(split[1]!, sid.publicJwk, { cart: id, splitHash: hash, currency: 'AUD' })).rejects.toThrow(/key/);
+    // Shares that don't add up to the total, or a split with no cart id to consent to, are refused when signing.
+    await expect(signCart({ seller: lead, sellerWebId: team[0]!.webId, sellerName: 'Ana', buyerWebId: 'x', items: [{ label: 'Brand pack', amount: { currency: 'AUD', value: 400 } }], id, split })).rejects.toThrow(/add up|split_hash/);
+    await expect(signCart({ seller: lead, sellerWebId: team[0]!.webId, sellerName: 'Ana', buyerWebId: 'x', items, split })).rejects.toThrow(/cart id/);
+  });
+
   const make = async (minutes = 30) => {
     const seller = await generateIdentity();
     const cart = await signCart({ seller, sellerWebId: 'https://poet.example/#agent', sellerName: 'Poet', buyerWebId: 'https://buyer.example/#agent', minutes, items: [{ label: 'A haiku', amount: { currency: 'USD', value: 2 } }, { label: 'Rush', amount: { currency: 'USD', value: 0.5 } }] });

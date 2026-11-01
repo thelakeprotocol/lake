@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, deliverWithRetries, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  packId, checkCart, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
+  packId, checkCart, checkSplitConsent, cardUrlFor, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
@@ -182,6 +182,8 @@ interface Hold {
   delivered?: { sha256: string; revision: number; at: number };
   /** The seller who signed the cart, when another is paid (an assistant selling for its owner's house), and its address. */
   seller?: string; sellerUrl?: string;
+  /** A team's cart: each member's share (cents), paid to it when the hold is released. */
+  split?: { webId: string; url: string; amount: number }[];
   /** Each dispute, about one delivery, and how it ended. */
   disputes?: { code: DisputeCode; sha256: string; at: number; ended?: string }[];
   /** Before deliveries were filed: the buyer disputed it. */
@@ -302,6 +304,19 @@ export async function createPayments(o: SpecialistOptions & {
         const ok = (await checkBadges({ ...seller, badges: [cart.payee.vouch] }, { sandbox: o.sandbox })).some((b) => b.type === ASSISTANT_KEY_TYPE && b.issuerWebId === cart!.payee!.webId && (b.subject.may as string[] | undefined)?.includes('sell'));
         if (!ok) return { kind: 'refused', problems: [`cart ${cart.id} names ${cart.payee.webId} as payee, but carries no word from it that the seller sells for it: nothing was paid`] };
       }
+      // A team's cart: held whole, and each member's consent to its share checked against that member's own card first.
+      if (cart.split) {
+        if (p.hold !== true) return { kind: 'refused', problems: [`cart ${cart.id} pays a team: pay it with hold: true, so each member is paid its share when it is released`] };
+        try {
+          for (const share of cart.split) {
+            const member = await verifyLakeCard((await (await fetch(cardUrlFor(share.url))).json()) as AgentCard);
+            if (member.webId !== share.webId) throw new Error(`the agent at ${share.url} is not ${share.webId}`);
+            await checkSplitConsent(share, member.publicJwk, { cart: cart.id, splitHash: cart.splitHash!, currency: cart.total.currency });
+          }
+        } catch (e) {
+          return { kind: 'refused', problems: [`cart ${cart.id}'s team: ${(e as Error).message}: nothing was paid`] };
+        }
+      }
       if (payments.length !== 1) return { kind: 'refused', problems: ['one payment per cart'] };
     }
     const checked: { payee: string; amount: number; agreement: string }[] = [];
@@ -358,7 +373,7 @@ export async function createPayments(o: SpecialistOptions & {
         const settlementId = randomUUID();
         // Where both sides are reached when it settles: the seller's card came with the cart, the buyer's with this message.
         const sellerUrl = (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url;
-        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: cart!.payee?.url ?? sellerUrl, ...(cart!.payee ? { seller: cart!.webId, sellerUrl } : {}), amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, about, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}) });
+        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: cart!.payee?.url ?? sellerUrl, ...(cart!.payee ? { seller: cart!.webId, sellerUrl } : {}), amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, about, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}), ...(cart!.split ? { split: cart!.split.map((x) => ({ webId: x.webId, url: x.url, amount: Math.round(x.amount * 100) })) } : {}) });
         return {
           payee: c.payee,
           credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash }, seller: cart.webId } : {}), ...about, intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
@@ -386,14 +401,21 @@ export async function createPayments(o: SpecialistOptions & {
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
     await save();
     const story = { how, ...(h.delivered ? { delivered: h.delivered.sha256, deliveries: h.delivered.revision } : {}), ...(h.disputes?.length ? { disputes: h.disputes.map((d) => ({ code: d.code, ended: d.ended })) } : {}) };
-    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, ...(h.about ?? {}), seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why, ...story }, 3650);
+    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, ...(h.about ?? {}), ...(to === 'captured' && h.split ? { paid_as_shares: h.split.map((x) => ({ member: x.webId, amount: x.amount / 100 })) } : {}), seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why, ...story }, 3650);
     const logged = o.log ? await o.log(credential, to === 'captured' ? 'capture' : 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
     const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `${to === 'captured' ? 'released' : 'voided'}: ${why}` };
     for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
       deliverWithRetries(async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
     }
+    // A team's cart: released, each member is paid its share, with a receipt of its own naming the cart and the release.
+    const shares = to === 'captured' && h.split ? await Promise.all(h.split.map(async (x) => {
+      const share = await s.vc('LakeReceipt', { id: x.webId, payer: h.payer, amount: { currency: h.currency, value: x.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, ...(h.about ?? {}), seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: 'simulated', settlementId: randomUUID(), captures: h.id, share: true, why }, 3650);
+      const note = { kind: 'receipt', receipt: { credential: share, card: s.card }, amount: x.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `your share of cart ${h.cart.id}, released: ${why}` };
+      deliverWithRetries(async () => sendLake(x.url, { lake: '0.1', card: s.card, envelope: (await signMessage(note, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
+      return { member: x.webId, amount: x.amount / 100, credential: share };
+    })) : undefined;
     if (to === 'captured') o.onSettled?.(h.amount / 100, 1, { cart: true, released: true, currency: h.currency });
-    return { kind: to, hold: h.id, cart: h.cart.id, credential, ...(logged ? { logged } : {}), why };
+    return { kind: to, hold: h.id, cart: h.cart.id, credential, ...(shares ? { shares } : {}), ...(logged ? { logged } : {}), why };
   };
   // Its deadline passed with nothing open: nothing delivered goes back to the buyer; a delivery nobody answered is released.
   // Checked at start too, for holds whose time passed while this agent was down.

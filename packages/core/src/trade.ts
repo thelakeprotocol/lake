@@ -52,7 +52,46 @@ export interface CartParty { url: string; webId: string; jkt: string }
  * whose receipts the seller counts as this cart paid, and the arbiters whose rulings it accepts on it. Inside the signed
  * contents, so the buyer pays (and its payment mandate names the hash of) these very terms.
  */
-export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee }
+export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; split_hash?: string }
+
+/**
+ * A team's cart (SPEC §6.5, run 77: three freelancers did one job for one client, and a cart pays one seller): the seller
+ * who signs is the one the buyer deals with, as a platform is the merchant of record in Stripe Connect's separate charges
+ * and transfers; the money is held whole and, on release, each member is paid its share. Each member's own signed
+ * consent to its share comes with it, so nobody is put into a cart, or given another share, without saying so.
+ */
+export interface CartShare { webId: string; url: string; jkt: string; amount: number; consent: string }
+export const MAX_SPLIT = 5;
+/** What each consent names: sha256 (base64url) over the canonical JSON of the shares without their consents, the currency and the total. */
+export const splitHash = (split: Omit<CartShare, 'consent'>[], currency: string, total: number) =>
+  jose.base64url.encode(createHash('sha256').update(canonicalize({ currency, total, shares: split.map(({ webId, url, jkt, amount }) => ({ webId, url, jkt, amount })) })).digest());
+/** A member's consent to its share of a team's cart: a JWT signed with its card key, naming the cart, the split and its amount. */
+export async function signSplitConsent(member: Identity, o: { webId: string; cart: string; splitHash: string; amount: number; currency: string; minutes?: number }): Promise<string> {
+  return new jose.SignJWT({ kind: 'split.consent', cart: o.cart, split_hash: o.splitHash, amount: o.amount, currency: o.currency })
+    .setProtectedHeader({ alg: 'EdDSA', kid: member.kid, typ: 'JWT' }).setIssuer(o.webId).setIssuedAt().setExpirationTime(Math.floor(Date.now() / 1000) + (o.minutes ?? 24 * 60) * 60)
+    .sign(member.privateKey);
+}
+/** Checks one member's consent against the key its card holds (whose thumbprint the share pins). Throws why not. */
+export async function checkSplitConsent(share: CartShare, memberJwk: jose.JWK, o: { cart: string; splitHash: string; currency: string }): Promise<void> {
+  if ((await keyThumbprint(memberJwk)) !== share.jkt) throw new Error(`${share.webId}: its card's key is not the one the cart names`);
+  let c: jose.JWTPayload & Record<string, unknown>;
+  try {
+    ({ payload: c } = await jose.jwtVerify(share.consent, await jose.importJWK(memberJwk, 'EdDSA'), { issuer: share.webId }));
+  } catch (e) {
+    throw new Error(`${share.webId}'s consent: ${(e as Error).message}`);
+  }
+  if (c.kind !== 'split.consent' || c.cart !== o.cart || c.split_hash !== o.splitHash || c.currency !== o.currency || Math.round(Number(c.amount) * 100) !== Math.round(share.amount * 100)) throw new Error(`${share.webId}'s consent is to another cart, split or share`);
+}
+const splitProblems = (split: unknown, total: PaymentCurrencyAmount, hash: unknown): string[] => {
+  if (split === undefined) return [];
+  const list = split as CartShare[];
+  if (!Array.isArray(list) || list.length < 2 || list.length > MAX_SPLIT) return [`split: 2 to ${MAX_SPLIT} shares`];
+  if (list.some((x) => !x || !/^https?:\/\//.test(String(x.webId)) || !/^https?:\/\//.test(String(x.url)) || typeof x.jkt !== 'string' || typeof x.consent !== 'string' || !(Number(x.amount) >= 0.01) || Math.abs(x.amount * 100 - Math.round(x.amount * 100)) > 1e-6)) return ['split: each { webId, url, jkt, amount (at least 0.01, whole cents), consent }'];
+  if (new Set(list.map((x) => x.webId)).size !== list.length) return ['split: each member once'];
+  if (list.reduce((a, x) => a + Math.round(x.amount * 100), 0) !== Math.round(total.value * 100)) return ['split: the shares must add up to the total, exactly'];
+  if (hash !== splitHash(list, total.currency, total.value)) return ['split: its split_hash is not over these shares'];
+  return [];
+};
 
 /**
  * Who is paid, when not the seller who signs the cart (SPEC §6.5): an owner's assistant sells for its owner's house, so
@@ -141,9 +180,10 @@ const partyProblems = (xs: unknown, what: string): string[] => {
 };
 
 /** The payments agents and arbiters a cart names, from its Lake payment method (empty when it names none). */
-export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee } {
+export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; splitHash?: string } {
   const data = (contents?.payment_request?.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}), ...(payeeOk(data?.payee) ? { payee: data!.payee } : {}) };
+  const total = contents?.payment_request?.details?.total?.amount;
+  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}), ...(payeeOk(data?.payee) ? { payee: data!.payee } : {}), ...(data?.split && total && !splitProblems(data.split, total, data.split_hash).length ? { split: data.split, splitHash: data.split_hash } : {}) };
 }
 const MAX_CART_MINUTES = 24 * 60;
 
@@ -202,8 +242,12 @@ export async function signCart(o: {
   delivery?: DeliveryTerms;
   /** Who is paid, when not the seller: the house an assistant sells for. */
   payee?: CartPayee;
+  /** A team's shares, each with its member's consent (made against this cart's id, so pass id too). */
+  split?: CartShare[];
 }): Promise<CartMandate> {
   if (o.payee && !payeeOk(o.payee)) throw new Error('payee: { webId, url, vouch: { credential, issuer } }');
+  if (o.payee && o.split) throw new Error('a cart pays a payee or a team, not both');
+  if (o.split && !o.id) throw new Error('split: give the cart id the members consented to');
   if (!o.items.length || o.items.length > MAX_ITEMS) throw new Error(`a cart holds 1 to ${MAX_ITEMS} items`);
   const currency = o.items[0]!.amount.currency;
   if (o.items.some((x) => x.amount.currency !== currency)) throw new Error('one currency per cart');
@@ -211,8 +255,8 @@ export async function signCart(o: {
   if (cents < 1) throw new Error('a cart costs at least 0.01');
   const minutes = Math.min(Math.max(o.minutes ?? 30, 1), MAX_CART_MINUTES);
   const id = o.id ?? randomUUID();
-  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}), ...(o.payee ? { payee: o.payee } : {}) };
-  const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters'), ...deliveryProblems(terms.delivery)];
+  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}), ...(o.payee ? { payee: o.payee } : {}), ...(o.split ? { split: o.split, split_hash: splitHash(o.split, currency, cents / 100) } : {}) };
+  const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters'), ...deliveryProblems(terms.delivery), ...splitProblems(terms.split, { currency, value: cents / 100 }, terms.split_hash)];
   if (problems.length) throw new Error(problems.join('; '));
   const contents: CartContents = {
     id, user_cart_confirmation_required: false,
@@ -232,7 +276,7 @@ export async function signCart(o: {
 }
 
 /** What a checked cart says: who sells, to whom, the total, the hash a payment names, and whom the seller named to settle it. */
-export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee }
+export interface CheckedCart { id: string; seller: string; buyer: string; total: PaymentCurrencyAmount; hash: string; expires: string; items: PaymentItem[]; payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; splitHash?: string }
 
 /**
  * Checks a cart against the seller's key (from its verified card): the signature, that the JWT's hash is this very
@@ -253,7 +297,7 @@ export async function checkCart(cart: CartMandate, sellerJwk: jose.JWK, now = Da
   if (items.reduce((a, x) => a + Math.round(x.amount.value * 100), 0) !== Math.round(total.amount.value * 100)) throw new Error('the cart\'s lines don\'t add up to its total');
   if (Date.parse(c.cart_expiry) < now) throw new Error(`the cart expired at ${c.cart_expiry}`);
   const data = (c.payment_request.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
-  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery), ...(data?.payee !== undefined && !payeeOk(data.payee) ? ['the cart\'s payee: { webId, url, vouch }'] : [])];
+  const problems = [...partyProblems(data?.payments, 'the cart\'s payments'), ...partyProblems(data?.arbiters, 'the cart\'s arbiters'), ...deliveryProblems(data?.delivery), ...(data?.payee !== undefined && !payeeOk(data.payee) ? ['the cart\'s payee: { webId, url, vouch }'] : []), ...splitProblems(data?.split, total.amount, data?.split_hash).map((x) => `the cart's ${x}`)];
   if (problems.length) throw new Error(problems.join('; '));
   return { id: c.id, seller: String(claims.iss), buyer: String(claims.sub), total: total.amount, hash: cartHash(c), expires: c.cart_expiry, items, ...cartTerms(c) };
 }
