@@ -50,12 +50,20 @@ if (page) {
 // Each player its own connector config. A connector with sign-in on (the sandbox) gives each a token of its own, so
 // every player is its own agent, as two people's AIs would be; without sign-in (404 here), none is needed.
 const mcpFor = {};
+// LAKE_TOKENS_FILE: tokens the operator minted beforehand (one per line), used first: a big crowd from one address meets
+// the connector's 20 sign-ins an hour.
+const minted = process.env.LAKE_TOKENS_FILE ? readFileSync(process.env.LAKE_TOKENS_FILE, 'utf8').split('\n').map((x) => x.trim()).filter(Boolean) : [];
 for (const p of config.players) {
   // `agent` makes this player a later conversation of another player's AI: the same sign-in, so the same agent.
   if (p.agent) { mcpFor[p.id] = mcpFor[p.agent]; continue; }
   const url = `${(p.lake ?? lake).replace(/\/$/, '')}/mcp`;
-  const r = await fetch(`${url}/oauth/anonymous`, { method: 'POST' }).catch(() => null);
-  const t = r?.ok ? await r.json() : null;
+  const own = !p.lake && minted.length ? { access_token: minted.shift() } : null;
+  const r = own ? null : await fetch(`${url}/oauth/anonymous`, { method: 'POST' }).catch(() => null);
+  const t = own ?? (r?.ok ? await r.json() : null);
+  // A connector that asks for sign-in (401 at /mcp) and no token for this player: don't start it. One player started
+  // without a token is remembered as "needs sign-in" for that URL by the agent app, and took every player resuming or
+  // starting in the next ~15 minutes off the Lake with it (runs 81-82). Mint tokens on the server (LAKE_TOKENS_FILE).
+  if (!t?.access_token && r && r.status !== 404) throw new Error(`no sign-in for ${p.id} (${url}/oauth/anonymous answered ${r.status}): not starting the run. Mint tokens on the server and pass LAKE_TOKENS_FILE`);
   mcpFor[p.id] = join(run, `mcp-${p.id}.json`);
   writeFileSync(mcpFor[p.id], JSON.stringify({ mcpServers: { lake: { type: 'http', url, ...(t?.access_token ? { headers: { Authorization: `Bearer ${t.access_token}` } } : {}) } } }));
 }
@@ -68,17 +76,39 @@ const procs = config.players.map((p, i) => new Promise((done) => setTimeout(() =
   // `model` runs this player on another model (opus, sonnet, haiku, fable), so look-alike agents can differ.
   // `lake` puts this player on another Lake (cross-Lake runs on the two local staging Lakes): its own connector.
   const mcp = mcpFor[p.id];
-  const c = spawn('claude', ['-p', prompt, '--mcp-config', mcp, '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'],
-    { cwd: join(outside, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
-  // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
-  let rest = '';
-  c.stdout.on('data', (d) => {
-    const lines = (rest + d).split('\n');
-    rest = lines.pop();
-    for (const l of lines) if (l.trim()) { try { appendFileSync(join(run, `${p.id}.jsonl`), JSON.stringify({ ...JSON.parse(l), _t: Math.round((Date.now() - t0) / 1000) }) + '\n'); } catch { appendFileSync(join(run, `${p.id}.jsonl`), l + '\n'); } }
-  });
-  const limit = setTimeout(() => c.kill(), (config.minutes ?? 20) * 60_000);
-  c.on('exit', (code) => { clearTimeout(limit); done(code); });
+  const started = Date.now();
+  const flags = ['--mcp-config', mcp, '--strict-mcp-config', ...(p.model ? ['--model', p.model] : []), ...(p.deny?.length ? ['--disallowedTools', ...p.deny] : []), '--allowedTools', ...(p.tools ?? config.tools ?? ['mcp__lake']), '--output-format', 'stream-json', '--verbose'];
+  // demo.json `keepGoing` (minutes): a player that stops before then is resumed in the same session and told the time
+  // (runs 70-80: agents briefed for 20-25 minutes stopped after 1-4, and the Lake went quiet).
+  const keepUntil = started + (config.keepGoing ?? 0) * 60_000;
+  let session = null, rounds = 0;
+  const go = (args) => {
+    const c = spawn('claude', args, { cwd: join(outside, p.id), stdio: ['ignore', 'pipe', 'inherit'] });
+    // Each transcript line gets "_t": seconds since the run began, so a narrator can tell when things happened.
+    let rest = '';
+    c.stdout.on('data', (d) => {
+      const lines = (rest + d).split('\n');
+      rest = lines.pop();
+      for (const l of lines) if (l.trim()) {
+        try {
+          const e = JSON.parse(l);
+          if (e.session_id) session = e.session_id;
+          appendFileSync(join(run, `${p.id}.jsonl`), JSON.stringify({ ...e, _t: Math.round((Date.now() - t0) / 1000) }) + '\n');
+        } catch { appendFileSync(join(run, `${p.id}.jsonl`), l + '\n'); }
+      }
+    });
+    const limit = setTimeout(() => c.kill(), Math.max(60_000, started + (config.minutes ?? 20) * 60_000 - Date.now()));
+    c.on('exit', (code) => {
+      clearTimeout(limit);
+      const left = Math.round((keepUntil - Date.now()) / 60_000);
+      if (session && left >= 2 && rounds++ < 8) {
+        const nudge = `Time check: it is ${new Date().toTimeString().slice(0, 5)}, and you have about ${left} more minutes on the Lake. Look at lake_inbox first (someone may have written to you, or a room you're in may have news), answer anyone waiting, then keep doing real things with other agents. Update NOTES.md only at the very end.`;
+        return go(['-p', nudge, '--resume', session, ...flags]);
+      }
+      done(code);
+    });
+  };
+  go(['-p', prompt, ...flags]);
 }, (p.delay ?? i * 2) * 1000)));
 const codes = await Promise.all(procs);
 if (config.teardown) try { execFileSync(process.execPath, [join(root, demo, config.teardown), run], { stdio: 'inherit' }); } catch (e) { console.log(`teardown: ${e.message}`); }
