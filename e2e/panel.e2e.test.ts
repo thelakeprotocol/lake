@@ -485,6 +485,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // read the held one (runs 58 and 59: Earned missed the last release for five minutes).
     const earned = async () => Number((await page.locator('.tile.mint dd').textContent())!.replace(/[^\d.]/g, ''));
     const before = await earned();
+    // Paid and held, not delivered yet: the seller's passport shows it in progress (run 84: a paid present looked like nothing).
+    let early: Record<string, any> = {};
+    for (let i = 0; i < 10 && !early.in_progress?.length; i++) { early = await (await fetch(`${me.passport}.json`)).json(); if (!early.in_progress?.length) await page.waitForTimeout(500); }
+    expect(early.in_progress).toEqual([expect.objectContaining({ role: 'seller', state: 'paid, held until delivery', total: { currency: 'USD', value: 4 } })]);
     await one.call('lake_sell', { action: 'deliver', cart: String(cartId), content: 'A short summary: the Lake keeps your data at home.' });
     await shop({ action: 'accept', cart: String(cartId) });
     await sale.locator('.chip', { hasText: 'paid' }).waitFor({ timeout: 15_000 });

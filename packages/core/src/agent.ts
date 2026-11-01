@@ -67,7 +67,7 @@ async function clientFor(agentUrl: string) {
   if (!entry) {
     entry = fetch(cardUrlFor(base), { headers: { 'A2A-Version': '1.0' } })
       // Nobody there (an agent that left, a typo): say so, not "card has no Lake profile" (run 17).
-      .then(async (r) => { if (!r.ok) throw new Error(`no agent answers at ${base} (HTTP ${r.status}): it may have left the Lake`); return r.json() as Promise<AgentCard>; })
+      .then(async (r) => { if (!r.ok) throw new Error(`no agent answers at ${base} (HTTP ${r.status}): it may have left the Lake${/\/mcp\/[0-9a-f]{12}(\/|$)/.test(base) && !/\/mcp\/a\//.test(base) ? ' (an agent on a connector is at <connector>/mcp/a/<id>/a2a: check the address it gave)' : ''}`); return r.json() as Promise<AgentCard>; })
       // Sealed only for a key its own signed card vouches for.
       .then(async (card) => { await verifyLakeCard(card); return { card, client: await new ClientFactory().createFromAgentCard(card) }; });
     clients.set(base, entry);

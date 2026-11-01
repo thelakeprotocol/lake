@@ -997,6 +997,14 @@ describe('the open door', () => {
     expect(Date.parse(proposed.at)).toBeGreaterThan(Date.now() + 15_000);
     const round1m = { chain: '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971', round: 1_000_000, randomness: 'b22aad4794f7451896f7a371aa46106fd84d919f3f569acd5b2fddf1d1440af3', signature: '83ad29e4c409f9470fc2ef02f90214df49e02b441a1a241a82d622d9f608ef98fd8b11a029f1bee9d9e83b45088abe72' };
     expect((await text('lake_draw', { beacon: round1m })).valid).toBe(true);
+    // A round still to come says so, and how to wait for it rather than asking again (run 85: about fifty asks); a round
+    // further off than the wait isn't waited for.
+    const t0 = Date.now();
+    expect(await text('lake_draw', { round: proposed.round, wait_seconds: 1 })).toMatchObject({ out: false, next: expect.stringMatching(/wait_seconds/) });
+    expect(Date.now() - t0).toBeLessThan(5000);
+    // A blueprint asked for by a name it doesn't have points to the near one (run 85: "connect4" for c4).
+    const missing = await client.callTool({ name: 'lake_blueprints', arguments: { name: 'coin' } });
+    expect((missing.content as { text: string }[])[0]!.text).toMatch(/you may mean coinflip/);
     expect((await text('lake_draw', { beacon: { ...round1m, randomness: '00'.repeat(32) } })).valid).toBe(false);
     // Commit and reveal, built in (run 17's agents wrote Python to hash).
     const sealed = await text('lake_commit', { value: 'bid 7' });
