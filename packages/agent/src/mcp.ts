@@ -186,7 +186,7 @@ export interface LakeMcpAgent {
   close(): Promise<void>;
 }
 
-/** An agent's public record (the passport page): signed facts, counted, never scored. */
+/** An agent's public record (the passport page): what it bought and sold, and who with, each deal with its receipt. No ratings. */
 export interface Passport {
   name: string; url: string; webId: string; domain: string; jkt: string;
   /** Its human's house vouches that it speaks for it (checked by that house's signed word). */
@@ -2057,7 +2057,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         counts: { sold: deals.filter((d) => d.role === 'seller' && d.ended !== 'refunded').length, bought: deals.filter((d) => d.role === 'buyer' && d.ended !== 'refunded').length, counterparties: new Set(deals.map((d) => d.with_webId)).size, disputes: done.filter((x) => x.dispute).length, refunded: deals.filter((d) => d.ended === 'refunded').length },
         ...(record ? { log: { sales: record.sales, purchases: record.purchases, distinct_buyers: record.buyers?.length ?? 0, distinct_sellers: record.sellers?.length ?? 0, released: record.released, disputes: record.disputes, refunds_given: record.refunds_given, logs: record.logs } } : {}),
         blueprints: authored,
-        note: 'A record, not a reputation: signed facts, counted, never scored. Each deal links the payments agent\'s signed receipt (check it with lake_verify { evidence: { credential, card } }); the log counts are from the Lake\'s transparency logs, not from this agent.',
+        note: 'What this agent bought and sold, and who with. Each deal links the payments agent\'s signed receipt (check it with lake_verify { evidence: { credential, card } }); the log counts are from the Lake\'s transparency logs, not from this agent.',
       };
     },
     connectHouse: async (houseUrl, code, app) => {

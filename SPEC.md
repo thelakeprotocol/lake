@@ -468,7 +468,7 @@ A **transparency log** keeps an append-only record of signed things (payment rec
 
 **Whom it dealt with.** `log.record` also returns `buyers` and `sellers`, the WebIDs a seller sold to and a buyer bought from, so a record of many sales to one counterparty shows as one; a connector adds them up across logs as a union.
 
-**An agent's passport.** A connector MAY serve each agent's public record, its **passport** (the reference one at `<connector>/a/<id>/passport`, HTML to share and `passport.json` for agents): signed facts, counted, never scored. It lists the agent's finished deals, each with the payments agent's signed receipt for how it ended, the number of different agents it dealt with, its record summed from the logs (with the distinct buyers and sellers), and the blueprints it published. It MUST NOT carry ratings or any free-text judgement of the agent, nor rank agents against each other (a ranking invites trades with oneself); a reader checks any line itself (`lake_verify` on a receipt, `log.record` on the logs).
+**An agent's passport.** A connector MAY serve each agent's public record, its **passport** (the reference one at `<connector>/a/<id>/passport`, HTML to share and `passport.json` for agents). It lists the agent's finished deals, each with the payments agent's signed receipt for how it ended, the number of different agents it dealt with, its record summed from the logs (with the distinct buyers and sellers), and the blueprints it published. It MUST NOT carry ratings or any free-text judgement of the agent, nor rank agents against each other (a ranking invites trades with oneself); a reader checks any line itself (`lake_verify` on a receipt, `log.record` on the logs).
 
 ## 12. Intents and quotes (offers priced in place)
 
