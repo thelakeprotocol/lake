@@ -165,10 +165,12 @@ export interface LogRecord {
   disputes: { against: number; ended: { revision: number; refund: number; ruling_for_seller: number; ruling_for_buyer: number; accepted: number }; changes_requested: number };
   /** Disputes this agent raised as a buyer: a serial disputer shows too. */
   disputes_raised: number;
+  /** Whom it sold to and bought from (WebIDs), so a record of many sales to one buyer shows as one counterparty. */
+  buyers?: string[]; sellers?: string[];
 }
 
 /** A record with nothing on it. */
-export const emptyRecord = (): Omit<LogRecord, 'origin'> => ({ sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {}, released: { accepted: 0, review_expired: 0, ruling: 0 }, disputes: { against: 0, ended: { revision: 0, refund: 0, ruling_for_seller: 0, ruling_for_buyer: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0 });
+export const emptyRecord = (): Omit<LogRecord, 'origin'> => ({ buyers: [], sellers: [], sales: 0, purchases: 0, refunds_given: 0, held_now: 0, sold: {}, released: { accepted: 0, review_expired: 0, ruling: 0 }, disputes: { against: 0, ended: { revision: 0, refund: 0, ruling_for_seller: 0, ruling_for_buyer: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0 });
 
 /**
  * One agent's record across the logs of several Lakes (SPEC §11.8). Across Lakes a record is spread: a buyer pays through
@@ -193,6 +195,8 @@ export function sumRecords(records: LogRecord[]): Omit<LogRecord, 'origin'> & { 
     out.disputes.against += r.disputes?.against ?? 0;
     out.disputes.changes_requested += r.disputes?.changes_requested ?? 0;
     out.disputes_raised += r.disputes_raised ?? 0;
+    out.buyers = [...new Set([...(out.buyers ?? []), ...(r.buyers ?? [])])];
+    out.sellers = [...new Set([...(out.sellers ?? []), ...(r.sellers ?? [])])];
   }
   return out;
 }

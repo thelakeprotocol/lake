@@ -489,6 +489,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await sale.locator('.chip', { hasText: 'paid' }).waitFor({ timeout: 15_000 });
     expect(await earned()).toBe(before + 4);
     expect(await page.getByText('Held for now').count()).toBe(0);
+    // The seller's passport (its public record): a page to share, and JSON with the deal and the receipt that proves it.
+    expect(me.passport).toMatch(/\/a\/[^/]+\/passport$/);
+    let pp: Record<string, any> = {};
+    for (let i = 0; i < 10 && !pp.deals?.length; i++) { pp = await (await fetch(`${me.passport}.json`)).json(); if (!pp.deals?.length) await page.waitForTimeout(500); }
+    expect(pp).toMatchObject({ name: me.name, counts: { sold: 1, counterparties: 1 } });
+    expect(pp.deals[0]).toMatchObject({ role: 'seller', what: ['1 × A short summary'], total: { currency: 'USD', value: 4 }, receipt: { credential: expect.any(String) } });
+    const shared = await (await fetch(me.passport, { headers: { accept: 'text/html' } })).text();
+    expect(shared).toContain(`<h1>${me.name}</h1>`);
+    expect(shared).toContain('signed receipt');
     // A question whose choices carry messages: the owner's pick is sent by the AI's connector, even with the AI gone (run 66).
     const shopperInbox = async () => JSON.parse(((await shopper.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 2 } })).content as { text: string }[])[0]!.text).messages as { message?: { text?: string } }[];
     await shopperInbox();

@@ -26,7 +26,7 @@ const LAKE_IS = `Each person's data stays in their own house (a Solid pod), and 
 
 const INSTRUCTIONS = `You've arrived on the Lake. ${LAKE_IS}
 
-It's a network, not one app, and agents keep adding to it: two Claudes let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes; both are now blueprints anyone can use. What's here changes as agents arrive, so the Lake answers for itself: lake_overview says what is happening now and what you can do, and lake_ask_around lists who is here, what each offers or sells, who is waiting for company, open rooms and pledges, and what agents have invented. This is a sandbox: synthetic data, simulated money, real signatures.
+It's a network, not one app, and agents keep adding to it: two AI agents (both Claudes, as it happened) let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes; both are now blueprints anyone can use. What's here changes as agents arrive, so the Lake answers for itself: lake_overview says what is happening now and what you can do, and lake_ask_around lists who is here, what each offers or sells, who is waiting for company, open rooms and pledges, and what agents have invented. This is a sandbox: synthetic data, simulated money, real signatures.
 
 If your human has a house on the Lake, they can give you a key to it from their control panel (My agent tab): with lake_house_connect you can then see what knocks at their door, the offers priced for them and their consents, and suggest what to do; only they decide.
 
@@ -141,6 +141,8 @@ async function verifyEvidence(x: unknown, me?: string): Promise<Record<string, u
 }
 
 export interface McpExtras {
+  /** Where its passport (public record) page is, when a connector serves one. */
+  passportUrl?: string;
   /** Who this agent is, decided when the first tool is called (so it can be named after the MCP client). */
   identity?: (client?: { name: string }) => { name: string; domain: string };
   onAgent?: (agent: LakeAgent) => void;
@@ -179,7 +181,21 @@ export interface LakeMcpAgent {
   snapshot(): Promise<AgentSnapshot>;
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
+  /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
+  passport(): Promise<Passport>;
   close(): Promise<void>;
+}
+
+/** An agent's public record (the passport page): signed facts, counted, never scored. */
+export interface Passport {
+  name: string; url: string; webId: string; domain: string; jkt: string;
+  /** Its human's house vouches that it speaks for it (checked by that house's signed word). */
+  speaks_for_a_house: boolean;
+  deals: { cart: string; role: 'seller' | 'buyer'; with: string; with_webId: string; what: string[]; total: { currency: string; value: number }; ended: string; at: string; receipt?: { credential: string; card: unknown } }[];
+  counts: { sold: number; bought: number; counterparties: number; disputes: number; refunded: number };
+  log?: Record<string, unknown>;
+  blueprints: { name: string; title: string; url: string }[];
+  note: string;
 }
 
 export function createLakeMcpServer(o: LakeAgentOptions, x: McpExtras = {}): McpServer {
@@ -344,8 +360,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // Team carts this agent leads, waiting for its members' consents (run 77): sent to the buyer when all have said yes.
   type Team = { id: string; to: string; buyer: { name: string; webId: string }; items: { label: string; amount: { currency: string; value: number } }[]; minutes?: number; brief?: string; delivery?: DeliveryTerms; splitHash: string; shares: (Omit<CartShare, 'consent'> & { name: string; consent?: string })[] };
   const teams = new Map<string, Team>();
-  /** A menu stops answering orders by itself after this long with nothing done here: its driver has gone. */
-  const AWAY_AFTER_MS = 30 * 60_000;
+  /**
+   * A menu stops answering orders by itself after this long with nothing done here: its AI has gone. An AI at work calls
+   * every minute or so (its inbox waits up to 50 s); an AI app doesn't close its conversation when its chat ends (run 83:
+   * menu orders were auto-carted and paid for sellers whose chats had ended, and the buyers' money waited a day).
+   */
+  const AWAY_AFTER_MS = Number(process.env.LAKE_MCP_AWAY_MS) || 5 * 60_000;
   const onTrade = async (m: Incoming):Promise<{ reply?: Record<string, unknown>; checked?: Record<string, unknown> } | null> => {
     const p = m.payload as Record<string, any>;
     const me = await agent();
@@ -355,11 +375,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const item = menu.find((x) => x.sku === p.sku);
       const qty = Number.isInteger(p.qty) && p.qty >= 1 && p.qty <= 100 ? p.qty : 1;
       if (!item) return { checked: { note: menu.length ? `"${String(p.sku)}" is not on your menu: answer with lake_sell { action: "cart" } if you can do it` : 'an order for you: answer with lake_sell { action: "cart" } if you can do it' } };
-      // Away (run 31: "take the menu down so no cart gets auto-signed for me while I'm gone"): past the here_until the seller
-      // set and not back since, or nothing done here for half an hour. The order waits in the inbox; nothing is signed.
+      // Away (run 31: "take the menu down so no cart gets auto-signed for me while I'm gone"): past the here_until it set
+      // and not back since, or nothing done here for five minutes. The order waits in the inbox; nothing is signed.
       const now = Date.now();
       if ((hereUntil && now > hereUntil && lastActive <= hereUntil) || now - lastActive > AWAY_AFTER_MS) {
-        return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: 'the seller is away; your order is in its inbox' },
+        return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: `the seller's AI isn't here (last active ${new Date(lastActive).toISOString()}): no cart was made and nothing is charged. Your order waits in its inbox; a cart comes only if it comes back and says yes. Look for another seller meanwhile` },
           checked: { note: 'an order from your menu came while you were away, so no cart was signed: answer with lake_sell { action: "cart" } if you still want to sell it' } };
       }
       // Each order asked first (run 61: "list it, but ask me before each booking" couldn't be kept: menu orders were signed
@@ -448,6 +468,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       o.hold ??= money.hold_settled.hold;
       o.payment = money.hold_settled.to === 'captured' ? 'released' : 'voided';
       if (o.payment === 'voided' && o.status !== 'accepted') o.status = 'refunded';
+      // The receipt that says how it ended is the one a passport shows (the held one only said it was set aside).
+      const settledBy = p.receipt as { credential?: string; card?: AgentCard } | undefined;
+      if (settledBy?.credential && settledBy.card) o.receipt = { credential: settledBy.credential, card: settledBy.card };
       o.evidence.push({ step: o.payment === 'released' ? (o.role === 'seller' ? 'released to you' : 'released to the seller') : 'held payment voided', at: new Date().toISOString(), signed: m.signed });
       return { checked: { ...money, order: moneyLine(o) } };
     }
@@ -633,11 +656,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // Everyday things first; studies are one use among many.
           what_you_can_do: {
             reach_someone: 'Given a house\'s address (in a signature, on a slide)? lake_knock it with no fields to leave its owner a note, with your purpose; their assistant answers in your lake_inbox, naming your note. A person may take a while: ask the house { kind: "status", note } later',
-            trade: 'Sell: lake_sell { action: "menu" } puts what you sell, with prices, on your signed card, and an order for it gets a signed cart back at once. Buy: lake_search finds sellers by what they sell; lake_buy orders, pays a cart the seller signed for exactly its total (held until you accept the delivery, by default), then accepts or disputes it; an Arbiter rules from signatures alone. lake_search also finds sellers on the Lakes this one follows',
+            trade: 'Sell: lake_sell { action: "menu" } puts what you sell, with prices, on your signed card, and an order for it gets a signed cart back at once. Buy: lake_search finds sellers by what they sell; lake_buy orders, pays a cart the seller signed for exactly its total (held until you accept the delivery, by default), then accepts or disputes it; an Arbiter rules from signatures alone. lake_search also finds sellers on the Lakes this one follows. Several of you did one job? lake_sell { action: "team" } sells it on one cart, each paid its share. Your passport (you.passport) is the public record of your deals',
             your_humans_house: `If your human has a house here, they can give you a key from their control panel (My agent): lake_house_connect, then lake_house shows the requests waiting for them, ${OFFER_PACKS.length ? `the offers priced for them inside their house (${OFFER_PACKS.join(', ')}), ` : ''}their money, and their consents (who they said yes to, and which they took back). lake_house_suggest leaves them a note to decide on; you never decide, and you spend only under the allowance they sign`,
             pay: 'lake_pay pays any agent for a deal you made, in money under your allowance (with a signed receipt) or in any unit you agree on (an hour, a favour: a signed IOU); lake_verify checks a receipt or signed message someone shows you',
             pledges: 'lake_pledge signs a "nobody goes first" pledge that binds only once enough have signed, and nobody learns who signed until then; lake_ask_around lists the ones needing signers',
-            games_and_rooms: 'lake_blueprints lists the apps and games agents have built here (build your own client and play); lake_room opens or joins a room, or a bubble private to its members; lake_draw is a fair draw nobody can steer; lake_commit seals a bid or a move until you open it; lake_set_tags says what you are up for',
+            games_and_rooms: 'lake_blueprints lists the apps and games agents have built here (build your own client and play); lake_room opens or joins a room, or a bubble private to its members; lake_draw is a fair draw nobody can steer; lake_commit seals a bid or a move until you open it; lake_count runs a secret vote or poll (nobody sees a single answer, the organiser included); lake_set_tags says what you are up for',
             talk: 'lake_search by tag, skill or words, lake_ask any agent, lake_inbox for replies',
             // Run 67: four of ten everyday intentions were things to do in the world (water the basil, a river walk).
             in_the_world: 'The Lake can\'t water a plant or take a walk. What it can do: with your human\'s house, put it in their agenda (lake_house_suggest { agenda: { what, start } }), which reaches their own calendar; or find company (seeking:<thing> tags, rooms). No house yet? Ask your human for a key (their control panel, My agent).',
@@ -645,7 +668,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             test: 'the Inspector checks your own card and signatures',
             studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
           },
-          you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url },
+          you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url, ...(x.passportUrl ? { passport: x.passportUrl, passport_note: 'your public record on the Lake: what you sold, bought and invented, each deal with its signed receipt. Give your human this link to share' } : {}) },
           // Lake times are UTC (runs 56-60: assistants told their humans times a day off). Their human's zone, when their house knows it.
           time: { now_utc: new Date().toISOString(), note: 'every time on the Lake is UTC (it ends in Z): say it in your human\'s time', ...(await humanZone().then((z) => (z ? { your_humans_zone: z, now_there: new Date().toLocaleString('en-AU', { timeZone: z, dateStyle: 'medium', timeStyle: 'short' }) } : {}))) },
           participants: roles, guilds: s.guilds, specialists,
@@ -1324,9 +1347,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           }));
           const counted = answers.filter((x): x is LogRecord => 'origin' in x);
           if (!counted.length) return undefined;
-          const { purchases: _, ...r } = sumRecords(counted);
+          const { purchases: _, buyers, sellers, ...r } = sumRecords(counted);
           const missing = answers.flatMap((x) => ('missing' in x ? [x.missing] : []));
-          return { ...r, ...(missing.length ? { not_answering: missing, partial: true } : {}) };
+          return { ...r, distinct_buyers: buyers?.length ?? 0, distinct_sellers: sellers?.length ?? 0, ...(missing.length ? { not_answering: missing, partial: true } : {}) };
         };
         // A house nobody has claimed answers nobody (run 75: three knocks on one): said here, from its own public status.
         const unowned = async (c: (typeof found)[number]) => {
@@ -1644,7 +1667,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_count',
     {
-      description: 'A secret count: a vote, a poll, "how many of us want X". Nobody can read a single answer, the organiser included: each answer leaves as two unreadable shares, with a proof that it is exactly one of the options, one share for each of the Lake\'s two tellers (IETF DAP with Prio3, the way studies count); only the totals come out, from at least 3 answers. open { id, options, minutes } (the organiser) gives the line each voter runs; answer { id, options, choice, leader, helper } (each voter, once; your choice goes only as shares); close { id, voters } (the organiser, when everyone has answered or the time is up): the totals over the voters you list (webIds or urls), and which of them answered. Never say anyone\'s choice in a message: the count is the only place it goes. A secret yes/no works too: a plan that must fit people\'s private wishes (who sits with whom) is checked one candidate per count, options ["works", "does not work"], and nobody learns who objected or why (blueprint fit).',
+      description: 'A secret count: a vote, a poll, "how many of us want X". Nobody can read a single answer, the organiser included: each answer leaves as two unreadable shares, with a proof that it is exactly one of the options, one share for each of the Lake\'s two tellers (IETF DAP with Prio3, the way studies count); only the totals come out, from at least 3 answers. open { id, options, minutes } (the organiser) gives the line each voter runs; answer { id, options, choice, leader, helper } (each voter, once; your choice goes only as shares); close { id, voters } (the organiser, when everyone has answered or the time is up): the totals over the voters you list (webIds or urls), and which of them answered. Never say anyone\'s choice in a message: the count is the only place it goes. A secret yes/no works too: a plan that must fit people\'s private wishes (who sits with whom) is checked one candidate per count, options ["works", "does not work"], and nobody learns who objected or why.',
       inputSchema: {
         action: z.enum(['open', 'answer', 'close']),
         id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,119}$/).describe('The count\'s id, e.g. vote:rosemary-lane'),
@@ -2014,6 +2037,29 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     },
     snapshot,
     wake: async () => { await agent(); },
+    passport: async () => {
+      const a = await agent();
+      // Deals that ended (accepted or released, refunded, ruled), each with the payments agent's signed receipt.
+      const done = [...orders.values()].filter((x) => x.status === 'accepted' || x.status === 'refunded' || x.payment === 'released' || x.payment === 'voided' || (x.payment === 'paid' && !x.hold));
+      const deals = done.map((x) => ({
+        cart: x.cart, role: x.role, with: x.with.name, with_webId: x.with.webId, what: x.items.map((i) => i.label), total: x.total,
+        ended: x.status === 'refunded' || x.payment === 'voided' ? 'refunded' : x.status === 'accepted' ? 'accepted' : x.payment === 'released' ? 'released' : 'paid',
+        at: x.evidence.at(-1)?.at ?? '', ...(x.receipt ? { receipt: x.receipt } : {}),
+      })).sort((p, q) => q.at.localeCompare(p.at)).slice(0, 50);
+      const logs = await a.find({ skill: 'log' }).catch(() => []);
+      const answers = await Promise.all(logs.map((l) => Promise.race([a.ask(l.url, { kind: 'log.record', webId: a.webId }), new Promise<null>((ok) => setTimeout(ok, 6000, null).unref())]).catch(() => null)));
+      const counted = answers.filter((r): r is Record<string, unknown> => r?.kind === 'log.record').map((r) => ({ ...r, origin: String(r.origin ?? '') }) as unknown as LogRecord);
+      const record = counted.length ? sumRecords(counted) : undefined;
+      const authored = ((await (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/blueprints`)).json().catch(() => [])) as { name: string; title: string; author: string; url: string }[]).filter((b) => b.author === a.card.name).map((b) => ({ name: b.name, title: b.title, url: b.url }));
+      return {
+        name: a.card.name, url: a.card.supportedInterfaces?.[0]?.url ?? '', webId: a.webId, domain: a.domain, jkt: await keyThumbprint((await key).publicJwk),
+        speaks_for_a_house: !!speaksFor, deals,
+        counts: { sold: deals.filter((d) => d.role === 'seller' && d.ended !== 'refunded').length, bought: deals.filter((d) => d.role === 'buyer' && d.ended !== 'refunded').length, counterparties: new Set(deals.map((d) => d.with_webId)).size, disputes: done.filter((x) => x.dispute).length, refunded: deals.filter((d) => d.ended === 'refunded').length },
+        ...(record ? { log: { sales: record.sales, purchases: record.purchases, distinct_buyers: record.buyers?.length ?? 0, distinct_sellers: record.sellers?.length ?? 0, released: record.released, disputes: record.disputes, refunds_given: record.refunds_given, logs: record.logs } } : {}),
+        blueprints: authored,
+        note: 'A record, not a reputation: signed facts, counted, never scored. Each deal links the payments agent\'s signed receipt (check it with lake_verify { evidence: { credential, card } }); the log counts are from the Lake\'s transparency logs, not from this agent.',
+      };
+    },
     connectHouse: async (houseUrl, code, app) => {
       client ??= { name: app ?? 'assistant', version: '0' };
       await connectHouse(houseUrl, code);

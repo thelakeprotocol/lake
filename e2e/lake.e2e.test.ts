@@ -1523,7 +1523,7 @@ describe('the open door', () => {
     await poet('lake_set_tags', { tags: [], here_until: 0.05 });
     await new Promise((r) => setTimeout(r, 3500));
     const away = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku', note: 'while you were out' });
-    expect(away).toMatchObject({ reply: { kind: 'received', away: 'the seller is away; your order is in its inbox' } });
+    expect(away).toMatchObject({ reply: { kind: 'received', away: expect.stringMatching(/isn't here .*no cart was made and nothing is charged/) } });
     expect(away.cart).toBeUndefined();
     const waiting = (await poet('lake_inbox', { wait_seconds: 3 })).messages.find((m: any) => m.message.note === 'while you were out');
     expect(waiting.checked.note).toMatch(/while you were away, so no cart was signed/);

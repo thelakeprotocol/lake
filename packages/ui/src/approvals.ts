@@ -832,7 +832,7 @@ async function acceptOffer(offer: string, how?: 'raise' | 'self', over?: OverAll
   const accept = (even = false) => call<R>({ kind: 'panel.offer.accept', offer, ...(even ? { even_over_allowance: true } : {}) }).catch((e) => ({ error: (e as Error).message }) as R);
   if (how === 'self') return accept(true);
   if (how === 'raise' && over) {
-    const need = Math.min(Math.ceil(over.price.amount), 500);
+    const need = Math.min(Math.ceil(over.price.amount), 1000);
     const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: over.allowance.kid, amount: need, currency: over.price.currency, days: 7 });
     if (d.error) return d;
     const set = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.allowance.set', id: d.id, credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
@@ -850,7 +850,7 @@ function AcceptOffer({ offer, label = 'Accept the offer', cls = 'primary', confi
   const [over, setOver] = useState<OverAllowance | null>(null);
   const done = async (r: { error?: string; over?: OverAllowance }) => { if (r.error) throw new Error(r.error); if (r.over) return setOver(r.over); setOver(null); await after?.(); };
   if (!over) return h(Act, { label, cls, confirm: confirmText, run: async () => done(await acceptOffer(offer)) });
-  const need = Math.min(Math.ceil(over.price.amount), 500);
+  const need = Math.min(Math.ceil(over.price.amount), 1000);
   return h('div', { class: 'choice' },
     h('p', { class: 'item-meta', style: 'margin:0 0 8px' }, `${money$(over.price.amount, over.price.currency)} is more than your agent may spend (${money$(over.allowance.amount, over.price.currency)}).`),
     h('div', { class: 'row', style: 'margin:0' },
@@ -970,7 +970,7 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
     h('p', { class: 'r-meta', style: 'margin:8px 0' }, `${shortName(a.label)} can spend ${money$(amount || 0, currency)} in total until ${days >= 1 && days <= 31 ? new Date(Date.now() + days * 86_400_000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '…'}. It's not per day: once it's spent, it's gone. Signed on this phone; stop it any time.`),
     h('div', { class: 'row', style: 'margin:0' },
       h(Act, { label: a.allowance ? 'Sign the change' : 'Sign and give', cls: 'primary', run: async () => {
-        if (!(amount >= 1 && amount <= 500)) throw new Error('An amount from 1 to 500.');
+        if (!(amount >= 1 && amount <= 1000)) throw new Error('An amount from 1 to 1000.');
         if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
         const d = await call<{ id: string; draft: Record<string, unknown>; error?: string }>({ kind: 'panel.allowance.draft', kid: a.kid, amount, currency, days });
         if (d.error) throw new Error(d.error);

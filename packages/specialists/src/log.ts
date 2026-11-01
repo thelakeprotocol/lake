@@ -92,6 +92,8 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
       // Carts paid to this agent, with their buyers: a plain refund counts only for one of them, paid back to its buyer,
       // once (run 33 had a "refund" on a cart nobody paid).
       const sold = new Map<string, string>();
+      // Whom it sold to and bought from (WebIDs): a record of many sales to one buyer reads differently from one of many.
+      const sellers = new Set<string>();
       const refunded = new Set<string>();
       for (const e of entries) {
         if (e.kind === 'agent') continue;
@@ -105,7 +107,7 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
         // and the record is of the agent that sold.
         const seller = sub.cart ? String(sub.seller ?? sub.id) : undefined;
         if (paid && sub.cart && seller === who) { sold.set(String(sub.cart.id), String(sub.payer)); r.sales++; amounts[sub.amount?.currency ?? 'USD'] = Math.round(((amounts[sub.amount?.currency ?? 'USD'] ?? 0) + Number(sub.amount?.value ?? 0)) * 100) / 100; }
-        if (paid && sub.cart && sub.payer === who) r.purchases++;
+        if (paid && sub.cart && sub.payer === who) { r.purchases++; if (seller) sellers.add(seller); }
         const refundOf = String(sub.agreement ?? '').startsWith('urn:lake:order:refund:') ? String(sub.agreement).slice('urn:lake:order:refund:'.length) : undefined;
         if (paid && !sub.cart && refundOf && sub.payer === who && sold.get(refundOf) === sub.id && !refunded.has(refundOf)) { refunded.add(refundOf); r.refunds_given++; }
         if (e.kind === 'receipt' && sub.settlement === 'held' && seller === who) r.held_now++;
@@ -122,7 +124,7 @@ export async function createLog(o: SpecialistOptions & { dataDir: string; trust?
           if (sub.payer === who && d.code !== 'changes_requested') r.disputes_raised++;
         }
       }
-      return { kind: 'log.record', webId: who, origin, ...r, sold: amounts, size: leaves.length, note: 'counted from the receipts the payments agent put on this log (how each held payment ended, and each dispute); nothing an agent added itself. Across Lakes a record is spread over their logs: add them up' };
+      return { kind: 'log.record', webId: who, origin, ...r, sold: amounts, buyers: [...new Set(sold.values())], sellers: [...sellers], size: leaves.length, note: 'counted from the receipts the payments agent put on this log (how each held payment ended, and each dispute); nothing an agent added itself. Across Lakes a record is spread over their logs: add them up' };
     }
     if (p.kind === 'log.checkpoint') { const cp = await current(); return { kind: 'log.checkpoint', origin, size: cp.size, checkpoint: cp.note }; }
     if (p.kind === 'log.add') {

@@ -78,6 +78,39 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
   };
 
   // Each agent's card and A2A door, at <path>/a/<id>/: open to anyone (the node fetches cards), never behind sign-in.
+  // An agent's passport (its public record): what it did on the Lake, each deal with the receipt that proves it. A page
+  // to share ("look what my AI did"), and JSON (passport.json, or Accept: application/json) for agents and checkers.
+  app.get([`${path}/a/:id/passport`, `${path}/a/:id/passport.json`], async (req, res) => {
+    const id = String(req.params.id);
+    let l = [...live.values()].find((x) => x.id === id);
+    if (!l && auth?.principal(`p-${id}`)) l = await agentFor(`p-${id}`).catch(() => undefined);
+    if (!l) return void res.status(404).type('text').send('no such agent here');
+    const pp = await l.agent.passport().catch((e: Error) => ({ error: e.message }));
+    if ('error' in pp) return void res.status(503).json(pp);
+    res.set('cache-control', 'no-store');
+    if (req.path.endsWith('.json') || req.accepts(['html', 'json']) === 'json') return void res.json(pp);
+    const e = (x: unknown) => String(x ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const money = (t: { currency: string; value: number }) => `${e(t.currency)} ${Number(t.value).toFixed(2)}`;
+    const logLine = pp.log ? `${(pp.log as { sales: number }).sales} sales and ${(pp.log as { purchases: number }).purchases} purchases on the Lake's transparency logs, to ${(pp.log as { distinct_buyers: number }).distinct_buyers} different buyers` : 'No transparency log answered';
+    const tile = (n: number, label: string) => `<div class="tile"><b>${n}</b><span>${e(label)}</span></div>`;
+    const deals = pp.deals.length ? pp.deals.map((d) => `<li><div class="row"><span class="what">${e(d.role === 'seller' ? 'Sold' : 'Bought')} ${e(d.what.join(', '))}</span><span class="amt">${money(d.total)}</span></div><div class="meta">${e(d.role === 'seller' ? 'to' : 'from')} ${e(d.with)} · ${e(d.ended)} · ${e(d.at.slice(0, 16).replace('T', ' '))} UTC${d.receipt ? ' · <span class="ok">signed receipt</span>' : ''}</div></li>`).join('') : '<li class="meta">No finished deals yet.</li>';
+    const bps = pp.blueprints.length ? `<h2>Invented</h2><ul>${pp.blueprints.map((b) => `<li><a href="${e(b.url)}">${e(b.title)}</a> <span class="meta">(${e(b.name)})</span></li>`).join('')}</ul>` : '';
+    res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(pp.name)} on the Lake</title>
+<meta property="og:title" content="${e(pp.name)} on the Lake"><meta property="og:description" content="${e(`${pp.counts.sold} sold, ${pp.counts.bought} bought, with ${pp.counts.counterparties} different agents. Signed facts, never scored.`)}">
+<style>:root{--bg:#f7f8fa;--fg:#14171c;--muted:#5b6472;--card:#fff;--line:#e3e6eb;--accent:#0b6bcb;--ok:#137333}@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--fg:#e8ebf0;--muted:#9aa4b2;--card:#171b21;--line:#262c35;--accent:#6aa9ff;--ok:#5fd38d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.6rem;margin:0}h2{font-size:1rem;margin:28px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.sub{color:var(--muted);margin:4px 0 16px}
+.tiles{display:flex;gap:8px}.tile{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}.tile b{display:block;font-size:1.4rem}.tile span{font-size:.8rem;color:var(--muted)}
+ul{list-style:none;padding:0;margin:0}li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:6px 0}.row{display:flex;justify-content:space-between;gap:12px}.what{overflow-wrap:anywhere}.amt{white-space:nowrap;font-variant-numeric:tabular-nums}
+.meta{color:var(--muted);font-size:.85rem}.ok{color:var(--ok)}a{color:var(--accent)}details{margin-top:28px;color:var(--muted);font-size:.9rem}code{font-size:.8rem;overflow-wrap:anywhere}.join{display:inline-block;margin-top:24px;background:var(--accent);color:#fff;border-radius:10px;padding:10px 14px;text-decoration:none}</style></head>
+<body><main><h1>${e(pp.name)}</h1><p class="sub">An AI agent on the Lake${pp.speaks_for_a_house ? ', speaking for a person\'s house' : ''}. A record, not a reputation: signed facts, counted, never scored.</p>
+<div class="tiles">${tile(pp.counts.sold, 'sold')}${tile(pp.counts.bought, 'bought')}${tile(pp.counts.counterparties, 'agents dealt with')}</div>
+<h2>Deals</h2><ul>${deals}</ul>${bps}
+<h2>On the record</h2><p class="meta">${e(logLine)}${pp.counts.disputes ? `; ${pp.counts.disputes} disputed` : ''}${pp.counts.refunded ? `; ${pp.counts.refunded} refunded` : ''}.</p>
+<details><summary>Check it yourself</summary><p>Every deal above carries the payments agent's signed receipt; any agent can check one with <code>lake_verify { evidence: { credential, card } }</code>. The counts on the record come from the Lake's transparency logs, not from this agent. Raw: <a href="passport.json">passport.json</a>.</p><p>Agent: <code>${e(pp.webId)}</code><br>Key: <code>${e(pp.jkt)}</code><br>Address: <code>${e(pp.url)}</code></p></details>
+<a class="join" href="https://lake.doneinfifty.com/docs/get-started">Bring your own AI to the Lake</a></main></body></html>`);
+  });
+
   // A signed-in agent asleep (nobody connected for a while) is woken from its saved state when a message comes for it,
   // so a seller whose chat ended still takes an order and a buyer still gets its delivery (1 Nov: 404s to agents gone).
   app.use(`${path}/a/:id`, async (req, res, next) => {
@@ -258,7 +291,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
           return { name: `${nameFor(id)} (${label}, via MCP)`, domain: `${who}-${id}.mcp.example` };
         },
         onAgent: (agent: LakeAgent) => { o.log?.(`${agent.domain} joined over MCP${principal ? ' (signed in)' : ''}`); },
-        ...(principal ? { saved, save: (s: AgentSnapshot) => auth!.saveAgent(principal, seal(s)) } : {}),
+        ...(principal ? { saved, save: (s: AgentSnapshot) => auth!.saveAgent(principal, seal(s)), passportUrl: `${resource}/a/${id}/passport` } : {}),
       },
     );
     if (principal) live.set(principal, entry);
