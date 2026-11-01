@@ -11,7 +11,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { generateIdentity, importIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
 import { createECDH, createPrivateKey, randomBytes } from 'node:crypto';
-import { ask, makeVisitor } from '../packages/visitor/src/knock.js';
+import { ask, knock, makeVisitor } from '../packages/visitor/src/knock.js';
 
 // The owner's panel as a person uses it, on a phone, against a real house: pairing, the door, the owner's own AI and its
 // spending money, notes arriving live, rules, More, signing out, long lists, a slow or dropped connection. Every step
@@ -611,6 +611,44 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(got.length).toBe(2);
     expect(await asOwner({ kind: 'panel.push.off' })).toMatchObject({ ok: true, devices: 0 });
     svc.close();
+  });
+
+  it('next time: "Always allow" makes a standing yes for exactly that ask, listed in Keys and removable; "Always decline" mutes (1-2 Nov)', async () => {
+    const clinic = await makeVisitor(await generateIdentity(), 'clinic.example');
+    const terms = { purpose: 'care', fields: ['medications'], priceUsd: 0, retention: 'none', credentials: { ethicsApproved: false, sponsorVerified: false, auditCertified: false } };
+    expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'ask' });
+    await tab('Requests');
+    const card = page.locator('article.req', { hasText: 'clinic.example' });
+    await card.getByRole('button', { name: 'Allow' }).click();
+    const next = page.locator('li.item', { hasText: 'You allowed clinic.example (care)' });
+    await next.waitFor({ timeout: 10_000 });
+    await next.getByRole('button', { name: 'Always allow' }).click();
+    await page.getByText(/From now on your house says yes to clinic.example/).waitFor({ timeout: 10_000 });
+    // The same ask again: the house answers it, by the owner's standing yes; anything more still asks.
+    expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'join' });
+    expect((await knock(house, clinic, { ...terms, fields: ['medications', 'age_band'] })).reply).toMatchObject({ decision: 'ask' });
+    // Another agent with the same name but its own key gets no standing yes (a name is not a key).
+    const lookalike = await makeVisitor(await generateIdentity(), 'clinic.example');
+    expect((await knock(house, lookalike, terms)).reply).toMatchObject({ decision: 'ask' });
+    await tab('Requests');
+    await page.locator('article.req', { hasText: 'clinic.example' }).getByRole('button', { name: /^Deny/ }).click();
+    await page.locator('li.item', { hasText: 'You declined clinic.example (care)' }).getByRole('button', { name: 'Ask me each time' }).click();
+    // Listed in Keys, with how often it was used; removed, it asks again.
+    await tab('Keys');
+    const row = page.locator('li', { hasText: 'Always yes to clinic.example, for care' });
+    await row.waitFor({ timeout: 10_000 });
+    expect(await row.textContent()).toMatch(/used 1 time/);
+    await row.getByRole('button', { name: 'Remove' }).click();
+    await row.waitFor({ state: 'detached', timeout: 10_000 });
+    expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'ask' });
+    // Declined, and "Always decline": that agent is turned away at the door from then on.
+    await tab('Requests');
+    await page.locator('article.req', { hasText: 'clinic.example' }).first().getByRole('button', { name: /^Deny/ }).click();
+    const no = page.locator('li.item', { hasText: 'You declined clinic.example (care)' });
+    await no.waitFor({ timeout: 10_000 });
+    await no.getByRole('button', { name: 'Always decline' }).click();
+    await page.getByText(/You won't hear from clinic.example again/).waitFor({ timeout: 10_000 });
+    expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'decline' });
   });
 
   it('signs out on this device: back to the pairing screen', async () => {

@@ -36,7 +36,7 @@ export interface Rules {
 }
 
 export interface Rule {
-  match: Partial<Record<MatchKey, string | boolean | number>>;
+  match: Partial<Record<MatchKey, string | boolean | number | string[]>>;
   allow_fields?: string[];
   deny_fields?: string[];
   min_price_usd?: number;
@@ -44,10 +44,16 @@ export interface Rule {
   min_price?: { amount: number; currency: string };
   retention?: string;
   grant_hours?: number;
+  /** The last day it counts (an ISO date or time): a standing yes lasts 90 days, then the owner is asked again. */
+  until?: string;
+  /** A standing yes the owner added from their panel: whom it is for and when, for the panel's list. */
+  standing?: { domain: string; added: string };
   decision: 'join' | 'decline' | 'ask';
 }
 
-const MATCH_KEYS = ['purpose', 'requester', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least', 'price_below', 'asks_identifying'] as const;
+// requester_key is the RFC 7638 thumbprint of the requester's card key, as the house computes it from the verified card
+// (never a label the agent chose); fields_within and retention_at_most bound a standing yes to what the owner allowed.
+const MATCH_KEYS = ['purpose', 'requester', 'requester_key', 'fields_within', 'retention_at_most', 'sponsor_verified', 'ethics_approved', 'audit_certified', 'reputation_at_least', 'price_below', 'asks_identifying'] as const;
 type MatchKey = (typeof MATCH_KEYS)[number];
 const DECISIONS = ['join', 'decline', 'ask'];
 const TRUST_LISTS = ['ethics', 'auditors', 'issuers', 'payments', 'regulators', 'tellers'];
@@ -74,6 +80,13 @@ export function parseRules(text: string): Rules {
     if (mp !== undefined && !(typeof mp?.amount === 'number' && mp.amount > 0 && typeof mp.currency === 'string' && /^[A-Z]{3}$/.test(mp.currency))) throw new RulesError(`rule ${i + 1}: min_price is { amount, currency }, e.g. { amount: 4, currency: AUD }`);
     const ids = r.match?.asks_identifying;
     if (ids !== undefined && typeof ids !== 'boolean') throw new RulesError(`rule ${i + 1}: asks_identifying must be true or false`);
+    const rk = r.match?.requester_key;
+    if (rk !== undefined && !(typeof rk === 'string' && /^[A-Za-z0-9_-]{43}$/.test(rk))) throw new RulesError(`rule ${i + 1}: requester_key is a key's RFC 7638 thumbprint (43 characters)`);
+    const within = r.match?.fields_within;
+    if (within !== undefined && !(Array.isArray(within) && within.length && within.every((f) => typeof f === 'string'))) throw new RulesError(`rule ${i + 1}: fields_within is a list of fields`);
+    const keepMost = r.match?.retention_at_most;
+    if (keepMost !== undefined && retentionSeconds(String(keepMost)) === null) throw new RulesError(`rule ${i + 1}: retention_at_most is none or an ISO 8601 duration (P30D)`);
+    if (r.until !== undefined && !Number.isFinite(Date.parse(String(r.until)))) throw new RulesError(`rule ${i + 1}: until is a date (2027-02-01)`);
     const purpose = r.match?.purpose;
     if (purpose !== undefined && !isPurpose(String(purpose))) throw new RulesError(`rule ${i + 1}: unknown purpose "${purpose}" (known: ${Object.keys(PURPOSES).join(', ')})`);
     return { ...r, match: r.match ?? {} };
@@ -116,10 +129,19 @@ export type Decision =
  * What a house knows besides the offer: the visitor's reputation from the signals it follows (0–1), and which fields
  * directly identify someone (the loaded packs say: `identifyingFields()`), for `asks_identifying`.
  */
-export interface Context { reputation?: number; identifying?: string[] }
+export interface Context { reputation?: number; identifying?: string[]; /** The RFC 7638 thumbprint of the requester's verified card key. */ requesterKey?: string }
+
+/** How long a retention keeps data, in seconds (none is 0); null if it isn't none or an ISO 8601 duration. */
+export function retentionSeconds(r: string): number | null {
+  if (r === 'none') return 0;
+  const m = /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(r);
+  if (!m || r === 'P' || r.endsWith('T')) return null;
+  const [y, mo, w, d, h, mi, se] = m.slice(1).map((x) => Number(x ?? 0));
+  return (((y! * 365 + mo! * 30 + w! * 7 + d!) * 24 + h!) * 60 + mi!) * 60 + se!;
+}
 
 function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
-  const facts: Record<Exclude<MatchKey, 'reputation_at_least' | 'price_below'>, string | boolean> = {
+  const facts: Record<Exclude<MatchKey, 'reputation_at_least' | 'price_below' | 'requester_key' | 'fields_within' | 'retention_at_most'>, string | boolean> = {
     purpose: o.purpose,
     // "Decline anything asking for direct identifiers" (run 31's owners): a field a pack marks identifying, not a guess.
     asks_identifying: o.fields.some((f) => ctx.identifying?.includes(f)),
@@ -130,7 +152,10 @@ function matches(m: Rule['match'], o: Offer, ctx: Context): boolean {
   };
   // A rule about a broad purpose covers the narrower ones inside it: "marketing" catches "advertising".
   return Object.entries(m).every(([k, v]) =>
-    k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'price_below' ? offerPrice(o).currency === 'USD' && offerPrice(o).amount < Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
+    k === 'requester_key' ? !!ctx.requesterKey && ctx.requesterKey === v
+    : k === 'fields_within' ? Array.isArray(v) && o.fields.every((f) => v.includes(f))
+    : k === 'retention_at_most' ? (retentionSeconds(o.retention) ?? Infinity) <= (retentionSeconds(String(v)) ?? -1)
+    : k === 'reputation_at_least' ? (ctx.reputation ?? 0.5) >= Number(v) : k === 'price_below' ? offerPrice(o).currency === 'USD' && offerPrice(o).amount < Number(v) : k === 'purpose' ? purposeWithin(o.purpose, String(v)) : facts[k as keyof typeof facts] === v);
 }
 
 /**
@@ -194,6 +219,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
   // silent fall-through would look like "pays too little").
   let otherCurrency = '';
   for (const [i, r] of rules.rules.entries()) {
+    if (r.until && Date.parse(r.until) < Date.now()) continue;
     if (!matches(r.match, offer, ctx)) continue;
     const n = i + 1;
     const floor = floorOf(r);
@@ -218,7 +244,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
       if (rules.negotiation?.join_collectives && counter.fields.length) return { decision: 'counter', rule: n, reason: `you'd join if they ${why}`, counter };
       return { decision: 'ask', rule: n, reason: `you'd normally join, but they'd need to ${why}` };
     }
-    return { decision: 'join', rule: n, reason: `matches your rule ${n}`, grantHours: r.grant_hours ?? DEFAULT_GRANT_HOURS, fields: offer.fields };
+    return { decision: 'join', rule: n, reason: r.match.requester_key ? `allowed by your standing yes for ${r.standing?.domain ?? 'this agent'} (rule ${n})` : `matches your rule ${n}`, grantHours: r.grant_hours ?? DEFAULT_GRANT_HOURS, fields: offer.fields };
   }
   const d = rules.default;
   const reason = `no rule covers ${offer.purpose} requests from ${offer.requester}${otherCurrency ? ` (${otherCurrency})` : ''}; your default is ${d}`;

@@ -10,7 +10,7 @@ import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
 import { OwnerDesk, type PanelProvider } from './owner.js';
 import { Parser } from 'n3';
-import { parseDocument } from 'yaml';
+import { parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
 import { createPodMcpServer } from './pod-mcp.js';
 import { pool, type OwnerSession } from './pod.js';
 import { recordPaths } from './packs.js';
@@ -567,6 +567,45 @@ function panelFor(x: {
     },
     availability() {
       return x.keeper().rules.availability ?? null;
+    },
+    // A standing yes, written into the owner's rules (comments kept) below their own declines, so it never outranks one:
+    // for this key and purpose, these fields or fewer, this long or shorter, at least this price, for 90 days.
+    async addStanding(st) {
+      const doc = parseDocument(x.keeper().rulesText);
+      let seq = doc.get('rules') as YAMLSeq | undefined;
+      if (!seq) { doc.set('rules', doc.createNode([])); seq = doc.get('rules') as YAMLSeq; }
+      // An earlier one for the same key and purpose is replaced, not stacked.
+      seq.items = seq.items.filter((it) => { const m = (it as YAMLMap).toJSON?.()?.match ?? {}; return !(m.requester_key === st.jkt && m.purpose === st.purpose); });
+      const declines = seq.items.findIndex((it) => (it as YAMLMap).toJSON?.()?.decision !== 'decline');
+      const at = declines === -1 ? seq.items.length : declines;
+      const today = new Date().toISOString().slice(0, 10), until = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
+      const node = doc.createNode({
+        match: { requester_key: st.jkt, purpose: st.purpose, fields_within: st.fields, retention_at_most: st.retention },
+        allow_fields: st.fields, ...(st.floor.currency === 'USD' ? { min_price_usd: st.floor.amount } : { min_price: st.floor }), retention: st.retention,
+        until, standing: { domain: st.domain, added: today }, decision: 'join',
+      }) as YAMLMap;
+      node.commentBefore = ` Added from your panel on ${today}: always allow ${st.domain} for ${st.purpose} (these fields or fewer), until ${until}.`;
+      seq.items.splice(at, 0, node);
+      return this.setRules(String(doc));
+    },
+    async removeStanding(jkt, purpose) {
+      const doc = parseDocument(x.keeper().rulesText);
+      const seq = doc.get('rules') as YAMLSeq | undefined;
+      if (!seq) return { ok: true as const, removed: 0 };
+      const before = seq.items.length;
+      seq.items = seq.items.filter((it) => { const m = (it as YAMLMap).toJSON?.()?.match ?? {}; return !(m.requester_key === jkt && (!purpose || m.purpose === purpose)); });
+      const removed = before - seq.items.length;
+      if (!removed) return { ok: true as const, removed: 0 };
+      const r = await this.setRules(String(doc));
+      return r.ok ? { ok: true as const, removed } : r;
+    },
+    standing() {
+      const uses = x.desk().standingUses;
+      return x.keeper().rules.rules.filter((r) => typeof r.match.requester_key === 'string').map((r) => ({
+        jkt: String(r.match.requester_key), domain: r.standing?.domain ?? '', purpose: String(r.match.purpose ?? ''), fields: (r.match.fields_within as string[] | undefined) ?? r.allow_fields ?? [],
+        retention: String(r.match.retention_at_most ?? r.retention ?? 'none'), ...(r.min_price ? { floor: r.min_price } : r.min_price_usd !== undefined ? { floor: { amount: r.min_price_usd, currency: 'USD' } } : {}),
+        added: r.standing?.added ?? '', until: r.until ?? '', uses: uses.get(`${String(r.match.requester_key)}|${String(r.match.purpose ?? '')}`) ?? 0,
+      }));
     },
     async setDoor(d) {
       const doc = parseDocument(x.keeper().rulesText);

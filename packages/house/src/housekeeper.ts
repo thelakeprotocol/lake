@@ -1,7 +1,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
-  studyFields, studyId, verifyAgreementSignature, verifyCredential, verifyLakeData,
+  studyFields, studyId, keyThumbprint, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { Market } from './market.js';
@@ -188,12 +188,15 @@ export class Housekeeper {
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     // A sender the owner muted, by key: nothing from it reaches them: no note, and no knock either (run 66: a muted sender's
     // knock was still weighed). Its own payments still file: a receipt is handled above.
-    if (key && this.o.desk.muted.has(key)) {
+    // Its key's fingerprint (RFC 7638), from the verified card: what a standing yes and a mute hold (a kid is a label the
+    // agent chose, so anyone could wear another's).
+    const jkt = await keyThumbprint(v.profile.publicJwk);
+    if ((key && this.o.desk.muted.has(key)) || this.o.desk.muted.has(jkt)) {
       this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'a muted sender' }));
       return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: 'declined: this house doesn\'t take messages from this sender', holds: [], notes: [] });
     }
     const visitor = `agent:${v.profile.ownerDomain}`;
-    if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key);
+    if (v.payload.kind === 'offer') return this.offer(v.payload as OfferPayload, v.profile.ownerDomain, v.profile.webId, visitor, key, jkt);
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor, key);
     if ((v.payload.kind as string) === 'withdraw') {
       const id = String((v.payload as { offerId?: string }).offerId ?? '');
@@ -202,7 +205,7 @@ export class Housekeeper {
       this.o.emit(makeEvent('approval.withdrawn', this.actor, visitor));
       return this.reply({ kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] });
     }
-    if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, key);
+    if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, jkt);
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
     // A hello is how a newcomer's agent starts (run 49: its first message here was rejected as malformed): answered with
     // what this door takes, not delivered (a note is the sender's deliberate words for the owner).
@@ -210,7 +213,7 @@ export class Housekeeper {
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a note (text for the owner, nothing asked), a compute request, a quote, or status / withdraw for a request you made' });
   }
 
-  private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = ''): Promise<LakeData> {
+  private async offer(p: OfferPayload, domain: string, visitorWebId: string, visitor: string, key = '', jkt = ''): Promise<LakeData> {
     const offer = p.offer;
     // Checked at the door, and never repeated back: whatever a sender typed shouldn't reach the owner's panel or another agent's log.
     const bad = offerProblem(offer);
@@ -303,7 +306,9 @@ export class Housekeeper {
     }
     if (waiting.length >= MAX_WAITING && !waiting.some((x) => x.purpose === offer.purpose && [...x.fields].sort().join() === [...offer.fields].sort().join())) return decide('decline', `already has ${waiting.length} requests waiting for the owner`, { code: 'too-many' }, `declined: you have ${waiting.length} requests waiting for this owner; withdraw one or wait for an answer`);
 
-    let d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() });
+    let d = evaluate(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields(), ...(jkt ? { requesterKey: jkt } : {}) });
+    // A standing yes that answered: counted for the owner's list (how often it was used).
+    if (d.decision === 'join' && d.rule !== null && jkt && this.o.rules.rules[d.rule - 1]?.match.requester_key === jkt) this.o.desk.standingUsed(jkt, offer.purpose);
     // The owner said No to this key for this purpose lately: their standing rule doesn't let it in now; they're asked.
     // Asked again after the owner said no to this key for this purpose: the owner's answer stands (run 62: gp.example asked
     // one house ten times), and the visitor hears so. A request their standing rule would let in is put to them instead.
@@ -328,7 +333,7 @@ export class Housekeeper {
       // The note is the visitor's words: never read by the rules, shown to the owner quoted, and only if it isn't trying to give orders.
       const note = typeof offer.note === 'string' && offer.note.trim() ? offer.note.trim().slice(0, 280) : undefined;
       filed = this.o.desk.ask({
-        offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain, ...(key ? { key } : {}) }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
+        offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain, ...(key ? { key } : {}), ...(jkt ? { jkt } : {}) }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
         grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
         priceUsd: offer.priceUsd, ...(offer.price ? { price: offerPrice(offer) } : {}), study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),

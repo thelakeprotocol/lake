@@ -439,10 +439,29 @@ function LeaseCard() {
 }
 
 // ---- Requests ----
+/**
+ * Requests just answered, kept here (not in the house) so the owner can say what to do next time: always allow this
+ * agent for this (a standing yes in their rules, below their own declines), always decline it (a mute), or keep asking.
+ */
+let answeredNow: { id: string; domain: string; purpose: string; allowed: boolean }[] = [];
+function NextTime({ a }: { a: (typeof answeredNow)[number] }) {
+  const bump = useBump();
+  const [said, setSaid] = useState('');
+  const done = () => { answeredNow = answeredNow.filter((x) => x.id !== a.id); bump(); };
+  return h('li', { class: 'item' },
+    h('p', { class: 'item-text' }, said || `You ${a.allowed ? 'allowed' : 'declined'} ${a.domain} (${a.purpose}). Next time they ask for the same:`),
+    h('div', { class: 'item-actions' },
+      said ? h('button', { class: 'btn small quiet', type: 'button', onClick: done }, 'OK') : h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
+        h(Act, { label: 'Always allow', cls: 'small', run: async () => { await call({ kind: 'panel.request.always', request: a.id, answer: 'allow' }); setSaid(`From now on your house says yes to ${a.domain} for this, for 90 days (the same fields or fewer, at least the same price). It's in Keys, under Standing yeses.`); } }),
+        h(Act, { label: 'Always decline', cls: 'small deny', run: async () => { await call({ kind: 'panel.request.always', request: a.id, answer: 'decline' }); setSaid(`You won't hear from ${a.domain} again.`); } }),
+        h('button', { class: 'btn small quiet', type: 'button', onClick: done }, 'Ask me each time'))));
+}
+
 function Requests() {
   const v = useHouse<ListView>({ kind: 'list' });
   if (!v.data) return h(Failed, { error: v.error });
   return h('div', {},
+    answeredNow.length ? h('ul', { class: 'items' }, ...answeredNow.map((a) => h(NextTime, { key: a.id, a }))) : null,
     h('p', { class: 'lede' }, 'Your rules answer the easy ones. These are the ones they left to you.'),
     v.data.requests.length ? h('div', {}, ...sameAsks(v.data.requests).map((all) => h(RequestCard, { key: all[0]!.id, all }))) : h('p', { class: 'empty' }, 'Nothing to decide. Your rules are handling it.'));
 }
@@ -451,7 +470,8 @@ function Requests() {
 function sameAsks(list: Request[]): Request[][] {
   const groups = new Map<string, Request[]>();
   for (const r of list) {
-    const k = JSON.stringify([r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.warnings ?? [], r.recommendation]);
+    // By who it really is (its WebID), not its name: two agents can share a name, and an answer for one isn't for the other.
+    const k = JSON.stringify([r.visitor.webId ?? r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.warnings ?? [], r.recommendation]);
     groups.set(k, [...(groups.get(k) ?? []), r]);
   }
   return [...groups.values()];
@@ -472,8 +492,12 @@ function RequestCard({ all }: { all: Request[] }) {
       const grant = signCredential({ ...draft, issuer: webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString() }, key);
       await call({ kind: 'answer', request: q.id, answer: 'allow', grant });
     }
+    answeredNow = [{ id: r.id, domain: r.visitor.domain, purpose: r.purpose, allowed: true }, ...answeredNow.filter((x) => x.id !== r.id)].slice(0, 3);
   };
-  const deny = async () => { for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {}); };
+  const deny = async () => {
+    for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {});
+    answeredNow = [{ id: r.id, domain: r.visitor.domain, purpose: r.purpose, allowed: false }, ...answeredNow.filter((x) => x.id !== r.id)].slice(0, 3);
+  };
   return h('article', { class: risky ? 'req risky' : 'req' },
     h('div', { class: 'who' }, r.visitor.domain, times > 1 ? h('span', { class: 'count' }, `asked ${times} times`) : null),
     r.question ? h('p', { class: 'q' }, `“${r.question}”`) : null,
@@ -493,6 +517,21 @@ function RequestCard({ all }: { all: Request[] }) {
 interface Consent {
   id: string; visitor: string; fields: { name: string; label: string }[]; purpose: string; purposeLabel: string; given: string; until: string; retention: string;
   how: { live?: true; rule?: number | null }; status: 'active' | 'withdrawn' | 'used' | 'ended'; withdrawnAt?: string;
+}
+
+interface StandingYes { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor?: { amount: number; currency: string }; added: string; until: string; uses: number }
+/** Your standing yeses: an agent you said "always allow" for, each removable (a change to your rules). */
+function StandingYeses() {
+  const s = useHouse<{ standing: StandingYes[] }>({ kind: 'panel.standing' });
+  if (!s.data?.standing.length) return null;
+  return h('div', {}, h('h2', {}, 'Standing yeses'),
+    h('p', { class: 'lede' }, 'Agents you said "always allow" for. Your house says yes to the same ask from them, or a smaller one, without asking you, until the date shown. Anything more, and it asks you again.'),
+    h('ul', { class: 'rows' }, ...s.data.standing.map((x) => h('li', { key: `${x.jkt}|${x.purpose}` },
+      h('div', {},
+        h('div', { class: 'r-title' }, `Always yes to ${x.domain || 'an agent'}, for ${x.purpose}`),
+        h('div', { style: 'margin-top:6px' }, ...x.fields.map((f) => h('span', { class: 'chip' }, nice(f)))),
+        h('div', { class: 'r-meta' }, [x.floor ? `at least ${money$(x.floor.amount, x.floor.currency)}` : '', x.retention === 'none' ? 'they keep nothing' : `they keep it for ${duration(x.retention)}`, x.added ? `added ${x.added}` : '', x.until ? `until ${x.until}` : '', `used ${x.uses} time${x.uses === 1 ? '' : 's'}`].filter(Boolean).join(' · '))),
+      h(Act, { label: 'Remove', cls: 'danger', run: () => call({ kind: 'panel.standing.remove', jkt: x.jkt, purpose: x.purpose }) })))));
 }
 
 function Keys() {
@@ -517,6 +556,7 @@ function Keys() {
   const loose = v.data.keys.filter((k) => !recorded.has(k.id));
   const live = consents.filter((x) => x.status === 'active').length + loose.length;
   return h('div', {},
+    h(StandingYeses, {}),
     h('p', { class: 'lede' }, 'Everyone you’ve said yes to. Take one back any time: they’re cut off on their next request.'),
     consents.length ? h(Paged, { items: consents, render: row, cls: 'rows' }) : h('p', { class: 'empty' }, 'You haven’t said yes to anyone yet.'),
     loose.length ? h('div', {}, h('h2', {}, 'Other keys'), h('ul', { class: 'rows' }, ...loose.map((k) => h('li', { key: k.id },

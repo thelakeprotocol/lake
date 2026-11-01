@@ -4,7 +4,7 @@ import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, availabilityProblems, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -15,7 +15,7 @@ export type OwnerActive = 'within the hour' | 'today' | 'this week' | 'not this 
 export interface PendingRequest {
   id: string;
   offerId: string;
-  visitor: { webId: string; domain: string; name: string; /** Its key's id: what an owner's No is held against. */ key?: string };
+  visitor: { webId: string; domain: string; name: string; /** Its key's id: what an owner's No is held against. */ key?: string; /** Its key's RFC 7638 thumbprint, from the verified card: what a standing yes and a mute hold. */ jkt?: string };
   purpose: string;
   fields: string[];
   retention: string;
@@ -41,8 +41,15 @@ export interface PendingRequest {
 }
 
 /** The control panel's view of a house. Every call is signed by the owner's key. */
+/** A standing yes the owner added from their panel ("always allow this agent for this"), as the panel lists it. */
+export interface StandingYes { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor?: { amount: number; currency: string }; added: string; until: string; uses: number }
+
 export interface PanelProvider {
   overview(tzOffset?: number): Promise<unknown>;
+  /** Standing yeses: added after the owner's own declines, listed, removed (each a change to the owner's rules). */
+  addStanding?(s: { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor: { amount: number; currency: string } }): Promise<{ ok: true } | { ok: false; error: string }>;
+  removeStanding?(jkt: string, purpose?: string): Promise<{ ok: true; removed: number } | { ok: false; error: string }>;
+  standing?(): StandingYes[];
   rules(): Promise<{ text: string; rules: unknown }>;
   setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
   /** The house's door (SPEC §9.0): open or not, its line, the address to give out, and its A2A address. */
@@ -154,6 +161,13 @@ const MAX_ALLOWANCE_DAYS = 31;
 export class OwnerDesk {
   ownerJwk: JWK | null = null;
   readonly pending = new Map<string, PendingRequest>();
+  /** How often each standing yes answered for the owner (by key and purpose), for the panel's list. */
+  readonly standingUses = new Map<string, number>();
+  standingUsed(jkt: string, purpose: string) {
+    const k = `${jkt}|${purpose}`;
+    this.standingUses.set(k, (this.standingUses.get(k) ?? 0) + 1);
+    void writeFile(join(this.o.dataDir, 'standing-uses.json'), JSON.stringify([...this.standingUses])).catch(() => {});
+  }
   readonly grants = new Map<string, GrantRecord>();
   private replay = new ReplayGuard();
   private token = '';
@@ -265,6 +279,8 @@ export class OwnerDesk {
   /** Back to nobody's: keys revoked, requests dropped, owner forgotten, house reset. Anyone can claim it again. */
   async release() {
     await this.revoke('all');
+    this.standingUses.clear();
+    await writeFile(join(this.o.dataDir, 'standing-uses.json'), '[]').catch(() => {});
     this.pending.clear();
     this.assistants.clear();
     this.suggestions = [];
@@ -292,6 +308,7 @@ export class OwnerDesk {
     this.ownerJwk = await this.o.readOwnerKey();
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
+    for (const [k, n] of JSON.parse(await readFile(join(this.o.dataDir, 'standing-uses.json'), 'utf8').catch(() => '[]')) as [string, number][]) this.standingUses.set(k, n);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
@@ -1039,6 +1056,33 @@ export class OwnerDesk {
       }
       // Notifications on this device: the house's public key to subscribe with, then the device's subscription (its push
       // service's address and keys), kept for up to five devices; a test; and off.
+      // "Next time": after answering a request, the owner says what to do with the same from this agent. Always decline is a
+      // mute (by key); always allow is a standing yes in their rules, below their own declines, for exactly what they
+      // allowed (these fields or fewer, this long or shorter, at least this price), for 90 days.
+      if (p.kind === 'panel.request.always') {
+        const q = p as { request?: string; answer?: string };
+        const req = this.pending.get(String(q.request ?? ''));
+        if (!req) return void res.status(404).json({ error: 'no such request' });
+        if (q.answer === 'decline') {
+          const k = req.visitor.jkt ?? req.visitor.key;
+          if (!k) return void res.status(400).json({ error: 'this request has no key to hold it against' });
+          await this.mute(k);
+          if (req.visitor.jkt) await this.o.panel?.removeStanding?.(req.visitor.jkt);
+          this.news({ about: 'sender.muted', domain: req.visitor.domain, note: 'your human won\'t hear from this sender again: its requests, notes and knocks are declined at the door' });
+          return void res.json({ ok: true, muted: req.visitor.domain });
+        }
+        if (q.answer !== 'allow') return void res.status(400).json({ error: 'answer: allow or decline' });
+        if (!req.visitor.jkt || !this.o.panel?.addStanding) return void res.status(400).json({ error: 'a standing yes needs the agent\'s key, from a request it signed' });
+        const ids = req.fields.filter((f) => identifyingFields().includes(f));
+        if (ids.length) return void res.status(400).json({ error: `not for fields that identify you (${ids.join(', ')}): those are asked each time` });
+        const price = req.price ?? { amount: req.priceUsd, currency: 'USD' };
+        return void res.json(await this.o.panel.addStanding({ jkt: req.visitor.jkt, domain: req.visitor.domain, purpose: req.purpose, fields: req.fields, retention: req.retention, floor: price }));
+      }
+      if (p.kind === 'panel.standing') return void res.json({ standing: this.o.panel?.standing?.() ?? [] });
+      if (p.kind === 'panel.standing.remove') {
+        const q = p as { jkt?: string; purpose?: string };
+        return void res.json((await this.o.panel?.removeStanding?.(String(q.jkt ?? ''), q.purpose ? String(q.purpose) : undefined)) ?? { ok: false, error: 'not here' });
+      }
       if (p.kind === 'panel.push.key') return void res.json({ publicKey: (await this.pushes()).keys!.publicKey });
       if (p.kind === 'panel.push.subscribe') {
         const sub = (p as { subscription?: webpush.PushSubscription }).subscription;
@@ -1214,6 +1258,8 @@ export class OwnerDesk {
     if (!req || req.status !== 'pending') return { error: 'no such pending request' };
     if (answer === 'deny') {
       req.status = 'denied';
+      // A No to an agent ends any standing yes for it on this purpose: the owner changed their mind about it.
+      if (req.visitor.jkt) void this.o.panel?.removeStanding?.(req.visitor.jkt, req.purpose);
       if (req.visitor.key) {
         const k = `${req.visitor.key}|${req.purpose}`, again = this.ownerSaidNo(req.visitor.key, req.purpose);
         this.ownerNos.set(k, { offerId: req.offerId, at: Date.now(), until: Date.now() + (again ? 30 : 7) * 86_400_000 });

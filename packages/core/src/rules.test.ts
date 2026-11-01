@@ -141,6 +141,42 @@ rules:
   });
 });
 
+describe('a standing yes (1 Nov: "always allow" from the owner\'s panel)', () => {
+  const jkt = 'A'.repeat(43), other = 'B'.repeat(43);
+  const gp: Offer = { ...study, requester: 'gp.example', purpose: 'care' };
+  const rules = parseRules(`
+owner: stan
+default: ask
+rules:
+  - match: { asks_identifying: true }
+    decision: decline
+  - match: { requester_key: ${jkt}, purpose: care, fields_within: [medications], retention_at_most: P30D }
+    allow_fields: [medications]
+    min_price_usd: 2
+    until: 2999-01-01
+    standing: { domain: gp.example, added: 2026-11-02 }
+    decision: join
+`);
+  const ask = (o: Partial<Offer>, key = jkt) => evaluate(rules, { ...gp, fields: ['medications'], priceUsd: 2, retention: 'P7D', ...o }, { requesterKey: key, identifying: ['name'] });
+  it('allows the same agent (by its key) for the same thing, and says it was the standing yes', () => {
+    expect(ask({})).toMatchObject({ decision: 'join', reason: expect.stringMatching(/standing yes for gp.example/) });
+  });
+  it('asks again for anything more: another key, more fields, longer keeping, less money, or after it ends', () => {
+    expect(ask({}, other).decision).toBe('ask');
+    expect(ask({ fields: ['medications', 'age_band'] }).decision).toBe('ask');
+    expect(ask({ retention: 'P90D' }).decision).toBe('ask');
+    expect(ask({ priceUsd: 1 }).decision).not.toBe('join');
+    const expired = { ...rules, rules: rules.rules.map((r) => (r.until ? { ...r, until: '2020-01-01' } : r)) };
+    expect(evaluate(expired, { ...gp, fields: ['medications'], priceUsd: 2, retention: 'P7D' }, { requesterKey: jkt }).decision).toBe('ask');
+  });
+  it('never outranks the owner\'s own decline above it', () => {
+    expect(ask({ fields: ['name'] }).decision).toBe('decline');
+  });
+  it('refuses a key that is not a thumbprint', () => {
+    expect(() => parseRules('owner: x\nrules:\n  - match: { requester_key: kid-1 }\n    decision: join\n')).toThrow(RulesError);
+  });
+});
+
 describe('collective counter', () => {
   it('takes the highest price and only fields every member accepts: $2 becomes $5', () => {
     const stan = evaluate(persona('stan'), study);
