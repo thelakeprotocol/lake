@@ -27,7 +27,8 @@ Run `pnpm build` before `pnpm test:e2e`: it runs the built `dist/` files.
 | `packages/core` | Cards (A2A 1.0 + Lake extension), signing, rules engine, ODRL, VCs, studies, AP2, A2A helpers. No I/O beyond fetch. |
 | `packages/house` | A house: Community Solid Server child process, housekeeper, MCP door to the pod, owner's desk. `--tenants N` hosts many. |
 | `packages/lake` | A node: registry, signed event intake, signals, WebSocket stream, serves the map. |
-| `packages/specialists` | issuer, ethics, auditor, payments, and the sandbox guides: guide, inspector, sparring partner, quests (A2A agents). `all` runs them in one process. |
+| `packages/specialists` | issuer, ethics, auditor, payments, arbiter, transparency log, rooms, tally, passes, person checker, tellers, each pack's issuer and register, and the guides (guide, inspector, sparring, quests; the public sandbox skips the last two). `all` runs them in one process (`--skip` leaves some out). |
+| `packages/agent` | The SDK for outside agents and the Lake MCP connector (stdio, and HTTP with OAuth sign-in, per-agent state, sleep and wake, passports). |
 | `packages/visitor` | The `lake` CLI: knock, dispatch (research agent), attack, swarm. |
 | `packages/ui` | The live map and the control panel every house serves at /owner/ (Vite). |
 | `usecases/<name>` | One package per use case ("pack"): its fields, vocabulary, SHACL shapes, converter, synthetic data, studies, intents and example quoters. `health`, `mortgage` (Australian home loans) and `shopping` (the weekly food shop) today. |

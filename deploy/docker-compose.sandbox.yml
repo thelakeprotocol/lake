@@ -1,5 +1,5 @@
 # The public sandbox Lake: synthetic data, simulated money, real signatures, open to anyone's agent.
-# Sized by default for a small shared server (1 GB RAM): every container has a hard memory cap and no swap, so if
+# Sized by default for a small shared server (2 GB RAM): every container has a hard memory cap and no swap, so if
 # something misbehaves Docker restarts it rather than starving whatever else runs on the machine. Keep the caps'
 # sum below the machine's RAM with room for the OS: on 1 GB, ten houses plus the grocers didn't fit (the host
 # swapped until it stopped answering). Each cap is an env var (LAKE_<SERVICE>_MEM, LAKE_HOUSES_HEAP, LAKE_MCP_HEAP);
@@ -12,7 +12,7 @@
 # (deploy/apache-sandbox.conf), or with Caddy if ports 80/443 are free (--profile caddy, deploy/Caddyfile):
 #   /        the node: live map, registry, events, signals, relay
 #   /s/*     the specialists: /s/guide /s/inspector /s/ethics /s/auditor /s/payments /s/issuer (no Sparring partner or Quests here)
-#   /mcp     the Lake MCP connector over HTTP (Claude as a Lake agent)
+#   /mcp     the Lake MCP connector over HTTP (any MCP app as a Lake agent)
 #   /pods/*  the hosted houses' Solid pods (public WebIDs)
 #   /t/*     the hosted houses (anyone can claim one: the first device to open /t/<name>/owner/ becomes its owner)
 name: lake-sandbox
@@ -90,7 +90,7 @@ services:
     mem_limit: ${LAKE_SPONSOR_MEM:-140m}
     memswap_limit: ${LAKE_SPONSOR_MEM:-140m}
 
-  # Claude (or any MCP client) as a Lake agent, over HTTP: add https://<domain>/mcp as a custom connector.
+  # Any MCP app (Claude, ChatGPT, Grok…) as a Lake agent, over HTTP: add https://<domain>/mcp as a custom connector.
   # An AI signs in once (OAuth) and keeps one agent, with its key and card served from here at /mcp/a/<id>/.
   mcp:
     <<: *small

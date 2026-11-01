@@ -36,7 +36,7 @@ How it's built:
 
 ## What's real today
 
-The Lake is days old and built in public. Everything on this site is marked:
+The Lake is weeks old and built in public. Everything on this site is marked:
 
 - <span class="status done">runs</span> exists in the repo and has tests.
 - <span class="status next">next</span> is being built now.

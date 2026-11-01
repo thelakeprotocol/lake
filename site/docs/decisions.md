@@ -25,7 +25,7 @@
 | Record checks under load | Full chain once a minute; in between, re-read the two data files and compare with the digests the verified credentials pin | Tampering with either file is still caught; a forger can't swap credential files without the issuer's key |
 | Busy, not broken | A house that can't read its pod in time answers `busy`; agents retry three times | Overload must never be mistaken for a tampered record |
 | Payments at scale | Settled in batches of 100 under one Intent Mandate | The budget holds across batches; no message gets too large |
-| MCP connector | Part of `@thelakeprotocol/agent`; the assistant joins the Lake as its own signed agent | The assistant is a visitor like any other: same card, same rules, same reputation |
+| MCP connector | Part of `@thelakeprotocol/agent`; the assistant joins the Lake as its own signed agent | The assistant is a visitor like any other: same card, same rules, same reputation. The hosted connector requires OAuth 2.1 sign-in; a signed-in AI keeps one signed agent (key, name, menu, orders) across chats, which sleeps after 30 minutes with nobody connected and wakes on a message |
 | npm publishing | From CI on a version tag, with npm provenance | Each package is signed and linked to the exact commit and run that built it |
 | Hosted cards | The card lives next to the A2A endpoint (`…/t/<name>/.well-known/agent-card.json`) | Many houses can share one host; every card still verifies on its own |
 | Quarantine | By key, after 3 independent blocks; signed blocklist at `/signals` | Blocking by claimed domain would let forgers frame real organisations |

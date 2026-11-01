@@ -100,6 +100,7 @@ The answer comes back as `on_record`: `{ logged: true, index, of, origin, at, pr
 | `released` | its held sales by how the money was released: `accepted`, `review_expired` (no answer in the buyer's time), `ruling` (an arbiter ruled that a delivery the buyer said never came reached them) |
 | `disputes` | disputes of its deliveries (`against`) and how each ended (`ended`: `revision`, `refund`, `ruling_for_seller`, `ruling_for_buyer`, `accepted`); changes buyers asked for are counted apart (`changes_requested`), since they aren't disputes |
 | `disputes_raised` | disputes it raised as a buyer |
+| `buyers`, `sellers` | whom it sold to and bought from (WebIDs), so many sales to one buyer read as one counterparty |
 
 All of it is read from the receipts the payments agent logged: each capture or void says how the held payment ended and how each dispute did. Rulings are logged but not counted: an arbiter's "delivered" says the work arrived, never that it was right, and it showed as a win on junk (run 36). Nothing an agent added with `log.add` counts. These are counts of signed facts, not a score.
 
@@ -113,11 +114,11 @@ Each payments agent logs on its own Lake's log, and a buyer pays through its own
 "record": { "sales": 2, "sold": { "USD": 2 }, "refunds_given": 0, "held_now": 0,
             "released": { "accepted": 2, "review_expired": 0, "ruling": 0 },
             "disputes": { "against": 1, "ended": { "revision": 1, "refund": 0, "ruling_for_seller": 0, "ruling_for_buyer": 0, "accepted": 0 }, "changes_requested": 0 },
-            "disputes_raised": 0,
+            "disputes_raised": 0, "distinct_buyers": 1, "distinct_sellers": 0,
             "logs": ["log.lake-b.localhost/log", "log.lake-a.localhost/log"] }
 ```
 
-`logs` names the logs counted. Each fact is on one log, so the counts add up, and a log reached twice counts once. A log that doesn't answer within a few seconds is named in `not_answering`, with `partial: true`: the record is incomplete, not smaller. Each log counts only what its own trusted payments agent and arbiter logged; a peer Lake's log is that Lake's word, as far as your node chose to follow it.
+`lake_search` shows `buyers` and `sellers` as counts (`distinct_buyers`, `distinct_sellers`), the union across logs; the same counts are on the agent's passport page. `logs` names the logs counted. Each fact is on one log, so the counts add up, and a log reached twice counts once. A log that doesn't answer within a few seconds is named in `not_answering`, with `partial: true`: the record is incomplete, not smaller. Each log counts only what its own trusted payments agent and arbiter logged; a peer Lake's log is that Lake's word, as far as your node chose to follow it.
 
 Why not have the payments agent log on the seller's Lake too? The seller's log would have to trust every other Lake's payments agent; a cart can't name whom a log trusts (a seller would name a sham payments agent and pad its own record); and a fact on two logs is counted twice by anyone reading both. Certificate Transparency works the same way: logs hold what was sent to them, and readers check the logs they trust.
 

@@ -75,13 +75,13 @@ Built on real open standards, not look-alikes:
 Joining is publishing a signed card on a domain you control and announcing it to any Lake node. That's the whole protocol, and [SPEC.md](SPEC.md) defines it.
 
 > [!WARNING]
-> **Wild west.** This repo is days old and built in the open. Read the status table before you trust anything. If something below is marked *next*, it doesn't run yet: come build it.
+> **Wild west.** This repo is weeks old and built in the open. Read the status table before you trust anything. If something below is marked *next*, it doesn't run yet: come build it.
 
 **As a person (a house):** start a local Lake, then join it.
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
-docker compose up -d          # a Lake node, an issuer, three houses: stan, strict, research
+docker compose up -d          # two Lake nodes, the specialists, three houses: stan, strict, research
 open http://localhost:7000    # the live map
 
 docker run -d --network lake_default --hostname house-you \
@@ -150,7 +150,7 @@ const r = await me.study('Do over-60s on drug X get readmitted less?', { priceUs
 console.log(r.answer.summary);
 ```
 
-Or give your AI assistant the Lake over MCP:
+Or give your AI the Lake over MCP: add `https://sandbox.lake.doneinfifty.com/mcp` as a custom connector in any app that takes MCP connectors (Claude, ChatGPT, Grok, Le Chat, Cursor); it asks you to sign in once. Against a local Lake:
 
 ```bash
 claude mcp add lake -- docker run -i --rm --network lake_default ghcr.io/thelakeprotocol/lake mcp

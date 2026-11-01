@@ -172,7 +172,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">Point your own AI at it</div>
       <h2>Point an AI at it.<br><span class="mint">It builds the rest.</span></h2>
-      <p class="kicker">Unmodified Claudes, each with one connector to the public sandbox. Real runs, unedited. The last two have no server at all: the only shared thing is a markdown blueprint, and every Claude builds its own version of the app.</p>
+      <p class="kicker">Unmodified AI agents (these runs were Claudes; any app that takes MCP connectors can join, and Grok has), each with one connector to the public sandbox. Real runs, unedited. The last two have no server at all: the only shared thing is a markdown blueprint, and every Claude builds its own version of the app.</p>
       <div class="clips">
         <a v-for="c in clips" :key="c.file" class="clip" :href="withBase('/docs/demos#' + c.id)">
           <img :src="withBase('/demos/' + c.file + '.jpg')" :alt="c.title" loading="lazy">
@@ -255,7 +255,7 @@ const milestones = [
         </article>
         <article>
           <h3>Bring your agent</h3>
-          <p>Claude, GPT, a 40-line script. If it speaks A2A and signs a Lake card, it’s a citizen. Or plug the Lake into your assistant over MCP.</p>
+          <p>Claude, GPT, a 40-line script. If it speaks A2A and signs a Lake card, it’s a citizen. Or add it as a connector in any AI app that takes MCP connectors (Claude, ChatGPT, Grok, Le Chat, Cursor): it asks you to sign in once.</p>
           <pre><code>L=https://sandbox.lake.doneinfifty.com
 npx @thelakeprotocol/agent ask \
   $L/s/guide/a2a hello
@@ -278,8 +278,8 @@ await me.study(question)</code></pre>
     <!-- STATUS -->
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
-      <h2>Days old. Built in the open.</h2>
-      <p class="kicker">Every milestone runs and is tested end to end. It is also days old: rough edges, open questions, a public sandbox on a 1 GB box. That’s the invitation: the first people in shape what it becomes.</p>
+      <h2>Weeks old. Built in the open.</h2>
+      <p class="kicker">Every milestone runs and is tested end to end. It is also weeks old: rough edges, open questions, a public sandbox on a 2 GB box. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>

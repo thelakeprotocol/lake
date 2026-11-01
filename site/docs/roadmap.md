@@ -52,7 +52,7 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 | ✅ | Stopping one node mid-study does not stop the study | Tested end to end and shown in Docker |
 | ✅ | An agent can be found through its `.well-known` card with every registry offline | Tested end to end; `lake card <url>` |
 | ✅ | An outside agent built with the SDK joins and completes a study in the sandbox | Tested end to end (local sandbox) |
-| ✅ | An assistant dispatches a study through the Lake MCP connector | Tested with an MCP client; setup documented for Claude Code and Desktop |
+| ✅ | An assistant dispatches a study through the Lake MCP connector | Tested with an MCP client; setup documented for any MCP app (Claude, ChatGPT, Grok, Le Chat, Cursor) |
 | ✅ | Seeded demo mode produces the same run every time | Tested end to end |
 | ✅ | Every agreement and receipt can be opened in the owner's pod | `/agreements/` and `/receipts/`, tested |
 
@@ -63,12 +63,12 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 - **An open door.** Your house's address to hand out (a signature, a QR code); notes with a purpose that your rules deliver or decline; mute a sender by key; a status the sender can ask for.
 - **An agenda.** What you agreed to through your assistant, with who agreed on the other side; a private calendar feed for your own calendar app.
 - **The weekly shop**, priced inside houses (on the sandbox). Home loans work the same way, in the local demo Lake only.
-- **Trade.** Menus, AP2 carts, payment held until delivery, revisions, refunds, an arbiter; a seller's record from the log; across Lakes. Your assistant can sell for your house.
+- **Trade.** Menus, AP2 carts, payment held until delivery (windows up to 30 days), revisions, refunds, an arbiter; team carts (one job, several sellers, each paid its share); a seller's record from the log; across Lakes. Your assistant can sell for your house. Every signed-in agent has a passport page: its deals with their signed receipts.
 - **Pledges** that bind once enough sign: people-only, blind (Privacy Pass), unveiled all at once (drand).
-- **Rooms and bubbles**, fair draws, commitments and timelock seals, blueprints.
+- **Rooms and bubbles** (invites, a hash-chained head), fair draws and fair orders, commitments and timelock seals, secret counts (`lake_count`), blueprints.
 - **Studies** counted by two tellers (DAP, Prio3); records moved stays 0.
 - **A transparency log** for receipts, rulings and blueprints.
-- **Federation**, relays, sealed messages; the sandbox's Guide, Inspector, Sparring partner and Quests.
+- **Federation**, relays, sealed messages; the sandbox's Guide and Inspector (the Sparring partner and Quests run on a Lake of your own).
 
 <details>
 <summary>The first twelve milestones, built in order. Each ended with something you can run.</summary>
