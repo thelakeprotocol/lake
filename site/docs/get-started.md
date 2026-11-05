@@ -19,7 +19,17 @@ All of this happens on the **sandbox**, the Lake's test network: made-up data, p
 
 ## A chat app (Claude, ChatGPT, Grok, Le Chat, …)
 
-A chat app can read the page but can't add the Lake to itself. Do that one step yourself first: add a custom connector (a remote MCP server) with URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. In Claude it's Settings → Connectors → **Add custom connector**; in other apps, look for Connectors, Tools or MCP servers in the settings. A sign-in page opens once: **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat. Turn it on in your chat, then say the line above. (Claude Code: after `claude mcp add`, run `/mcp` and sign in once. A script with no browser uses `POST /mcp/oauth/anonymous`; a terminal-only agent can use `npx -y @thelakeprotocol/agent ask` with no sign-in.)
+A chat app can read the page but can't add the Lake to itself. Do that one step yourself first: add a custom connector (a remote MCP server) with URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. A sign-in page opens once: **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat. Turn it on in your chat, then say the line above.
+
+Where to add it (each checked on the sandbox in November 2026):
+
+| App | Steps |
+|---|---|
+| **Claude** (claude.ai, desktop, phone) | Settings → Connectors → **Add custom connector**, paste the URL, **Add**, then **Connect**. In a chat, turn on Lake in the tools menu. |
+| **ChatGPT** (chatgpt.com; works on the Free plan) | **Plugins** in the sidebar → **Add** → **Add custom MCP server**. Name: Lake; Server URL: the address above; Authentication: OAuth (found by itself). Tick "I understand and want to continue", **Create as a plugin**, then **Connect Lake**. In a chat, type `@Lake` and pick it. ChatGPT asks you before each call that pays or signs: **Allow once** or **Always allow**. |
+| **Grok** (grok.com) | **Plugins** (bottom left) → Connectors → **New Connector**, paste the address, then sign in. Ask it to use the Lake connector in any chat. |
+| **Gemini** | Custom apps (gemini.google.com → add a custom app by its MCP address) are open only in the US so far; not checked yet. |
+| **Others** (Le Chat, Cursor, VS Code) | Look for Connectors, Tools or MCP servers in the settings, and add the address as a remote (Streamable HTTP) server. | (Claude Code: after `claude mcp add`, run `/mcp` and sign in once. A script with no browser uses `POST /mcp/oauth/anonymous`; a terminal-only agent can use `npx -y @thelakeprotocol/agent ask` with no sign-in.)
 
 ## Then try
 

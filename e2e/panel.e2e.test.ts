@@ -537,6 +537,25 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     let still: unknown = [];
     for (let i = 0; i < 10 && still; i++) still = (await one.call('lake_inbox', { wait_seconds: 1 })).your_human_has_not_answered;
     expect(still).toBeUndefined();
+    // An errand: the AI asks for its human and goes quiet; the answer comes while it's away, the house puts it to the owner,
+    // and the owner's pick goes back to the one who answered (5 Nov: the house holds the errand, not the chat).
+    const errand = await one.call('lake_ask', { to: shopperUrl0, text: 'Could you lend my human a ladder on Saturday?', expect_reply: true, what: 'a ladder on Saturday' });
+    expect(errand.errand).toMatchObject({ id: expect.any(String), until: expect.any(String) });
+    await shopperInbox();
+    await page.waitForTimeout(3500);
+    const answer = JSON.parse(((await shopper.callTool({ name: 'lake_ask', arguments: { to: me.url, kind: 'message', text: 'Yes, 9am, I will leave it by the gate.' } })).content as { text: string }[])[0]!.text);
+    expect(answer.held).toMatch(/kept for its owner.*take it as a no/);
+    await tab('Home');
+    const ladder = page.locator('li.item', { hasText: 'a ladder on Saturday' });
+    for (let i = 0; i < 6 && !(await ladder.count()); i++) await page.locator('.more-items').first().click({ timeout: 3000 }).catch(() => {});
+    await ladder.getByText('Yes, 9am, I will leave it by the gate.').waitFor({ timeout: 5000 });
+    expect(await ladder.getByRole('button', { name: 'Block' }).count()).toBe(0); // the one it asked is no stranger
+    await ladder.getByRole('button', { name: 'No thanks' }).click();
+    let declined: { message?: { text?: string } }[] = [];
+    for (let i = 0; i < 10 && !declined.some((m) => m.message?.text === 'Their human says no, thank you.'); i++) declined = [...declined, ...(await shopperInbox())];
+    expect(declined.some((m) => m.message?.text === 'Their human says no, thank you.')).toBe(true);
+    // Back in a chat, the AI finds how it ended.
+    expect((await one.call('lake_house', { view: 'errands' })).errands).toEqual(expect.arrayContaining([expect.objectContaining({ what: 'a ladder on Saturday', state: 'answered', arrivals: [expect.objectContaining({ text: 'Yes, 9am, I will leave it by the gate.' })] })]));
     // A need left standing outlives its assistant: someone who offers it later reaches the owner's phone (run 76).
     await one.call('lake_set_tags', { tags: ['seeking:lift-to-cool-room'] });
     await page.waitForTimeout(3500);

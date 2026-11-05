@@ -1,5 +1,5 @@
 import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
@@ -128,8 +128,24 @@ export interface Suggestion {
   rules?: string;
   /** A new line for the door (run 47: "plants free, sofa gone" took a whole rules file): an Apply tap, the rest kept. */
   door?: { about: string };
+  /** Something the assistant is waiting on (a reply, a cart): the house holds it while the assistant's chat is gone. */
+  errand?: Errand;
   at: string;
 }
+/**
+ * An errand: what an assistant set going and waits on. The house keeps it, not the chat (runs 72-78: replies came after the
+ * AI had stopped, and nobody heard). The assistant opens it; what arrives while it's away is filed here and put to the owner
+ * as a question; only the owner's tap or its date ends a held one. It never pays or agrees by itself.
+ */
+export interface Errand {
+  what: string; kind: 'ask' | 'order' | 'cart' | 'seeking'; ref?: string;
+  /** Who it waits on: matched on their key (a name is only a name), the cart or tag second. */
+  with?: { name: string; webId: string; key?: string; url?: string };
+  until: string; state: 'open' | 'held' | 'answered' | 'expired' | 'closed';
+  arrivals: { at: string; from: { name: string; domain: string; webId: string; url?: string; key?: string }; kind: string; text: string; ref?: string }[];
+  ended?: { at: string; how: 'answered' | 'expired' | 'owner' | 'assistant' | 'blocked' };
+}
+const ERRAND_KINDS = ['ask', 'order', 'cart', 'seeking'] as const;
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
 /**
  * Something the owner agreed to, in their agenda. Who agreed on the other side is what it rests on (run 47: a visitor's
@@ -284,6 +300,7 @@ export class OwnerDesk {
     this.pending.clear();
     this.assistants.clear();
     this.suggestions = [];
+    await this.saveSuggestions();
     // The last owner's notes, mutes and agenda were theirs: the next one starts with none, and a new calendar address.
     this.notes = [];
     this.closedNotes.clear();
@@ -310,6 +327,7 @@ export class OwnerDesk {
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     for (const [k, n] of JSON.parse(await readFile(join(this.o.dataDir, 'standing-uses.json'), 'utf8').catch(() => '[]')) as [string, number][]) this.standingUses.set(k, n);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
+    this.suggestions = JSON.parse(await readFile(join(this.o.dataDir, 'suggestions.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
     this.notes = kept.notes ?? [];
@@ -321,6 +339,7 @@ export class OwnerDesk {
       check();
       setInterval(check, 60_000).unref();
     }
+    setInterval(() => this.sweepErrands(), 60_000).unref();
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
@@ -507,6 +526,34 @@ export class OwnerDesk {
   agenda: AgendaItem[] = [];
   /** The secret in the owner's calendar address for the agenda (a private iCal feed, as calendars give out): reset makes a new one. */
   private feedKey = '';
+  /** The assistants' notes and questions to the owner: a restart (a deploy) mustn't lose a question waiting for a tap. */
+  /** At most 50 notes, oldest first out; open errands don't count and aren't cut (their own cap is 20 an assistant). */
+  private trimSuggestions() {
+    let notes = 0;
+    this.suggestions = this.suggestions.filter((x) => (x.errand && (x.errand.state === 'open' || x.errand.state === 'held')) || ++notes <= 50);
+  }
+  /** What the assistant's connector needs to answer the other side: who, what, the cart or tag, how it ended. */
+  private errandNews(s: Suggestion) {
+    const e = s.errand!;
+    return { id: s.id, what: e.what, kind: e.kind, state: e.state, ...(e.ref ? { ref: e.ref } : {}), ...(e.with ? { with: e.with } : {}), ...(e.ended ? { ended: e.ended.how } : {}), arrivals: e.arrivals.map((a) => ({ from: a.from, kind: a.kind, ...(a.ref ? { ref: a.ref } : {}) })) };
+  }
+  /** Errands past their date lapse quietly: off the owner's list, and the assistant's connector tells the other side. */
+  private sweepErrands() {
+    const now = Date.now();
+    const due = this.suggestions.filter((x) => x.errand && (x.errand.state === 'open' || x.errand.state === 'held') && Date.parse(x.errand.until) <= now);
+    if (!due.length) return;
+    this.suggestions = this.suggestions.filter((x) => !due.includes(x));
+    void this.saveSuggestions();
+    for (const s of due) { s.errand!.state = 'expired'; s.errand!.ended = { at: new Date(now).toISOString(), how: 'expired' }; this.news({ about: 'errand.ended', errand: this.errandNews(s) }, s.by); }
+  }
+  private saveSuggestions = async () => {
+    // Capped by size as well as count (a note may carry a whole rules file): the oldest go first.
+    let text = JSON.stringify(this.suggestions);
+    while (text.length > 256_000 && this.suggestions.length > 1) { this.suggestions = this.suggestions.slice(0, -1); text = JSON.stringify(this.suggestions); }
+    // Written whole and renamed into place, so a crash mid-write never leaves half a file.
+    const file = join(this.o.dataDir, 'suggestions.json'), tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+    await writeFile(tmp, text).then(() => rename(tmp, file)).catch(() => rm(tmp, { force: true }).catch(() => {}));
+  };
   private saveAgenda = () => writeFile(join(this.o.dataDir, 'agenda.json'), JSON.stringify(this.agenda)).catch(() => {});
 
   /** Notes the owner set aside, so their senders can ask what became of them. */
@@ -801,9 +848,24 @@ export class OwnerDesk {
           const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
           if (q.replaces && !old) return void res.status(404).json({ error: 'no note of yours with that id' });
           // An answered question stays answered (run 41 asked the owner twice): ask a new one if something changed.
+          if (old?.errand?.state === 'held') return void res.status(409).json({ error: 'something came in on that errand and it is with your human now: they answer it (you hear as house.news)' });
           if (old?.ask?.answered) return void res.status(409).json({ error: `your human already answered that: "${old.ask.answered}". To ask them something new, send a new note (without replaces)` });
           if (old) this.suggestions = this.suggestions.filter((x) => x !== old);
+          if (old && !text) await this.saveSuggestions();
           if (!text) return void (old ? res.json({ ok: true, withdrawn: old.id }) : res.status(400).json({ error: 'suggest something: text' }));
+          const e = (p as unknown as { errand?: { kind?: string; ref?: string; days?: number; with?: { name?: string; webId?: string; key?: string; url?: string } } }).errand;
+          if (e) {
+            // Opened quietly: nothing to tap yet, so no notification; the owner hears when something comes in.
+            if (!ERRAND_KINDS.includes(e.kind as Errand['kind'])) return void res.status(400).json({ error: `errand: { kind: ${ERRAND_KINDS.join(' | ')}, with: { name, webId, key, url }, ref, days }` });
+            if (this.suggestions.filter((x) => x.by === assistant.kid && (x.errand?.state === 'open' || x.errand?.state === 'held')).length >= 20) return void res.status(429).json({ error: 'twenty errands open already: close one (replaces with an empty text) first' });
+            const days = Math.min(31, Math.max(1, Number(e.days) || 7));
+            const w = e.with?.webId ? { name: String(e.with.name ?? '').slice(0, 80), webId: String(e.with.webId).slice(0, 300), ...(e.with.key ? { key: String(e.with.key).slice(0, 100) } : {}), ...(e.with.url ? { url: String(e.with.url).slice(0, 300) } : {}) } : undefined;
+            const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text: text.slice(0, 300), errand: { what: text.slice(0, 300), kind: e.kind as Errand['kind'], ...(e.ref ? { ref: String(e.ref).slice(0, 200) } : {}), ...(w ? { with: w } : {}), until: new Date(Date.now() + days * 86_400_000).toISOString(), state: 'open', arrivals: [] }, at: new Date().toISOString() };
+            this.suggestions = [sug, ...this.suggestions];
+            this.trimSuggestions();
+            await this.saveSuggestions();
+            return void res.json({ ok: true, id: sug.id, errand: sug.errand!.until, note: 'your human\'s house holds it: what comes in while you are away is put to them, and you hear their answer' });
+          }
           // A note about a request must point at a real one: a unique prefix is enough, anything else is refused.
           let request: string | undefined;
           if (q.request) {
@@ -873,7 +935,9 @@ export class OwnerDesk {
             ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
-          this.suggestions = [sug, ...this.suggestions].slice(0, 50);
+          this.suggestions = [sug, ...this.suggestions];
+          this.trimSuggestions();
+          await this.saveSuggestions();
           this.notifyOwner('suggestion', ask ? 'Your AI has a question for you.' : 'Your AI left you a note.');
           return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }
@@ -928,9 +992,28 @@ export class OwnerDesk {
         if (p.kind === 'assistant.forward') {
           // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked
           // as passed on by the assistant (its connector, not its judgement).
-          const q = p as unknown as { from?: { name?: string; domain?: string; webId?: string; url?: string }; text?: string };
+          const q = p as unknown as { from?: { name?: string; domain?: string; webId?: string; url?: string; key?: string }; text?: string; errand?: string; arrived?: string; ref?: string; stranger?: boolean };
           const text = String(q.text ?? '').trim().slice(0, 1000);
           if (!text || !q.from?.webId) return void res.status(400).json({ error: 'forward: { from: { name, domain, webId, url }, text }' });
+          if (q.errand) {
+            const sug = this.suggestions.find((x) => x.id === q.errand && x.by === assistant.kid && x.errand);
+            const er = sug?.errand;
+            if (!sug || !er || (er.state !== 'open' && er.state !== 'held')) return void res.status(404).json({ error: 'no open errand of yours with that id' });
+            if (er.arrivals.length >= 20) return void res.status(429).json({ error: 'twenty things came in on that errand already: it waits for your human' });
+            const from = { name: String(q.from.name ?? '').slice(0, 80), domain: String(q.from.domain ?? '').slice(0, 200), webId: String(q.from.webId).slice(0, 300), ...(q.from.url ? { url: String(q.from.url).slice(0, 300) } : {}), ...(q.from.key ? { key: String(q.from.key).slice(0, 100) } : {}) };
+            const kind = String(q.arrived ?? 'message').slice(0, 60);
+            er.arrivals.push({ at: new Date().toISOString(), from, kind, text, ...(q.ref ? { ref: String(q.ref).slice(0, 200) } : {}) });
+            er.state = 'held';
+            // A cart is a bill: yes means the AI pays when it's back, and the choice says so (run 77: "yes" heard, nobody paid).
+            // A stranger's (first contact from that key) can be blocked from here: scam carts come while the AI is away.
+            const yes = kind === 'trade.cart' ? 'Yes, I\'ll have my AI pay' : 'Yes, go ahead';
+            sug.ask = { choices: [yes, 'No thanks', 'Ask my AI later', ...(q.stranger ? ['Block'] : [])] };
+            sug.text = `${from.name || from.domain} answered your AI about: ${er.what}\n\n${text}`.slice(0, 1500);
+            sug.at = new Date().toISOString();
+            await this.saveSuggestions();
+            this.notifyOwner('errand', `${from.name || from.domain} answered your AI about: ${er.what}`.slice(0, 160));
+            return void res.json({ ok: true, held: sug.id, until: er.until, choices: sug.ask.choices });
+          }
           const id = this.addNote({ from: { name: `${String(q.from.name ?? '').slice(0, 80)} (to your assistant, while it was away)`, domain: String(q.from.domain ?? ''), webId: String(q.from.webId), ...(q.from.url ? { url: String(q.from.url) } : {}), checked: false }, text });
           return void res.json(id ? { ok: true, note: id } : { ok: false, error: 'a few notes an hour from one sender' });
         }
@@ -1034,7 +1117,16 @@ export class OwnerDesk {
         if (!sug || (q.choice !== undefined && !sug.ask?.choices.includes(String(q.choice))) || (q.choice === undefined && !text)) return void res.status(400).json({ error: 'answer a note: one of its choices, your own words (text), or both' });
         if (q.choice !== undefined) sug.ask!.answered = String(q.choice);
         if (text) sug.reply = text;
-        this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}) });
+        const er = sug.errand;
+        if (er && q.choice !== undefined) {
+          // "Ask my AI later" leaves it held for the assistant; anything else ends it, and Block blocks the one it waited on.
+          if (q.choice === 'Ask my AI later') { delete sug.ask!.answered; er.state = 'held'; }
+          else { er.state = q.choice === 'Block' ? 'closed' : 'answered'; er.ended = { at: new Date().toISOString(), how: q.choice === 'Block' ? 'blocked' : 'answered' }; }
+          const blockUrl = er.arrivals.at(-1)?.from.url ?? er.with?.url;
+          if (q.choice === 'Block' && blockUrl) this.news({ about: 'block', url: blockUrl, note: 'your human tapped Block on what came in on your errand: your connector turns its messages away from now on' }, sug.by);
+        }
+        await this.saveSuggestions();
+        this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}), ...(er ? { errand: this.errandNews(sug) } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
       }
       // Your key: a recovery code to write down, and a one-use link to move to another device.
@@ -1150,12 +1242,19 @@ export class OwnerDesk {
         if (!/^https?:\/\//.test(sug.sender)) return void res.status(400).json({ error: 'the warning names no address to block: ask your agent to block it (lake_block)' });
         this.news({ about: 'block', url: sug.sender, note: 'your human tapped Block on your warning: your connector turns its messages away from now on' }, sug.by);
         this.suggestions = this.suggestions.filter((x) => x.id !== sug.id);
+        await this.saveSuggestions();
         this.touch();
         return void res.json({ ok: true });
       }
       if (p.kind === 'panel.assistant.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
+        const gone = this.suggestions.find((x) => x.id === id);
         this.suggestions = this.suggestions.filter((x) => x.id !== id);
+        await this.saveSuggestions();
+        if (gone?.errand && (gone.errand.state === 'open' || gone.errand.state === 'held')) {
+          gone.errand.state = 'closed'; gone.errand.ended = { at: new Date().toISOString(), how: 'owner' };
+          this.news({ about: 'errand.ended', errand: this.errandNews(gone) }, gone.by);
+        }
         return void res.json({ ok: true });
       }
       if (p.kind === 'list') return void res.json(this.view());

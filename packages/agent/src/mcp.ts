@@ -166,11 +166,17 @@ export interface AgentSnapshot {
   received?: unknown[];
   blocked?: string[];
   followUps?: [string, { choices: string[]; then: ({ to: string; text: string } | null)[] }][];
+  /** Questions its human hasn't answered yet, and the errands its human's house holds for it (by the house's id). */
+  unanswered?: [string, { question: string; asked_at: string }][];
+  errands?: [string, Errand][];
   /** What it did besides trade, for its passport: draws, votes and counts, pledges. */
   doings?: Doing[];
 }
 
 /** One thing an agent did on the Lake besides trading, as its passport lists it (never a vote's choice). */
+/** An errand its human's house holds (SPEC §6.1): who it waits on, by key (a name is only a name), and the cart or tag. */
+interface Errand { what: string; key?: string; webId?: string; url?: string; ref?: string; until: string }
+
 export type Doing =
   | { kind: 'draw'; at: string; round: number; label: string; options: number; result: string }
   | { kind: 'vote'; at: string; id: string }
@@ -286,7 +292,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   const followUps = new Map<string, { choices: string[]; then: ({ to: string; text: string } | null)[] }>(x.saved?.followUps ?? []);
   // Questions put to its human not answered yet (run 72: four assistants left within three minutes, with a lift, a tutoring
   // swap and a dog walk waiting on their humans' taps): lake_inbox says so, so an assistant knows it is still needed.
-  const unanswered = new Map<string, { question: string; asked_at: string }>();
+  const unanswered = new Map<string, { question: string; asked_at: string }>(x.saved?.unanswered ?? []);
+  // What its human's house holds for it: a reply that comes while it's away is filed there and put to the human (runs 72-78).
+  const errands = new Map<string, Errand>(x.saved?.errands ?? []);
   // Senders this agent won't hear from again, by key: narrowing what it takes in needs nobody's say.
   const blocked = new Set<string>(x.saved?.blocked ?? []);
   // Every conversation waiting on the inbox is woken (two chats may wait at once).
@@ -603,12 +611,25 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // The human answered a question that carried messages for its choices: the chosen one goes now.
         if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'question.answered' && typeof m.payload.suggestion === 'string') {
           unanswered.delete(m.payload.suggestion);
+          // An errand ends with its human's answer, except "Ask my AI later", which leaves it with this agent.
+          if ((m.payload.errand as { state?: string } | undefined)?.state === 'answered') errands.delete(m.payload.suggestion);
           const f = followUps.get(m.payload.suggestion);
           const send = f?.then[f.choices.indexOf(String(m.payload.answer ?? ''))];
           if (f) followUps.delete(m.payload.suggestion);
           if (send) {
             const r = await (await agent()).ask(send.to, { kind: 'message', text: send.text }).catch((e: Error) => ({ error: e.message }));
             m.payload = { ...m.payload, sent_for_them: { to: send.to, text: send.text, reply: r } };
+          }
+        }
+        // An errand its human closed or that ran out: the one it waited on is told it's a no, not left waiting (run 54).
+        if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'errand.ended') {
+          const e = m.payload.errand as { id?: string; ended?: string } | undefined;
+          const mine = e?.id ? errands.get(e.id) : undefined;
+          if (e?.id) { errands.delete(e.id); followUps.delete(e.id); unanswered.delete(e.id); }
+          if (mine?.url && (e?.ended === 'expired' || e?.ended === 'owner')) {
+            const text = e.ended === 'expired' ? 'No answer from their human in time: please take it as a no.' : 'Their human has closed this: please take it as a no.';
+            const r = await (await agent()).ask(mine.url, { kind: 'message', text, code: e.ended }).catch((err: Error) => ({ error: err.message }));
+            m.payload = { ...m.payload, sent_for_them: { to: mine.url, text, reply: r } };
           }
         }
         // Blocked by this agent (its key, not its name): not heard (run 64: a scammer's "mute" from an assistant went nowhere).
@@ -620,8 +641,27 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // acknowledgements move each order along. The message still lands in the inbox, so the model knows.
         // The Inspector's test pings aren't mail: filed in history only, never woken for.
         if (m.payload.kind === 'inspector.ping') { pushInbox(m, undefined, true); return { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex') }; }
+        // A reply on an errand while this agent is away: filed at its human's house, put to them as a question with what each
+        // answer sends back, and the sender told it's held there (not which house) and until when (Fable's review, 5 Nov).
+        const hold = async (): Promise<Record<string, unknown>> => {
+          if (!house || !errands.size || fromHouse || Date.now() - Math.max(lastRead, lastActive) <= QUIET_MS) return {};
+          const jkt = m.from.publicJwk ? await keyThumbprint(m.from.publicJwk as Parameters<typeof keyThumbprint>[0]).catch(() => '') : '';
+          const refs = [m.payload.cart, m.payload.order, m.payload.re].filter((v): v is string => typeof v === 'string');
+          const hit = [...errands].find(([, e]) => (!!e.key && e.key === jkt) || (!!e.ref && refs.includes(e.ref)));
+          if (!hit) return {};
+          const [id, e] = hit;
+          const url = m.card.supportedInterfaces?.[0]?.url;
+          const said = typeof m.payload.text === 'string' ? m.payload.text : typeof m.payload.body === 'string' ? m.payload.body : typeof m.payload.note === 'string' ? m.payload.note : `(a ${m.payload.kind}: your AI sees the whole of it in its inbox)`;
+          const r = (await houseCall({ kind: 'assistant.forward', errand: id, arrived: m.payload.kind, ...(refs[0] ? { ref: refs[0] } : {}), stranger: !e.key || e.key !== jkt, from: { name: m.card.name, domain: m.from.ownerDomain, webId: m.from.webId, url, key: jkt }, text: said.slice(0, 1000) }).catch(() => null)) as { ok?: boolean; choices?: string[]; until?: string } | null;
+          if (!r?.ok || !r.choices || !url) return {};
+          const cart = m.payload.kind === 'trade.cart';
+          const words: Record<string, string> = { 'No thanks': 'Their human says no, thank you.', 'Ask my AI later': 'Their human has seen it and will have their AI answer you.' };
+          followUps.set(id, { choices: r.choices, then: r.choices.map((c, i) => i === 0 ? { to: url, text: cart ? 'Their human says yes: their AI will pay when it is back.' : 'Their human says yes: their AI will follow up when it is back.' } : words[c] ? { to: url, text: words[c]! } : null) });
+          unanswered.set(id, { question: e.what.slice(0, 120), asked_at: new Date().toISOString() });
+          return { held: `kept for its owner, who has been told and decides. If nothing comes by ${r.until ?? e.until}, take it as a no`, until: r.until ?? e.until };
+        };
         const traded = await onTrade(m);
-        if (traded?.reply) { pushInbox(m, traded.checked); return traded.reply; }
+        if (traded?.reply) { pushInbox(m, traded.checked); return { ...traded.reply, ...(await hold()) }; }
         const checked = traded?.checked ?? (m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId, trustedPayments)
           : attached.length ? { ...(await verifyEvidence(attached[0])), note: 'evidence inside the message, checked; what the sender says about it is not' }
           : Object.values(m.payload).some((v) => typeof v === 'string' && /^eyJ[\w-]+\.[\w-]+\./.test(v)) ? { verified: false, why: 'a pasted credential with no card to check it against: forward it as { credential, card }' } : undefined);
@@ -643,8 +683,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // An assistant that has stopped reading (run 43: a neighbour's request sat unread and the tomatoes went unwatered):
         // words for its human go to their panel as a note, and the sender is told, without saying which house.
         const words = typeof m.payload.text === 'string' ? m.payload.text : typeof m.payload.body === 'string' ? m.payload.body : undefined;
-        let passed: Record<string, string> = {};
-        if (house && words && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) {
+        let passed: Record<string, unknown> = await hold();
+        if (!passed.held && house && words && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) {
           const r = (await houseCall({ kind: 'assistant.forward', from: { name: m.card.name, domain: m.from.ownerDomain, webId: m.from.webId, url: m.card.supportedInterfaces?.[0]?.url }, text: words.slice(0, 1000) }).catch(() => null)) as { ok?: boolean } | null;
           if (r?.ok) passed = { passed_on: 'this assistant isn\'t reading right now: your words went to its human directly, as a note' };
         }
@@ -874,7 +914,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     }
     return playLine ? `you may pay other agents up to ${playLine} with lake_pay and lake_buy (sandbox play money, signed for you by the sandbox in place of your human; each currency pays only in itself)` : 'none: lake_pay is off here';
   };
-  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', consents: 'panel.consents', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules', free: 'panel.free' };
+  const VIEWS: Record<string, string> = { requests: 'list', overview: 'panel.overview', activity: 'panel.activity', visitors: 'panel.agents', money: 'panel.money', consents: 'panel.consents', data: 'panel.data', offers: 'panel.market', rules: 'panel.rules', free: 'panel.free', errands: 'list' };
 
   /** This agent becomes its human's assistant at their house, with a one-time code from their panel. */
   const connectHouse = async (houseUrl: string, code: string) => {
@@ -912,12 +952,17 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   server.registerTool(
     'lake_house',
-    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules, and when they are free to meet (free: slots from the hours they set, around their agenda, to offer someone who wants to meet). Read only. Polling activity? Pass the next_since it gave you back as since, and get only what happened after.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules', 'free']), since: z.union([z.number(), z.string()]).optional().describe('activity only: the next_since from your last look (or a time): only what happened after it') } },
+    { description: 'Look inside your human\'s house (after lake_house_connect): its overview, the requests waiting for their tap, offers priced for them, recent activity, the visitors at their door, money, their consents (who they said yes to, and which they took back), data and rules, and when they are free to meet (free: slots from the hours they set, around their agenda, to offer someone who wants to meet), and errands (what their house holds for you: lake_ask with expect_reply, and what came in while you were away). Read only. Polling activity? Pass the next_since it gave you back as since, and get only what happened after.', inputSchema: { view: z.enum(['overview', 'requests', 'offers', 'activity', 'visitors', 'money', 'consents', 'data', 'rules', 'free', 'errands']), since: z.union([z.number(), z.string()]).optional().describe('activity only: the next_since from your last look (or a time): only what happened after it') } },
     async (a) => {
       try {
         if (a.view === 'activity') {
           const items = (await houseCall({ kind: 'panel.activity', ...(a.since !== undefined ? { since: a.since } : {}) })) as { seq?: number }[];
           return json({ activity: items, next_since: items[0]?.seq ?? a.since ?? 0 });
+        }
+        // Errands: what its house holds for it (lake_ask with expect_reply), with what came in while it was away.
+        if (a.view === 'errands') {
+          const all = ((await houseCall({ kind: 'list' })) as { suggestions?: { id: string; errand?: unknown; ask?: unknown }[] }).suggestions ?? [];
+          return json({ errands: all.filter((x) => x.errand).map((x) => ({ id: x.id, ...(x.errand as object), ...(x.ask ? { question: x.ask } : {}) })) });
         }
         return json(await houseCall({ kind: VIEWS[a.view]! }));
       } catch (e) {
@@ -1463,6 +1508,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         text: z.string().optional().describe('Shorthand, with no message: sends { kind: "note", text }'),
         kind: z.string().optional().describe('Shorthand, with no message: the kind to send with text'),
         reveal_house: z.boolean().default(false).describe('Tell the other agent which house is your human\'s, deliberately: the message then carries the house\'s word that you speak for it, which their side checks'),
+        expect_reply: z.boolean().default(false).describe('You wait on their answer for your human (a favour, a quote, a time): your human\'s house keeps it as an errand, so a reply that comes after you have gone is put to them, not lost. Needs lake_house_connect'),
+        what: z.string().max(300).optional().describe('With expect_reply: what you are waiting on, in a few words for your human ("a lift to the airport on Friday")'),
       },
     },
     async (input) => {
@@ -1487,6 +1534,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // Asked to show a house's word with none to show: said, not silently dropped (run 43).
         if (a.reveal_house && !speaksFor) throw new Error('reveal_house: you have no house\'s word to show: only an assistant connected to its human\'s house (lake_house_connect) carries one. Send it without reveal_house; it arrives as your own words');
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
+        // Waiting on an answer for the human: the house holds it as an errand, matched later by the other side's key.
+        if (a.expect_reply && !house) reply.errand = 'not kept: only an assistant connected to its human\'s house (lake_house_connect) has a house to keep it';
+        else if (a.expect_reply) {
+          const card = (await (await fetch(cardUrlFor(a.agent_url))).json()) as AgentCard;
+          const prof = await verifyLakeCard(card);
+          const what = (a.what ?? (typeof a.message.text === 'string' ? a.message.text : String(a.message.kind))).slice(0, 300);
+          const w = { name: String(card.name ?? a.agent_url).slice(0, 80), webId: prof.webId, key: await keyThumbprint(prof.publicJwk), url: card.supportedInterfaces?.[0]?.url ?? a.agent_url };
+          const made = (await houseCall({ kind: 'assistant.suggest', text: what, errand: { kind: 'ask', with: w } })) as { id?: string; errand?: string };
+          if (made.id) { errands.set(made.id, { what, key: w.key, webId: w.webId, url: w.url, until: made.errand ?? '' }); reply.errand = { id: made.id, until: made.errand, note: 'your human\'s house keeps it: an answer that comes while you are away is put to them, and you hear what they chose (house.news)' }; }
+        }
         // Another agent's signed "received" names what arrived: say whether it's exactly what was sent.
         if (reply.kind === 'received' && typeof reply.digest === 'string') reply.delivered = reply.digest === createHash('sha256').update(canonicalize(a.message)).digest('hex') ? 'exactly what you sent, in their signed word (kept in lake_inbox history)' : 'NOT what you sent: the digest differs';
         // Delivered isn't read: say plainly whether anyone is there to read it.
@@ -2054,7 +2111,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-60), doings, blocked: [...blocked], followUps: [...followUps],
+    orders: [...orders], pledged: [...pledged], received: received.slice(-60), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], errands: [...errands],
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';
