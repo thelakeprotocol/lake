@@ -1068,6 +1068,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const all = ((await houseCall({ kind: 'list' })) as { suggestions?: { id: string; errand?: unknown; ask?: unknown }[] }).suggestions ?? [];
           return json({ errands: all.filter((x) => x.errand).map((x) => ({ id: x.id, ...(x.errand as object), ...(x.ask ? { question: x.ask } : {}) })) });
         }
+        // Money, newest first and the latest 30: a busy house's whole list ran to 170,000 characters (6 Nov).
+        if (a.view === 'money') {
+          const m = (await houseCall({ kind: 'panel.money' })) as { receipts?: unknown[]; spent?: unknown[] } & Record<string, unknown>;
+          const n = m.receipts?.length ?? 0;
+          return json({ ...m, receipts: (m.receipts ?? []).slice(0, 30), ...(m.spent ? { spent: m.spent.slice(0, 30) } : {}), ...(n > 30 ? { more: `${n - 30} older receipts are in your human's control panel (Money)` } : {}) });
+        }
         return json(await houseCall({ kind: VIEWS[a.view]! }));
       } catch (e) {
         return fail(e);

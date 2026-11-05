@@ -557,7 +557,8 @@ export class OwnerDesk {
   /** Whether the owner's side has dealt with this key (it wrote to it first, or a standing yes names it), and how. */
   /** A sender that says it's one the owner's side knows, with another key: an impostor, or a new key nobody vouched for. */
   lookalike(from: { key?: string; webId?: string; name?: string }): string | undefined {
-    if (!from.key) return undefined;
+    // Only a key thumbprint can be compared: notes kept from before (1 Nov) hold a key id, and the real sender isn't a twin.
+    if (!from.key || from.key.length < 40) return undefined;
     const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase();
     const twin = [...this.contacts].find(([k, c]) => k !== from.key && ((!!from.webId && c.webId === from.webId) || (!!c.name && base(c.name) === base(from.name))));
     return twin ? `says it is ${twin[1].name || twin[1].webId}, whom your human's side knows, but with a different key: treat it as a stranger` : undefined;
