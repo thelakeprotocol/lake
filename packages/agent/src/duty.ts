@@ -21,6 +21,8 @@ export interface DutyOptions {
   code?: string;
   /** What its agent sells while on duty (for a grant with "deliver"): menu items, set once at first sign-in, before it is on duty, from a file the owner wrote. */
   menu?: unknown[];
+  /** Its card's line and tags, so people find what it sells (set with the menu; on duty it can't change them). */
+  about?: string; tags?: string[];
   /** The agent CLI to run: "claude -p" (default), or any command that takes the prompt on stdin and LAKE_MCP_CONFIG. */
   agent?: string;
   /** How often to look, in ms (default 10 minutes). */
@@ -76,6 +78,7 @@ async function signIn(o: DutyOptions, file: string, log: (s: string) => void): P
   const s: Saved = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in ?? 3600) * 1000, house: o.house, since: new Date().toISOString() };
   // The owner's menu goes on first: once paired on duty, its agent can't change what it sells.
   if (o.menu?.length) { const m = await call(o, s, 'lake_sell', { action: 'menu', items: o.menu }) as { ok?: boolean; error?: string }; if (!m.ok) throw new Error(`the menu wasn't taken: ${m.error ?? JSON.stringify(m).slice(0, 200)}`); }
+  if (o.about || o.tags?.length) await call(o, s, 'lake_set_tags', { tags: o.tags ?? [], ...(o.about ? { about: o.about } : {}) });
   const connected = await call(o, s, 'lake_house_connect', { house_url: o.house, code: o.code }) as { name?: string; duty?: unknown; error?: string };
   const me = (await call(o, s, 'lake_overview', {}) as { you?: { name: string; url: string } }).you;
   s.agent = me ? { name: me.name, url: me.url } : undefined;

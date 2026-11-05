@@ -34,12 +34,14 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   if (!a.house) { console.error('usage: lake duty --house <your house> --code <the code from your panel> [--lake <connector>/mcp] [--agent "claude -p"] [--every 600] [--max-runs 30] [--max-tools 40] [--menu menu.json]'); process.exit(2); }
   const { runDuty } = await import('./duty.js');
   const { readFileSync } = await import('node:fs');
-  // The menu its agent sells from while on duty (with "deliver" in the grant): a JSON list of items, set at first sign-in.
-  const menu = a.menu ? JSON.parse(readFileSync(a.menu, 'utf8')) as unknown[] : undefined;
+  // The menu its agent sells from while on duty (with "deliver" in the grant), set at first sign-in: a JSON list of items,
+  // or { items, about, tags } to say on its card what it sells.
+  const file = a.menu ? JSON.parse(readFileSync(a.menu, 'utf8')) as unknown[] | { items: unknown[]; about?: string; tags?: string[] } : undefined;
+  const menu = Array.isArray(file) ? { menu: file } : file ? { menu: file.items, ...(file.about ? { about: file.about } : {}), ...(file.tags ? { tags: file.tags } : {}) } : {};
   const stop = new AbortController();
   process.once('SIGINT', () => stop.abort());
   process.once('SIGTERM', () => stop.abort());
-  await runDuty({ lake: a.lake!, house: a.house, code: a.code, agent: a.agent, every: Number(process.env.LAKE_DUTY_EVERY_MS) || Number(a.every) * 1000, maxRuns: Number(a['max-runs']), maxTools: Number(a['max-tools']), state: a.state, ...(menu ? { menu } : {}), signal: stop.signal })
+  await runDuty({ lake: a.lake!, house: a.house, code: a.code, agent: a.agent, every: Number(process.env.LAKE_DUTY_EVERY_MS) || Number(a.every) * 1000, maxRuns: Number(a['max-runs']), maxTools: Number(a['max-tools']), state: a.state, ...menu, signal: stop.signal })
     .catch((e: Error) => { console.error(`lake duty: ${e.message}`); process.exit(1); });
 } else if (process.argv[2] === 'mcp') {
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
