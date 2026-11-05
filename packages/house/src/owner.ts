@@ -548,6 +548,14 @@ export class OwnerDesk {
   /** The secret in the owner's calendar address for the agenda (a private iCal feed, as calendars give out): reset makes a new one. */
   private feedKey = '';
   /** The assistants' notes and questions to the owner: a restart (a deploy) mustn't lose a question waiting for a tap. */
+  /** Whether the owner's side has dealt with this key (it wrote to it first, or a standing yes names it), and how. */
+  knownBy(key?: string): string | undefined {
+    if (!key) return undefined;
+    const c = this.contacts.get(key);
+    if (c) return `your human's side has written to ${c.name || 'it'} before`;
+    const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
+    return st ? `a standing yes names it (${st.domain})` : undefined;
+  }
   private saveDuty = async () => {
     await writeFile(join(this.o.dataDir, 'duty-log.json'), JSON.stringify(this.dutyLog.slice(-2000))).catch(() => {});
     await writeFile(join(this.o.dataDir, 'contacts.json'), JSON.stringify([...this.contacts].slice(-500))).catch(() => {});
@@ -746,7 +754,8 @@ export class OwnerDesk {
     for (const old of this.notes.slice(49)) this.closedNotes.set(old.id, { by: old.from.webId, state: 'not read: too many notes came at once; send it again if it still matters' });
     this.notes = [note, ...this.notes].slice(0, 50);
     void this.saveNotes();
-    this.news({ about: 'note', note: note.id, from: n.from, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
+    const known = this.knownBy(n.from.key);
+    this.news({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: 'first contact: your human\'s side has never written to it' }, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
     return note.id;
   }
 
@@ -1139,11 +1148,8 @@ export class OwnerDesk {
           // The duty's novelty rule (Fable, 5 Nov): known means the owner's side wrote to that key first, or a standing yes
           // names it. Having received from it isn't enough: a stranger who writes twice is still a stranger.
           const key = String((p as unknown as { key?: string }).key ?? '');
-          const c = this.contacts.get(key);
-          if (c) return void res.json({ known: true, why: `your human's side has written to ${c.name || 'it'} before` });
-          const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
-          if (st) return void res.json({ known: true, why: `a standing yes names it (${st.domain})` });
-          return void res.json({ known: false, why: 'first contact: your human hears of it first' });
+          const why = this.knownBy(key);
+          return void res.json(why ? { known: true, why } : { known: false, why: 'first contact: your human hears of it first' });
         }
         if (p.kind === 'assistant.badge') {
           const badge = await this.assistantBadge(assistant);
@@ -1540,7 +1546,7 @@ export class OwnerDesk {
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); return a ? { ...n, answered: a } : n; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : {}) }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };
