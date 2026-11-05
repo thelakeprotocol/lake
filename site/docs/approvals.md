@@ -44,6 +44,22 @@ LAKE_PUBLIC_HOST=192.168.1.20 docker compose up -d
 
 **Allow** signs a key on your device: a Solid Access Grant (the Solid ecosystem's own format for "this person lets that agent read this"), drafted by your house for exactly what you were shown: this visitor, this study, these fields, this purpose, 48 hours, one use for a study. The house checks it is signed by your key and matches exactly what you were shown, stores it in your pod's `/agreements/`, and hands it to the visitor. A revoked key stops working at once: the next request with it is refused, and the map shows every line into your house snap.
 
+## AI on duty
+
+While you sleep or are away, your own AI can handle the easy things for you, and leave the rest for you in the morning.
+
+- **Turn it on:** in your panel (**My agent**), choose what it may do (reply to people you already know, book times in your free hours, deliver text you already sold), how many things a night (10 by default), and in which hours. You sign that on this device, and the panel gives you a one-time code (it works for 15 minutes).
+- **Start it** on a computer of yours that stays on (it uses your own AI and your own subscription; the Lake keeps no AI key):
+
+  ```bash
+  npx -y @thelakeprotocol/agent duty --house <your house's address> --code <the code>
+  ```
+
+  It looks every ten minutes whether anyone wrote, and only then starts your AI (Claude Code by default: `--agent "claude -p"`; any other agent CLI that takes a prompt and an MCP config can be wired in). At most 30 runs a day and 40 steps a run.
+- **What it can't do:** anything with money; write to someone you (or your AI) have never written to before (a stranger's message waits for you, with a Block button); change your rules, answer requests for your data, or accept offers. Your house and the Lake's connector hold it to that, whatever it is told. Each message from others reaches it as data, never as instructions.
+- **In the morning:** one notification ("While you slept: 3 handled, 1 waiting for you, 1 blocked") and a page with each thing it did, the signed reply, and **Undo** where it can be undone (a booking, a block, a standing yes; a reply can't be unsent, so you can send a correction).
+- **Off duty:** one tap in your panel takes the permission back at once (its bit on your house's status list is set). It also stops by itself when it reaches the night's limit, after three refused attempts, or when you undo two things in one night.
+
 ## From the command line
 
 Whoever runs the machine can pull every key of a house:
@@ -54,7 +70,7 @@ docker compose exec house-stan node dist/admin.js revoke-all
 
 ## The API under it
 
-The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.consents`, `panel.data`, `panel.export`, `panel.market`, `panel.intent.open`, `panel.intent.close`, `panel.offer.accept`, `panel.assistant.invite`, `panel.assistant.revoke`, `panel.assistant.dismiss`, `panel.person.request`, `panel.pledge.sign`, `panel.pledge.reveal`, `panel.door`, `panel.door.set`, `panel.note.dismiss`, `panel.note.mute`, `panel.agenda.feed`, `panel.agenda.remove`, `panel.assistant.answer`, `panel.allowance.draft`, `panel.allowance.set`, `panel.allowance.revoke`, `panel.key`, `panel.recovery.make`, `panel.pair.link`, `panel.stream`, `panel.connect.answer`, `panel.assistant.block` (a Warning from your agent names an agent: **Block them** turns its messages away from your agent). Your assistant's key may only read and send `assistant.waiting` (people are waiting for it and it isn't reading: Home says so), `assistant.suggest`, `assistant.agenda`, `assistant.forward`, `assistant.badge`, `assistant.allowance` and `assistant.spent`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
+The panel is a static page; everything it does is one signed `POST /owner/api` with a `kind`: `list`, `answer`, `revoke`, `panel.overview`, `panel.rules`, `panel.rules.set`, `panel.activity`, `panel.agents`, `panel.money`, `panel.consents`, `panel.data`, `panel.export`, `panel.market`, `panel.intent.open`, `panel.intent.close`, `panel.offer.accept`, `panel.assistant.invite`, `panel.assistant.revoke`, `panel.assistant.dismiss`, `panel.person.request`, `panel.pledge.sign`, `panel.pledge.reveal`, `panel.door`, `panel.door.set`, `panel.note.dismiss`, `panel.note.mute`, `panel.agenda.feed`, `panel.agenda.remove`, `panel.assistant.answer`, `panel.allowance.draft`, `panel.allowance.set`, `panel.allowance.revoke`, `panel.duty.draft`, `panel.duty.set`, `panel.duty.off`, `panel.duty.log`, `panel.duty.undo`, `panel.key`, `panel.recovery.make`, `panel.pair.link`, `panel.stream`, `panel.connect.answer`, `panel.assistant.block` (a Warning from your agent names an agent: **Block them** turns its messages away from your agent). Your assistant's key may only read and send `assistant.waiting` (people are waiting for it and it isn't reading: Home says so), `assistant.suggest`, `assistant.agenda`, `assistant.forward`, `assistant.badge`, `assistant.allowance` and `assistant.spent`. Build your own panel, a widget, a CLI: sign the envelope with the paired key and you have the same powers, and nobody else does.
 
 ## What it can't do yet
 

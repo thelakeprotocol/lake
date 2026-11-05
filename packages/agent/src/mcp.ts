@@ -169,6 +169,10 @@ export interface AgentSnapshot {
   /** Questions its human hasn't answered yet, and the errands its human's house holds for it (by the house's id). */
   unanswered?: [string, { question: string; asked_at: string }][];
   errands?: [string, Errand][];
+  /** Messages not read yet. */
+  inbox?: unknown[];
+  /** Its human's AI on duty: what the grant lets it do (the house holds the grant and the count). */
+  duty?: { kinds: string[] };
   /** What it did besides trade, for its passport: draws, votes and counts, pledges. */
   doings?: Doing[];
 }
@@ -195,6 +199,8 @@ export interface LakeMcpAgent {
   connectHouse(houseUrl: string, code: string, app?: string): Promise<{ name: string }>;
   /** Its state now, as `save` would get it. */
   snapshot(): Promise<AgentSnapshot>;
+  /** How many messages wait unread, and since when (the duty runner's cheap look). */
+  pending(): { waiting: number; oldest?: string };
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
@@ -268,23 +274,37 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // Presence: when the model last did anything here, and last read its inbox (a process left running isn't someone there).
   let lastActive = 0, lastRead = 0, hereUntil = 0;
   const register = server.registerTool.bind(server);
-  server.registerTool = ((name: string, config: never, cb: (...args: unknown[]) => unknown) =>
-    register(name, config, ((...args: unknown[]) => { lastActive = Date.now(); return (PUT_DOWN.has(name)
+  server.registerTool = ((name: string, config: never, cb0: (...args: unknown[]) => unknown) => {
+    // On duty, every call passes the duty gate first (in code: the model can't talk its way past it), and what it did is
+    // logged at its human's house; any assistant tells its house whom it wrote to (the duty's novelty rule reads that).
+    const cb = async (...args: unknown[]) => {
+      const gate = onDuty ? await dutyGate(name, (args[0] ?? {}) as Record<string, unknown>) : undefined;
+      if (gate && 'refused' in gate) return { content: [{ type: 'text' as const, text: `On duty you can't do this: ${gate.refused}. Leave your human a note instead (lake_house_suggest), and tell whoever is waiting that your human will answer.` }], isError: true };
+      const out = (await cb0(...args)) as { isError?: boolean; content?: { text?: string }[] };
+      if (!out?.isError) {
+        if (gate && 'log' in gate) await dutyDone(gate.log, out).catch(() => {});
+        if (house) reportContact(name, (args[0] ?? {}) as Record<string, unknown>);
+      }
+      return out;
+    };
+    return register(name, config, ((...args: unknown[]) => { lastActive = Date.now(); return (PUT_DOWN.has(name)
       // In any bubble at all: capabilities stay down until the agent has left every one.
       ? async (...args: unknown[]) => (bubbles.size && !keepsPromise(name, args[0]) ? { content: [{ type: 'text' as const, text: `You're in ${bubbles.size === 1 ? 'the bubble' : 'the bubbles'} ${[...bubbles.keys()].map((b) => `"${b}"`).join(' and ')}: paying, knocking and your human's house wait outside. Leave (lake_room { action: "leave" }) to pick them up again.` }], isError: true } : cb(...args))
-      : cb)(...args); }) as never)) as typeof server.registerTool;
+      : cb)(...args); }) as never);
+  }) as typeof server.registerTool;
   let me: Promise<LakeAgent> | null = null;
   // One key and one name for the agent, even when the card changes (new tags); a saved agent keeps its own.
   const key = x.saved?.key ? importIdentity(x.saved.key) : o.keyFile ? loadOrCreateIdentity(o.keyFile) : generateIdentity();
   let who: { name: string; domain: string } | undefined = x.saved?.who;
   let tags: string[] = x.saved?.tags ?? [];
   let about: string | undefined = x.saved?.about;
-  const inbox: { id: number; at: string; from: { name: string; domain: string; url?: string }; message: Record<string, unknown>; checked?: Checked | Record<string, unknown>; signed?: unknown }[] = [];
+  // Unread, kept across sleep and restarts (the duty runner's agent may sleep between its looks: nothing is lost).
+  const inbox: { id: number; at: string; from: { name: string; domain: string; url?: string }; message: Record<string, unknown>; checked?: Checked | Record<string, unknown>; signed?: unknown }[] = (x.saved?.inbox as never) ?? [];
   // Everything received, kept beyond the last batch: with what this agent sent, the record it can show in a dispute.
   const received: typeof inbox = (x.saved?.received as typeof inbox | undefined) ?? [];
   // The last batch handed out, kept until the next call: if that answer was lost on the way, ask again for it.
   let lastBatch: typeof inbox = [];
-  let nextId = Math.max(0, ...received.map((r) => r.id)) + 1;
+  let nextId = Math.max(0, ...received.map((r) => r.id), ...inbox.map((r) => r.id)) + 1;
   const bySender = new Map<string, number>();
   // Sellers whose cart this agent's human asked for by accepting their offer (not unasked, though never written to).
   const expected = new Set<string>();
@@ -295,6 +315,69 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   const unanswered = new Map<string, { question: string; asked_at: string }>(x.saved?.unanswered ?? []);
   // What its human's house holds for it: a reply that comes while it's away is filed there and put to the human (runs 72-78).
   const errands = new Map<string, Errand>(x.saved?.errands ?? []);
+  // On duty for its human while they're away (SPEC §6.1): only what their signed grant lets it do, never money, nothing to
+  // an agent their side never wrote to. Learned from the house when it paired; the house keeps the count and the off switch.
+  let onDuty: { kinds: string[] } | null = x.saved?.duty ?? null;
+  const DUTY_READ = new Set(['lake_overview', 'lake_inbox', 'lake_house', 'lake_search', 'lake_verify', 'lake_blueprints', 'lake_ask_around']);
+  type DutyLog = { tool: string; action: string; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; undo?: { kind: string; ref: string } };
+  const cardOf = new Map<string, Promise<{ name: string; webId: string; key: string; url: string }>>();
+  const whoIs = (url: string) => {
+    if (!cardOf.has(url)) cardOf.set(url, (async () => {
+      const card = (await (await fetch(cardUrlFor(url))).json()) as AgentCard;
+      const prof = await verifyLakeCard(card);
+      return { name: String(card.name ?? url).slice(0, 80), webId: prof.webId, key: await keyThumbprint(prof.publicJwk), url: card.supportedInterfaces?.[0]?.url ?? url };
+    })());
+    const p = cardOf.get(url)!;
+    p.catch(() => cardOf.delete(url));
+    return p;
+  };
+  const dutyGate = async (name: string, a: Record<string, unknown>): Promise<{ refused: string } | { log: DutyLog } | undefined> => {
+    const refuse = async (why: string, action = name) => { await houseCall({ kind: 'assistant.duty.log', tool: name, action, refused: why }).catch(() => {}); return { refused: why }; };
+    if (DUTY_READ.has(name)) return undefined;
+    if (name === 'lake_block') return { log: { tool: name, action: 'block', ...(typeof a.agent_url === 'string' ? { to: { url: a.agent_url } } : {}), ...(typeof a.agent_url === 'string' && !a.undo ? { undo: { kind: 'block', ref: a.agent_url } } : {}) } };
+    const st = (await houseCall({ kind: 'assistant.duty' }).catch(() => ({ on: false, why: 'your human\'s house can\'t be reached' }))) as { on?: boolean; why?: string; kinds?: string[] };
+    if (!st.on) return { refused: `you're off duty (${st.why ?? 'your human\'s house says so'})` };
+    const kinds = st.kinds ?? onDuty?.kinds ?? [];
+    if (name === 'lake_house_suggest') {
+      const agenda = a.agenda as { what?: string; with?: string } | undefined;
+      if (agenda && !kinds.includes('book')) return refuse('booking isn\'t in your duty: leave your human a note', 'book');
+      if (a.rules || a.allowance || a.door) return refuse('rules, doors and allowances are your human\'s own changes: not on duty');
+      return { log: { tool: name, action: agenda ? 'book' : 'note', text: String(agenda?.what ?? a.text ?? '').slice(0, 500) } };
+    }
+    if (name === 'lake_sell') {
+      if (!['deliver', 'revise', 'orders'].includes(String(a.action))) return refuse('on duty you only deliver what was already paid for');
+      if (a.action === 'orders') return undefined;
+      if (!kinds.includes('deliver')) return refuse('delivering isn\'t in your duty: leave your human a note', 'deliver');
+      return { log: { tool: name, action: 'deliver', text: String(a.content ?? '').slice(0, 500) } };
+    }
+    if (name === 'lake_ask') {
+      if (!kinds.includes('reply')) return refuse('replying isn\'t in your duty', 'reply');
+      const msg = (a.message ?? { kind: a.kind ?? 'note', text: a.text }) as Record<string, unknown>;
+      if (!['note', 'message', 'text', 'reply'].includes(String(msg.kind))) return refuse(`on duty you send words only (a note or message), not "${String(msg.kind)}"`, 'reply');
+      const url = String(a.agent_url ?? a.to ?? '');
+      const to = await whoIs(url).catch(() => null);
+      if (!to) return refuse('no Lake agent at that address', 'reply');
+      // The novelty rule: first contact goes to the human (a name is only a name: it's the key that counts).
+      const known = (await houseCall({ kind: 'assistant.known', key: to.key }).catch(() => ({ known: false }))) as { known?: boolean };
+      if (!known.known) return refuse(`${to.name} is someone new to your human: first contact is theirs to answer`, 'reply');
+      return { log: { tool: name, action: 'reply', to, text: String(msg.text ?? msg.body ?? '').slice(0, 1500), undo: { kind: 'correction', ref: to.url } } };
+    }
+    return refuse(name === 'lake_pay' || name === 'lake_buy' ? 'no money on duty' : `${name} isn't part of being on duty`);
+  };
+  const dutyDone = async (log: DutyLog, out: { content?: { text?: string }[] }) => {
+    let reply: unknown;
+    try { reply = JSON.parse(out.content?.[0]?.text ?? 'null'); } catch { reply = out.content?.[0]?.text; }
+    // A booking names the agenda entry it wrote, so the owner's Undo can take it out.
+    const agendaId = log.action === 'book' ? (reply as { id?: string } | null)?.id : undefined;
+    await houseCall({ kind: 'assistant.duty.log', ...log, reply, ...(agendaId ? { undo: { kind: 'agenda', ref: agendaId } } : {}) });
+  };
+  const contacted = new Set<string>();
+  const reportContact = (name: string, a: Record<string, unknown>) => {
+    const url = name === 'lake_ask' ? a.agent_url ?? a.to : name === 'lake_buy' ? a.seller_url : name === 'lake_sell' || name === 'lake_pay' ? a.to : undefined;
+    if (typeof url !== 'string' || !url || contacted.has(url) || (house && url.startsWith(house))) return;
+    contacted.add(url);
+    void whoIs(url).then((w) => houseCall({ kind: 'assistant.contact', key: w.key, name: w.name, webId: w.webId })).catch(() => contacted.delete(url));
+  };
   // Senders this agent won't hear from again, by key: narrowing what it takes in needs nobody's say.
   const blocked = new Set<string>(x.saved?.blocked ?? []);
   // Every conversation waiting on the inbox is woken (two chats may wait at once).
@@ -632,6 +715,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             m.payload = { ...m.payload, sent_for_them: { to: mine.url, text, reply: r } };
           }
         }
+        // The owner undid something its AI did on duty: the connector's part (unblock, or a correction to the other side).
+        if (fromHouse && m.payload.kind === 'house.news' && m.payload.about === 'duty.undo') {
+          const e = m.payload.entry as { undo?: { kind?: string; ref?: string }; to?: { url?: string } } | undefined;
+          if (e?.undo?.kind === 'block' && e.undo.ref) { const w = await whoIs(e.undo.ref).catch(() => null); const card = w ? await (await fetch(cardUrlFor(w.url))).json().catch(() => null) : null; const kid = (card && lakeProfile(card as AgentCard)?.publicJwk?.kid) as string | undefined; if (kid) blocked.delete(kid); }
+          if (e?.undo?.kind === 'correction' && e.undo.ref) {
+            const text = 'Please set aside my last message: my human will answer you themselves.';
+            const r = await (await agent()).ask(e.undo.ref, { kind: 'message', text }).catch((err: Error) => ({ error: err.message }));
+            m.payload = { ...m.payload, sent_for_them: { to: e.undo.ref, text, reply: r } };
+          }
+        }
         // Blocked by this agent (its key, not its name): not heard (run 64: a scammer's "mute" from an assistant went nowhere).
         if (m.from.publicJwk?.kid && blocked.has(String(m.from.publicJwk.kid))) return { kind: 'declined', why: 'this agent does not take messages from you' };
         // A payment to you is checked as one. Anything else that carries evidence ({ credential, card } or a forwarded
@@ -929,6 +1022,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       await me.sellFor({ webId: String(body.webId), url: String(body.badge.issuer), vouch: body.badge });
       speaksFor = { house: String(body.webId), url: String(body.badge.issuer), vouch: body.badge };
     }
+    // Paired as its human's AI on duty: the grant's kinds, checked in code on every call from now on.
+    if (body.duty) onDuty = { kinds: (body.duty as { kinds?: string[] }).kinds ?? [] };
     // From now on, money is spent under the allowance your human signed in this house, if they gave you one.
     useHouseAllowance(me);
     return body as Record<string, unknown> & { badge?: unknown; badge_note?: unknown };
@@ -2111,7 +2206,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-60), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], errands: [...errands],
+    orders: [...orders], pledged: [...pledged], received: received.slice(-60), inbox: inbox.slice(-100), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], errands: [...errands], ...(onDuty ? { duty: onDuty } : {}),
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';
@@ -2147,6 +2242,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       return mcp;
     },
     snapshot,
+    pending: () => ({ waiting: inbox.length, ...(inbox[0] ? { oldest: inbox[0].at } : {}) }),
     wake: async () => { await agent(); },
     passport: async () => {
       const a = await agent();

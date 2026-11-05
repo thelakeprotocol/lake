@@ -104,5 +104,20 @@ export const allowanceDraft = (houseWebId: string, assistantWebId: string, amoun
   ...(status ? { credentialStatus: status } : {}),
 });
 
+/** What an owner may put their AI on duty for while they're away (SPEC §6.1): never money. */
+export const DUTY_KINDS = ['reply', 'book', 'deliver'] as const;
+export type DutyKind = (typeof DUTY_KINDS)[number];
+/**
+ * A duty grant the owner signs on their device: what their AI may do for them while they're away, how many actions a night,
+ * in which hours, until when. A credential with a status bit, so taking it back (off duty) is one revocation.
+ */
+export const dutyDraft = (houseWebId: string, d: { kinds: DutyKind[]; cap: number; until: Date; hours?: { from: string; to: string; tz: string } }, status?: unknown) => ({
+  '@context': ['https://www.w3.org/ns/credentials/v2'],
+  type: ['VerifiableCredential', 'LakeDutyGrant'],
+  issuer: houseWebId,
+  credentialSubject: { id: `urn:lake:duty:${houseWebId}`, natural_language_description: 'What my AI may do for me while I am away', kinds: d.kinds, cap: d.cap, until: d.until.toISOString(), ...(d.hours ? { hours: d.hours } : {}) },
+  ...(status ? { credentialStatus: status } : {}),
+});
+
 /** A currency, as AP2 and receipts name it: an ISO 4217 code. */
 export const isCurrency = (c: unknown): c is string => typeof c === 'string' && /^[A-Z]{3}$/.test(c);

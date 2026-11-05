@@ -692,6 +692,64 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'decline' });
   });
 
+  it('puts the owner\'s AI on duty: a signed grant and a code, the morning page with Undo, and off duty in two taps (5 Nov)', async () => {
+    await tab('My agent');
+    const card = page.locator('section.duty');
+    await card.getByText('Never money. Anything new waits for you.').waitFor({ timeout: 10_000 });
+    // Hours around now, so what it does below counts as on duty.
+    const [from, to] = await page.evaluate(() => { const hh = (d: number) => String((new Date().getHours() + d + 24) % 24).padStart(2, '0') + ':00'; return [hh(-1), hh(2)]; });
+    await card.getByLabel('On duty from').fill(from);
+    await card.getByLabel('On duty until').fill(to);
+    expect(await card.getByLabel('Reply to people you already know').isChecked()).toBe(true);
+    expect(await card.getByLabel('Book times in your free hours').isChecked()).toBe(true);
+    await card.getByRole('button', { name: 'Sign and get a code' }).click();
+    const box = card.locator('textarea.copybox');
+    await box.waitFor({ timeout: 10_000 });
+    const cmd = await box.inputValue();
+    expect(cmd).toMatch(new RegExp(`^npx -y @thelakeprotocol/agent duty --lake \\S+/mcp --house ${house.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} --code \\S+$`));
+    const code = /--code (\S+)$/.exec(cmd)![1]!;
+    expect(await card.locator('.duty-code').textContent()).toBe(code);
+    await tidy();
+    // The runner pairs with the code: it is the AI on duty, under exactly what was signed.
+    const night = await generateIdentity('night-ai');
+    const paired = await (await fetch(`${house}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: night.publicJwk, code, label: 'Night AI', url: 'https://night.example/a2a' }) })).json();
+    expect(paired).toMatchObject({ paired: true, duty: { kinds: ['reply', 'book'], cap: 10 } });
+    const asNight = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, night, { iss: 'assistant' })) })).json();
+    expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0 });
+    // Overnight: a booking (undoable), a reply, and one thing it was stopped from doing.
+    const booked = await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Mon 10:00', with: 'Sam' });
+    expect(booked).toMatchObject({ ok: true, id: expect.any(String) });
+    expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Call on Monday at 10:00', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, on: true });
+    expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.', reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
+    expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
+    // The morning: Home shows what it did, newest first, with receipts and Undo.
+    await tab('Home');
+    const slept = page.locator('section.slept');
+    await slept.waitFor({ timeout: 10_000 });
+    expect(await slept.locator('.slept-sum').textContent()).toBe('2 handled, 0 waiting for you, 0 blocked');
+    await slept.getByText('Replied to Sam\'s AI: Yes, Monday works.').waitFor();
+    await slept.getByText('Stopped (to Quick Cash): no money on duty').waitFor();
+    const book = slept.locator('li.item', { hasText: 'Booked with Sam\'s AI: Call on Monday at 10:00' });
+    await book.locator('summary', { hasText: 'Receipt' }).click();
+    await book.getByText(/"digest": "abc123"/).waitFor();
+    await book.getByRole('button', { name: 'Undo' }).click();
+    await book.getByText('Undone').waitFor({ timeout: 10_000 });
+    expect((await (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, night, { iss: 'assistant' })) })).json()).agenda.some((x: { id: string }) => x.id === booked.id)).toBe(false);
+    await tidy();
+    // My agent: on duty, with tonight's count; no money box for it; off duty in two taps.
+    await tab('My agent');
+    const on = card.locator('li.item', { hasText: 'Night AI' });
+    await on.locator('.chip', { hasText: 'On duty' }).waitFor({ timeout: 10_000 });
+    expect(await on.textContent()).toMatch(new RegExp(`On duty ${from}–${to} · 2 of 10 tonight`));
+    await page.locator('li.item', { hasText: 'Night AI' }).getByText('On duty: replies and bookings only, never money.').waitFor();
+    await tidy();
+    await on.getByRole('button', { name: 'Off duty' }).click();
+    await on.getByRole('button', { name: /Tap again/ }).click();
+    await card.getByRole('button', { name: 'Sign and get a code' }).waitFor({ timeout: 10_000 });
+    expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
+    await tidy();
+  });
+
   it('signs out on this device: back to the pairing screen', async () => {
     const keyNow = () => page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))?.[1] ?? null);
     const before = await keyNow();

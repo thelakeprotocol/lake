@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, menuHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, QUICKNET, type Identity } from '../packages/core/src/index.js';
+import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, menuHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, keyThumbprint, QUICKNET, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -669,6 +669,49 @@ describe('the owner', () => {
     } finally {
       await seller.close();
       await buyer.close();
+    }
+  });
+
+  it('an AI on duty does only what its signed grant says: no money, nobody new, every action logged at the house, off in one tap (SPEC §6.1)', async () => {
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-duty'), LAKE_PAYMENTS_URL: payments, LAKE_PLAY_MONEY: 'USD:50' });
+    const friend = await joinLake({ name: 'Sam helper', domain: 'sam-helper.example', node, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+    const stranger = await joinLake({ name: 'Cold caller', domain: 'cold.example', node, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+    try {
+      // The owner signs the grant on their device; the code pairs the runner's agent as their AI on duty.
+      const { id, draft } = await ownerCall({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 5 });
+      const { code } = await ownerCall({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, owner), label: 'Night shift' });
+      const anon = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'duty-runner', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const text = (r.content as { text: string }[])[0]!.text; return { error: !!r.isError, text, json: r.isError ? undefined : JSON.parse(text) }; };
+      expect((await call('lake_house_connect', { code, house_url: houses.strict })).json).toMatchObject({ paired: true, duty: { kinds: ['reply', 'book'], cap: 5 } });
+      // Money is refused in code, whatever the model is told.
+      const pay = await call('lake_pay', { agent_url: friend.card.supportedInterfaces[0]!.url, amount: 1, unit: 'USD', memo: 'a tip' });
+      expect(pay).toMatchObject({ error: true, text: expect.stringContaining('no money on duty') });
+      // Nobody new: first contact is the owner's. Sam is known once the owner's side has written to him.
+      expect(await call('lake_ask', { to: stranger.card.supportedInterfaces[0]!.url, text: 'Hello!' })).toMatchObject({ error: true, text: expect.stringContaining('someone new to your human') });
+      const { code: c2 } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Day assistant' });
+      const day = await generateIdentity('day-assistant');
+      await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: day.publicJwk, code: c2, label: 'Day assistant' }) });
+      const samKey = await keyThumbprint((await verifyLakeCard(friend.card)).publicJwk);
+      await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'assistant.contact', key: samKey, name: 'Sam helper', webId: friend.webId }, day, { iss: 'assistant' })) });
+      const sent = await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, text: 'Monday 10:00 works for my human.' });
+      expect(sent.json).toMatchObject({ kind: 'received' });
+      // Words only: an order or a cart isn't a reply.
+      expect(await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, message: { kind: 'trade.order', sku: 'x' } })).toMatchObject({ error: true, text: expect.stringContaining('words only') });
+      // The morning page: the reply with its signed answer and an undo; the refusals said so.
+      const log = await ownerCall({ kind: 'panel.duty.log' });
+      const reply = log.entries.find((e: { action: string; refused?: string }) => e.action === 'reply' && !e.refused);
+      expect(reply).toMatchObject({ tool: 'lake_ask', to: { name: 'Sam helper', key: samKey }, text: 'Monday 10:00 works for my human.', reply: { kind: 'received' }, undo: { kind: 'correction' } });
+      expect(log.entries.filter((e: { refused?: string }) => e.refused).map((e: { refused: string }) => e.refused)).toEqual([expect.stringContaining('no money'), expect.stringContaining('someone new'), expect.stringContaining('words only')]);
+      // Three refusals in a night: off duty on its own, and said so on the next call.
+      expect(await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, text: 'Still there?' })).toMatchObject({ error: true, text: expect.stringContaining('off duty') });
+      expect((await ownerCall({ kind: 'panel.duty.log' })).duties[0].state).toMatchObject({ on: false, why: expect.stringContaining('three refused') });
+      await c.close();
+    } finally {
+      await friend.close();
+      await stranger.close();
     }
   });
 

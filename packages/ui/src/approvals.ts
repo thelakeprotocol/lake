@@ -231,6 +231,8 @@ function Home({ go }: { go: (t: Tab) => void }) {
     h('button', { class: `stat ${cls}`, type: 'button', onClick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
   return h('div', {},
     h(StartCard, { door: door.data && !door.data.error ? door.data : null, hasAssistant: assistants.length > 0, free: free.data ?? { set: false, slots: [] }, go }),
+    // The morning: what your AI on duty did while you were away, first.
+    h(WhileYouSlept, {}),
     // What needs you, first and only: your agent's suggestions, notes at your door, requests your rules left to you.
     h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
       waiting || needs.length
@@ -970,6 +972,8 @@ function lastHere(at?: string): { text: string; now: boolean } {
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
 function MyAgent() {
   const v = useHouse<ListView>({ kind: 'list' });
+  const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  const onDuty = new Set((duty.data?.duties ?? []).map((d) => d.kid));
   const redraw = useRedraw();
   // The code's minutes count down on screen; when it runs out, the button is back.
   useEffect(() => { const t = setInterval(redraw, 30_000); return () => clearInterval(t); }, []);
@@ -990,7 +994,8 @@ function MyAgent() {
       h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests`),
       a.waiting ? h('p', { class: 'item-text amber-text' }, waitingLine(a)) : null,
       // Its money in a box of its own, the agent's removal below a line: side by side, "Revoke" read as taking the money back.
-      h(Allowance, { a }),
+      // An AI on duty never spends: no money box for it.
+      onDuty.has(a.kid) ? h('p', { class: 'item-meta' }, 'On duty: replies and bookings only, never money.') : h(Allowance, { a }),
       h('div', { class: 'item-foot agent-remove' },
         h(Act, { label: 'Remove this AI', cls: 'danger quiet', confirm: 'Tap again: its key stops working', run: () => call({ kind: 'panel.assistant.revoke', kid: a.kid }) })))))) : null,
     invite ? h('section', { class: 'block start' }, h('h2', {}, 'Paste this to your AI'),
@@ -998,6 +1003,7 @@ function MyAgent() {
       h('textarea', { readonly: true, rows: 5, class: 'copybox', value: invite.msg, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
       h('div', { class: 'row' }, h(CopyButton, { text: invite.msg }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => { invite = null; redraw(); } }, 'Done')))
       : h('div', { class: 'block' }, give),
+    h(DutyCard, { houseUrl, log: duty.data }),
     h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
       v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and on Home.')));
 }
@@ -1050,6 +1056,102 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
         done();
       } }),
       h('button', { class: 'btn small quiet', type: 'button', onClick: done }, 'Cancel')));
+}
+
+// ---- AI on duty ----
+type DutyEntry = { id: string; by: string; at: string; tool: string; action: string; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: string; ref: string }; undone?: string };
+type DutyInfo = { kid: string; label: string; seenAt?: string; kinds: string[]; cap: number; until: string; hours?: { from: string; to: string; tz: string }; state: { on: true; used: number } | { on: false; why: string }; off?: { at: string; why: string; night?: boolean }; summary: { handled: number; waiting: number; blocked: number; refused: number } };
+type DutyLog = { duties: DutyInfo[]; entries: DutyEntry[] };
+/** The code and command for the AI on duty, kept here so a tab change doesn't lose them while you copy them. */
+let dutyCode: { code: string; cmd: string; until: number; made: number } | null = null;
+const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you already know'], ['book', 'Book times in your free hours']];
+/** Off for good (taken off, refused too often, ended): not the same as off for the night or outside its hours. */
+const dutyLive = (d: DutyInfo) => !(d.off && !d.off.night) && Date.parse(d.until) > Date.now() && !(!d.state.on && /took you off duty|has ended/.test(d.state.why));
+
+/**
+ * Your AI on duty: your own AI handles things while you're away, under a grant you sign here (what it may do, how many
+ * things a night, in which hours). It runs on your computer, with your own AI app; the house keeps what it did.
+ */
+function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
+  const [kinds, setKinds] = useState<string[]>(['reply', 'book']);
+  const [from, setFrom] = useState('22:00');
+  const [to, setTo] = useState('07:00');
+  const [cap, setCap] = useState(10);
+  const [days, setDays] = useState(7);
+  const redraw = useRedraw();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (dutyCode && dutyCode.until < Date.now()) dutyCode = null;
+  const live = (log?.duties ?? []).filter(dutyLive);
+  // Its runner has used the code: the box has done its job.
+  if (dutyCode && live.some((d) => d.seenAt && Date.parse(d.seenAt) >= dutyCode!.made - 1000)) dutyCode = null;
+  const head = h('h2', {}, 'AI on duty');
+  if (dutyCode) {
+    const mins = Math.max(1, Math.round((dutyCode.until - Date.now()) / 60_000));
+    return h('section', { class: 'block start duty' }, head,
+      h('p', { class: 'muted' }, `Run this on the computer where your AI app is (it uses your own AI, on your own account). The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`),
+      h('textarea', { readonly: true, rows: 4, class: 'copybox', value: dutyCode.cmd, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
+      h('p', { class: 'r-meta' }, 'Code: ', h('code', { class: 'duty-code' }, dutyCode.code)),
+      h('div', { class: 'row' }, h(CopyButton, { text: dutyCode.cmd }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => { dutyCode = null; redraw(); } }, 'Done')));
+  }
+  if (live.length) return h('section', { class: 'block duty' }, head, h('ul', { class: 'items' }, ...live.map((d) => {
+    const used = d.state.on ? d.state.used : d.off?.night ? d.cap : d.summary.handled;
+    const chip = d.state.on ? h('span', { class: 'chip ok' }, 'On duty') : h('span', { class: 'chip wait', title: d.state.why }, d.off?.night ? 'Paused tonight' : 'Off hours');
+    const until = new Date(d.until).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+    return h('li', { key: d.kid, class: 'item' },
+      h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(d.label)), chip),
+      h('p', { class: 'item-meta' }, `${d.hours ? `On duty ${d.hours.from}–${d.hours.to}` : 'On duty while you\'re away'} · ${used} of ${d.cap} tonight · until ${until}`),
+      h('p', { class: 'item-meta' }, `${DUTY_KINDS.filter(([k]) => d.kinds.includes(k)).map(([, l]) => l).join(' · ') || d.kinds.join(', ')} · ${lastHere(d.seenAt).text}`),
+      !d.state.on ? h('p', { class: 'item-meta amber-text' }, d.state.why) : null,
+      h('div', { class: 'item-foot' }, h(Act, { label: 'Off duty', cls: 'danger', confirm: 'Tap again: it stops now', run: () => call({ kind: 'panel.duty.off', kid: d.kid }) })));
+  })));
+  const flip = (k: string, on: boolean) => setKinds(on ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k));
+  return h('section', { class: 'block duty' }, head,
+    h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know, bookings in your free hours. Never money. Anything new waits for you.'),
+    ...DUTY_KINDS.map(([k, label]) => h(Toggle, { key: k, label, checked: kinds.includes(k), onChange: (v: boolean) => flip(k, v) })),
+    h('div', { class: 'times' },
+      h('span', { class: 'muted' }, 'From'),
+      h('input', { type: 'time', step: 1800, value: from, 'aria-label': 'On duty from', onInput: (e: Event) => setFrom((e.target as HTMLInputElement).value) }),
+      h('span', { class: 'muted' }, 'to'),
+      h('input', { type: 'time', step: 1800, value: to, 'aria-label': 'On duty until', onInput: (e: Event) => setTo((e.target as HTMLInputElement).value) })),
+    h('p', { class: 'r-meta' }, `Your time (${tz.replace(/_/g, ' ')}).`),
+    h('div', { class: 'row' },
+      h('label', { class: 'inline' }, 'At most ', h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 50, value: cap, class: 'days-input', 'aria-label': 'Most things a night', onInput: (e: Event) => setCap(Number((e.target as HTMLInputElement).value)) }), ' things a night')),
+    h('div', { class: 'row' },
+      h('label', { class: 'inline' }, 'For ', h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 31, value: days, class: 'days-input', 'aria-label': 'Days on duty', onInput: (e: Event) => setDays(Number((e.target as HTMLInputElement).value)) }), ' days')),
+    h('div', { class: 'row' }, h(Act, { label: 'Sign and get a code', cls: 'primary', run: async () => {
+      if (!kinds.length) throw new Error('Pick at least one thing it may do.');
+      if (!(cap >= 1 && cap <= 50)) throw new Error('From 1 to 50 things a night.');
+      if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
+      if (from === to) throw new Error('The hours need to start and end at different times.');
+      const d = await call<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
+      const r = await call<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
+      dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}` };
+    } })));
+}
+
+/** One thing it did, said plainly: "Replied to Sam's AI: Yes, Monday works." */
+function dutyLine(e: DutyEntry): string {
+  const name = e.to?.name ? shortName(e.to.name) : e.to?.webId ? who(e.to.webId) : '';
+  const text = e.text ? `: ${e.text}` : '';
+  if (e.refused) return `Stopped${name ? ` (to ${name})` : ''}: ${e.refused}`;
+  const said: Record<string, string> = { reply: `Replied to ${name || 'someone'}`, book: `Booked with ${name || 'someone'}`, deliver: `Delivered to ${name || 'someone'}`, block: `Blocked ${name || 'someone'}`, note: 'Left you a note' };
+  return `${said[e.action] ?? `${e.action}${name ? ` ${name}` : ''}`}${text}`;
+}
+
+/** The morning page: what your AI on duty did in the last day, each with what the other side signed, and Undo. */
+function WhileYouSlept() {
+  const log = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  const entries = (log.data?.entries ?? []).slice().reverse();
+  if (!entries.length) return null;
+  const sum = (log.data?.duties ?? []).reduce((t, d) => ({ handled: t.handled + d.summary.handled, waiting: t.waiting + d.summary.waiting, blocked: t.blocked + d.summary.blocked }), { handled: 0, waiting: 0, blocked: 0 });
+  return h('section', { class: 'block slept' },
+    h('h2', {}, 'While you slept'),
+    h('p', { class: 'slept-sum' }, `${sum.handled} handled, ${sum.waiting} waiting for you, ${sum.blocked} blocked`),
+    h(Paged, { items: entries, size: 8, render: (e: DutyEntry) => h('li', { key: e.id, class: `item${e.refused ? ' amber' : ''}` },
+      h('div', { class: 'item-head' }, h('span', { class: 'item-text duty-line' }, dutyLine(e)), h('time', { class: 'r-meta' }, time(e.at))),
+      (e.reply !== undefined || e.receipt) || e.undo ? h('div', { class: 'item-foot' },
+        e.reply !== undefined || e.receipt ? h('details', { class: 'receipt' }, h('summary', {}, 'Receipt'), h('pre', { class: 'json' }, typeof (e.reply ?? e.receipt) === 'string' ? String(e.reply ?? e.receipt) : JSON.stringify(e.reply, null, 1))) : h('span', {}),
+        e.undo ? (e.undone ? h('span', { class: 'chip' }, 'Undone') : h(Act, { label: 'Undo', cls: 'quiet', run: () => call({ kind: 'panel.duty.undo', entry: e.id }) })) : null) : null) }));
 }
 
 // ---- Money ----

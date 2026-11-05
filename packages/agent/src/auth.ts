@@ -74,7 +74,9 @@ export class LakeOAuth implements OAuthServerProvider {
 
   get clientsStore(): OAuthRegisteredClientsStore {
     return {
-      getClient: (id) => this.clients.get()[id],
+      // A script's sign-in (oauth/anonymous) is a public client with no way back to a browser: it may only renew its token
+      // (an AI on duty runs for days on one).
+      getClient: (id) => id === 'anonymous' ? { client_id: 'anonymous', redirect_uris: [], token_endpoint_auth_method: 'none', grant_types: ['refresh_token'] } as unknown as OAuthClientInformationFull : this.clients.get()[id],
       registerClient: (c) => {
         const all = this.clients.get();
         // Registration is open (any AI app may register): keep the newest few hundred.

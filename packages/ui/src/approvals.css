@@ -287,3 +287,11 @@ select.tz { max-width: 220px; }
 .money-input select { border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--raised); color: inherit; font: inherit; padding: 10px 8px; }
 .money-input input { border: 0; background: transparent; color: inherit; font: 600 18px var(--f-body); padding: 10px 12px; width: 100%; min-width: 0; }
 .days-input { width: 90px; background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 600 18px var(--f-body); }
+
+/* AI on duty, and the morning page. */
+.slept-sum { font-size: 17px; font-weight: 600; margin: 0 0 10px; color: var(--fg); }
+.duty-line { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.slept .item-head { align-items: flex-start; }
+pre.json { white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; margin: 6px 0 0; font-size: 11px; }
+.duty .times { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; }
+.duty-code { overflow-wrap: anywhere; }

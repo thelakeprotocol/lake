@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { describe, expect, it } from 'vitest';
-import { generateIdentity, signMessage, type JWK } from '@thelakeprotocol/core';
+import { generateIdentity, issueCredential, signMessage, type JWK } from '@thelakeprotocol/core';
 import { agendaIcs, OwnerDesk } from './owner.js';
 
 // A sandbox house anyone can claim: the claim is a lease, and the house resets when it ends.
@@ -176,5 +176,95 @@ describe('errands: what the owner\'s AI waits on, kept by the house', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(told.at(-1)).toMatchObject({ about: 'errand.ended', errand: { id: order.id, state: 'expired', ended: 'expired', arrivals: [{ kind: 'trade.cart', ref: 'cart-9' }] } });
     d.close();
+  });
+});
+
+describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
+  it('a signed grant, a one-time code, actions counted to the cap, known keys only, undo, and off duty in one tap', async () => {
+    const told: Record<string, unknown>[] = [];
+    let key: JWK | null = null;
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [],
+      statusUrl: () => 'http://h/status', tell: async (_u, p) => { told.push(p); },
+      panel: { standing: () => [{ jkt: 'standing-key-0123456789abcdef', domain: 'friend.example', purpose: 'contact', fields: [], retention: 'P0D', added: '', until: '', uses: 0 }] } as never,
+    });
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+
+    expect(await owner({ kind: 'panel.duty.draft', kinds: ['pay'] })).toMatchObject({ error: expect.stringContaining('never money') });
+    const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 2 });
+    expect(draft.credentialSubject).toMatchObject({ kinds: ['reply', 'book'], cap: 2 });
+    // Signed by someone else: refused. Signed by the owner: a code for the runner.
+    expect(await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, await generateIdentity('x')) })).toMatchObject({ error: expect.stringContaining('not signed by your key') });
+    const set = await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, phone) });
+    expect(set).toMatchObject({ ok: true, code: expect.any(String) });
+    const ai = await generateIdentity('duty');
+    const paired = await post('/assistant', { publicJwk: ai.publicJwk, code: set.code, label: 'Night AI', url: 'https://duty.example/a2a' });
+    expect(paired).toMatchObject({ paired: true, duty: { kinds: ['reply', 'book'], cap: 2 } });
+    const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0, cap: 2 });
+
+    // Known: a key the owner's side wrote to, or a standing yes; a stranger isn't, however often it writes.
+    expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: false });
+    await asAi({ kind: 'assistant.contact', key: 'sam-key-0123456789abcdefgh', name: 'Sam\'s AI', webId: 'https://sam.example/#a' });
+    expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: true });
+    expect(await asAi({ kind: 'assistant.known', key: 'standing-key-0123456789abcdef' })).toMatchObject({ known: true });
+
+    // Two actions reach the cap: off for the night, said so.
+    desk.agenda.push({ id: 'ag1', what: 'Call with Sam', when: 'Mon 10:00', by: 'Night AI', at: new Date().toISOString() });
+    const one = await asAi({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI', key: 'sam-key-0123456789abcdefgh' }, text: 'Booked Mon 10:00', undo: { kind: 'agenda', ref: 'ag1' } });
+    expect(one).toMatchObject({ ok: true, on: true, used: 1 });
+    const two = await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.' });
+    expect(two).toMatchObject({ ok: true, on: false, why: expect.stringContaining('cap of 2') });
+    expect(await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', text: 'one more' })).toMatchObject({ ok: false, on: false });
+
+    // The morning page: what it did; undo takes the agenda entry out and tells the AI's connector.
+    const log = await owner({ kind: 'panel.duty.log' });
+    expect(log.duties[0]).toMatchObject({ label: 'Night AI', summary: { handled: 2 } });
+    expect(await owner({ kind: 'panel.duty.undo', entry: one.entry })).toMatchObject({ ok: true });
+    expect(desk.agenda.find((x) => x.id === 'ag1')).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.some((t) => t.about === 'duty.undo')).toBe(true);
+
+    // Off duty: one tap; its status bit is set and it can't act any more.
+    expect(await owner({ kind: 'panel.duty.off' })).toMatchObject({ ok: true, off: 1 });
+    expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: false, why: expect.stringContaining('off duty') });
+    server.close();
+  });
+
+  it('three refusals in a night take it off duty; outside its hours it is off', async () => {
+    let key: JWK | null = null;
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [], statusUrl: () => 'http://h/status',
+    });
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply'] });
+    const { code } = await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, phone) });
+    const ai = await generateIdentity('duty');
+    await post('/assistant', { publicJwk: ai.publicJwk, code });
+    const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    for (let i = 0; i < 3; i++) await asAi({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', refused: 'no money on duty' });
+    expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: false, why: expect.stringContaining('three refused') });
+    // Hours: on 22:00 to 07:00 in a zone where it is now midday is off.
+    const a = desk.assistants.get(ai.publicJwk.kid as string)!;
+    a.duty = { ...a.duty!, statusId: 'duty:other', hours: { from: '22:00', to: '07:00', tz: 'UTC' } };
+    const noonUtc = Date.UTC(2026, 10, 6, 12, 0);
+    expect(desk.dutyState(a, noonUtc)).toMatchObject({ on: false, why: expect.stringContaining('off hours') });
+    expect(desk.dutyState(a, Date.UTC(2026, 10, 6, 23, 0))).toMatchObject({ on: true });
+    expect(desk.nightStart(a.duty!, Date.UTC(2026, 10, 7, 3, 0))).toBe(Date.UTC(2026, 10, 6, 22, 0));
+    server.close();
   });
 });

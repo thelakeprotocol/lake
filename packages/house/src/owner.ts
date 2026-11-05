@@ -4,7 +4,7 @@ import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, dutyDraft, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -103,7 +103,14 @@ const MAX_GRANT_MS = 48 * 3_600_000;
  * offers, activity, data, rules) and suggest; it may never Allow, change rules, accept, revoke or export. Only
  * the owner's key cuts keys.
  */
-export interface AssistantKey { kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
+/**
+ * The owner's AI on duty while they're away (SPEC §6.1): what their signed grant lets it do, how many actions a night, in
+ * which hours. Its bit on the status list is the kill switch.
+ */
+export interface Duty { statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean } }
+/** One thing the AI on duty did, or was refused: what the owner's morning page shows, with its signed reply and an undo. */
+export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction'; ref: string }; undone?: string }
+export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
@@ -146,6 +153,8 @@ export interface Errand {
   ended?: { at: string; how: 'answered' | 'expired' | 'owner' | 'assistant' | 'blocked' };
 }
 const ERRAND_KINDS = ['ask', 'order', 'cart', 'seeking'] as const;
+/** What counts against a duty's nightly cap: things done for the owner out in the world (not notes to them, not blocks). */
+const COUNTED = new Set<string>(DUTY_KINDS);
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
 /**
  * Something the owner agreed to, in their agenda. Who agreed on the other side is what it rests on (run 47: a visitor's
@@ -163,7 +172,7 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -210,7 +219,13 @@ export class OwnerDesk {
    */
   private connects = new Map<string, { ask: string; app: string; from: string; number: string; back: string; at: number }>();
   private connectTimes: number[] = [];
-  private invites = new Map<string, { label: string; until: number }>();
+  private invites = new Map<string, { label: string; until: number; duty?: Duty }>();
+  private dutyDrafts = new Map<string, { statusId: string; draft: Record<string, unknown> }>();
+  /** What the AI on duty did and was refused, newest last (the morning page). */
+  dutyLog: DutyEntry[] = [];
+  private dutyPushed = new Set<string>();
+  /** Keys the owner's assistants have sent signed messages to: who counts as known for the duty's novelty rule. */
+  private contacts = new Map<string, { name: string; webId: string; at: string }>();
   suggestions: Suggestion[] = [];
   /** When the owner's own key last called the desk (the panel polls while open; answers come through it too). */
   private ownerSeen = 0;
@@ -301,6 +316,9 @@ export class OwnerDesk {
     this.assistants.clear();
     this.suggestions = [];
     await this.saveSuggestions();
+    this.dutyLog = [];
+    this.contacts.clear();
+    await this.saveDuty();
     // The last owner's notes, mutes and agenda were theirs: the next one starts with none, and a new calendar address.
     this.notes = [];
     this.closedNotes.clear();
@@ -340,6 +358,9 @@ export class OwnerDesk {
       setInterval(check, 60_000).unref();
     }
     setInterval(() => this.sweepErrands(), 60_000).unref();
+    this.dutyLog = JSON.parse(await readFile(join(this.o.dataDir, 'duty-log.json'), 'utf8').catch(() => '[]'));
+    this.contacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'contacts.json'), 'utf8').catch(() => '[]')));
+    setInterval(() => this.morningPush(), 60_000).unref();
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
@@ -527,6 +548,71 @@ export class OwnerDesk {
   /** The secret in the owner's calendar address for the agenda (a private iCal feed, as calendars give out): reset makes a new one. */
   private feedKey = '';
   /** The assistants' notes and questions to the owner: a restart (a deploy) mustn't lose a question waiting for a tap. */
+  private saveDuty = async () => {
+    await writeFile(join(this.o.dataDir, 'duty-log.json'), JSON.stringify(this.dutyLog.slice(-2000))).catch(() => {});
+    await writeFile(join(this.o.dataDir, 'contacts.json'), JSON.stringify([...this.contacts].slice(-500))).catch(() => {});
+  };
+  /** Where the clock is in a time zone, as minutes since its midnight, and that midnight in UTC ms. */
+  private static local(tz: string, at = Date.now()) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }).formatToParts(at).map((x) => [x.type, x.value]));
+    const asUtc = Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!);
+    const offset = asUtc - (at - (at % 60_000));
+    return { minutes: +p.hour! * 60 + +p.minute!, midnight: Date.UTC(+p.year!, +p.month! - 1, +p.day!) - offset };
+  }
+  private static hhmm = (t: string) => { const [h, m] = t.split(':').map(Number); return (h ?? 0) * 60 + (m ?? 0); };
+  /** When tonight's duty began: the last time its hours started, or twelve hours ago with no hours. */
+  nightStart(d: Duty, at = Date.now()) {
+    if (!d.hours) return at - 12 * 3_600_000;
+    const l = OwnerDesk.local(d.hours.tz, at), from = OwnerDesk.hhmm(d.hours.from);
+    return l.midnight + from * 60_000 - (l.minutes < from ? 86_400_000 : 0);
+  }
+  /** Whether the AI on duty may act now, and why not. */
+  dutyState(a: AssistantKey, at = Date.now()): { on: true; used: number } | { on: false; why: string } {
+    const d = a.duty;
+    if (!d) return { on: false, why: 'this key is not on duty' };
+    if (this.isRevoked(d.statusId)) return { on: false, why: d.off?.why ?? 'your human took you off duty' };
+    if (Date.parse(d.until) <= at) return { on: false, why: 'your duty has ended' };
+    const start = this.nightStart(d, at);
+    if (d.hours) {
+      const l = OwnerDesk.local(d.hours.tz, at), from = OwnerDesk.hhmm(d.hours.from), to = OwnerDesk.hhmm(d.hours.to);
+      const inHours = from <= to ? l.minutes >= from && l.minutes < to : l.minutes >= from || l.minutes < to;
+      if (!inHours) return { on: false, why: `off hours: on duty ${d.hours.from} to ${d.hours.to} (${d.hours.tz})` };
+    }
+    if (d.off?.night && Date.parse(d.off.at) >= start) return { on: false, why: d.off.why };
+    const used = this.dutyLog.filter((e) => e.by === a.kid && !e.refused && COUNTED.has(e.action) && Date.parse(e.at) >= start).length;
+    return { on: true, used };
+  }
+  /** Off duty: its bit set on the status list, the assistant told; the owner turns it back on with a new grant. */
+  private async dutyOff(a: AssistantKey, why: string, night = false) {
+    if (!a.duty) return;
+    a.duty.off = { at: new Date().toISOString(), why, ...(night ? { night: true } : {}) };
+    if (!night) await this.revoke(a.duty.statusId);
+    await this.o.saveAssistants?.([...this.assistants.values()]);
+    this.news({ about: 'duty', off: true, why, ...(night ? { until: 'the next night' } : {}) }, a.kid);
+  }
+  /** The morning: once the hours end, one notification of what happened (if anything did). */
+  private morningPush(at = Date.now()) {
+    for (const a of this.assistants.values()) {
+      const d = a.duty;
+      if (!d?.hours || this.isRevoked(d.statusId)) continue;
+      const l = OwnerDesk.local(d.hours.tz, at), to = OwnerDesk.hhmm(d.hours.to);
+      if (l.minutes < to || l.minutes > to + 30) continue;
+      const key = `${a.kid}:${l.midnight}`;
+      if (this.dutyPushed.has(key)) continue;
+      this.dutyPushed.add(key);
+      const s = this.dutySummary(a, at - 20 * 3_600_000);
+      if (s.handled + s.waiting + s.blocked) this.notifyOwner('duty', `While you slept: ${s.handled} handled, ${s.waiting} waiting for you, ${s.blocked} blocked.`);
+    }
+  }
+  dutySummary(a: AssistantKey, since: number) {
+    const mine = this.dutyLog.filter((e) => e.by === a.kid && Date.parse(e.at) >= since);
+    return {
+      handled: mine.filter((e) => !e.refused && COUNTED.has(e.action)).length,
+      waiting: this.suggestions.filter((x) => x.by === a.kid && Date.parse(x.at) >= since && ((x.ask && !x.ask.answered) || x.errand?.state === 'held' || (!x.ask && !x.errand))).length,
+      blocked: mine.filter((e) => e.action === 'block').length,
+      refused: mine.filter((e) => e.refused).length,
+    };
+  }
   /** At most 50 notes, oldest first out; open errands don't count and aren't cut (their own cap is 20 an assistant). */
   private trimSuggestions() {
     let notes = 0;
@@ -779,11 +865,11 @@ export class OwnerDesk {
       this.invites.delete(String(code));
       const kid = String(publicJwk.kid);
       if (kid === this.ownerJwk?.kid) return void res.status(400).json({ error: 'that is the owner\'s own key' });
-      const a: AssistantKey = { kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
+      const a: AssistantKey = { ...(invite.duty ? { duty: invite.duty } : {}), kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       const badge = await this.assistantBadge(a).catch(() => undefined);
-      res.json({ paired: true, role: 'assistant', webId: this.o.webId, may: [...ASSISTANT_MAY], may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
+      res.json({ paired: true, role: 'assistant', webId: this.o.webId, ...(a.duty ? { duty: { kinds: a.duty.kinds, cap: a.duty.cap, until: a.duty.until, ...(a.duty.hours ? { hours: a.duty.hours } : {}), note: 'you are your human\'s AI on duty: only these kinds, no money, nothing to an agent they or their assistants never wrote to (leave them a note instead), and every action is logged for them' } } : {}), may: [...ASSISTANT_MAY], may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
     });
 
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
@@ -1017,6 +1103,48 @@ export class OwnerDesk {
           const id = this.addNote({ from: { name: `${String(q.from.name ?? '').slice(0, 80)} (to your assistant, while it was away)`, domain: String(q.from.domain ?? ''), webId: String(q.from.webId), ...(q.from.url ? { url: String(q.from.url) } : {}), checked: false }, text });
           return void res.json(id ? { ok: true, note: id } : { ok: false, error: 'a few notes an hour from one sender' });
         }
+        if (p.kind === 'assistant.duty') {
+          const st = this.dutyState(assistant);
+          const d = assistant.duty;
+          return void res.json(d ? { ...st, kinds: d.kinds, cap: d.cap, until: d.until, ...(d.hours ? { hours: d.hours } : {}) } : st);
+        }
+        if (p.kind === 'assistant.duty.log') {
+          // What the AI on duty did or was refused, as its connector saw it: counted against the night's cap, and the
+          // third refusal in a night takes it off duty (something keeps trying what it may not do).
+          if (!assistant.duty) return void res.status(403).json({ error: 'this key is not on duty' });
+          const q = p as unknown as { tool?: string; action?: string; to?: DutyEntry['to']; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: DutyEntry['undo'] };
+          const before = this.dutyState(assistant);
+          if (!q.refused && COUNTED.has(String(q.action)) && !before.on) return void res.json({ ok: false, on: false, why: before.why });
+          const to = q.to ? { ...(q.to.name ? { name: String(q.to.name).slice(0, 80) } : {}), ...(q.to.webId ? { webId: String(q.to.webId).slice(0, 300) } : {}), ...(q.to.key ? { key: String(q.to.key).slice(0, 100) } : {}), ...(q.to.url ? { url: String(q.to.url).slice(0, 300) } : {}) } : undefined;
+          const undo = q.undo && ['agenda', 'block', 'standing', 'correction'].includes(q.undo.kind) ? { kind: q.undo.kind, ref: String(q.undo.ref ?? '').slice(0, 300) } : undefined;
+          const e: DutyEntry = { id: randomBytes(6).toString('hex'), by: assistant.kid, at: new Date().toISOString(), tool: String(q.tool ?? '').slice(0, 60), action: String(q.action ?? '').slice(0, 40), ...(to ? { to } : {}), ...(q.text ? { text: String(q.text).slice(0, 1500) } : {}), ...(q.reply !== undefined ? { reply: JSON.stringify(q.reply).length <= 4000 ? q.reply : `${JSON.stringify(q.reply).slice(0, 4000)}…` } : {}), ...(q.refused ? { refused: String(q.refused).slice(0, 300) } : {}), ...(q.receipt ? { receipt: String(q.receipt).slice(0, 8000) } : {}), ...(undo ? { undo } : {}) };
+          this.dutyLog.push(e);
+          await this.saveDuty();
+          const start = this.nightStart(assistant.duty);
+          const tonight = this.dutyLog.filter((x) => x.by === assistant.kid && Date.parse(x.at) >= start);
+          if (tonight.filter((x) => x.refused).length >= 3 && !this.isRevoked(assistant.duty.statusId)) await this.dutyOff(assistant, 'three refused actions in one night: off duty until your human puts you back on');
+          const after = this.dutyState(assistant);
+          if (after.on && after.used >= assistant.duty.cap) await this.dutyOff(assistant, `tonight's cap of ${assistant.duty.cap} actions reached: back on duty tomorrow night`, true);
+          const now = this.dutyState(assistant);
+          return void res.json({ ok: true, entry: e.id, on: now.on, ...(now.on ? { used: now.used, cap: assistant.duty.cap } : { why: now.why }) });
+        }
+        if (p.kind === 'assistant.contact') {
+          const q = p as unknown as { key?: string; name?: string; webId?: string };
+          const key = String(q.key ?? '');
+          if (!/^[\w-]{20,100}$/.test(key)) return void res.status(400).json({ error: 'contact: { key (its RFC 7638 thumbprint), name, webId }' });
+          if (!this.contacts.has(key)) { this.contacts.set(key, { name: String(q.name ?? '').slice(0, 80), webId: String(q.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
+          return void res.json({ ok: true });
+        }
+        if (p.kind === 'assistant.known') {
+          // The duty's novelty rule (Fable, 5 Nov): known means the owner's side wrote to that key first, or a standing yes
+          // names it. Having received from it isn't enough: a stranger who writes twice is still a stranger.
+          const key = String((p as unknown as { key?: string }).key ?? '');
+          const c = this.contacts.get(key);
+          if (c) return void res.json({ known: true, why: `your human's side has written to ${c.name || 'it'} before` });
+          const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
+          if (st) return void res.json({ known: true, why: `a standing yes names it (${st.domain})` });
+          return void res.json({ known: false, why: 'first contact: your human hears of it first' });
+        }
         if (p.kind === 'assistant.badge') {
           const badge = await this.assistantBadge(assistant);
           return void res.json(badge ? { badge } : { badge: null, why: 'this house can\'t vouch for you: pair again with your Lake WebID' });
@@ -1060,6 +1188,72 @@ export class OwnerDesk {
         if (kid === 'all') this.assistants.clear();
         await this.o.saveAssistants?.([...this.assistants.values()]);
         return void res.json({ revoked: gone });
+      }
+      // AI on duty: the owner signs what it may do while they're away; the grant comes with a one-time code for the runner.
+      if (p.kind === 'panel.duty.draft') {
+        const q = p as unknown as { kinds?: unknown; cap?: number; days?: number; hours?: { from?: string; to?: string; tz?: string } };
+        const kinds = Array.isArray(q.kinds) ? [...new Set(q.kinds.map(String))] : [];
+        if (!kinds.length || kinds.some((k) => !DUTY_KINDS.includes(k as DutyKind))) return void res.status(400).json({ error: `kinds: one or more of ${DUTY_KINDS.join(', ')} (never money)` });
+        const cap = Math.round(Number(q.cap ?? 10)), days = Math.round(Number(q.days ?? 7));
+        if (!(cap >= 1 && cap <= 50)) return void res.status(400).json({ error: 'cap: 1 to 50 actions a night' });
+        if (!(days >= 1 && days <= 31)) return void res.status(400).json({ error: 'days: 1 to 31' });
+        let hours: { from: string; to: string; tz: string } | undefined;
+        if (q.hours) {
+          const ok = (t?: string) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+          let tzOk = false;
+          try { new Intl.DateTimeFormat('en', { timeZone: String(q.hours.tz) }); tzOk = !!q.hours.tz; } catch { /* checked below */ }
+          if (!ok(q.hours.from) || !ok(q.hours.to) || q.hours.from === q.hours.to || !tzOk) return void res.status(400).json({ error: 'hours: { from: "22:00", to: "07:00", tz: "Australia/Brisbane" }' });
+          hours = { from: q.hours.from!, to: q.hours.to!, tz: String(q.hours.tz) };
+        }
+        if (!this.o.statusUrl) return void res.status(501).json({ error: 'this house cannot keep a duty grant' });
+        const statusId = `duty:${randomBytes(6).toString('hex')}`;
+        const draft = dutyDraft(this.o.webId, { kinds: kinds as DutyKind[], cap, until: new Date(Date.now() + days * 86_400_000), ...(hours ? { hours } : {}) }, statusEntry(this.o.statusUrl(), await this.statusIndex(statusId)));
+        this.dutyDrafts.set(statusId, { statusId, draft });
+        return void res.json({ id: statusId, draft, note: 'sign it on this device and send it back with panel.duty.set' });
+      }
+      if (p.kind === 'panel.duty.set') {
+        const q = p as unknown as { id?: string; credential?: string; label?: string };
+        const d = this.dutyDrafts.get(String(q.id ?? ''));
+        if (!d) return void res.status(404).json({ error: 'no duty draft with that id: start again' });
+        let vc;
+        try { vc = await verifyCredential(String(q.credential ?? ''), this.ownerJwk); } catch { return void res.status(403).json({ error: 'the duty grant is not signed by your key' }); }
+        const same = ['issuer', 'type', 'credentialSubject', 'credentialStatus'].every((k) => JSON.stringify((vc as unknown as Record<string, unknown>)[k]) === JSON.stringify(d.draft[k]));
+        if (!same) return void res.status(400).json({ error: 'the duty grant does not match its draft' });
+        const sub = vc.credentialSubject as unknown as { kinds: DutyKind[]; cap: number; until: string; hours?: Duty['hours'] };
+        const duty: Duty = { statusId: d.statusId, credential: String(q.credential), kinds: sub.kinds, cap: sub.cap, until: sub.until, ...(sub.hours ? { hours: sub.hours } : {}), at: new Date().toISOString() };
+        this.dutyDrafts.delete(d.statusId);
+        const code = randomBytes(9).toString('base64url');
+        this.invites.set(code, { label: String(q.label ?? 'AI on duty').slice(0, 60), until: Date.now() + 15 * 60_000, duty });
+        return void res.json({ ok: true, code, until: new Date(Date.now() + 15 * 60_000).toISOString(), note: 'give this code to your AI on duty (it works once, for 15 minutes)' });
+      }
+      if (p.kind === 'panel.duty.off') {
+        const kid = String((p as unknown as { kid?: string }).kid ?? '');
+        const on = [...this.assistants.values()].filter((a) => a.duty && (!kid || a.kid === kid) && !this.isRevoked(a.duty.statusId));
+        for (const a of on) await this.dutyOff(a, 'your human took you off duty');
+        return void res.json({ ok: true, off: on.length });
+      }
+      if (p.kind === 'panel.duty.log') {
+        const since = Number((p as unknown as { since?: number }).since) || Date.now() - 24 * 3_600_000;
+        const duties = [...this.assistants.values()].filter((a) => a.duty).map((a) => ({ kid: a.kid, label: a.label, seenAt: a.seenAt, kinds: a.duty!.kinds, cap: a.duty!.cap, until: a.duty!.until, ...(a.duty!.hours ? { hours: a.duty!.hours } : {}), state: this.dutyState(a), ...(a.duty!.off ? { off: a.duty!.off } : {}), summary: this.dutySummary(a, since) }));
+        return void res.json({ duties, entries: this.dutyLog.filter((e) => Date.parse(e.at) >= since) });
+      }
+      if (p.kind === 'panel.duty.undo') {
+        // Undo what the protocol lets be undone: the house's own (an agenda entry, a standing yes); the rest by the AI's
+        // connector (unblock, a correction sent). A second undo in a night takes the AI off duty: the owner disagrees.
+        const e = this.dutyLog.find((x) => x.id === String((p as unknown as { entry?: string }).entry ?? ''));
+        if (!e?.undo) return void res.status(404).json({ error: 'nothing to undo for that entry' });
+        if (e.undone) return void res.status(409).json({ error: 'already undone' });
+        const a = this.assistants.get(e.by);
+        if (e.undo.kind === 'agenda') { this.agenda = this.agenda.filter((x) => x.id !== e.undo!.ref); await this.saveAgenda(); }
+        if (e.undo.kind === 'standing' && e.to?.key) await this.o.panel?.removeStanding?.(e.to.key);
+        e.undone = new Date().toISOString();
+        await this.saveDuty();
+        this.news({ about: 'duty.undo', entry: { id: e.id, tool: e.tool, action: e.action, ...(e.to ? { to: e.to } : {}), undo: e.undo }, note: 'your human undid this: your connector does its part (unblock, or tell the other side)' }, e.by);
+        if (a?.duty) {
+          const start = this.nightStart(a.duty);
+          if (this.dutyLog.filter((x) => x.by === a.kid && x.undone && Date.parse(x.undone) >= start).length >= 2 && !this.isRevoked(a.duty.statusId)) await this.dutyOff(a, 'your human undid two things tonight: off duty until they put you back on');
+        }
+        return void res.json({ ok: true, undone: e.id });
       }
       if (p.kind === 'panel.allowance.draft') {
         const q = p as unknown as { kid?: string; amount?: number; amountUsd?: number; currency?: string; days?: number };
