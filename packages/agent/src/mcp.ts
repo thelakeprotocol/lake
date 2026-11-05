@@ -332,7 +332,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     return p;
   };
   const dutyGate = async (name: string, a: Record<string, unknown>): Promise<{ refused: string } | { log: DutyLog } | undefined> => {
-    const refuse = async (why: string, action = name) => { await houseCall({ kind: 'assistant.duty.log', tool: name, action, refused: why }).catch(() => {}); return { refused: why }; };
+    const refuse = async (why: string, action = name, limit = false) => { await houseCall({ kind: 'assistant.duty.log', tool: name, action, refused: why, ...(limit ? { limit: true } : {}) }).catch(() => {}); return { refused: why }; };
+    // Room tonight for one more of this, for this person (a few replies and one booking each; bookings and replies apart).
+    const room = async (action: string, to?: { key?: string; name?: string }) => {
+      const r = (await houseCall({ kind: 'assistant.duty', action, ...(to ? { to } : {}) }).catch(() => null)) as { room?: { ok: boolean; why?: string } } | null;
+      return r?.room && !r.room.ok ? refuse(r.room.why ?? 'a limit for tonight is reached', action, true) : undefined;
+    };
     if (DUTY_READ.has(name)) return undefined;
     if (name === 'lake_block') return { log: { tool: name, action: 'block', ...(typeof a.agent_url === 'string' ? { to: { url: a.agent_url } } : {}), ...(typeof a.agent_url === 'string' && !a.undo ? { undo: { kind: 'block', ref: a.agent_url } } : {}) } };
     const st = (await houseCall({ kind: 'assistant.duty' }).catch(() => ({ on: false, why: 'your human\'s house can\'t be reached' }))) as { on?: boolean; why?: string; kinds?: string[] };
@@ -342,6 +347,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const agenda = a.agenda as { what?: string; with?: string } | undefined;
       if (agenda && !kinds.includes('book')) return refuse('booking isn\'t in your duty: leave your human a note', 'book');
       if (a.rules || a.allowance || a.door) return refuse('rules, doors and allowances are your human\'s own changes: not on duty');
+      if (agenda) { const full = await room('book', agenda.with ? { name: String(agenda.with) } : undefined); if (full) return full; }
       return { log: { tool: name, action: agenda ? 'book' : 'note', ...(agenda?.with ? { to: { name: String(agenda.with).slice(0, 80) } } : {}), text: String(agenda?.what ?? a.text ?? '').slice(0, 500) } };
     }
     if (name === 'lake_sell') {
@@ -360,6 +366,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       // The novelty rule: first contact goes to the human (a name is only a name: it's the key that counts).
       const known = (await houseCall({ kind: 'assistant.known', key: to.key }).catch(() => ({ known: false }))) as { known?: boolean };
       if (!known.known) return refuse(`${to.name} is someone new to your human: first contact is theirs to answer`, 'reply');
+      const full = await room('reply', { key: to.key, name: to.name });
+      if (full) return full;
       return { log: { tool: name, action: 'reply', to, text: String(msg.text ?? msg.body ?? '').slice(0, 1500), undo: { kind: 'correction', ref: to.url } } };
     }
     return refuse(name === 'lake_pay' || name === 'lake_buy' ? 'no money on duty' : `${name} isn't part of being on duty`);
