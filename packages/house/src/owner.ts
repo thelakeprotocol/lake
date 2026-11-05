@@ -1094,6 +1094,17 @@ export class OwnerDesk {
           if (!what || !when) return void res.status(400).json({ error: 'agenda: { what, when, start?, where?, with? } (what was agreed, and when)' });
           const start = q.start ? new Date(String(q.start)) : undefined;
           if (start && Number.isNaN(start.getTime())) return void res.status(400).json({ error: 'agenda.start: a date and time (ISO 8601, with its offset), for your human\'s calendar' });
+          // On duty, "book in my free hours" is held in code, not left to the AI's reading (6 Nov: with no free hours set, an AI on
+          // duty pencilled in a call at 21:00).
+          if (assistant.duty) {
+            const av = this.o.panel?.availability?.();
+            if (!av) return void res.status(409).json({ error: 'your human hasn\'t set when they are free (Rules: When you\'re free): on duty you can\'t book a time; leave them a note instead' });
+            if (!start) return void res.status(400).json({ error: 'on duty a booking needs its start, inside your human\'s free hours (lake_house { view: "free" })' });
+            const len = (Number.isInteger(q.minutes) && q.minutes! > 0 ? q.minutes! : av.meetings ?? 60) * 60_000;
+            const busy = this.agenda.filter((x) => x.start).map((x) => ({ start: x.start!, ...(x.minutes ? { minutes: x.minutes } : {}) }));
+            const fits = freeSlots(av, busy, new Date(), 31, 2000).some((sl) => Date.parse(sl.start) <= start.getTime() && start.getTime() + len <= Date.parse(sl.end));
+            if (!fits) return void res.status(409).json({ error: 'that time isn\'t one of your human\'s free slots (lake_house { view: "free" }): on duty you can only book a free slot' });
+          }
           const str = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
           const ag = q.agreed;
           const agreed = ag && typeof ag === 'object' ? { by: str(ag.by, 120), domain: str(ag.domain, 200), said: str(ag.said, 300), at: str(ag.at, 40), ...(ag.speaks_for ? { speaks_for: { house: str(ag.speaks_for.house, 300), checked: ag.speaks_for.checked === true } } : {}) } : undefined;

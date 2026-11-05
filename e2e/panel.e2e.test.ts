@@ -717,7 +717,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const asNight = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, night, { iss: 'assistant' })) })).json();
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0 });
     // Overnight: a booking (undoable), a reply, and one thing it was stopped from doing.
-    const booked = await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Mon 10:00', with: 'Sam' });
+    // On duty it books only a free slot (an earlier test set the free hours); with none given, it's refused.
+    expect(await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Mon 10:00', with: 'Sam' })).toMatchObject({ error: expect.stringContaining('needs its start') });
+    const slot = (await asNight({ kind: 'panel.free' })).slots[0];
+    const booked = await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Mon 10:00', with: 'Sam', start: slot.start });
     expect(booked).toMatchObject({ ok: true, id: expect.any(String) });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Call on Monday at 10:00', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, on: true });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.', reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
