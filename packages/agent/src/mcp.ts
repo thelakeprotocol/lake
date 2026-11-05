@@ -200,7 +200,7 @@ export interface LakeMcpAgent {
   /** Its state now, as `save` would get it. */
   snapshot(): Promise<AgentSnapshot>;
   /** How many messages wait unread, and since when, and for an AI on duty whether it is on now (the runner's cheap look). */
-  pending(): Promise<{ waiting: number; oldest?: string; duty?: { on: boolean; why?: string } }>;
+  pending(look?: { host: string; since: string; every: number }): Promise<{ waiting: number; oldest?: string; duty?: { on: boolean; why?: string } }>;
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
@@ -2250,8 +2250,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       return mcp;
     },
     snapshot,
-    pending: async () => {
-      const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty' }).catch(() => null)) as { on?: boolean; why?: string } | null) : null;
+    pending: async (look) => {
+      const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty', ...(look ? { runner: look } : {}) }).catch(() => null)) as { on?: boolean; why?: string } | null) : null;
       return { waiting: inbox.length, ...(inbox[0] ? { oldest: inbox[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}) };
     },
     wake: async () => { await agent(); },

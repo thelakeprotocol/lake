@@ -110,8 +110,10 @@ async function call(o: DutyOptions, s: Saved, name: string, args: Record<string,
 }
 
 /** Unread messages for this agent, without reading them (the connector's GET <lake>/duty/pending). */
+const started = new Date().toISOString();
 async function pending(o: DutyOptions, s: Saved): Promise<{ waiting: number | null; duty?: { on: boolean; why?: string } }> {
-  const r = await fetch(`${o.lake.replace(/\/$/, '')}/duty/pending`, { headers: { authorization: `Bearer ${s.access_token}` } });
+  const q = new URLSearchParams({ host: hostname(), since: started, every: String(Math.round((o.every ?? 600_000) / 1000)) });
+  const r = await fetch(`${o.lake.replace(/\/$/, '')}/duty/pending?${q}`, { headers: { authorization: `Bearer ${s.access_token}` } });
   if (r.status === 401) { s.expires_at = 0; throw new Error('401'); }
   return (await r.json()) as { waiting: number | null; duty?: { on: boolean; why?: string } };
 }

@@ -1059,8 +1059,15 @@ function AllowanceEditor({ a, done }: { a: Assistant; done: () => void }) {
 }
 
 // ---- AI on duty ----
+/** When the runner was watching, said honestly: where, since when, when it last looked, and any gaps (the computer slept). */
+const watching = (r: NonNullable<DutyInfo['runner']>) => {
+  const t = (x: string) => new Date(x).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const late = Date.now() - Date.parse(r.last) > 3 * r.every * 1000;
+  const recent = r.gaps.filter((g) => Date.now() - Date.parse(g.to) < 24 * 3_600_000);
+  return `On duty on ${r.host} since ${t(r.since)}; ${late ? `not looking since ${t(r.last)} (is the computer asleep?)` : `last looked ${t(r.last)}`}.${recent.length ? ` Not looking ${recent.map((g) => `${t(g.from)}–${t(g.to)}`).join(', ')}.` : ''}`;
+};
 type DutyEntry = { id: string; by: string; at: string; tool: string; action: string; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: string; ref: string }; undone?: string };
-type DutyInfo = { kid: string; label: string; seenAt?: string; kinds: string[]; cap: number; until: string; hours?: { from: string; to: string; tz: string }; state: { on: true; used: number } | { on: false; why: string }; off?: { at: string; why: string; night?: boolean }; summary: { handled: number; waiting: number; blocked: number; refused: number } };
+type DutyInfo = { kid: string; label: string; seenAt?: string; kinds: string[]; cap: number; until: string; hours?: { from: string; to: string; tz: string }; state: { on: true; used: number } | { on: false; why: string }; off?: { at: string; why: string; night?: boolean }; runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] }; summary: { handled: number; waiting: number; blocked: number; refused: number } };
 type DutyLog = { duties: DutyInfo[]; entries: DutyEntry[] };
 /** The code and command for the AI on duty, kept here so a tab change doesn't lose them while you copy them. */
 let dutyCode: { code: string; cmd: string; until: number; made: number } | null = null;
@@ -1147,15 +1154,25 @@ function WhileYouSlept() {
   return h('section', { class: 'block slept' },
     h('h2', {}, 'While you slept'),
     h('p', { class: 'slept-sum' }, `${sum.handled} handled, ${sum.waiting} waiting for you, ${sum.blocked} blocked`),
+    ...(log.data?.duties ?? []).filter((d) => d.runner).map((d) => h('p', { class: 'muted', key: `run-${d.kid}` }, watching(d.runner!))),
     h(Paged, { items: entries, size: 8, render: (e: DutyEntry) => h('li', { key: e.id, class: `item${e.refused ? ' amber' : ''}` },
       h('div', { class: 'item-head' }, h('span', { class: 'item-text duty-line' }, dutyLine(e)), h('time', { class: 'r-meta' }, time(e.at))),
       (e.reply !== undefined || e.receipt) || e.undo ? h('div', { class: 'item-foot' },
-        e.reply !== undefined || e.receipt ? h('details', { class: 'receipt' }, h('summary', {}, 'Receipt'), h('pre', { class: 'json' }, typeof (e.reply ?? e.receipt) === 'string' ? String(e.reply ?? e.receipt) : JSON.stringify(e.reply, null, 1))) : h('span', {}),
+        e.reply !== undefined || e.receipt ? h('details', { class: 'receipt' }, h('summary', {}, 'Receipt'), h('p', { class: 'muted' }, receiptWords(e)), h('pre', { class: 'json' }, typeof (e.reply ?? e.receipt) === 'string' ? String(e.reply ?? e.receipt) : JSON.stringify(e.reply, null, 1))) : h('span', {}),
         e.undo ? (e.undone ? h('span', { class: 'chip' }, 'Undone') : h(Act, { label: 'Undo', cls: 'quiet', run: () => call({ kind: 'panel.duty.undo', entry: e.id }) })) : null) : null) }));
 }
 
 // ---- Money ----
 type About = { question?: string; purpose: string; fields: string[]; to: string };
+/** The other side's signed answer, in words first (the JSON stays below it, for whoever wants to check). */
+const receiptWords = (e: { reply?: unknown; to?: { name?: string } }) => {
+  const r = e.reply as { kind?: string; delivered?: string; status?: string; id?: string } | null;
+  const who = e.to?.name?.replace(/\s*\(.*$/, '') ?? 'They';
+  if (r?.kind === 'received') return `${who} signed that they got exactly this message${r.delivered?.startsWith('NOT') ? ' (but not exactly what was sent)' : ''}.`;
+  if (r?.status?.startsWith('agreed')) return `In your agenda, agreed in ${who}'s signed message.`;
+  if (r?.id) return 'Written into your agenda, as proposed until the other side agrees.';
+  return 'What came back, signed:';
+};
 type Receipt = { about?: About; amount: number; currency: string; agreement: string; from: string; payer?: string; payerName?: string; via?: string; viaName?: string; at: string; settlement: string; heldUntil?: string; items?: { label: string; amount: { currency: string; value: number } }[] };
 /** What a payment was for, as its receipt says: the cart's items, or the order it paid. */
 const forWhat = (r: Receipt) => r.items?.length ? r.items.map((i) => i.label.replace(/^1 × /, '')).join(', ')

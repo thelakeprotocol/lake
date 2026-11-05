@@ -267,6 +267,12 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     const ai = await generateIdentity('duty');
     await post('/assistant', { publicJwk: ai.publicJwk, code });
     const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    // The runner's looks: where and since when; a gap when it stopped looking for more than three looks.
+    await asAi({ kind: 'assistant.duty', runner: { host: 'laptop', since: '2026-11-06T12:00:00.000Z', every: 60 } });
+    const ai0 = desk.assistants.get(ai.publicJwk.kid as string)!;
+    ai0.duty!.runner!.last = new Date(Date.now() - 10 * 60_000).toISOString();
+    await asAi({ kind: 'assistant.duty', runner: { host: 'laptop', since: '2026-11-06T12:00:00.000Z', every: 60 } });
+    expect(ai0.duty!.runner).toMatchObject({ host: 'laptop', since: '2026-11-06T12:00:00.000Z', gaps: [{ from: expect.any(String), to: expect.any(String) }] });
     for (let i = 0; i < 3; i++) await asAi({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', refused: 'no money on duty' });
     expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: false, why: expect.stringContaining('three refused') });
     // Hours: on 22:00 to 07:00 in a zone where it is now midday is off.
@@ -277,5 +283,31 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(desk.dutyState(a, Date.UTC(2026, 10, 6, 23, 0))).toMatchObject({ on: true });
     expect(desk.nightStart(a.duty!, Date.UTC(2026, 10, 7, 3, 0))).toBe(Date.UTC(2026, 10, 6, 22, 0));
     server.close();
+  });
+});
+
+describe('the morning after a night on duty', () => {
+  it('one notification when the hours end, saying what happened; none on a quiet night', async () => {
+    let key: JWK | null = null;
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [], statusUrl: () => 'http://h/status',
+    });
+    await desk.init();
+    const pushed: string[] = [];
+    desk.notifyOwner = (_tag: string, body: string) => { pushed.push(body); };
+    const a = { kid: 'night-ai', jwk: {} as JWK, label: 'Night AI', addedAt: '', duty: { statusId: 'duty:x', credential: '', kinds: ['reply', 'book'], cap: 10, hours: { from: '22:00', to: '07:00', tz: 'UTC' }, until: new Date(Date.now() + 7 * 86_400_000).toISOString(), at: '' } } as never;
+    desk.assistants.set('night-ai', a);
+    const morning = (h: number, m: number) => (desk as unknown as { morningPush: (at: number) => void }).morningPush(Date.UTC(2026, 10, 7, h, m));
+    morning(7, 5);
+    expect(pushed).toEqual([]); // nothing happened that night
+    desk.dutyLog.push({ id: 'e1', by: 'night-ai', at: new Date(Date.UTC(2026, 10, 7, 23, 0)).toISOString(), tool: 'lake_ask', action: 'reply', to: { name: 'Sam' }, text: 'Yes' });
+    desk.dutyLog.push({ id: 'e2', by: 'night-ai', at: new Date(Date.UTC(2026, 10, 7, 23, 5)).toISOString(), tool: 'lake_block', action: 'block', to: { name: 'Gale' } });
+    const next = (h: number, m: number) => (desk as unknown as { morningPush: (at: number) => void }).morningPush(Date.UTC(2026, 10, 8, h, m));
+    next(6, 59);
+    expect(pushed).toEqual([]); // not yet
+    next(7, 2);
+    next(7, 10); // once a morning
+    expect(pushed).toEqual(['While you slept: 1 handled, 0 waiting for you, 1 blocked.']);
   });
 });

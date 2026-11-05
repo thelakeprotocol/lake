@@ -437,11 +437,14 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
   app.get(`${path}/duty/pending`, ...signedIn, async (req, res) => {
     const principal = principalOf(req);
     if (!principal) return void res.status(401).json({ error: 'sign in first (Authorization: Bearer)' });
-    const l = live.get(principal);
     res.set('cache-control', 'no-store');
-    // Asleep means nothing waits: a message for it would have woken it.
-    if (!l) return void res.json({ waiting: 0, asleep: true });
-    res.json(await l.agent.pending().catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
+    // The runner says where it runs and since when: its look also tells the owner's house it's there (the morning page
+    // says honestly when it was watching, and the gaps). So a duty agent's look wakes it, like a message would.
+    const look = { host: String(req.query.host ?? '').slice(0, 80), since: String(req.query.since ?? '').slice(0, 40), every: Number(req.query.every) || 0 };
+    let l = live.get(principal);
+    if (!l && !look.host) return void res.json({ waiting: 0, asleep: true });
+    if (!l) { try { l = await agentFor(principal); await l.agent.wake(); } catch (e) { return void res.status(503).json({ error: (e as Error).message }); } }
+    res.json(await l.agent.pending(look.host ? look : undefined).catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
   });
   app.delete(path, ...signedIn, stream);
   app.get('/health', (_req, res) => void res.json({ ok: true, sessions: sessions.size, agents: live.size }));

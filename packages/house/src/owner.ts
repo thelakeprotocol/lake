@@ -107,7 +107,8 @@ const MAX_GRANT_MS = 48 * 3_600_000;
  * The owner's AI on duty while they're away (SPEC §6.1): what their signed grant lets it do, how many actions a night, in
  * which hours. Its bit on the status list is the kill switch.
  */
-export interface Duty { statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean } }
+export interface Duty { statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean };
+  /** Where its runner runs, since when, when it last looked, and the gaps when it didn't (the computer slept): said honestly. */ runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] } }
 /** One thing the AI on duty did, or was refused: what the owner's morning page shows, with its signed reply and an undo. */
 export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction'; ref: string }; undone?: string }
 export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
@@ -1139,7 +1140,16 @@ export class OwnerDesk {
         if (p.kind === 'assistant.duty') {
           const st = this.dutyState(assistant);
           const d = assistant.duty;
-          const q = p as unknown as { action?: string; to?: { key?: string; name?: string } };
+          const q = p as unknown as { action?: string; to?: { key?: string; name?: string }; runner?: { host?: string; since?: string; every?: number } };
+          // The runner's look: where and since when, and a gap when it stopped looking for longer than three of its looks.
+          if (d && q.runner?.host) {
+            const now = new Date().toISOString(), every = Math.max(30, Math.min(3600, Number(q.runner.every) || 600));
+            const prev = d.runner;
+            const gaps = prev ? [...prev.gaps] : [];
+            if (prev && Date.now() - Date.parse(prev.last) > 3 * every * 1000) gaps.push({ from: prev.last, to: now });
+            d.runner = { host: String(q.runner.host).slice(0, 80), since: prev && prev.since === q.runner.since ? prev.since : String(q.runner.since ?? now).slice(0, 40), last: now, every, gaps: gaps.slice(-10) };
+            if (!prev || gaps.length !== prev.gaps.length || prev.since !== d.runner.since || Date.now() - Date.parse(prev.last) > 10 * 60_000) await this.o.saveAssistants?.([...this.assistants.values()]);
+          }
           const room = d && st.on && q.action ? this.dutyRoom(assistant, String(q.action), q.to) : undefined;
           return void res.json(d ? { ...st, kinds: d.kinds, cap: d.cap, bookings: Math.min(BOOKINGS_A_NIGHT, d.cap), until: d.until, ...(d.hours ? { hours: d.hours } : {}), ...(room ? { room } : {}) } : st);
         }
@@ -1264,7 +1274,7 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.duty.log') {
         const since = Number((p as unknown as { since?: number }).since) || Date.now() - 24 * 3_600_000;
-        const duties = [...this.assistants.values()].filter((a) => a.duty).map((a) => ({ kid: a.kid, label: a.label, seenAt: a.seenAt, kinds: a.duty!.kinds, cap: a.duty!.cap, until: a.duty!.until, ...(a.duty!.hours ? { hours: a.duty!.hours } : {}), state: this.dutyState(a), ...(a.duty!.off ? { off: a.duty!.off } : {}), summary: this.dutySummary(a, since) }));
+        const duties = [...this.assistants.values()].filter((a) => a.duty).map((a) => ({ kid: a.kid, label: a.label, seenAt: a.seenAt, kinds: a.duty!.kinds, cap: a.duty!.cap, until: a.duty!.until, ...(a.duty!.hours ? { hours: a.duty!.hours } : {}), state: this.dutyState(a), ...(a.duty!.off ? { off: a.duty!.off } : {}), ...(a.duty!.runner ? { runner: a.duty!.runner } : {}), summary: this.dutySummary(a, since) }));
         return void res.json({ duties, entries: this.dutyLog.filter((e) => Date.parse(e.at) >= since) });
       }
       if (p.kind === 'panel.duty.undo') {
