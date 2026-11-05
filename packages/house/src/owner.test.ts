@@ -311,3 +311,19 @@ describe('the morning after a night on duty', () => {
     expect(pushed).toEqual(['While you slept: 1 handled, 0 waiting for you, 1 blocked.']);
   });
 });
+
+describe('notes about a request that is gone', () => {
+  it('leave the owner\'s list when the request is replaced or withdrawn', async () => {
+    const d = await leasedDesk();
+    const visitor = { webId: 'https://gp.example/#agent', domain: 'gp.example', name: 'gp.example' };
+    const a = d.desk.ask({ offerId: 'r1', visitor, purpose: 'care', fields: ['medications'], retention: 'none', priceUsd: 0, study: null, recommendation: 'deny' });
+    d.desk.suggestions = [{ id: 's1', from: 'Night AI', text: 'Deny gp.example', request: a.id, at: new Date().toISOString() }, { id: 's2', from: 'Night AI', text: 'Something else', at: new Date().toISOString() }];
+    // The same visitor asks again with another price: the old request is replaced, and the note about it goes.
+    const b = d.desk.ask({ offerId: 'r2', visitor, purpose: 'care', fields: ['medications'], retention: 'none', priceUsd: 1, study: null, recommendation: 'deny' });
+    expect(d.desk.suggestions.map((x) => x.id)).toEqual(['s2']);
+    d.desk.suggestions.push({ id: 's3', from: 'Night AI', text: 'Deny again', request: b.id, at: new Date().toISOString() });
+    expect(d.desk.withdraw(b.id, visitor.webId)).toBe(true);
+    expect(d.desk.suggestions.map((x) => x.id)).toEqual(['s2']);
+    d.close();
+  });
+});

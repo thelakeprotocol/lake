@@ -430,6 +430,7 @@ export class OwnerDesk {
     const older = [...this.pending.values()].filter((x) => x.status === 'pending' && x.visitor.webId === r.visitor.webId && x.purpose === r.purpose && x.fields.some((f) => r.fields.includes(f)));
     for (const o of older) {
       this.pending.delete(o.id);
+      this.dropNotesAbout(o.id);
       this.news({ about: 'request.withdrawn', request: o.id, by: o.visitor.domain, note: `replaced by its newer request ${r.offerId}` });
     }
     const req: PendingRequest = { ...r, id: r.offerId, status: 'pending', requestedAt: new Date().toISOString(), ...(older.length ? { replaces: older.map((o) => o.id) } : {}) };
@@ -451,6 +452,7 @@ export class OwnerDesk {
     const req = this.pending.get(offerId);
     if (!req || req.visitor.webId !== visitorWebId || req.status !== 'pending') return false;
     this.pending.delete(offerId);
+    this.dropNotesAbout(offerId);
     this.news({ about: 'request.withdrawn', request: offerId, by: req.visitor.domain, note: 'the visitor took its request back; your human won\'t be asked' });
     return true;
   }
@@ -646,6 +648,13 @@ export class OwnerDesk {
       blocked: mine.filter((e) => e.action === 'block').length,
       refused: mine.filter((e) => e.refused).length,
     };
+  }
+  /** An assistant's notes about a request that's gone (withdrawn, or replaced by a newer one) say nothing any more: off the
+   * owner's list (6 Nov: a bot re-asking with a new price each time left a stack of "deny this" notes behind). */
+  private dropNotesAbout(requestId: string) {
+    const before = this.suggestions.length;
+    this.suggestions = this.suggestions.filter((x) => x.request !== requestId);
+    if (this.suggestions.length !== before) void this.saveSuggestions();
   }
   /** At most 50 notes, oldest first out; open errands don't count and aren't cut (their own cap is 20 an assistant). */
   private trimSuggestions() {
