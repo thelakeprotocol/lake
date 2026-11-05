@@ -434,15 +434,14 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
   app.get(path, ...signedIn, stream);
   // For the owner's AI on duty (`lake duty`): how many messages wait unread for this agent, without reading them, so its
   // runner starts the owner's model only when there is something to do.
-  app.get(`${path}/duty/pending`, ...signedIn, (req, res) => {
+  app.get(`${path}/duty/pending`, ...signedIn, async (req, res) => {
     const principal = principalOf(req);
     if (!principal) return void res.status(401).json({ error: 'sign in first (Authorization: Bearer)' });
     const l = live.get(principal);
     res.set('cache-control', 'no-store');
     // Asleep means nothing waits: a message for it would have woken it.
     if (!l) return void res.json({ waiting: 0, asleep: true });
-    const p = (l.agent as LakeMcpAgent & { pending?: () => { waiting: number; oldest?: string } }).pending?.();
-    res.json(p ?? { waiting: null, why: 'this connector can\'t count unread messages: the runner looks anyway' });
+    res.json(await l.agent.pending().catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
   });
   app.delete(path, ...signedIn, stream);
   app.get('/health', (_req, res) => void res.json({ ok: true, sessions: sessions.size, agents: live.size }));

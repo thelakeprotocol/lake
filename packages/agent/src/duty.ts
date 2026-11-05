@@ -108,10 +108,10 @@ async function call(o: DutyOptions, s: Saved, name: string, args: Record<string,
 }
 
 /** Unread messages for this agent, without reading them (the connector's GET <lake>/duty/pending). */
-async function pending(o: DutyOptions, s: Saved): Promise<{ waiting: number | null }> {
+async function pending(o: DutyOptions, s: Saved): Promise<{ waiting: number | null; duty?: { on: boolean; why?: string } }> {
   const r = await fetch(`${o.lake.replace(/\/$/, '')}/duty/pending`, { headers: { authorization: `Bearer ${s.access_token}` } });
   if (r.status === 401) { s.expires_at = 0; throw new Error('401'); }
-  return (await r.json()) as { waiting: number | null };
+  return (await r.json()) as { waiting: number | null; duty?: { on: boolean; why?: string } };
 }
 
 /** Runs the owner's agent CLI once with the Lake as its only tools; resolves with what it said last. */
@@ -146,6 +146,7 @@ export async function runDuty(o: DutyOptions): Promise<void> {
   let s = await signIn(o, file, log);
   const every = o.every ?? 10 * 60_000, maxRuns = o.maxRuns ?? 30, maxTools = o.maxTools ?? 40;
   const runs: number[] = [];
+  let offSaid = false;
   log(`on duty since ${hhmm()} on ${hostname()}, for ${o.house}, as ${s.agent?.name ?? 'its agent'}; looking every ${Math.round(every / 1000)} s`);
   const work = join(state, 'duty-work');
   mkdirSync(work, { recursive: true });
@@ -155,7 +156,10 @@ export async function runDuty(o: DutyOptions): Promise<void> {
       const p = await pending(o, s);
       // A connector that can't count says null: then run now and then anyway (every sixth look), not at every look.
       const unknownDue = p.waiting === null && !runs.some((t) => Date.now() - t < every * 6);
-      if (p.waiting ? p.waiting > 0 : unknownDue) {
+      // Off duty (its human's Off, or tonight's cap): nothing runs, said once, until the house says it's on again.
+      if (p.duty && !p.duty.on) { if (!offSaid) log(`off duty for now: ${p.duty.why ?? 'its house says so'}; looking again every ${Math.round(every / 1000)} s`); offSaid = true; }
+      else if (p.waiting ? p.waiting > 0 : unknownDue) {
+        offSaid = false;
         const recent = runs.filter((t) => Date.now() - t < 24 * 3_600_000);
         if (recent.length >= maxRuns) log(`${p.waiting ?? 'something'} waiting, but ${maxRuns} runs in 24 hours is the cap: not running`);
         else {
@@ -167,13 +171,14 @@ export async function runDuty(o: DutyOptions): Promise<void> {
           appendFileSync(join(logs, `${day}.log`), `--- ${new Date().toISOString()} run on ${hostname()} (exit ${r.code})\n[prompt]\n${prompt}\n[said]\n${r.out}\n`, { mode: 0o600 });
           const said = r.out.split('\n').filter(Boolean);
           log(`run done (exit ${r.code}): ${(r.code === 0 ? said.at(-1) : said.slice(-6).join(' | '))?.slice(0, 600) ?? '(nothing said)'}`);
-          if (/off duty/i.test(r.out)) log('the house says this AI is off duty: it keeps looking, and runs again once its human puts it back on');
+
         }
       }
     } catch (e) {
       if ((e as Error).message !== '401') log(`problem: ${(e as Error).message}`);
     }
-    await new Promise((r) => { const t = setTimeout(r, every); o.signal?.addEventListener('abort', () => { clearTimeout(t); r(undefined); }, { once: true }); });
+    // One listener a wait, taken off when the wait ends (each look added one before, and they piled up overnight).
+    await new Promise<void>((r) => { const stop = () => { clearTimeout(t); r(); }; const t = setTimeout(() => { o.signal?.removeEventListener('abort', stop); r(); }, every); o.signal?.addEventListener('abort', stop, { once: true }); });
   }
   log(`off duty at ${hhmm()}`);
 }

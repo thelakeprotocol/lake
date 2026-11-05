@@ -199,8 +199,8 @@ export interface LakeMcpAgent {
   connectHouse(houseUrl: string, code: string, app?: string): Promise<{ name: string }>;
   /** Its state now, as `save` would get it. */
   snapshot(): Promise<AgentSnapshot>;
-  /** How many messages wait unread, and since when (the duty runner's cheap look). */
-  pending(): { waiting: number; oldest?: string };
+  /** How many messages wait unread, and since when, and for an AI on duty whether it is on now (the runner's cheap look). */
+  pending(): Promise<{ waiting: number; oldest?: string; duty?: { on: boolean; why?: string } }>;
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
@@ -342,7 +342,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const agenda = a.agenda as { what?: string; with?: string } | undefined;
       if (agenda && !kinds.includes('book')) return refuse('booking isn\'t in your duty: leave your human a note', 'book');
       if (a.rules || a.allowance || a.door) return refuse('rules, doors and allowances are your human\'s own changes: not on duty');
-      return { log: { tool: name, action: agenda ? 'book' : 'note', text: String(agenda?.what ?? a.text ?? '').slice(0, 500) } };
+      return { log: { tool: name, action: agenda ? 'book' : 'note', ...(agenda?.with ? { to: { name: String(agenda.with).slice(0, 80) } } : {}), text: String(agenda?.what ?? a.text ?? '').slice(0, 500) } };
     }
     if (name === 'lake_sell') {
       if (!['deliver', 'revise', 'orders'].includes(String(a.action))) return refuse('on duty you only deliver what was already paid for');
@@ -2242,7 +2242,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       return mcp;
     },
     snapshot,
-    pending: () => ({ waiting: inbox.length, ...(inbox[0] ? { oldest: inbox[0].at } : {}) }),
+    pending: async () => {
+      const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty' }).catch(() => null)) as { on?: boolean; why?: string } | null) : null;
+      return { waiting: inbox.length, ...(inbox[0] ? { oldest: inbox[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}) };
+    },
     wake: async () => { await agent(); },
     passport: async () => {
       const a = await agent();

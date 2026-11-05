@@ -371,7 +371,13 @@ async function ensureContainer(o: OwnerSession, path: string) {
 }
 
 async function put(o: OwnerSession, path: string, body: string, contentType: string) {
-  const res = await o.fetch(o.podRoot + path, { method: 'PUT', headers: { 'content-type': contentType }, body });
+  // A pod server just started can refuse an owner it has only just logged in (403), or stumble (5xx): a PUT is safe to
+  // send again, so a few tries a moment apart before giving up (sandbox, 5 Nov: the houses crashed once on start-up).
+  let res = await o.fetch(o.podRoot + path, { method: 'PUT', headers: { 'content-type': contentType }, body });
+  for (let wait = 500; !res.ok && (res.status === 401 || res.status === 403 || res.status >= 500) && wait <= 4000; wait *= 2) {
+    await new Promise((r) => setTimeout(r, wait));
+    res = await o.fetch(o.podRoot + path, { method: 'PUT', headers: { 'content-type': contentType }, body });
+  }
   if (!res.ok) throw new Error(`could not write ${path}: ${res.status} ${(await res.text()).slice(0, 160)}`);
 }
 
