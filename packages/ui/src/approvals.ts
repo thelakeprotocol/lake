@@ -1148,18 +1148,25 @@ function dutyLine(e: DutyEntry): string {
 /** The morning page: what your AI on duty did in the last day, each with what the other side signed, and Undo. */
 function WhileYouSlept() {
   const log = useHouse<DutyLog>({ kind: 'panel.duty.log' });
-  const entries = (log.data?.entries ?? []).slice().reverse();
-  if (!entries.length) return null;
+  const all = log.data?.entries ?? [];
+  if (!all.length) return null;
+  // In the order it happened, like a night told in the morning. Its notes to you are under Needs you, so not again here.
+  const done = all.filter((e) => !e.refused && e.action !== 'note'), stopped = all.filter((e) => e.refused);
   const sum = (log.data?.duties ?? []).reduce((t, d) => ({ handled: t.handled + d.summary.handled, waiting: t.waiting + d.summary.waiting, blocked: t.blocked + d.summary.blocked }), { handled: 0, waiting: 0, blocked: 0 });
-  return h('section', { class: 'block slept' },
-    h('h2', {}, 'While you slept'),
-    h('p', { class: 'slept-sum' }, `${sum.handled} handled, ${sum.waiting} waiting for you, ${sum.blocked} blocked`),
-    ...(log.data?.duties ?? []).filter((d) => d.runner).map((d) => h('p', { class: 'muted', key: `run-${d.kid}` }, watching(d.runner!))),
-    h(Paged, { items: entries, size: 8, render: (e: DutyEntry) => h('li', { key: e.id, class: `item${e.refused ? ' amber' : ''}` },
+  const row = (e: DutyEntry) => h('li', { key: e.id, class: `item${e.refused ? ' amber' : ''}` },
       h('div', { class: 'item-head' }, h('span', { class: 'item-text duty-line' }, dutyLine(e)), h('time', { class: 'r-meta' }, time(e.at))),
       (e.reply !== undefined || e.receipt) || e.undo ? h('div', { class: 'item-foot' },
         e.reply !== undefined || e.receipt ? h('details', { class: 'receipt' }, h('summary', {}, 'Receipt'), h('p', { class: 'muted' }, receiptWords(e)), h('pre', { class: 'json' }, typeof (e.reply ?? e.receipt) === 'string' ? String(e.reply ?? e.receipt) : JSON.stringify(e.reply, null, 1))) : h('span', {}),
-        e.undo ? (e.undone ? h('span', { class: 'chip' }, 'Undone') : h(Act, { label: 'Undo', cls: 'quiet', run: () => call({ kind: 'panel.duty.undo', entry: e.id }) })) : null) : null) }));
+        e.undo ? (e.undone ? h('span', { class: 'chip' }, 'Undone') : h(Act, { label: 'Undo', cls: 'quiet', run: () => call({ kind: 'panel.duty.undo', entry: e.id }) })) : null) : null);
+  return h('section', { class: 'block slept' },
+    h('h2', {}, 'While you slept'),
+    h('dl', { class: 'tiles slept-tiles' },
+      h('div', { class: 'tile mint' }, h('dt', {}, 'Handled'), h('dd', {}, String(sum.handled))),
+      h('div', { class: 'tile' }, h('dt', {}, 'Waiting for you'), h('dd', {}, String(sum.waiting))),
+      h('div', { class: 'tile' }, h('dt', {}, 'Blocked'), h('dd', {}, String(sum.blocked)))),
+    ...(log.data?.duties ?? []).filter((d) => d.runner).map((d) => h('p', { class: 'muted', key: `run-${d.kid}` }, watching(d.runner!))),
+    done.length ? h(Paged, { items: done, size: 8, render: row }) : h('p', { class: 'empty' }, 'Nothing done for you: what came in is waiting for you below.'),
+    stopped.length ? h('details', { class: 'slept-stopped' }, h('summary', {}, `Stopped: ${stopped.length} thing${stopped.length === 1 ? '' : 's'} it may not do`), h('ul', { class: 'items' }, ...stopped.map(row))) : null);
 }
 
 // ---- Money ----

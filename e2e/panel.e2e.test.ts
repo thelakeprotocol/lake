@@ -722,13 +722,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Call on Monday at 10:00', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, on: true });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.', reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
-    // The morning: Home shows what it did, newest first, with receipts and Undo.
+    // The morning: Home shows what it did, in order, with receipts and Undo; what it was stopped from, folded away.
     await tab('Home');
     const slept = page.locator('section.slept');
     await slept.waitFor({ timeout: 10_000 });
-    expect(await slept.locator('.slept-sum').textContent()).toBe('2 handled, 0 waiting for you, 0 blocked');
+    expect(await slept.locator('.slept-tiles dd').allTextContents()).toEqual(['2', '0', '0']);
     await slept.getByText('Replied to Sam\'s AI: Yes, Monday works.').waitFor();
+    await slept.locator('.slept-stopped summary', { hasText: 'Stopped: 1 thing it may not do' }).click();
     await slept.getByText('Stopped (to Quick Cash): no money on duty').waitFor();
+    await slept.locator('.slept-stopped summary').click();
     const book = slept.locator('li.item', { hasText: 'Booked with Sam\'s AI: Call on Monday at 10:00' });
     await book.locator('summary', { hasText: 'Receipt' }).click();
     await book.getByText(/"digest": "abc123"/).waitFor();

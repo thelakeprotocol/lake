@@ -289,6 +289,9 @@ select.tz { max-width: 220px; }
 .days-input { width: 90px; background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 600 18px var(--f-body); }
 
 /* AI on duty, and the morning page. */
+.slept-tiles { margin: 4px 0 10px; }
+.slept-stopped { margin-top: 10px; }
+.slept-stopped > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 .slept-sum { font-size: 17px; font-weight: 600; margin: 0 0 10px; color: var(--fg); }
 .duty-line { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .slept .item-head { align-items: flex-start; }
