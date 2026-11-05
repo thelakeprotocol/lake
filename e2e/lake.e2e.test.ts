@@ -800,6 +800,45 @@ describe('the owner', () => {
     }
   });
 
+  it('a private answer: the owner taps their band, the house keeps it, and the AI sends it into a secret count without ever being told it', async () => {
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-private') });
+    const chat = async () => {
+      const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'pa', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const text = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: text } : JSON.parse(text); };
+      return { c, call, you: (await call('lake_overview')).you };
+    };
+    const [a, b, c] = [await chat(), await chat(), await chat()];
+    try {
+      const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'pay band test' });
+      expect(await a.call('lake_house_connect', { code, house_url: houses.strict })).toMatchObject({ paired: true });
+      const bands = ['under 60k', '60-80k', '80-100k', '100k+'];
+      // A private question can't carry messages for its choices (which one went out would give the answer away).
+      expect(await a.call('lake_house_suggest', { text: 'Your band?', ask: { choices: bands, private: true }, then: [null, null, null, null] })).toMatchObject({ error: expect.stringContaining('give the answer away') });
+      const asked = await a.call('lake_house_suggest', { text: 'Your pay band, for the team\'s secret count (only totals come out)?', ask: { choices: bands, private: true } });
+      await ownerCall({ kind: 'panel.assistant.answer', id: asked.id, choice: '80-100k' });
+      // The AI hears it was answered, not what.
+      let heard: { message?: Record<string, unknown> }[] = [];
+      for (let i = 0; i < 10 && !heard.some((m) => m.message?.about === 'question.answered'); i++) heard = [...heard, ...((await a.call('lake_inbox', { wait_seconds: 2 })).messages ?? [])];
+      const news = heard.find((m) => m.message?.about === 'question.answered')!;
+      expect(news.message).toMatchObject({ private: true });
+      expect(JSON.stringify(news)).not.toContain('80-100k');
+      const opened = await a.call('lake_count', { action: 'open', id: 'band:e2e-team', options: bands, minutes: 10 });
+      const ballot = { action: 'answer', id: 'band:e2e-team', options: bands, leader: opened.leader, helper: opened.helper };
+      const answered = await a.call('lake_count', { ...ballot, from_question: asked.id });
+      expect(answered).toMatchObject({ kind: 'count.answered', by: expect.stringContaining('you were not told it') });
+      expect(JSON.stringify(answered)).not.toContain('80-100k');
+      // Once only: no second count can be fed the same answer.
+      expect(await a.call('lake_count', { ...ballot, id: 'band:e2e-again', from_question: asked.id })).toMatchObject({ error: expect.stringContaining('already') });
+      for (const [v, choice] of [[b, '60-80k'], [c, '80-100k']] as const) expect(await v.call('lake_count', { ...ballot, choice })).toMatchObject({ kind: 'count.answered' });
+      expect(await a.call('lake_count', { action: 'close', id: 'band:e2e-team', voters: [a.you.url, b.you.url, c.you.url] })).toMatchObject({ kind: 'count.totals', totals: { 'under 60k': 0, '60-80k': 1, '80-100k': 2, '100k+': 0 }, counted: 3 });
+    } finally {
+      for (const v of [a, b, c]) await v.c.close();
+    }
+  });
+
   it('one person, one house: a person stamp, and a people-only pledge counts two houses of one owner once', async () => {
     const consentFor = (house: string) => signMessage({ kind: 'personhood.consent', house }, owner, { iss: house });
     expect(await ownerCall({ kind: 'panel.person.request', consent: await consentFor(webId) })).toMatchObject({ stamped: true });

@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, keyThumbprint, revealBlind, signBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -746,6 +746,19 @@ function panelFor(x: {
       if (reply.kind === 'tally.signed' || reply.kind === 'tally.triggered') {
         x.note('pledge.signed', `You signed the pledge "${id}" (${tally})${reply.kind === 'tally.triggered' ? ': it filled' : ''}`);
         x.desk().news({ about: 'pledge.signed', pledge: id, tally, at: new Date().toISOString(), ...(reply.kind === 'tally.triggered' ? { filled: true } : {}) });
+      }
+      return reply;
+    },
+    async withdrawPledge(tally, id) {
+      // A blind signature is taken back with the secret only its signer holds (from a throwaway identity, so taking it back
+      // says no more than signing did); a plain one, as the house. Either way, only before the pledge fills.
+      const all = await blindPledges();
+      const s = all.find((p) => p.tally === tally && p.id === id);
+      const reply = s ? await withdrawBlind(tally, s, { sandbox: x.o.sandbox }) : (await send(tally, { kind: 'tally.withdraw', id })).payload as Record<string, any>;
+      if (reply.kind === 'tally.withdrawn') {
+        if (s) await put(owner, 'wallet/pledges.json', JSON.stringify(all.filter((p) => p !== s)), 'application/json');
+        x.note('pledge.withdrawn', `You took your signature back from the pledge "${id}" (${tally})`);
+        x.desk().news({ about: 'pledge.withdrawn', pledge: id, tally, at: new Date().toISOString() });
       }
       return reply;
     },

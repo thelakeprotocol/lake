@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -377,6 +377,7 @@ function SuggestionItem({ x }: { x: Note }) {
     x.sender ? h('p', { class: 'item-meta' }, `About: ${x.sender}`) : null,
     h('p', { class: 'item-text' }, x.text),
     x.door ? h('blockquote', {}, x.door.about) : null,
+    x.ask?.private ? h('p', { class: 'item-meta private-q' }, x.ask.answered ? 'Private: only you know this answer. It leaves your house only as two unreadable shares, and only totals come out.' : 'Private: your AI won\'t see your answer. It leaves your house only as two unreadable shares, and only totals come out.') : null,
     x.ask?.answered ? h('p', { class: 'item-meta' }, `You answered: ${x.ask.answered}`) : null,
     // A question: each choice is a button; the one your agent advises stands out.
     x.ask && !x.ask.answered ? h('div', { class: 'choices' }, ...x.ask.choices.map((c, i) => h(Act, { key: c, label: c, cls: x.ask!.recommend === i ? 'primary' : '', run: () => call({ kind: 'panel.assistant.answer', id: x.id, choice: c }) }))) : null,

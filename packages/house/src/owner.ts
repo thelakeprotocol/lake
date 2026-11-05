@@ -81,6 +81,8 @@ export interface PanelProvider {
   signPledge(tally: string, id: string): Promise<unknown>;
   /** Reveal this house on a blind pledge that has filled. */
   revealPledge(tally: string, id: string): Promise<unknown>;
+  /** Takes the owner's signature back, before the pledge fills: it never binds them. */
+  withdrawPledge?(tally: string, id: string): Promise<unknown>;
 }
 
 export interface GrantRecord {
@@ -1599,6 +1601,7 @@ export class OwnerDesk {
           'panel.person.request': () => panel.requestPersonhood((q as { consent?: unknown }).consent, this.ownerJwk!),
           'panel.pledge.sign': () => panel.signPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
           'panel.pledge.reveal': () => panel.revealPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
+          'panel.pledge.withdraw': async () => panel.withdrawPledge?.(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')) ?? { error: 'this house can\'t take a signature back' },
         } as Record<string, () => Promise<unknown>>)[p.kind]?.().catch((e: Error) => ({ error: e.message }));
         if (answer !== undefined && p.kind === 'panel.offer.accept' && !(answer as { error?: string }).error) {
           // The assistant that suggested it is the one to pay: what was accepted, from whom, and the quoter's answer (its order).

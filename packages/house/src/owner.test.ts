@@ -327,3 +327,37 @@ describe('notes about a request that is gone', () => {
     d.close();
   });
 });
+
+describe('a private question', () => {
+  it('keeps the answer in the house: the AI is told it was answered, and its connector can take it once, for a count with the same options', async () => {
+    const told: Record<string, unknown>[] = [];
+    const d = await leasedDesk(null, undefined, told);
+    const phone = await generateIdentity('phone');
+    await d.post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => d.post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    const { code } = await owner({ kind: 'panel.assistant.invite' });
+    const ai = await generateIdentity('ai');
+    await d.post('/assistant', { publicJwk: ai.publicJwk, code, url: 'https://ai.example/a2a' });
+    const asAi = async (p: Record<string, unknown>) => d.post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    const bands = ['under 60k', '60-70k', '70-80k', '80-90k', '90-100k', '100k+'];
+    // Six choices only when private; a public question stays at four.
+    expect(await asAi({ kind: 'assistant.suggest', text: 'Your pay band?', ask: { choices: bands } })).toMatchObject({ error: expect.stringContaining('2 to 4') });
+    const q = await asAi({ kind: 'assistant.suggest', text: 'Your pay band, for the secret count (only totals come out)?', ask: { choices: bands, private: true, recommend: 2 } });
+    expect(q).toMatchObject({ ok: true });
+    expect(d.desk.suggestions[0]!.ask).toEqual({ choices: bands, private: true });
+    expect(await asAi({ kind: 'assistant.private_answer', question: q.id, options: bands })).toMatchObject({ error: expect.stringContaining('hasn\'t answered') });
+    await owner({ kind: 'panel.assistant.answer', id: q.id, choice: '80-90k' });
+    await new Promise((r) => setTimeout(r, 20));
+    // The AI hears it was answered, never what; its list shows only that.
+    const news = told.find((t) => t.about === 'question.answered')!;
+    expect(news).toMatchObject({ private: true });
+    expect(JSON.stringify(news)).not.toContain('80-90k');
+    expect((await asAi({ kind: 'list' })).suggestions.find((x: { id: string }) => x.id === q.id).ask.answered).toBe('answered privately');
+    expect((await owner({ kind: 'list' })).suggestions.find((x: { id: string }) => x.id === q.id).ask.answered).toBe('80-90k');
+    // Its connector takes it for a count with exactly these options, once.
+    expect(await asAi({ kind: 'assistant.private_answer', question: q.id, options: ['yes', 'no'] })).toMatchObject({ error: expect.stringContaining('exactly') });
+    expect(await asAi({ kind: 'assistant.private_answer', question: q.id, options: bands })).toEqual({ choice: '80-90k' });
+    expect(await asAi({ kind: 'assistant.private_answer', question: q.id, options: bands })).toMatchObject({ error: expect.stringContaining('already') });
+    d.close();
+  });
+});
