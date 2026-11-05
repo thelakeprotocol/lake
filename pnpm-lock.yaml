@@ -40,15 +40,6 @@ importers:
       '@thelakeprotocol/core':
         specifier: workspace:^
         version: link:../core
-      '@thelakeprotocol/usecase-health':
-        specifier: workspace:^
-        version: link:../../usecases/health
-      '@thelakeprotocol/usecase-mortgage':
-        specifier: workspace:^
-        version: link:../../usecases/mortgage
-      '@thelakeprotocol/usecase-shopping':
-        specifier: workspace:^
-        version: link:../../usecases/shopping
       '@thelakeprotocol/visitor':
         specifier: workspace:^
         version: link:../visitor
@@ -61,6 +52,16 @@ importers:
       zod:
         specifier: '3'
         version: 3.25.76
+    optionalDependencies:
+      '@thelakeprotocol/usecase-health':
+        specifier: workspace:^
+        version: link:../../usecases/health
+      '@thelakeprotocol/usecase-mortgage':
+        specifier: workspace:^
+        version: link:../../usecases/mortgage
+      '@thelakeprotocol/usecase-shopping':
+        specifier: workspace:^
+        version: link:../../usecases/shopping
     devDependencies:
       '@types/express':
         specifier: '5'
@@ -280,6 +281,10 @@ importers:
       '@thelakeprotocol/core':
         specifier: workspace:^
         version: link:../core
+      express:
+        specifier: '5'
+        version: 5.3.0
+    optionalDependencies:
       '@thelakeprotocol/usecase-health':
         specifier: workspace:^
         version: link:../../usecases/health
@@ -289,9 +294,6 @@ importers:
       '@thelakeprotocol/usecase-shopping':
         specifier: workspace:^
         version: link:../../usecases/shopping
-      express:
-        specifier: '5'
-        version: 5.3.0
     devDependencies:
       '@types/express':
         specifier: '5'

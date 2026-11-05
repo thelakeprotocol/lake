@@ -18,10 +18,12 @@
   "dependencies": {
     "@a2a-js/sdk": "1.3.0",
     "@thelakeprotocol/core": "workspace:^",
+    "express": "5"
+  },
+  "optionalDependencies": {
     "@thelakeprotocol/usecase-health": "workspace:^",
     "@thelakeprotocol/usecase-mortgage": "workspace:^",
-    "@thelakeprotocol/usecase-shopping": "workspace:^",
-    "express": "5"
+    "@thelakeprotocol/usecase-shopping": "workspace:^"
   },
   "repository": {
     "type": "git",

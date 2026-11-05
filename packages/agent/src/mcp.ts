@@ -6,7 +6,8 @@ import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckp
 import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, checkSplitConsent, splitHash, keyThumbprint, type CartShare, type DeliveryTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
-await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n));
+// Packs are optional installs: one asked for by name must load; the default, if it isn't installed, is left out.
+await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n)).catch((e: Error) => { if (process.env.LAKE_PACKS) throw e; });
 const SANDBOX_STUDIES = exampleStudies();
 import { ago } from './ago.js';
 import { joinLake, type LakeAgent, type LakeAgentOptions } from './index.js';

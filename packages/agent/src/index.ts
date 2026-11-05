@@ -170,7 +170,7 @@ export interface LakeAgent {
 export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
   const port = o.port ?? 4800;
   const base = (o.publicUrl ?? `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
-  await loadPacks(o.packs ?? ['health'], (n) => import(n));
+  await loadPacks(o.packs ?? ['health'], (n) => import(n)).catch((e: Error) => { if (o.packs) throw e; });
   const id: Identity = o.identity ?? (o.keyFile ? await loadOrCreateIdentity(o.keyFile) : await generateIdentity());
   const visitor: Visitor = await makeVisitor(id, o.domain, o.name, `${base}/a2a`);
   const sent: LakeAgent['sent'] = [];
