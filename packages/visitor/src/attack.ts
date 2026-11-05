@@ -44,11 +44,12 @@ export async function attack(o: { houses: string[]; count: number; domain?: stri
 }
 
 /** Background life: traders making small, ordinary requests, and an attacker every so often. */
-export async function swarm(o: { node: string; traders: number; attackers: number; intervalMs: number; log?: (line: string) => void; signal?: AbortSignal }) {
+export async function swarm(o: { node: string; traders: number; attackers: number; intervalMs: number; log?: (line: string) => void; signal?: AbortSignal; /** Only houses whose address contains one of these (a sandbox's claimable houses): kept houses, real people's, are left alone. */ only?: string[] }) {
   const domains = ['gp.example', 'pharmacy.example', 'ads.example', 'shop.example', 'insurer.example', 'gym.example'];
   const traders = await Promise.all(Array.from({ length: o.traders }, async (_, i) => makeVisitor(await generateIdentity(), domains[i % domains.length]!)));
-  let houses = await houseUrls(o.node);
-  const refresh = setInterval(async () => { houses = await houseUrls(o.node).catch(() => houses); }, 10_000);
+  const mine = (urls: string[]) => (o.only?.length ? urls.filter((u) => o.only!.some((x) => u.includes(x))) : urls);
+  let houses = mine(await houseUrls(o.node));
+  const refresh = setInterval(async () => { houses = mine(await houseUrls(o.node).catch(() => houses)); }, 10_000);
   const jitter = () => o.intervalMs * (0.5 + Math.random());
   const loops = traders.map(async (t) => {
     while (!o.signal?.aborted) {

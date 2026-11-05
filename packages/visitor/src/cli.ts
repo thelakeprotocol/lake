@@ -32,7 +32,7 @@ const HELP = `lake — talk to the Lake
                                    rotating questions, prices and asks, so new houses get knocked, bargain and get paid
   lake quoters --packs mortgage [--port 4810] [--public-url http://quoters:4810] [--authority http://specialists:4300/register]
                                    run a pack's demo quoters (its lenders, for mortgage) in one process, each at /<name>
-  lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000]`;
+  lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000] [--only /t/sb-]`;
 
 const [cmd, ...rest] = process.argv.slice(2);
 const { positionals, values: a } = parseArgs({
@@ -63,7 +63,7 @@ const { positionals, values: a } = parseArgs({
     unpaid: { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     count: { type: 'string', default: '10' },
-    traders: { type: 'string', default: '8' },
+    traders: { type: 'string', default: '8' }, only: { type: 'string' },
     attackers: { type: 'string', default: '1' },
     interval: { type: 'string', default: '2000' },
     every: { type: 'string', default: '600' },
@@ -137,7 +137,7 @@ else if (cmd === 'reset') {
   console.log(`DONE      attacker ${r.domain}: ${Object.entries(r.tally).map(([k, n]) => `${n} ${k}`).join(', ')}`);
 } else if (cmd === 'swarm') {
   console.log(`swarm: ${a.traders} traders, ${a.attackers} attacker(s), one move every ~${a.interval} ms. Ctrl-C to stop.`);
-  await swarm({ node: a.node!, traders: Number(a.traders), attackers: Number(a.attackers), intervalMs: Number(a.interval), log: (l) => console.log(l) });
+  await swarm({ node: a.node!, traders: Number(a.traders), attackers: Number(a.attackers), intervalMs: Number(a.interval), log: (l) => console.log(l), ...(a.only ? { only: a.only.split(',').map((x) => x.trim()).filter(Boolean) } : {}) });
 }
 else if (cmd === 'quoters') {
   // Every quoter the loaded packs bring (for mortgage: its lenders), in one process, each under its own path.
