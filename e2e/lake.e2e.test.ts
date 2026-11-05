@@ -691,11 +691,16 @@ describe('the owner', () => {
       expect(pay).toMatchObject({ error: true, text: expect.stringContaining('no money on duty') });
       // Nobody new: first contact is the owner's. Sam is known once the owner's side has written to him.
       expect(await call('lake_ask', { to: stranger.card.supportedInterfaces[0]!.url, text: 'Hello!' })).toMatchObject({ error: true, text: expect.stringContaining('someone new to your human') });
+      // The owner's day assistant (another chat, another agent) writes to Sam: its connector tells the house, by Sam's key.
       const { code: c2 } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Day assistant' });
-      const day = await generateIdentity('day-assistant');
-      await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: day.publicJwk, code: c2, label: 'Day assistant' }) });
+      const dayTok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const day = new Client({ name: 'day-chat', version: '0' });
+      await day.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${dayTok.access_token}` } } }));
+      expect((await day.callTool({ name: 'lake_house_connect', arguments: { code: c2, house_url: houses.strict } })).isError).toBeFalsy();
+      expect((await day.callTool({ name: 'lake_ask', arguments: { to: friend.card.supportedInterfaces[0]!.url, text: 'Hi Sam, about Monday?' } })).isError).toBeFalsy();
+      await day.close();
       const samKey = await keyThumbprint((await verifyLakeCard(friend.card)).publicJwk);
-      await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'assistant.contact', key: samKey, name: 'Sam helper', webId: friend.webId }, day, { iss: 'assistant' })) });
+      await new Promise((r) => setTimeout(r, 1500)); // the day chat's connector tells the house after the call returns
       const sent = await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, text: 'Monday 10:00 works for my human.' });
       expect(sent.json).toMatchObject({ kind: 'received' });
       // Words only: an order or a cart isn't a reply.
