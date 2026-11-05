@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { getHeapStatistics } from 'node:v8';
 import express from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
@@ -44,6 +45,11 @@ export interface NodeOptions {
   logUrl?: string;
   /** How often blueprints not yet on the log are tried again (ms). Default 30000. */
   logRetryMs?: number;
+  /**
+   * A file the operator's own cron writes the host's disk and memory to (JSON), shown in GET /status with its age: a
+   * container can't see its host's.
+   */
+  hostStatusFile?: string;
 }
 
 /** What a node tells the houses that follow it: keys to drop on sight, and how agents have behaved. */
@@ -125,8 +131,10 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   // Skill ids let the map tell what an agent does (a quoter docks at the edge); the card is public anyway.
   const participant = (e: Entry): Participant => ({ id: e.id, role: e.profile.role, label: e.label, tags: e.profile.tags, domain: e.profile.ownerDomain, skills: (e.card.skills ?? []).map((s) => s.id).slice(0, 12) });
+  // Who is here now, for the map and its counts: one asleep is still listed in search, but not on the map.
+  const here = () => registry.all().filter((e) => !e.asleep);
   const recount = () => {
-    const all = registry.all();
+    const all = here();
     counters.houses = all.filter((e) => e.profile.role === 'house').length;
     counters.agents = all.filter((e) => e.profile.role !== 'house' && e.profile.role !== 'node').length + seenVisitors.size;
   };
@@ -224,6 +232,31 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   app.use(express.json({ limit: '256kb' }));
   app.get('/.well-known/agent-card.json', (_req, res) => void res.json(card));
   app.get('/health', (_req, res) => void res.json({ ok: true }));
+  // For whoever runs it (and their alarms): up, which build, memory, who is here. Counts only, nobody's identity.
+  const started = Date.now();
+  app.get('/status', (_req, res) => {
+    const m = process.memoryUsage(), mb = (n: number) => Math.round(n / 1_048_576);
+    const cgroup = (f: string) => { try { const v = readFileSync(`/sys/fs/cgroup/${f}`, 'utf8').trim(); return v === 'max' ? undefined : Number(v); } catch { return undefined; } };
+    const used = cgroup('memory.current'), limit = cgroup('memory.max');
+    let host: Record<string, unknown> | undefined;
+    try {
+      if (o.hostStatusFile && existsSync(o.hostStatusFile)) {
+        const h = JSON.parse(readFileSync(o.hostStatusFile, 'utf8')) as Record<string, unknown>;
+        host = { ...h, age_s: Math.round((Date.now() - Date.parse(String(h.at ?? ''))) / 1000) };
+      }
+    } catch {
+      host = { error: 'unreadable' };
+    }
+    const all = registry.all().filter((e) => e.via === 'direct');
+    res.set('cache-control', 'no-store').json({
+      ok: true, service: 'node', domain: o.domain, version: process.env.LAKE_VERSION ?? 'dev', started: new Date(started).toISOString(), uptime_s: Math.round((Date.now() - started) / 1000),
+      memory: { rss_mb: mb(m.rss), heap_used_mb: mb(m.heapUsed), heap_limit_mb: mb(getHeapStatistics().heap_size_limit), ...(used ? { container_used_mb: mb(used) } : {}), ...(limit ? { container_limit_mb: mb(limit) } : {}) },
+      participants: { houses: all.filter((e) => e.profile.role === 'house').length, specialists: all.filter((e) => e.profile.role === 'specialist').length, agents: all.filter((e) => !e.asleep && e.profile.role !== 'house' && e.profile.role !== 'specialist' && e.profile.role !== 'node').length, asleep: all.filter((e) => e.asleep).length },
+      watching: sockets.size,
+      lakes: [...peerHealth].map(([url, h]) => ({ url, answering: h.answering })),
+      ...(host ? { host } : {}),
+    });
+  });
 
   const announced = new Set<string>();
   app.post('/register', async (req, res) => {
@@ -233,6 +266,14 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
       return void res.status(400).json(r.refusal);
     }
     for (const old of r.replaced) if (old.profile.role === 'house') publish(makeEvent('house.left', old.id, undefined, { replaced: true }));
+    // Its host listing it again while it sleeps (after this node restarted): kept findable, and not news. Only a card its
+    // endpoint serves gets here, so this keeps nothing listed that its host has let go.
+    if (req.body?.asleep === true && r.entry.profile.role !== 'house') {
+      r.entry.asleep = true;
+      announced.add(r.entry.profile.publicJwk.kid!);
+      recount();
+      return void res.json({ id: r.entry.id, domainVia: r.entry.domainVia, asleep: true });
+    }
     const p = participant(r.entry);
     // The same key registering again (a reconnect, a new tag) isn't news: the feed said it arrived the first time.
     const again = r.entry.profile.role !== 'house' && announced.has(r.entry.profile.publicJwk.kid!);
@@ -242,14 +283,14 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     res.json({ id: r.entry.id, domainVia: r.entry.domainVia });
   });
 
-  const IDLE_MS = 15 * 60_000;
+  const IDLE_MS = 15 * 60_000, ASLEEP_MS = 30 * 86_400_000;
   app.get('/cards', (req, res) => {
     const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role), q: str(req.query.q) };
     // An agent whose driver hasn't acted for a quarter of an hour is left out unless asked for (idle=1): run 29's host
     // invited a player sixteen minutes after it had gone. It is still there for messages, just not offered as company.
     const idle = req.query.idle === '1';
     // `via`: the peer node a card was learned from (SPEC §9), so an agent can tell its own Lake's specialists from a peer's.
-    res.json(registry.search(q).filter((e) => idle || !e.lastActive || Date.now() - e.lastActive < IDLE_MS).map((e) => ({ id: e.id, card: e.card, ...(e.via !== 'direct' ? { via: e.via, ...(peerHealth.get(e.via)?.answering === false ? { unreachable_since: peerHealth.get(e.via)!.since } : {}) } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}), ...registry.claimsOf(e) })));
+    res.json(registry.search(q).filter((e) => idle || (!e.asleep && (!e.lastActive || Date.now() - e.lastActive < IDLE_MS))).map((e) => ({ id: e.id, card: e.card, ...(e.asleep ? { asleep: true } : {}), ...(e.via !== 'direct' ? { via: e.via, ...(peerHealth.get(e.via)?.answering === false ? { unreachable_since: peerHealth.get(e.via)!.since } : {}) } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}), ...registry.claimsOf(e) })));
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
@@ -278,7 +319,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   // an agent can tell who is at work from who was left running (run 22: five of nine invitees had gone, and every
   // message to them still said "received").
   app.post('/presence', async (req, res) => {
-    const env = req.body as Signed<{ kind: 'presence'; active?: string; until?: string; gone?: boolean }>;
+    const env = req.body as Signed<{ kind: 'presence'; active?: string; until?: string; gone?: boolean; asleep?: boolean }>;
     const entry = env?.payload?.iss ? registry.byWebId(env.payload.iss) : undefined;
     if (!entry) return void res.status(403).json({ code: 'not-registered', why: 'register your card first' });
     try {
@@ -293,6 +334,13 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
       else recount();
       return void res.json({ ok: true, gone: true });
     }
+    // Asleep: it stops checking in, and its host wakes it for a message. Listed (marked asleep) for up to 30 days.
+    if (env.payload.asleep === true) {
+      entry.asleep = true;
+      entry.lastSeen = Date.now();
+      recount();
+      return void res.json({ ok: true, asleep: true });
+    }
     const at = Date.parse(String(env.payload.active ?? ''));
     if (!(at > 0) || at > Date.now() + 60_000) return void res.status(400).json({ code: 'malformed', why: 'active: when, as an ISO time, not in the future' });
     entry.lastActive = Math.min(at, Date.now());
@@ -305,10 +353,11 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   // Badges, checked at registration, are checked again every few minutes: an issuer may revoke one (SPEC §2.5).
   setInterval(() => void registry.recheck().catch(() => {}), 5 * 60_000).unref();
-  // Participants check in every few seconds. Anyone silent for a minute has gone: say so, and forget them.
+  // Participants check in every few seconds. Anyone silent for a minute has gone: say so, and forget them. One asleep
+  // checks in no more; it is forgotten after 30 days, as a connector forgets an agent nobody has used for that long.
   setInterval(() => {
     for (const e of registry.all()) {
-      if (e.via !== 'direct' || e.profile.role === 'node' || Date.now() - e.lastSeen < 60_000) continue;
+      if (e.via !== 'direct' || e.profile.role === 'node' || Date.now() - e.lastSeen < (e.asleep ? ASLEEP_MS : 60_000)) continue;
       registry.remove(e.id);
       if (e.profile.role === 'house') publish(makeEvent('house.left', e.id, undefined, { silent: true }));
       else recount();
@@ -316,7 +365,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   }, 15_000).unref();
 
   // `recent` is what the map's log shows anyway: what just happened, in one line each, newest first.
-  app.get('/state', (_req, res) => void res.json({ counters, participants: registry.all().map(participant), guilds: guildList(), lakes: [...peerHealth].map(([url, h]) => ({ url, answering: h.answering, since: h.since })), recent: recent.slice(-20).reverse().map((l) => ({ at: l.event.at, kind: l.event.kind, text: l.text })) }));
+  app.get('/state', (_req, res) => void res.json({ counters, participants: here().map(participant), guilds: guildList(), lakes: [...peerHealth].map(([url, h]) => ({ url, answering: h.answering, since: h.since })), recent: recent.slice(-20).reverse().map((l) => ({ at: l.event.at, kind: l.event.kind, text: l.text })) }));
 
   // Signed, so a house can follow a node's blocklist without trusting the wire. Each house chooses which nodes it follows.
   // A node republishes the blocklists of the peers it chose to follow, alongside its own.
@@ -601,7 +650,7 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   wss.on('connection', (ws) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
-    send(ws, { type: 'snapshot', node: o.domain, sandbox: o.sandbox, approvalsUrl: o.approvalsUrl, participants: registry.all().map(participant), counters, recent: recent.slice(-20), guilds: guildList() });
+    send(ws, { type: 'snapshot', node: o.domain, sandbox: o.sandbox, approvalsUrl: o.approvalsUrl, participants: here().map(participant), counters, recent: recent.slice(-20), guilds: guildList() });
   });
   return { server, card, registry, publish };
 }

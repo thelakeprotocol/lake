@@ -36,6 +36,7 @@ jobs:
         with:
           context: .
           target: ${{ matrix.target }}
+          build-args: GIT_SHA=${{ github.sha }}
           push: true
           tags: |
             ghcr.io/thelakeprotocol/${{ matrix.image }}:latest

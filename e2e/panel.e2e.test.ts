@@ -59,12 +59,14 @@ const lostKey = async (p: Page) => {
 };
 
 let assistant: Identity;
+let nodeUrl = '';
 const asAssistant = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, assistant, { iss: 'assistant' })) })).json();
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'lake-panel-'));
   const [np, sp, pp, hp, mp, xp] = [await freePort(), await freePort(), await freePort(), await freePort(), await freePort(), await freePort()];
   const node = `http://localhost:${np}`;
+  nodeUrl = node;
   // One site for the house and the connector, as on the sandbox (the panel hands its code only to its own Lake's sign-in).
   const site = `http://localhost:${xp}`;
   proxy = httpServer((req, res) => {
@@ -108,6 +110,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await c.close();
     // Asleep after 3 s with nobody connected (LAKE_MCP_SLEEP_MS); a message for it wakes it from disk.
     await new Promise((ok) => setTimeout(ok, 6000));
+    // Still listed while asleep (5 Nov: Grok's agent went unfound by name): left out of a search for company, found by
+    // name with idle=1, marked asleep; and the node fetching its card doesn't wake it.
+    const name = encodeURIComponent(me.name.split(' (')[0]);
+    const cards = async (idle: boolean) => (await (await fetch(`${nodeUrl}/cards?q=${name}${idle ? '&idle=1' : ''}`)).json()) as { card: { name: string }; asleep?: boolean }[];
+    expect((await cards(false)).some((c) => c.card.name === me.name)).toBe(false);
+    expect((await cards(true)).find((c) => c.card.name === me.name)).toMatchObject({ asleep: true });
+    const status = async () => (await (await fetch(`${house}/mcp/status`)).json()) as { ok: boolean; agents: { awake: number; asleep: number }; memory: { rss_mb: number } };
+    expect(await status()).toMatchObject({ ok: true, agents: { asleep: 1 }, memory: { rss_mb: expect.any(Number) } });
+    // Its host lists it again after a node restart, as asleep, from the card it keeps: still asleep afterwards.
+    const card = await (await fetch(me.url.replace(/\/a2a$/, '/.well-known/agent-card.json'))).json();
+    expect(await (await fetch(`${nodeUrl}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ card, asleep: true }) })).json()).toMatchObject({ asleep: true });
+    expect((await status()).agents).toMatchObject({ awake: 0, asleep: 1 });
+    expect(await (await fetch(`${nodeUrl}/status`)).json()).toMatchObject({ ok: true, service: 'node', participants: { asleep: 1 } });
     const writer = await makeVisitor(await generateIdentity(), 'writer.example');
     expect((await ask(me.url, writer, { kind: 'message', text: 'still there?' })).reply).toMatchObject({ kind: 'received' });
     // Back with the same sign-in, the same agent, and the message waiting.
@@ -116,6 +131,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const inbox = JSON.parse(((await again.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 2 } })).content as { text: string }[])[0]!.text);
     expect(inbox.messages.map((m: { message: { text?: string } }) => m.message.text)).toContain('still there?');
     expect(JSON.parse(((await again.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text).you.url).toBe(me.url);
+    // Awake again: no longer marked asleep anywhere.
+    expect((await cards(true)).find((c) => c.card.name === me.name)?.asleep).toBeUndefined();
+    expect((await status()).agents.asleep).toBe(0);
     await again.close();
   });
 

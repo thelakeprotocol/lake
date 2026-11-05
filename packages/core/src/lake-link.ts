@@ -110,6 +110,20 @@ export class LakeLink {
     }
   }
 
+  /**
+   * Tell the node this participant is going to sleep (SPEC §8.1): it stops checking in, but its host still answers at its
+   * endpoint and wakes it for a message, so the node keeps it findable instead of forgetting it a minute later.
+   */
+  async sleep() {
+    if (!this.id) return;
+    try {
+      const env = await signMessage({ kind: 'presence', asleep: true }, this.o.identity, { iss: this.o.webId });
+      await fetch(`${this.o.nodeUrl}/presence`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(env), signal: AbortSignal.timeout(3000) });
+    } catch {
+      // forgotten in a minute, and its host registers it again as asleep
+    }
+  }
+
   /** Stop checking in (a participant that's leaving, or replacing its card). */
   stop() {
     if (this.alive) clearInterval(this.alive);
@@ -164,6 +178,10 @@ export class LakeLinks {
 
   async leave() {
     await Promise.all(this.links.map((l) => l.leave()));
+  }
+
+  async sleep() {
+    await Promise.all(this.links.map((l) => l.sleep()));
   }
 
   stop() {

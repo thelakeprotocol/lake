@@ -17,6 +17,8 @@ export interface Entry {
   lastActive?: number;
   /** Until when it says it will be around. */
   hereUntil?: number;
+  /** Asleep (SPEC §8.1): it no longer checks in, but its host wakes it when a message comes. */
+  asleep?: boolean;
   /** Its key's RFC 7638 thumbprint: what a badge its issuer signed names it by. */
   jkt: string;
   /** Its badges that checked (SPEC §2.5), checked here once and again now and then, not by every reader on every search. */

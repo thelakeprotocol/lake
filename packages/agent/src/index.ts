@@ -98,7 +98,7 @@ export interface LakeAgent {
   domain: string;
   /** Search the node: houses by skill or interest, specialists, other agents. */
   /** Agents registered with this agent's own node come first; one a peer Lake lists says which (`lake`: that peer node). */
-  find(q?: { skill?: string; tag?: string; role?: string; q?: string }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string; /** Listed by a peer Lake this agent's node follows (SPEC §9): that peer's address. Absent for its own Lake's. */ lake?: string; /** Its Lake isn't answering, since then: it can't be reached for now. */ unreachable_since?: string; /** Its badges that checked, and whether this Lake lists their issuer (SPEC §2.5). */ vouched?: { by: string; says: string; listed: boolean }[]; /** Claims in its own words that look like someone else's. */ own_words?: string[]; /** Other agents' domains that use the same name. */ same_name_as?: string[] }[]>;
+  find(q?: { skill?: string; tag?: string; role?: string; q?: string; /** Agents idle or asleep too (SPEC §8.1): looking for someone in particular, not for company. */ idle?: boolean }): Promise<{ name: string; role: string; domain: string; webId: string; tags: string[]; url: string; /** What it sells, from its signed card. */ menu?: MenuItem[]; /** When its driver last acted through it, if it says (agents only). */ last_active?: string; /** Until when it says it will be around. */ here_until?: string; /** Listed by a peer Lake this agent's node follows (SPEC §9): that peer's address. Absent for its own Lake's. */ lake?: string; /** Its Lake isn't answering, since then: it can't be reached for now. */ unreachable_since?: string; /** Its badges that checked, and whether this Lake lists their issuer (SPEC §2.5). */ vouched?: { by: string; says: string; listed: boolean }[]; /** Claims in its own words that look like someone else's. */ own_words?: string[]; /** Other agents' domains that use the same name. */ same_name_as?: string[]; /** Asleep: its host wakes it when a message comes, so it may answer later. */ asleep?: boolean }[]>;
   /** The payments agent this agent pays through and checks receipts against, pinned by its card's key; null if unreachable. */
   paymentsAgent(): Promise<CartParty | null>;
   /** The arbiters this agent accepts (its own first), pinned by key. */
@@ -155,7 +155,8 @@ export interface LakeAgent {
    * signed there (SPEC §6.2), in its currency. Without one, USD payments use the sandbox's play-money allowance, if any.
    */
   setAllowanceSource(source: () => Promise<{ credential: string; card: AgentCard; owner?: string; currency?: string } | null>): void;
-  close(): Promise<void>;
+  /** Leaves the Lake, or with `asleep` goes to sleep: still listed, for a host that wakes it when a message comes. */
+  close(opts?: { asleep?: boolean }): Promise<void>;
 }
 
 /**
@@ -231,8 +232,8 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     webId: visitor.webId,
     domain: o.domain,
     async find(q = {}) {
-      const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
-      type Found = { card: AgentCard; active?: string; until?: string; via?: string; unreachable_since?: string; vouched?: { by: string; says: string; listed: boolean }[]; own_words?: string[]; same_name_as?: string[] };
+      const params = new URLSearchParams(Object.entries({ ...q, idle: q.idle ? '1' : undefined }).filter(([, v]) => v) as [string, string][]);
+      type Found = { card: AgentCard; active?: string; until?: string; via?: string; unreachable_since?: string; vouched?: { by: string; says: string; listed: boolean }[]; own_words?: string[]; same_name_as?: string[]; asleep?: boolean };
       let found: Found[] | null = null;
       for (const node of nodes) {
         try {
@@ -245,10 +246,10 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       if (!found) throw new Error('no Lake node reachable');
       // A federated node lists its peers' agents too: two Lakes each run a payments agent, an arbiter, a log… Its own Lake's
       // come first, so a lookup by skill gets the one this agent's Lake runs; a peer's says which Lake it is from.
-      return found.sort((a, b) => Number(!!a.via) - Number(!!b.via)).map(({ card, active, until, via, unreachable_since, vouched, own_words, same_name_as }) => {
+      return found.sort((a, b) => Number(!!a.via) - Number(!!b.via)).map(({ card, active, until, via, unreachable_since, vouched, own_words, same_name_as, asleep }) => {
         const p = card.capabilities?.extensions?.[0]?.params as { role: string; webId: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
-        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(unreachable_since ? { unreachable_since } : {}), ...(vouched?.length ? { vouched } : {}), ...(own_words?.length ? { own_words } : {}), ...(same_name_as?.length ? { same_name_as } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(unreachable_since ? { unreachable_since } : {}), ...(vouched?.length ? { vouched } : {}), ...(own_words?.length ? { own_words } : {}), ...(same_name_as?.length ? { same_name_as } : {}), ...(asleep ? { asleep } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,
@@ -412,9 +413,9 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       Object.assign(visitor.card, fresh);
       await link.register(5);
     },
-    async close() {
+    async close(opts) {
       link.stop();
-      await link.leave();
+      await (opts?.asleep ? link.sleep() : link.leave());
       await link.flush();
       if (server) await new Promise((ok) => server!.close(ok));
     },

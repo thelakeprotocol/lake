@@ -1,5 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getHeapStatistics } from 'node:v8';
 import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -9,6 +11,7 @@ import { clientRegistrationHandler } from '@modelcontextprotocol/sdk/server/auth
 import { revocationHandler } from '@modelcontextprotocol/sdk/server/auth/handlers/revoke.js';
 import { metadataHandler } from '@modelcontextprotocol/sdk/server/auth/handlers/metadata.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import type { AgentCard } from '@thelakeprotocol/core';
 import type { LakeAgent, LakeAgentOptions } from './index.js';
 import { lakeMcpAgent, type AgentSnapshot, type LakeMcpAgent } from './mcp.js';
 import { LakeOAuth } from './auth.js';
@@ -30,6 +33,14 @@ const SLEEP_MS = Number(process.env.LAKE_MCP_SLEEP_MS) || 30 * 60_000;
 
 type Live = { id: string; principal?: string; agent: LakeMcpAgent; sessions: Set<string>; seen: number };
 
+/** This process's memory as it and its container see it (MB): a container can't see its host's. */
+export function memoryStatus() {
+  const m = process.memoryUsage(), mb = (n: number) => Math.round(n / 1_048_576);
+  const cgroup = (f: string) => { try { const v = readFileSync(`/sys/fs/cgroup/${f}`, 'utf8').trim(); return v === 'max' ? undefined : Number(v); } catch { return undefined; } };
+  const used = cgroup('memory.current'), limit = cgroup('memory.max');
+  return { rss_mb: mb(m.rss), heap_used_mb: mb(m.heapUsed), heap_limit_mb: mb(getHeapStatistics().heap_size_limit), ...(used ? { container_used_mb: mb(used) } : {}), ...(limit ? { container_limit_mb: mb(limit) } : {}) };
+}
+
 export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'port' | 'publicUrl' | 'mount'> & {
   publicUrl: string; path?: string; maxSessions?: number; log?: (msg: string) => void;
   /** Where signed-in agents are kept: turns sign-in on (and requires it). */
@@ -46,6 +57,14 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
   const sessions = new Map<string, { live: Live; principal?: string; transport: StreamableHTTPServerTransport; seen: number }>();
   const live = new Map<string, Live>();
   const cards = new Map<string, express.Express>();
+  // Agents asleep stay listed on the node (SPEC §8.1): their cards (public) are kept here, so the node can fetch one, and
+  // list it again after a restart, without waking the agent; a message for it wakes it.
+  const asleepDir = o.data ? join(o.data, 'asleep') : undefined;
+  const sleepers = new Set<string>(asleepDir && existsSync(asleepDir) ? readdirSync(asleepDir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)) : []);
+  const asleepCard = (id: string) => { try { return JSON.parse(readFileSync(join(asleepDir!, `${id}.json`), 'utf8')) as AgentCard; } catch { return undefined; } };
+  const unslept = (id: string) => { if (sleepers.delete(id)) rmSync(join(asleepDir!, `${id}.json`), { force: true }); };
+  const nodes = o.node.split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
+  const started = Date.now();
   // Names in use by agents here, so no two answer to the same one.
   const named = new Map<string, string>();
   // And names already on cards the node lists, this Lake's and the ones it follows (run 48: two "Lumen"s, one per Lake,
@@ -127,6 +146,10 @@ ul{list-style:none;padding:0;margin:0}li{background:var(--card);border:1px solid
   app.use(`${path}/a/:id`, async (req, res, next) => {
     const id = String(req.params.id);
     let sub = cards.get(id);
+    if (!sub && sleepers.has(id) && req.method === 'GET' && req.path === '/.well-known/agent-card.json') {
+      const card = asleepCard(id);
+      if (card) return void res.json(card);
+    }
     if (!sub && auth?.principal(`p-${id}`)) {
       try {
         await (await agentFor(`p-${id}`)).agent.wake();
@@ -238,7 +261,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
         res.json({ ok: true, name });
       } catch (e) {
         const l = live.get(r.principal);
-        if (l) await sleep(l);
+        if (l) await sleep(l, true);
         auth.forget(r.principal);
         w.state = 'failed';
         w.error = (e as Error).message;
@@ -260,7 +283,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
           await l.agent.connectHouse(house, code, r.app);
         } catch (e) {
           const l = live.get(r.principal);
-          if (l) await sleep(l);
+          if (l) await sleep(l, true);
           auth.forget(r.principal);
           return page(res, 400, 'Not connected', `Your house said: ${(e as Error).message}. Start again from your AI app.`);
         }
@@ -301,19 +324,51 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
           const label = /claude/i.test(client?.name ?? '') ? 'Claude' : client?.name ?? 'an assistant';
           return { name: `${nameFor(id)} (${label}, via MCP)`, domain: `${who}-${id}.mcp.example` };
         },
-        onAgent: (agent: LakeAgent) => { o.log?.(`${agent.domain} joined over MCP${principal ? ' (signed in)' : ''}`); },
+        onAgent: (agent: LakeAgent) => { unslept(id); o.log?.(`${agent.domain} joined over MCP${principal ? ' (signed in)' : ''}`); },
         ...(principal ? { saved, save: (s: AgentSnapshot) => auth!.saveAgent(principal, seal(s)), passportUrl: `${resource}/a/${id}/passport` } : {}),
       },
     );
     if (principal) live.set(principal, entry);
     return entry;
   };
-  const sleep = async (l: Live) => {
+  /** A signed-in agent goes to sleep, still listed; an unsigned one (or one `leaving`) leaves the Lake. */
+  const sleep = async (l: Live, leaving = false) => {
     if (l.principal) live.delete(l.principal);
     cards.delete(l.id);
     named.delete(l.id);
-    await l.agent.close().catch(() => {});
+    const card = !leaving && l.principal && asleepDir ? l.agent.card() : undefined;
+    if (card) {
+      mkdirSync(asleepDir!, { recursive: true });
+      writeFileSync(join(asleepDir!, `${l.id}.json`), JSON.stringify(card));
+      sleepers.add(l.id);
+    }
+    await l.agent.close({ asleep: !!card }).catch(() => {});
   };
+  // A node that restarted has forgotten who was asleep: one asked each minute, and if it doesn't know them, all are listed
+  // again. Agents forgotten here (unused for 30 days) are let go.
+  let relisting = false;
+  const relist = async () => {
+    if (!asleepDir || !sleepers.size || relisting) return;
+    relisting = true;
+    try {
+      for (const id of [...sleepers]) if (!auth?.principal(`p-${id}`)) unslept(id);
+      const ids = [...sleepers], webIdOf = (c?: AgentCard) => (c?.capabilities?.extensions?.[0]?.params as { webId?: string } | undefined)?.webId;
+      const known = async (n: string, webId: string) => ((await fetch(`${n}/registered?webId=${encodeURIComponent(webId)}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json()).catch(() => null)) as { registered?: boolean } | null)?.registered;
+      const sample = webIdOf(asleepCard(ids[Math.floor(Math.random() * ids.length)] ?? ''));
+      for (const n of sample ? nodes : []) {
+        if ((await known(n, sample!)) !== false) continue;
+        for (const id of ids) {
+          const card = asleepCard(id), webId = webIdOf(card);
+          if (!card || !webId || !sleepers.has(id) || (await known(n, webId)) !== false) continue;
+          await fetch(`${n}/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ card, asleep: true }), signal: AbortSignal.timeout(10_000) }).catch(() => {});
+        }
+      }
+    } finally {
+      relisting = false;
+    }
+  };
+  setInterval(() => void relist(), Number(process.env.LAKE_MCP_RELIST_MS) || 60_000).unref();
+  setTimeout(() => void relist(), 5000).unref();
   const endSession = (sid: string) => {
     const s = sessions.get(sid);
     if (!s) return;
@@ -379,8 +434,18 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
   app.get(path, ...signedIn, stream);
   app.delete(path, ...signedIn, stream);
   app.get('/health', (_req, res) => void res.json({ ok: true, sessions: sessions.size, agents: live.size }));
-  // Saved as they are, on the way down (a deploy): signed-in agents come back as themselves.
-  const down = async () => { await Promise.all([...live.values()].map((l) => l.agent.close().catch(() => {}))); process.exit(0); };
+  // For whoever runs it (and their alarms): up, which build, memory, and how full. Counts only, nobody's identity.
+  app.get(`${path}/status`, (_req, res) => {
+    const cap = o.maxSessions ?? 40;
+    res.set('cache-control', 'no-store').json({
+      ok: true, service: 'connector', version: process.env.LAKE_VERSION ?? 'dev', started: new Date(started).toISOString(), uptime_s: Math.round((Date.now() - started) / 1000),
+      memory: memoryStatus(),
+      agents: { awake: live.size, asleep: sleepers.size, cap },
+      sessions: { open: sessions.size, cap: cap * 2 },
+    });
+  });
+  // Saved as they are, on the way down (a deploy): signed-in agents sleep, still listed, and come back as themselves.
+  const down = async () => { await Promise.all([...live.values()].map((l) => sleep(l))); process.exit(0); };
   if (auth) { process.once('SIGTERM', () => void down()); process.once('SIGINT', () => void down()); }
   return app;
 }

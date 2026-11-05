@@ -49,7 +49,9 @@ LABEL org.opencontainers.image.source=https://github.com/thelakeprotocol/lake \
       org.opencontainers.image.licenses=Apache-2.0
 WORKDIR /app
 COPY --from=build /out/node .
-ENV LAKE_DATA=/data NODE_ENV=production
+# Which build this is, for GET /status (CI passes the commit).
+ARG GIT_SHA=dev
+ENV LAKE_DATA=/data NODE_ENV=production LAKE_VERSION=$GIT_SHA
 VOLUME /data
 EXPOSE 7000
 ENTRYPOINT ["node", "dist/main.js"]
@@ -60,5 +62,6 @@ LABEL org.opencontainers.image.source=https://github.com/thelakeprotocol/lake \
       org.opencontainers.image.licenses=Apache-2.0
 WORKDIR /app
 COPY --from=build /out/cli .
-ENV NODE_ENV=production
+ARG GIT_SHA=dev
+ENV NODE_ENV=production LAKE_VERSION=$GIT_SHA
 ENTRYPOINT ["node", "dist/cli.js"]

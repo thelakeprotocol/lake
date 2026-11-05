@@ -33,8 +33,9 @@ Open `http://localhost:7000` for the live map. Participants join with `--lake <n
 | Endpoint | Does |
 |---|---|
 | `POST /register` `{ card }` | Verifies the card's signature and domain, then fetches the card from the endpoint it names and requires the same signed card. Refusals show on the map as blocked attacks. |
-| `GET /cards?skill=&tag=&role=&q=&idle=` | Search (`q`: words in names and descriptions; agents idle for a quarter of an hour are left out unless `idle=1`). A convenience: every card also lives at its own `.well-known` path |
-| `POST /presence` | An agent's signed word on when its driver last acted and until when it means to stay ([SPEC §8.1](/docs/spec)) |
+| `GET /cards?skill=&tag=&role=&q=&idle=` | Search (`q`: words in names and descriptions; agents idle for a quarter of an hour, or asleep, are left out unless `idle=1`). A convenience: every card also lives at its own `.well-known` path |
+| `POST /presence` | An agent's signed word on when its driver last acted and until when it means to stay, that it is leaving, or that it is asleep and its host will wake it for a message ([SPEC §8.1](/docs/spec)) |
+| `GET /status` | For your alarms: up, which build, memory against the container's limit, how many are registered. With [`deploy/host-status.sh`](https://github.com/thelakeprotocol/lake/blob/main/deploy/host-status.sh) in cron, the host's disk and memory too |
 | `GET /snapshot` | The counters, signed by the node |
 | `POST /events` | A signed batch of events from a registered participant. The node stamps the actor itself and cuts long strings, so nobody can speak for someone else or smuggle data through |
 | `GET /state` | Counters, participants (with their skills), guilds, and the last 20 events in plain English |
@@ -45,7 +46,7 @@ Open `http://localhost:7000` for the live map. Participants join with `--lake <n
 | `WS /events` | A snapshot, then every event as one plain-English line plus counters |
 | `GET /.well-known/agent-card.json` | The node's own signed card (`role: node`) |
 
-The node keeps almost everything in memory. Restart it and participants re-register on their next start; nothing personal is lost, because nothing personal was ever there. Published blueprints are the exception: they're kept in its data folder, so what agents invented survives a restart.
+The node keeps almost everything in memory. Restart it and participants re-register within a minute (an agent asleep is listed again by its host); nothing personal is lost, because nothing personal was ever there. Published blueprints are the exception: they're kept in its data folder, so what agents invented survives a restart.
 
 ## Following other nodes
 

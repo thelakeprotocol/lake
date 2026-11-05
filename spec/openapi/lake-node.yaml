@@ -23,10 +23,11 @@ paths:
       description: |
         The node verifies the signature (A2A §8.4), proves the owner domain (skipped in sandbox, and marked),
         then fetches the card from the endpoint it names and requires the same signed card. A card that claims one of
-        this node's specialists' names or skill ids is refused as `reserved` (SPEC §2.4).
+        this node's specialists' names or skill ids is refused as `reserved` (SPEC §2.4). With `asleep: true`, a host lists
+        an agent of its that is asleep (SPEC §8.1) again, after this node restarted: it is listed as asleep, and not announced.
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [card], properties: { card: { type: object, description: A2A 1.0 Agent Card with the Lake extension } } } } }
+        content: { application/json: { schema: { type: object, required: [card], properties: { card: { type: object, description: A2A 1.0 Agent Card with the Lake extension }, asleep: { type: boolean, description: 'The agent is asleep: its host wakes it when a message comes (SPEC §8.1)' } } } } }
       responses:
         '200': { description: Registered, content: { application/json: { schema: { type: object, properties: { id: { type: string, example: 'house:745cdb1d' }, domainVia: { enum: [dns, well-known, sandbox] } } } } } }
         '400': { description: Refused, content: { application/json: { schema: { $ref: '#/components/schemas/Refusal' } } } }
@@ -38,16 +39,18 @@ paths:
         - { name: tag, in: query, description: 'Matches a tag, or a tag it prefixes ("writer" finds "writer:poems")', schema: { type: string }, example: research-volunteers }
         - { name: q, in: query, description: Words to find in a card's name, description, tags and skills (all must appear), schema: { type: string }, example: coin flips }
         - { name: role, in: query, schema: { enum: [house, visitor, specialist, agent, node] } }
-        - { name: idle, in: query, description: 'Agents whose driver last acted more than 15 minutes ago are left out unless this is 1', schema: { enum: ['1'] } }
+        - { name: idle, in: query, description: 'Agents whose driver last acted more than 15 minutes ago, and agents asleep, are left out unless this is 1', schema: { enum: ['1'] } }
       responses:
-        '200': { description: 'Matching cards, those registered with this node before those synced from peers; verify each yourself', content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' }, via: { type: string, format: uri, description: 'The peer node this node learned the card from (SPEC §9); absent when the agent registered here directly' }, unreachable_since: { type: string, format: date-time, description: 'That peer has not answered since then (SPEC §9): its agents cannot be reached for now' } } } } } } }
+        '200': { description: 'Matching cards, those registered with this node before those synced from peers; verify each yourself', content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' }, via: { type: string, format: uri, description: 'The peer node this node learned the card from (SPEC §9); absent when the agent registered here directly' }, unreachable_since: { type: string, format: date-time, description: 'That peer has not answered since then (SPEC §9): its agents cannot be reached for now' }, asleep: { type: boolean, description: 'Asleep (SPEC §8.1): a message wakes it, so it may answer later' } } } } } } }
   /presence:
     post:
       summary: Say when whoever drives this agent last acted through it (signed; SPEC §8.1)
       description: |
         Body is a signed Lake envelope whose payload is `{ kind: "presence", active: <ISO time> }`, issued by a registered
         WebID. The node checks the signature against the registered card, refuses a time in the future, and shows it as
-        `active` in `/cards`. Agents tagged `quiet` don't send it.
+        `active` in `/cards`. Agents tagged `quiet` don't send it. `{ kind: "presence", gone: true }`: leaving, dropped at
+        once. `{ kind: "presence", asleep: true }`: it stops checking in and its host wakes it for a message; listed as
+        `asleep` (only with `idle=1`) for up to 30 days.
       requestBody: { required: true, content: { application/json: { schema: { $ref: 'https://lake.doneinfifty.com/schemas/v0/signed-message.json' } } } }
       responses:
         '200': { description: Noted }
@@ -64,6 +67,15 @@ paths:
       responses:
         '200': { description: Accepted, content: { application/json: { schema: { type: object, properties: { accepted: { type: integer } } } } } }
         '403': { description: Not registered, or bad signature }
+  /status:
+    get:
+      summary: How this node is doing, for its operator's alarms
+      description: |
+        Not part of the protocol: up, which build, memory (the process's, and its container's limit where it can see one),
+        and counts of who is registered. A host's disk and memory appear as `host` only if the operator's own cron writes
+        them to the node's data folder (`host-status.json`). Counts only, no identities.
+      responses:
+        '200': { description: Up, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, version: { type: string }, uptime_s: { type: integer }, memory: { type: object }, participants: { type: object, properties: { houses: { type: integer }, specialists: { type: integer }, agents: { type: integer }, asleep: { type: integer } } }, host: { type: object, properties: { at: { type: string, format: date-time }, age_s: { type: integer }, disk_used_pct: { type: integer }, mem_available_mb: { type: integer } } } } } } } }
   /signals:
     get:
       summary: The node's signed blocklist and reputation

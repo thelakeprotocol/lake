@@ -193,7 +193,10 @@ export interface LakeMcpAgent {
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
   passport(): Promise<Passport>;
-  close(): Promise<void>;
+  /** Its signed card, once it has one: what the node lists while it sleeps. */
+  card(): AgentCard | undefined;
+  /** Leaves the Lake, or with `asleep` stays listed while its host can wake it. */
+  close(opts?: { asleep?: boolean }): Promise<void>;
 }
 
 /** An agent's public record (the passport page): what it bought and sold, and who with, each deal with its receipt. No ratings. */
@@ -653,8 +656,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     if (speaksFor) await a.sellFor({ webId: speaksFor.house, url: speaksFor.url, vouch: speaksFor.vouch }).catch(() => {});
     if (house) useHouseAllowance(a);
     x.onAgent?.(a);
+    built = a;
     return a;
   };
+  let built: LakeAgent | undefined;
   const agent = () => (me ??= join());
   const json = (v: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(v, null, 2) }] });
   const fail = (e: unknown) => ({ content: [{ type: 'text' as const, text: `Lake error: ${(e as Error).message}` }], isError: true });
@@ -1366,7 +1371,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       try {
         // "agent" means any agent that isn't a house: visitors, assistants and specialists (run 17 found nothing).
         const me = await agent();
-        const found = q.role === 'agent' ? (await me.find({ ...q, role: undefined })).filter((c) => c.role !== 'house') : await me.find(q);
+        // Words (a name) look for someone in particular: those idle or asleep too, whom a message still reaches (Grok's agent
+        // went unfound by name half an hour after its chat).
+        const ask = { ...q, ...(q.q ? { idle: true } : {}) };
+        const found = q.role === 'agent' ? (await me.find({ ...ask, role: undefined })).filter((c) => c.role !== 'house') : await me.find(ask);
         // Sellers come with their record from the transparency logs: sales released to them, refunds, rulings. Facts, counted.
         // Across Lakes a record is spread: a buyer pays through its own Lake's payments agent, which logs on its own Lake's
         // log, and a ruling is on the arbiter's Lake's. So every log search lists (this Lake's and the followed Lakes') is
@@ -1391,6 +1399,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         };
         const withRecord = await Promise.all(found.map(async (c, i) => {
           if (i < 30 && (await unowned(c))) return { ...c, owner: 'none: nobody has claimed this house, so a note or a knock reaches no one' };
+          if (c.asleep) return { ...c, asleep: 'its AI isn\'t here now: a message wakes the agent and waits for it, and its human may be told; the answer may take a while' };
           if (!c.menu || !logs.length || i >= 10) return c;
           const record = await recordOf(c.webId);
           return record ? { ...c, record } : c;
@@ -2119,12 +2128,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       await saveNow().catch(() => {});
       return { name: (await agent()).card.name };
     },
-    close: async () => {
+    card: () => built?.card,
+    close: async (opts) => {
       if (saving) clearInterval(saving);
       clearInterval(waiting);
       clearInterval(matchWatch);
       await saveNow().catch(() => {});
-      await (await me?.catch(() => null))?.close().catch(() => {});
+      await (await me?.catch(() => null))?.close(opts).catch(() => {});
     },
   };
 }

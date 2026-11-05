@@ -1,0 +1,46 @@
+name: Sandbox status
+# Every 15 minutes: is the public sandbox up, and not about to run out of memory or disk? A failed run emails whoever last
+# changed this schedule (GitHub's own notice for a failed scheduled workflow): that email is the alarm.
+on:
+  schedule: [{ cron: '*/15 * * * *' }]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: { SANDBOX: 'https://sandbox.lake.doneinfifty.com' }
+    steps:
+      - name: Node, connector, sign-in and host
+        run: |
+          fail=0; bad() { echo "::error::$1"; fail=1; }
+          get() { curl -fsS --max-time 20 --retry 3 --retry-delay 20 --retry-all-errors "$1"; }
+          node=$(get "$SANDBOX/status") || { bad "node: $SANDBOX/status did not answer"; node='{}'; }
+          mcp=$(get "$SANDBOX/mcp/status") || { bad "connector: $SANDBOX/mcp/status did not answer"; mcp='{}'; }
+          echo "node: $node"; echo "connector: $mcp"
+          [ "$(jq -r '.ok' <<<"$node")" = true ] || bad "node not ok"
+          [ "$(jq -r '.participants.specialists // 0' <<<"$node")" -ge 10 ] || bad "fewer than 10 specialists listed"
+          [ "$(jq -r '.participants.houses // 0' <<<"$node")" -ge 1 ] || bad "no houses listed"
+          [ "$(jq -r '.ok' <<<"$mcp")" = true ] || bad "connector not ok"
+          # Memory: each container against its own limit, and the connector's heap against its cap.
+          for x in node mcp; do
+            j=${!x}
+            pct=$(jq -r 'if .memory.container_limit_mb then (100 * .memory.container_used_mb / .memory.container_limit_mb | floor) else 0 end' <<<"$j")
+            [ "$pct" -lt 85 ] || bad "$x: memory at $pct% of its container's limit"
+          done
+          heap=$(jq -r 'if .memory.heap_limit_mb then (100 * .memory.heap_used_mb / .memory.heap_limit_mb | floor) else 0 end' <<<"$mcp")
+          [ "$heap" -lt 85 ] || bad "connector: heap at $heap% of its cap"
+          full=$(jq -r 'if .agents.cap then (100 * .agents.awake / .agents.cap | floor) else 0 end' <<<"$mcp")
+          [ "$full" -lt 90 ] || bad "connector: $full% of its agent places taken"
+          # The host's own disk and memory, if the droplet's cron writes them (see docs/run-a-node).
+          if [ "$(jq -r 'has("host")' <<<"$node")" = true ]; then
+            [ "$(jq -r '.host.age_s // 99999' <<<"$node")" -lt 1800 ] || bad "host: its status is over half an hour old (is its cron running?)"
+            [ "$(jq -r '.host.disk_used_pct // 0' <<<"$node")" -lt 85 ] || bad "host: disk $(jq -r .host.disk_used_pct <<<"$node")% full"
+            [ "$(jq -r '.host.mem_available_mb // 99999' <<<"$node")" -gt 150 ] || bad "host: only $(jq -r .host.mem_available_mb <<<"$node") MB of memory available"
+          else
+            echo "::warning::the node shows no host status: disk is unchecked"
+          fi
+          # The connector asks for sign-in (401), as an AI app expects.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$SANDBOX/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"status","version":"1"}}}')
+          [ "$code" = 401 ] || bad "connector: unsigned initialize gave $code, not 401"
+          exit $fail
