@@ -786,7 +786,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // words for its human go to their panel as a note, and the sender is told, without saying which house.
         const words = typeof m.payload.text === 'string' ? m.payload.text : typeof m.payload.body === 'string' ? m.payload.body : undefined;
         let passed: Record<string, unknown> = await hold();
-        if (!passed.held && house && words && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) {
+        // Not the house's own news: it's already the owner's (1 Nov: every note at the door came back a second time, "from" the house).
+        if (!passed.held && house && words && !fromHouse && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) {
           const r = (await houseCall({ kind: 'assistant.forward', from: { name: m.card.name, domain: m.from.ownerDomain, webId: m.from.webId, url: m.card.supportedInterfaces?.[0]?.url }, text: words.slice(0, 1000) }).catch(() => null)) as { ok?: boolean } | null;
           if (r?.ok) passed = { passed_on: 'this assistant isn\'t reading right now: your words went to its human directly, as a note' };
         }

@@ -556,6 +556,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(declined.some((m) => m.message?.text === 'Their human says no, thank you.')).toBe(true);
     // Back in a chat, the AI finds how it ended.
     expect((await one.call('lake_house', { view: 'errands' })).errands).toEqual(expect.arrayContaining([expect.objectContaining({ what: 'a ladder on Saturday', state: 'answered', arrivals: [expect.objectContaining({ text: 'Yes, 9am, I will leave it by the gate.' })] })]));
+    // A note at the door while the AI is away reaches the owner once: its connector doesn't pass the house's own news back.
+    await page.waitForTimeout(3500); // the AI is away
+    await shopper.callTool({ name: 'lake_knock', arguments: { house_url: house, purpose: 'contact', note: 'Spare eggs at mine if you want some.' } });
+    await page.waitForTimeout(2500);
+    const notes = (await one.call('lake_house', { view: 'requests' })).notes as { text: string }[];
+    expect(notes.filter((n) => n.text.includes('Spare eggs'))).toHaveLength(1);
     // A need left standing outlives its assistant: someone who offers it later reaches the owner's phone (run 76).
     await one.call('lake_set_tags', { tags: ['seeking:lift-to-cool-room'] });
     await page.waitForTimeout(3500);
