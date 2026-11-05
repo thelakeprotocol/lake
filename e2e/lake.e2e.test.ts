@@ -765,6 +765,41 @@ describe('the owner', () => {
     }
   });
 
+  it('a free/busy count answered by the house, not the model: the agent passes the slot, its connector sends the house\'s bit as shares (Consent Compiler)', async () => {
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-freebusy') });
+    const chat = async () => {
+      const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'fb', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const text = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: text } : JSON.parse(text); };
+      return { c, call, you: (await call('lake_overview')).you };
+    };
+    const [a, b, c] = [await chat(), await chat(), await chat()];
+    try {
+      // The owner is free on weekdays 09:00-17:00 UTC; A is their assistant.
+      expect(await ownerCall({ kind: 'panel.availability.set', availability: { tz: 'UTC', free: ['mon-fri 09:00-17:00'], meetings: 30 } })).toEqual({ ok: true });
+      const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'free-busy test' });
+      expect(await a.call('lake_house_connect', { code, house_url: houses.strict })).toMatchObject({ paired: true });
+      const day = new Date(); day.setUTCDate(day.getUTCDate() + ((8 - day.getUTCDay()) % 7 || 7)); // next Monday
+      const monday10 = `${day.toISOString().slice(0, 10)}T10:00:00Z`;
+      const opened = await a.call('lake_count', { action: 'open', id: 'fb:e2e-monday', options: ['free', 'busy'], minutes: 10 });
+      const ballot = { action: 'answer', id: 'fb:e2e-monday', options: ['free', 'busy'], leader: opened.leader, helper: opened.helper };
+      // The model can't pass both, or use freebusy on another kind of count.
+      expect(await a.call('lake_count', { ...ballot, freebusy: { start: monday10 }, choice: 'busy' })).toMatchObject({ error: expect.stringContaining('not both') });
+      expect(await a.call('lake_count', { ...ballot, options: ['yes', 'no'], freebusy: { start: monday10 } })).toMatchObject({ error: expect.stringContaining('exactly ["free", "busy"]') });
+      const answered = await a.call('lake_count', { ...ballot, freebusy: { start: monday10, minutes: 30 } });
+      expect(answered).toMatchObject({ kind: 'count.answered', by: expect.stringContaining('you were not told') });
+      expect(JSON.stringify(answered)).not.toMatch(/"(free|busy)"/);
+      for (const v of [b, c]) expect(await v.call('lake_count', { ...ballot, choice: 'busy' })).toMatchObject({ kind: 'count.answered' });
+      // Only the totals come out: the house said free.
+      expect(await a.call('lake_count', { action: 'close', id: 'fb:e2e-monday', voters: [a.you.url, b.you.url, c.you.url] })).toMatchObject({ kind: 'count.totals', totals: { free: 1, busy: 2 }, counted: 3 });
+    } finally {
+      await ownerCall({ kind: 'panel.availability.set', availability: null });
+      for (const v of [a, b, c]) await v.c.close();
+    }
+  });
+
   it('one person, one house: a person stamp, and a people-only pledge counts two houses of one owner once', async () => {
     const consentFor = (house: string) => signMessage({ kind: 'personhood.consent', house }, owner, { iss: house });
     expect(await ownerCall({ kind: 'panel.person.request', consent: await consentFor(webId) })).toMatchObject({ stamped: true });

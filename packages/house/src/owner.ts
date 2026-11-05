@@ -129,7 +129,7 @@ export interface Suggestion {
   /** What the assistant advises on the request, offer or pledge it names, as a field: nobody (no panel, no bot) reads it out of the words (run 39). */
   advice?: Advice;
   /** A question for the owner, with the choices to tap (a neighbour's favour, say); the house tells the assistant the answer. */
-  ask?: { choices: string[]; recommend?: number; answered?: string };
+  ask?: { choices: string[]; recommend?: number; answered?: string; /** Kept in the house: the assistant is told it was answered, never what; its connector sends it only as a secret count's shares. */ private?: boolean };
   /** The owner's own words back to the assistant. */
   reply?: string;
   /** New rules (the whole text) the assistant proposes: the owner's panel shows an Apply button. */
@@ -178,7 +178,7 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -1058,11 +1058,15 @@ export class OwnerDesk {
           if (q.ask) {
             // Refused, not cut (run 40 stored "…return fa"): the assistant shortens its own words.
             const choices = Array.isArray(q.ask.choices) ? q.ask.choices.map((c) => String(c).trim()).filter(Boolean) : [];
-            if (choices.length < 2 || choices.length > 4 || choices.some((c) => c.length > 80)) return void res.status(400).json({ error: 'ask: { choices: 2 to 4 answers of up to 80 characters, recommend?: the index of the one you advise }' });
+            // A private question (for a secret count: a pay band, a rent band) may have as many choices as a count has options.
+            const priv = (q.ask as { private?: unknown }).private === true;
+            const most = priv ? 16 : 4;
+            if (choices.length < 2 || choices.length > most || choices.some((c) => c.length > 80)) return void res.status(400).json({ error: `ask: { choices: 2 to ${most} answers of up to 80 characters, recommend?: the index of the one you advise${priv ? '' : ', private?: true (its answer stays in the house, for a secret count; up to 16 choices)'} }` });
+            if (priv) { ask = { choices, private: true }; }
             const r = Number(q.ask.recommend);
             // "Your call" means it (run 44: three "your call" questions each carried a recommended choice, and it was taken).
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
-            ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
+            if (!priv) ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions];
@@ -1191,6 +1195,31 @@ export class OwnerDesk {
           if (tonight.filter((x) => x.refused && !x.limit).length >= 3 && !this.isRevoked(assistant.duty.statusId)) await this.dutyOff(assistant, 'three refused actions in one night: off duty until your human puts you back on');
           const now = this.dutyState(assistant);
           return void res.json({ ok: true, entry: e.id, on: now.on, ...(now.on ? { used: now.used, cap: assistant.duty.cap } : { why: now.why }) });
+        }
+        if (p.kind === 'assistant.private_answer') {
+          // The owner's private answer, for this assistant's connector to send as a secret count's shares (never shown to it
+          // in a list or a notice). Once only: a second count can't reuse it to learn more (differencing).
+          const q = p as unknown as { question?: string; options?: string[] };
+          const sug = this.suggestions.find((x) => x.id === String(q.question ?? '') && x.by === assistant.kid && x.ask?.private);
+          if (!sug?.ask?.answered) return void res.json({ error: sug ? 'your human hasn\'t answered it yet' : 'no private question of yours with that id' });
+          if (JSON.stringify(q.options) !== JSON.stringify(sug.ask.choices)) return void res.json({ error: 'the count\'s options must be exactly the question\'s choices, in the same order' });
+          if ((sug as Suggestion & { used?: string }).used) return void res.json({ error: 'that answer went into a count already' });
+          (sug as Suggestion & { used?: string }).used = new Date().toISOString();
+          await this.saveSuggestions();
+          return void res.json({ choice: sug.ask.answered });
+        }
+        if (p.kind === 'assistant.freebusy') {
+          // Whether the owner is free for this slot, from their own free hours and agenda: for a secret count, where the
+          // assistant's connector sends it as shares (the Consent Compiler blueprint). Only the yes or no leaves here.
+          const q = p as unknown as { start?: string; minutes?: number };
+          const av = this.o.panel?.availability?.();
+          if (!av) return void res.json({ error: 'your human hasn\'t set when they are free (Rules: When you\'re free)' });
+          const start = Date.parse(String(q.start ?? ''));
+          if (Number.isNaN(start)) return void res.status(400).json({ error: 'freebusy: { start (ISO 8601, with its offset), minutes? }' });
+          const len = (Number.isInteger(q.minutes) && q.minutes! > 0 ? q.minutes! : av.meetings ?? 60) * 60_000;
+          const busy = this.agenda.filter((x) => x.start).map((x) => ({ start: x.start!, ...(x.minutes ? { minutes: x.minutes } : {}) }));
+          const free = freeSlots(av, busy, new Date(), 31, 2000).some((sl) => Date.parse(sl.start) <= start && start + len <= Date.parse(sl.end));
+          return void res.json({ free });
         }
         if (p.kind === 'assistant.contact') {
           const q = p as unknown as { key?: string; name?: string; webId?: string };
@@ -1381,7 +1410,8 @@ export class OwnerDesk {
           if (q.choice === 'Block' && blockUrl) this.news({ about: 'block', url: blockUrl, note: 'your human tapped Block on what came in on your errand: your connector turns its messages away from now on' }, sug.by);
         }
         await this.saveSuggestions();
-        this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}), ...(er ? { errand: this.errandNews(sug) } : {}) });
+        if (sug.ask?.private) this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), private: true, note: 'your human answered privately: the answer stays in their house. Send it into the secret count with lake_count { action: "answer", from_question: this id }: your connector sends it as the two shares, and you never see it' });
+        else this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}), ...(er ? { errand: this.errandNews(sug) } : {}) });
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
       }
       // Your key: a recovery code to write down, and a one-use link to move to another device.
@@ -1512,7 +1542,7 @@ export class OwnerDesk {
         }
         return void res.json({ ok: true });
       }
-      if (p.kind === 'list') return void res.json(this.view());
+      if (p.kind === 'list') return void res.json(this.view(!!(signer !== this.ownerJwk?.kid)));
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
       if (p.kind === 'revoke') return void res.json({ revoked: await this.revoke(p.revoke ?? 'all') });
       if (p.kind === 'release' && this.o.leaseHours) {
@@ -1592,14 +1622,15 @@ export class OwnerDesk {
     return r;
   }
 
-  view() {
+  /** What the panel lists; for an assistant, a private answer shows only that it was given. */
+  view(forAssistant = false) {
     return {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       connects: [...this.connects].filter(([, c]) => Date.now() - c.at < 15 * 60_000).map(([id, c]) => ({ id, app: c.app, from: c.from, number: c.number, at: new Date(c.at).toISOString() })),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
-      suggestions: this.suggestions,
+      suggestions: forAssistant ? this.suggestions.map((x) => (x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x)) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}) }; }),
       agenda: this.agenda,

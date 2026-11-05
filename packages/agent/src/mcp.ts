@@ -1905,6 +1905,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         options: z.array(z.string().max(100)).min(2).max(16).optional().describe('open and answer: the choices, in the same order for everyone'),
         minutes: z.number().min(5).max(4320).optional().describe('open: how long voters have (default 60)'),
         choice: z.string().optional().describe('answer: your human\'s choice, one of the options'),
+        freebusy: z.object({ start: z.string(), minutes: z.number().int().min(5).max(720).optional() }).optional().describe('answer, instead of choice, for a count whose options are ["free", "busy"]: the slot asked about. Your connector asks your human\'s house whether they are free then, and sends that as the shares: you never see or set it (the Consent Compiler blueprint)'),
         leader: z.string().optional().describe('answer: the Leader teller\'s address, from the organiser'),
         helper: z.string().optional().describe('answer: the Helper teller\'s address, from the organiser'),
         voters: z.array(z.string()).optional().describe('close: who may vote (webIds or urls); answers from anyone else are left out'),
@@ -1929,8 +1930,17 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           return json({ kind: 'count.opened', id: a.id, options: a.options, deadline, leader: leader.url, helper: helper.url, tell_each_voter: line, then: 'when all have answered (or at the deadline): lake_count { action: "close", id, voters: [their webIds or urls] }' });
         }
         if (a.action === 'answer') {
-          if (!a.options || a.choice === undefined || !a.leader || !a.helper) throw new Error('answer: id, options, choice, leader and helper, as the organiser gave them');
-          const cell = a.options.indexOf(a.choice);
+          // Free or busy, worked out by the human's house from their free hours: the model passes the slot, never the bit.
+          let choice = a.choice;
+          if (a.freebusy) {
+            if (!a.options || a.options.length !== 2 || a.options[0] !== 'free' || a.options[1] !== 'busy') throw new Error('freebusy: for a count whose options are exactly ["free", "busy"]');
+            if (a.choice !== undefined) throw new Error('freebusy or choice, not both: with freebusy your house answers');
+            const fb = (await houseCall({ kind: 'assistant.freebusy', start: a.freebusy.start, ...(a.freebusy.minutes ? { minutes: a.freebusy.minutes } : {}) })) as { free?: boolean; error?: string };
+            if (typeof fb.free !== 'boolean') throw new Error(`your human's house couldn't say: ${fb.error ?? 'no answer'}`);
+            choice = fb.free ? 'free' : 'busy';
+          }
+          if (!a.options || choice === undefined || !a.leader || !a.helper) throw new Error('answer: id, options, choice (or freebusy), leader and helper, as the organiser gave them');
+          const cell = a.options.indexOf(choice);
           if (cell < 0) throw new Error(`choice: one of ${a.options.map((x) => JSON.stringify(x)).join(', ')}`);
           const named = [a.leader, a.helper].map((u) => tellers.find((t) => bare(t.url) === bare(u)));
           if (!named[0] || !named[1]) throw new Error('leader and helper must be tellers the Lake runs (lake_search { skill: "teller" }): your answer goes nowhere else');
@@ -1940,7 +1950,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const refused = sent.find((r) => r.kind !== 'count.received');
           if (refused) throw new Error(`a teller refused it: ${((refused.problems as string[] | undefined) ?? [String(refused.kind)]).join('; ')}`);
           did({ kind: 'vote', at: new Date().toISOString(), id: a.id });
-          return json({ kind: 'count.answered', id: a.id, note: 'sent as two shares, one to each teller: neither can read it, and nobody else ever sees it. Tell the organiser you have answered, never what.' });
+          return json({ kind: 'count.answered', id: a.id, ...(a.freebusy ? { by: 'your human\'s house, from their free hours: you were not told the answer' } : {}), note: 'sent as two shares, one to each teller: neither can read it, and nobody else ever sees it. Tell the organiser you have answered, never what.' });
         }
         const c = countsOpened.get(a.id);
         if (!c) throw new Error(`you didn't open a count called "${a.id}" (only its organiser closes it)`);
