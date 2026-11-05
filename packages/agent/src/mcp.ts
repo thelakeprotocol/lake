@@ -201,7 +201,7 @@ export interface LakeMcpAgent {
   /** Its state now, as `save` would get it. */
   snapshot(): Promise<AgentSnapshot>;
   /** How many messages wait unread, and since when, and for an AI on duty whether it is on now (the runner's cheap look). */
-  pending(look?: { host: string; since: string; every: number }): Promise<{ waiting: number; oldest?: string; duty?: { on: boolean; why?: string } }>;
+  pending(look?: { host: string; since: string; every: number }): Promise<{ waiting: number; to_deliver?: number; oldest?: string; duty?: { on: boolean; why?: string } }>;
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
@@ -319,6 +319,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // On duty for its human while they're away (SPEC §6.1): only what their signed grant lets it do, never money, nothing to
   // an agent their side never wrote to. Learned from the house when it paired; the house keeps the count and the off switch.
   let onDuty: { kinds: string[] } | null = x.saved?.duty ?? null;
+  // When its runner last looked, and how often it looks: an AI on duty with "deliver" is on duty, a third state between here
+  // and away: its menu takes orders while the runner keeps looking; notes still get the away answer (Fable, 6 Nov).
+  const dutyLook = { at: 0, every: 600 };
+  /** Menu sales on duty, a night (the last 12 hours): one per buyer, thirty in all; past that, "sold out tonight". */
+  const DUTY_PER_BUYER = 1, DUTY_A_NIGHT = 30;
   const DUTY_READ = new Set(['lake_overview', 'lake_inbox', 'lake_house', 'lake_search', 'lake_verify', 'lake_blueprints', 'lake_ask_around']);
   type DutyLog = { tool: string; action: string; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; undo?: { kind: string; ref: string } };
   const cardOf = new Map<string, Promise<{ name: string; webId: string; key: string; url: string }>>();
@@ -355,7 +360,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (!['deliver', 'revise', 'orders'].includes(String(a.action))) return refuse('on duty you only deliver what was already paid for');
       if (a.action === 'orders') return undefined;
       if (!kinds.includes('deliver')) return refuse('delivering isn\'t in your duty: leave your human a note', 'deliver');
-      return { log: { tool: name, action: 'deliver', text: String(a.content ?? '').slice(0, 500) } };
+      // Only what was ordered from the menu the owner set, paid, and not delivered yet: an injected "deliver this instead"
+      // can't ship anything at a menu price, and a run that crashed after delivering doesn't deliver twice.
+      const id = String(a.cart ?? '');
+      const o = [...orders.values()].find((x) => x.role === 'seller' && (x.cart === id || (id.length >= 6 && x.cart.startsWith(id))));
+      if (!o || o.evidence[0]?.step !== 'ordered') return refuse('on duty you deliver only orders from your menu', 'deliver');
+      if (a.action === 'deliver' && (o.delivered || o.status === 'delivered' || o.status === 'accepted')) return refuse('that order is delivered already', 'deliver');
+      if (o.payment !== 'held' && o.payment !== 'paid' && o.status !== 'paid') return refuse('that order isn\'t paid yet: deliver once it is', 'deliver');
+      return { log: { tool: name, action: 'deliver', to: { name: o.with.name, webId: o.with.webId, ...(o.with.url ? { url: o.with.url } : {}) }, text: String(a.content ?? '').slice(0, 500) } };
     }
     if (name === 'lake_ask') {
       if (!kinds.includes('reply')) return refuse('replying isn\'t in your duty', 'reply');
@@ -505,7 +517,17 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       // Away (run 31: "take the menu down so no cart gets auto-signed for me while I'm gone"): past the here_until it set
       // and not back since, or nothing done here for five minutes. The order waits in the inbox; nothing is signed.
       const now = Date.now();
-      if ((hereUntil && now > hereUntil && lastActive <= hereUntil) || now - lastActive > AWAY_AFTER_MS) {
+      const onDutyHere = !!onDuty?.kinds.includes('deliver') && now - dutyLook.at < 3 * dutyLook.every * 1000;
+      if (onDutyHere) {
+        const tonight = [...orders.values()].filter((o) => o.role === 'seller' && o.evidence[0]?.step === 'ordered' && now - Date.parse(o.evidence[0].at) < 12 * 3_600_000 && o.status !== 'withdrawn');
+        const mine = tonight.filter((o) => o.with.webId === m.from.webId);
+        const full = mine.length >= DUTY_PER_BUYER ? `one each a night, and you have yours` : tonight.length >= DUTY_A_NIGHT ? `all ${DUTY_A_NIGHT} for tonight are gone` : '';
+        if (full) {
+          const reopens = new Date(Math.min(...(mine.length >= DUTY_PER_BUYER ? mine : tonight).map((o) => Date.parse(o.evidence[0]!.at))) + 12 * 3_600_000).toISOString();
+          return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), sold_out: `sold out tonight (${full}): no cart was made and nothing is charged. It reopens at ${reopens}. A note to its owner still gets through (lake_knock their house)`, reopens } };
+        }
+      }
+      if (!onDutyHere && ((hereUntil && now > hereUntil && lastActive <= hereUntil) || now - lastActive > AWAY_AFTER_MS)) {
         return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: `the seller's AI isn't here (last active ${new Date(lastActive).toISOString()}): no cart was made and nothing is charged. Your order waits in its inbox; a cart comes only if it comes back and says yes. Look for another seller meanwhile` },
           checked: { note: 'an order from your menu came while you were away, so no cart was signed: answer with lake_sell { action: "cart" } if you still want to sell it' } };
       }
@@ -2259,8 +2281,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     },
     snapshot,
     pending: async (look) => {
+      if (look) { dutyLook.at = Date.now(); dutyLook.every = Math.max(30, Math.min(3600, look.every || 600)); }
+      const deliver = onDuty ? [...orders.values()].filter((o) => o.role === 'seller' && o.evidence[0]?.step === 'ordered' && !o.delivered && (o.payment === 'held' || o.payment === 'paid')).length : 0;
       const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty', ...(look ? { runner: look } : {}) }).catch(() => null)) as { on?: boolean; why?: string } | null) : null;
-      return { waiting: inbox.length, ...(inbox[0] ? { oldest: inbox[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}) };
+      return { waiting: inbox.length, ...(deliver ? { to_deliver: deliver } : {}), ...(inbox[0] ? { oldest: inbox[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}) };
     },
     wake: async () => { await agent(); },
     passport: async () => {

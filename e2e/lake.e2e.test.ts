@@ -720,6 +720,51 @@ describe('the owner', () => {
     }
   });
 
+  it('an AI on duty sells from the menu its owner set: on duty while its runner looks, one each a night, and it delivers only what was ordered and paid, once', async () => {
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-duty-shop'), LAKE_PAYMENTS_URL: payments, LAKE_PLAY_MONEY: 'USD:50' });
+    const buyer = await joinLake({ name: 'Haiku fan', domain: 'haiku-fan.example', node, port: await freePort(), payments, allowanceUsd: 20, onMessage: async () => ({ kind: 'received' }) });
+    try {
+      const { id, draft } = await ownerCall({ kind: 'panel.duty.draft', kinds: ['deliver'], cap: 10 });
+      const { code } = await ownerCall({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, owner), label: 'Haiku desk' });
+      const anon = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'duty-runner', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const text = (r.content as { text: string }[])[0]!.text; return { error: !!r.isError, text, json: r.isError ? undefined : JSON.parse(text) }; };
+      // The owner's menu goes on before it is on duty; once on duty, it can't change it.
+      expect((await call('lake_sell', { action: 'menu', items: [{ sku: 'duty-poem', label: 'A three-line poem on any word, except anything about my owner', price: 1, currency: 'USD', delivery: { within_hours: 1, lines: { min: 3, max: 3 } } }] })).error).toBe(false);
+      expect((await call('lake_house_connect', { code, house_url: houses.strict })).json).toMatchObject({ duty: { kinds: ['deliver'] } });
+      expect(await call('lake_sell', { action: 'menu', items: [{ sku: 'x', label: 'anything', price: 99, currency: 'USD' }] })).toMatchObject({ error: true });
+      const me = (await call('lake_overview')).json.you;
+      // While its runner looks, it is on duty: an order gets a cart at once (an AI away would sign nothing).
+      await new Promise((r) => setTimeout(r, 300));
+      const look = await (await fetch(`${url}/duty/pending?host=test&since=now&every=60`, { headers: { authorization: `Bearer ${anon.access_token}` } })).json();
+      expect(look).toMatchObject({ duty: { on: true } });
+      const order = await buyer.ask(me.url, { kind: 'trade.order', sku: 'duty-poem', note: 'The word: tide' });
+      expect(order).toMatchObject({ kind: 'trade.cart' });
+      const paid = await buyer.payCart(me.url, order.cart as never, true);
+      expect(paid.hold).toBeTruthy();
+      // One each a night: the same buyer again is told when it reopens, and nothing is signed.
+      expect(await buyer.ask(me.url, { kind: 'trade.order', sku: 'duty-poem', note: 'Another one' })).toMatchObject({ sold_out: expect.stringContaining('one each a night'), reopens: expect.any(String) });
+      // The runner's next look counts it as an order to deliver.
+      let p: Record<string, number> = {};
+      for (let i = 0; i < 20 && !p.to_deliver; i++) { await new Promise((r) => setTimeout(r, 250)); p = await (await fetch(`${url}/duty/pending?host=test&since=now&every=60`, { headers: { authorization: `Bearer ${anon.access_token}` } })).json(); }
+      expect(p.to_deliver).toBe(1);
+      // It delivers what was ordered and paid, once; nothing off its menu.
+      expect(await call('lake_sell', { action: 'deliver', cart: 'not-a-cart-of-mine', content: 'x\ny\nz' })).toMatchObject({ error: true, text: expect.stringContaining('only orders from your menu') });
+      const cartId = String((order.cart as { contents?: { id?: string } }).contents?.id ?? (await call('lake_sell', { action: 'orders' })).json.orders?.[0]?.cart);
+      expect((await call('lake_sell', { action: 'deliver', cart: cartId, content: 'Tide pulls at the sand\nshells keep the sea in their ears\nmorning brings it back' })).error).toBe(false);
+      expect(await call('lake_sell', { action: 'deliver', cart: cartId, content: 'again\nagain\nagain' })).toMatchObject({ error: true, text: expect.stringContaining('delivered already') });
+      // The owner's morning page has the sale, to the buyer, with its signed answer.
+      const log = await ownerCall({ kind: 'panel.duty.log' });
+      expect(log.entries.find((e: { action: string; refused?: string }) => e.action === 'deliver' && !e.refused)).toMatchObject({ to: { name: 'Haiku fan' }, text: expect.stringContaining('Tide pulls') });
+      await ownerCall({ kind: 'panel.duty.off' });
+      await c.close();
+    } finally {
+      await buyer.close();
+    }
+  });
+
   it('one person, one house: a person stamp, and a people-only pledge counts two houses of one owner once', async () => {
     const consentFor = (house: string) => signMessage({ kind: 'personhood.consent', house }, owner, { iss: house });
     expect(await ownerCall({ kind: 'panel.person.request', consent: await consentFor(webId) })).toMatchObject({ stamped: true });

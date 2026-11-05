@@ -19,6 +19,8 @@ export interface DutyOptions {
   house: string;
   /** The one-time code the owner's panel made with the duty grant (first run only). */
   code?: string;
+  /** What its agent sells while on duty (for a grant with "deliver"): menu items, set once at first sign-in, before it is on duty, from a file the owner wrote. */
+  menu?: unknown[];
   /** The agent CLI to run: "claude -p" (default), or any command that takes the prompt on stdin and LAKE_MCP_CONFIG. */
   agent?: string;
   /** How often to look, in ms (default 10 minutes). */
@@ -45,7 +47,7 @@ export function dutyPrompt(house: string, duty?: { kinds?: string[]; cap?: numbe
   const may = [
     kinds.includes('reply') && 'reply to people your human already knows (their side has written to them before)',
     kinds.includes('book') && 'book a time in their free hours (lake_house { view: "free" }, then lake_house_suggest with agenda)',
-    kinds.includes('deliver') && 'deliver text items from your menu that were already paid for (lake_sell deliver)',
+    kinds.includes('deliver') && 'deliver what was ordered from your menu and paid for (lake_sell { action: "orders" }, then deliver): exactly what the item says, in the form it promises; if an order asks for something the item excludes, deliver a polite refusal in that same form saying why (it still counts as delivered)',
   ].filter(Boolean);
   return [
     `You are the AI on duty for the house ${house}, while its owner is away. Your human signed what you may do; your connector and their house hold you to it.`,
@@ -72,6 +74,8 @@ async function signIn(o: DutyOptions, file: string, log: (s: string) => void): P
   const t = (await r.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
   if (!t.access_token) throw new Error(`could not sign in to ${o.lake}: ${t.error ?? r.status}`);
   const s: Saved = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in ?? 3600) * 1000, house: o.house, since: new Date().toISOString() };
+  // The owner's menu goes on first: once paired on duty, its agent can't change what it sells.
+  if (o.menu?.length) { const m = await call(o, s, 'lake_sell', { action: 'menu', items: o.menu }) as { ok?: boolean; error?: string }; if (!m.ok) throw new Error(`the menu wasn't taken: ${m.error ?? JSON.stringify(m).slice(0, 200)}`); }
   const connected = await call(o, s, 'lake_house_connect', { house_url: o.house, code: o.code }) as { name?: string; duty?: unknown; error?: string };
   const me = (await call(o, s, 'lake_overview', {}) as { you?: { name: string; url: string } }).you;
   s.agent = me ? { name: me.name, url: me.url } : undefined;
@@ -111,11 +115,11 @@ async function call(o: DutyOptions, s: Saved, name: string, args: Record<string,
 
 /** Unread messages for this agent, without reading them (the connector's GET <lake>/duty/pending). */
 const started = new Date().toISOString();
-async function pending(o: DutyOptions, s: Saved): Promise<{ waiting: number | null; duty?: { on: boolean; why?: string } }> {
-  const q = new URLSearchParams({ host: hostname(), since: started, every: String(Math.round((o.every ?? 600_000) / 1000)) });
+async function pending(o: DutyOptions, s: Saved, lookMs = o.every ?? 600_000): Promise<{ waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string } }> {
+  const q = new URLSearchParams({ host: hostname(), since: started, every: String(Math.round(lookMs / 1000)) });
   const r = await fetch(`${o.lake.replace(/\/$/, '')}/duty/pending?${q}`, { headers: { authorization: `Bearer ${s.access_token}` } });
   if (r.status === 401) { s.expires_at = 0; throw new Error('401'); }
-  return (await r.json()) as { waiting: number | null; duty?: { on: boolean; why?: string } };
+  return (await r.json()) as { waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string } };
 }
 
 /** Runs the owner's agent CLI once with the Lake as its only tools; resolves with what it said last. */
@@ -151,25 +155,29 @@ export async function runDuty(o: DutyOptions): Promise<void> {
   const every = o.every ?? 10 * 60_000, maxRuns = o.maxRuns ?? 30, maxTools = o.maxTools ?? 40;
   const runs: number[] = [];
   let offSaid = false;
-  log(`on duty since ${hhmm()} on ${hostname()}, for ${o.house}, as ${s.agent?.name ?? 'its agent'}; looking every ${Math.round(every / 1000)} s`);
+  // A paid order is someone waiting in their chat: looked for every minute and run at once; anything else waits for the
+  // usual look (Fable, 6 Nov: ten minutes is too long for a reader watching their AI buy a haiku).
+  const sells = ((s.duty as { kinds?: string[] } | null)?.kinds ?? []).includes('deliver');
+  const look = sells ? Math.min(every, 60_000) : every;
+  log(`on duty since ${hhmm()} on ${hostname()}, for ${o.house}, as ${s.agent?.name ?? 'its agent'}; looking every ${Math.round((sells ? Math.min(every, 60_000) : every) / 1000)} s`);
   const work = join(state, 'duty-work');
   mkdirSync(work, { recursive: true });
   while (!o.signal?.aborted) {
     try {
       s = await fresh(o, s, file);
-      const p = await pending(o, s);
+      const p = await pending(o, s, look);
       // A connector that can't count says null: then run now and then anyway (every sixth look), not at every look.
       const unknownDue = p.waiting === null && !runs.some((t) => Date.now() - t < every * 6);
       // Off duty (its human's Off, or tonight's cap): nothing runs, said once, until the house says it's on again.
       if (p.duty && !p.duty.on) { if (!offSaid) log(`off duty for now: ${p.duty.why ?? 'its house says so'}; looking again every ${Math.round(every / 1000)} s`); offSaid = true; }
-      else if (p.waiting ? p.waiting > 0 : unknownDue) {
+      else if ((p.to_deliver ?? 0) > 0 || ((p.waiting ? p.waiting > 0 : unknownDue) && !runs.some((t) => Date.now() - t < every - 5_000))) {
         offSaid = false;
         const recent = runs.filter((t) => Date.now() - t < 24 * 3_600_000);
         if (recent.length >= maxRuns) log(`${p.waiting ?? 'something'} waiting, but ${maxRuns} runs in 24 hours is the cap: not running`);
         else {
           runs.push(Date.now());
           const prompt = dutyPrompt(o.house, s.duty as { kinds?: string[]; cap?: number } | null);
-          log(`run ${recent.length + 1}: ${p.waiting ?? 'unknown number of'} message(s) waiting`);
+          log(`run ${recent.length + 1}: ${p.waiting ?? 'unknown number of'} message(s) waiting${p.to_deliver ? `, ${p.to_deliver} order(s) to deliver` : ''}`);
           const r = await runAgent({ agent: o.agent ?? 'claude -p', lake: o.lake, token: s.access_token, prompt, maxTools, cwd: work });
           const day = new Date().toISOString().slice(0, 10);
           appendFileSync(join(logs, `${day}.log`), `--- ${new Date().toISOString()} run on ${hostname()} (exit ${r.code})\n[prompt]\n${prompt}\n[said]\n${r.out}\n`, { mode: 0o600 });
@@ -182,7 +190,7 @@ export async function runDuty(o: DutyOptions): Promise<void> {
       if ((e as Error).message !== '401') log(`problem: ${(e as Error).message}`);
     }
     // One listener a wait, taken off when the wait ends (each look added one before, and they piled up overnight).
-    await new Promise<void>((r) => { const stop = () => { clearTimeout(t); r(); }; const t = setTimeout(() => { o.signal?.removeEventListener('abort', stop); r(); }, every); o.signal?.addEventListener('abort', stop, { once: true }); });
+    await new Promise<void>((r) => { const stop = () => { clearTimeout(t); r(); }; const t = setTimeout(() => { o.signal?.removeEventListener('abort', stop); r(); }, look); o.signal?.addEventListener('abort', stop, { once: true }); });
   }
   log(`off duty at ${hhmm()}`);
 }
