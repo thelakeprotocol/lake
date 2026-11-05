@@ -2023,7 +2023,7 @@ describe('mortgage offers, priced inside the house', () => {
       const m = await b.call({ kind: 'panel.market' });
       return m.intents[0]?.members === 3 && m.offers.length === 8 && m.offers.every((o: any) => o.groupSize === 3);
     };
-    for (let i = 0; i < 80 && !(await Promise.all(buyers.map(ready))).every(Boolean); i++) await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 240 && !(await Promise.all(buyers.map(ready))).every(Boolean); i++) await new Promise((r) => setTimeout(r, 500));
     for (const b of buyers) {
       const m = await b.call({ kind: 'panel.market' });
       expect(m.intents[0]).toMatchObject({ pack: 'mortgage@1', members: 3 });
@@ -2094,9 +2094,10 @@ describe('the weekly shop, priced inside the house', () => {
   it("every grocer prices each household inside its house, at the street's group price, and only the owner sees it", async () => {
     const ready = async (b: (typeof buyers)[number]) => {
       const m = await b.call({ kind: 'panel.market' });
-      return m.intents[0]?.members === 3 && m.offers.length === 3 && m.offers.every((o: any) => o.groupSize === 3);
+      // A house still starting answers without a market yet: not ready, not a failure (CI, 5 Nov).
+      return m.intents?.[0]?.members === 3 && m.offers?.length === 3 && m.offers.every((o: any) => o.groupSize === 3);
     };
-    for (let i = 0; i < 80 && !(await Promise.all(buyers.map(ready))).every(Boolean); i++) await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 240 && !(await Promise.all(buyers.map(ready))).every(Boolean); i++) await new Promise((r) => setTimeout(r, 500));
     for (const b of buyers) {
       const m = await b.call({ kind: 'panel.market' });
       expect(m.intents[0]).toMatchObject({ pack: 'shopping@1', members: 3 });
