@@ -1071,7 +1071,7 @@ type DutyInfo = { kid: string; label: string; seenAt?: string; kinds: string[]; 
 type DutyLog = { duties: DutyInfo[]; entries: DutyEntry[] };
 /** The code and command for the AI on duty, kept here so a tab change doesn't lose them while you copy them. */
 let dutyCode: { code: string; cmd: string; until: number; made: number } | null = null;
-const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you already know'], ['book', 'Book times in your free hours']];
+const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you already know'], ['book', 'Book times in your free hours'], ['deliver', 'Deliver what people buy from your AI\'s menu (one each a night)']];
 /** Off for good (taken off, refused too often, ended): not the same as off for the night or outside its hours. */
 const dutyLive = (d: DutyInfo) => !(d.off && !d.off.night) && Date.parse(d.until) > Date.now() && !(!d.state.on && /took you off duty|has ended/.test(d.state.why));
 
@@ -1098,6 +1098,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       h('p', { class: 'muted' }, `Run this on the computer where your AI app is (it uses your own AI, on your own account). The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`),
       h('textarea', { readonly: true, rows: 4, class: 'copybox', value: dutyCode.cmd, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
       h('p', { class: 'r-meta' }, 'Code: ', h('code', { class: 'duty-code' }, dutyCode.code)),
+      dutyCode.cmd.includes('--menu') ? h('p', { class: 'muted' }, 'menu.json is what it sells, in a file next to where you run it, for example: ', h('code', {}, '[{ "sku": "haiku", "label": "A haiku on any word", "price": 1, "currency": "USD" }]'), '. It is set once, when it starts: on duty it can\'t change it.') : null,
       h('div', { class: 'row' }, h(CopyButton, { text: dutyCode.cmd }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => { dutyCode = null; redraw(); } }, 'Done')));
   }
   if (live.length) return h('section', { class: 'block duty' }, head, h('ul', { class: 'items' }, ...live.map((d) => {
@@ -1132,7 +1133,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       if (from === to) throw new Error('The hours need to start and end at different times.');
       const d = await call<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
       const r = await call<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
-      dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}` };
+      dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
     } })));
 }
 
