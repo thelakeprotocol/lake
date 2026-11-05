@@ -1140,7 +1140,8 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
 /** One thing it did, said plainly: "Replied to Sam's AI: Yes, Monday works." */
 function dutyLine(e: DutyEntry): string {
   const name = e.to?.name ? shortName(e.to.name) : e.to?.webId ? who(e.to.webId) : '';
-  const text = e.text ? `: ${e.text}` : '';
+  // What it delivered keeps its lines (a haiku is three of them); everything else is one line of words.
+  const text = e.text ? (e.action === 'deliver' && e.text.includes('\n') ? `:\n${e.text}` : `: ${e.text}`) : '';
   if (e.refused) return `Stopped${name ? ` (to ${name})` : ''}: ${e.refused}`;
   const said: Record<string, string> = { reply: `Replied to ${name || 'someone'}`, book: `Booked with ${name || 'someone'}`, deliver: `Delivered to ${name || 'someone'}`, block: `Blocked ${name || 'someone'}`, note: 'Left you a note' };
   return `${said[e.action] ?? `${e.action}${name ? ` ${name}` : ''}`}${text}`;

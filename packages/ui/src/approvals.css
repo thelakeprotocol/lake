@@ -290,6 +290,7 @@ select.tz { max-width: 220px; }
 
 /* AI on duty, and the morning page. */
 .slept-tiles { margin: 4px 0 10px; }
+.slept .duty-line { white-space: pre-line; }
 .slept-stopped { margin-top: 10px; }
 .slept-stopped > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
 .slept-sum { font-size: 17px; font-weight: 600; margin: 0 0 10px; color: var(--fg); }
