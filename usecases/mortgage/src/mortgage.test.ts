@@ -68,6 +68,28 @@ describe('mortgage@1', () => {
     expect(new Set(someone).size).toBeGreaterThan(3);
   });
 
+  it('existing loans carry a loyalty tax, and lenders price a refinance of exactly that loan, inside the house', () => {
+    const owners = people.filter((c) => c.some((x) => x.field === 'home_loan_lender'));
+    // About three in five have a home loan with one of the big four.
+    expect(owners.length).toBeGreaterThan(150);
+    expect(owners.length).toBeLessThan(220);
+    const n = (c: typeof people[number], f: string) => Number(c.find((x) => x.field === f)!.value);
+    // The gap: what the same bank charges this borrower over what it offers a new customer, never negative.
+    for (const c of owners) {
+      expect(n(c, 'loyalty_gap')).toBeGreaterThanOrEqual(0);
+      expect(n(c, 'overpay_yearly')).toBeCloseTo((n(c, 'home_loan_balance') * n(c, 'loyalty_gap')) / 10_000, -2);
+      expect(c.find((x) => x.field === 'lender_overpay')!.code).toMatch(/^(harbour|granite|lyrebird|magpie):/);
+    }
+    const refi = { region: 'qld', purpose: 'refinance' };
+    const offers = owners.map((c) => LENDERS.map((l) => runProgram(l.program, c, refi)).filter((r) => r.eligible));
+    // Most can refinance somewhere, and the best offer saves most of them money even after switching costs.
+    expect(offers.filter((o) => o.length).length).toBeGreaterThan(owners.length * 0.6);
+    expect(offers.filter((o) => Math.max(...o.map((r) => r.outputs.saving_yearly!)) > 0).length).toBeGreaterThan(owners.length * 0.5);
+    // Without a loan there is nothing to refinance.
+    const renter = people.find((c) => !c.some((x) => x.field === 'home_loan_lender'))!;
+    expect(LENDERS.every((l) => !runProgram(l.program, renter, refi).eligible)).toBe(true);
+  });
+
   it('refuses a program that reads an identifying field or does something it may not', () => {
     const p = LENDERS[0]!.program;
     expect(auditProgram({ ...p, inputs: [...p.inputs, 'account_number'] }).ok).toBe(false);

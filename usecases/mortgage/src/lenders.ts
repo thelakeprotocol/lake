@@ -27,6 +27,9 @@ export interface LenderRules {
   group?: { off: number; minMembers: number };
 }
 
+/** What switching costs a borrower who refinances: the old bank's discharge fee and the new loan's fees, roughly. */
+export const SWITCH_COST = 900;
+
 /** APRA's serviceability buffer, in percentage points over the loan's rate. */
 export const BUFFER = 3;
 
@@ -47,21 +50,26 @@ export function lenderProgram(title: string, r: LenderRules): QuoteProgram {
     kind: 'quote',
     pack: 'mortgage@1',
     title,
-    inputs: ['income_annual', 'monthly_commitments', 'savings', 'missed_payments_12m', 'employment'],
-    terms: ['region', 'price_band', 'term_years', 'first_time_buyer', 'group_size'],
+    inputs: ['income_annual', 'monthly_commitments', 'savings', 'missed_payments_12m', 'employment', 'home_loan_balance', 'home_value', 'home_loan_rate'],
+    terms: ['region', 'price_band', 'term_years', 'first_time_buyer', 'purpose', 'group_size'],
     let: {
+      // Refinancing the loan the owner already has (its balance and the bank's estimate of the home), or buying.
+      refi: "purpose == 'refinance'",
       // The price band's lower bound: a conservative estimate of the purchase price.
-      price: 'price_band',
-      fhg: r.fhg ? `first_time_buyer == 'yes' && price <= (${cap})` : 'false',
+      price: 'refi ? home_value : price_band',
+      years: 'term_years >= 1.0 ? term_years : 25.0',
+      fhg: r.fhg ? `!refi && first_time_buyer == 'yes' && price <= (${cap})` : 'false',
       // Some savings go on stamp duty and fees; the rest is the deposit, up to 40%.
-      deposit: 'min(savings * 0.85, price * 0.4)',
-      base_loan: 'price - deposit',
+      deposit: 'refi ? 0.0 : min(savings * 0.85, price * 0.4)',
+      base_loan: 'refi ? home_loan_balance : price - deposit',
       lvr: 'base_loan / price',
       lmi: `fhg ? 0.0 : base_loan * band(lvr, ${table([...LMI, [1e9, 0.05]])})`,
       loan: 'base_loan + lmi',
       group_off: r.group ? `group_size >= ${dbl(r.group.minMembers)} ? ${dbl(r.group.off)} : 0.0` : '0.0',
       rate: `band(lvr, ${table(r.rates)}) + missed_payments_12m * ${dbl(r.missedLoading ?? 0)} - group_off`,
-      stressed: `annuity(loan, rate + ${dbl(BUFFER)}, term_years)`,
+      stressed: `annuity(loan, rate + ${dbl(BUFFER)}, years)`,
+      // What it saves a year against the rate the owner pays now, after a year's share of switching costs.
+      saving: `refi ? loan * (home_loan_rate - rate) / 100.0 - ${dbl(SWITCH_COST)} : 0.0`,
       take_home: `(income_annual - ${taxExpr('income_annual')}) / 12.0`,
       surplus: `take_home - ${dbl(r.living)} - monthly_commitments`,
     },
@@ -74,7 +82,8 @@ export function lenderProgram(title: string, r: LenderRules): QuoteProgram {
     ].join(' && '),
     outputs: {
       rate: 'round(rate, 2)',
-      monthly: 'round(annuity(loan, rate, term_years), 0)',
+      monthly: 'round(annuity(loan, rate, years), 0)',
+      saving_yearly: 'round(saving, -1)',
       loan: 'round(loan, -3)',
       lvr_pct: 'round(lvr * 100.0, 0)',
       lmi: 'round(lmi, -2)',
@@ -91,6 +100,7 @@ export function lenderProgram(title: string, r: LenderRules): QuoteProgram {
       first_home_guarantee: { label: 'First Home Guarantee', unit: 'yes/no' },
       max_loan: { label: 'Most they would lend', unit: 'AUD' },
       group_off: { label: 'Group discount', unit: '%' },
+      saving_yearly: { label: 'Saved in the first year against your rate now (after switching costs)', unit: 'AUD' },
     },
     output: 'owner',
   };

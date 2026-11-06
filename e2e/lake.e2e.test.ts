@@ -2159,7 +2159,7 @@ describe('mortgage offers, priced inside the house', () => {
       expect(m.offers.some((o: any) => o.result.outputs.group_off > 0)).toBe(true);
     }
     const intents = await (await fetch(`${node}/intents?pack=mortgage@1`)).json();
-    expect(intents).toEqual([{ pack: 'mortgage@1', group: 'region=qld;price_band=450000-599999;first_time_buyer=yes', members: 3 }]);
+    expect(intents).toEqual([{ pack: 'mortgage@1', group: 'region=qld;price_band=450000-599999;first_time_buyer=yes;purpose=any', members: 3 }]);
   });
 
   it('nothing leaves until the owner accepts; then two files go to one lender, who confirms and pays the fee', async () => {

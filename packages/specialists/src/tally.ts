@@ -53,7 +53,7 @@ interface Quorum {
   joined: { webId: string; person: string; url: string }[];
   /** How it is signed once it opens: blind (and unveil), registered with the pass issuer only then. */
   blind?: boolean; unveil?: boolean;
-  result?: { totals: Record<string, number>; counted: number; size: number; at: string; why?: string };
+  result?: { totals: Record<string, number>; counted: number; size: number; binds?: number; at: string; why?: string };
 }
 
 /**
@@ -67,6 +67,15 @@ export function quorumSize(totals: number[], atLeast: (number | null)[]): number
     if (n >= v) size = Math.max(size, n);
   }
   return size;
+}
+
+/**
+ * How many must sign for a group of `size` to bind: the highest threshold among the answers in it. Each of them said
+ * they'd join a group that big, so the pledge binds once that many sign, and the rest of the group can come late or not
+ * at all (the largest group is 205; the highest threshold in it, 200).
+ */
+export function quorumBinds(size: number, atLeast: (number | null)[]): number {
+  return Math.max(0, ...atLeast.filter((x): x is number => x !== null && x <= size));
 }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -216,9 +225,9 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         else { totals = unshardCounts(q.options.length, [lead.share, help.share], Number(lead.count)); counted = Number(lead.count); }
       }
       const size = totals ? quorumSize(totals, q.atLeast) : 0;
-      q.result = { totals: Object.fromEntries(q.options.map((x, i) => [x, totals?.[i] ?? 0])), counted, size, at: new Date().toISOString(), ...(why ? { why } : totals && size < t.threshold ? { why: `the largest group that holds together is ${size}, under the ${t.threshold} it needs` } : {}) };
+      q.result = { totals: Object.fromEntries(q.options.map((x, i) => [x, totals?.[i] ?? 0])), counted, size, ...(totals && size >= t.threshold ? { binds: Math.max(t.threshold, quorumBinds(size, q.atLeast)) } : {}), at: new Date().toISOString(), ...(why ? { why } : totals && size < t.threshold ? { why: `the largest group that holds together is ${size}, under the ${t.threshold} it needs` } : {}) };
       if (totals && size >= t.threshold) {
-        t.threshold = size;
+        t.threshold = Math.max(t.threshold, quorumBinds(size, q.atLeast));
         const err = q.blind ? await registerBlind(t, !!q.unveil) : null;
         if (err) q.result.why = err;
         t.state = err ? 'lapsed' : 'open';
@@ -499,11 +508,11 @@ async function tick(){
   let h='';
   if(v.state==='gathering'){h='<p class="big">'+q.answered+'</p><p class="of">families have answered privately. Answers close '+when(q.closes)+'. Nobody can sign until then, and only if enough would join.</p>'}
   else if(v.state==='lapsed'){h='<p class="big">'+v.count+'</p><p class="of">'+esc((q&&q.result&&q.result.why)||('of '+v.threshold+' needed by '+when(v.deadline)))+'</p>'}
-  else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">of '+v.threshold+' signed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
+  else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">signed, '+v.threshold+' needed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
     if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}
   $('main').innerHTML=h;
   if(q&&q.result){const r=q.result,max=Math.max(1,...Object.values(r.totals));
-    $('quorum').hidden=false;$('quorum').innerHTML='<p><b>The secret count:</b> '+r.counted+' families answered "I\\'m in if at least how many are?"</p>'+q.options.map((o,i)=>{const n=r.totals[o]||0,inq=q.at_least[i]!==null&&q.at_least[i]<=r.size;return '<div class="row"><span>'+esc(o)+'</span><div class="bar"><i class="'+(inq?'in':'')+'" style="width:'+(100*n/max)+'%"></i></div><b>'+n+'</b></div>'}).join('')+'<p class="of">'+(r.size?'<b>'+r.size+'</b> families hold together: each said they\\'d join a group that size or smaller.':'')+(r.why?' '+esc(r.why):'')+'</p>'}
+    $('quorum').hidden=false;$('quorum').innerHTML='<p><b>The secret count:</b> '+r.counted+' families answered "I\\'m in if at least how many are?"</p>'+q.options.map((o,i)=>{const n=r.totals[o]||0,inq=q.at_least[i]!==null&&q.at_least[i]<=r.size;return '<div class="row"><span>'+esc(o)+'</span><div class="bar"><i class="'+(inq?'in':'')+'" style="width:'+(100*n/max)+'%"></i></div><b>'+n+'</b></div>'}).join('')+'<p class="of">'+(r.size?'<b>'+r.size+'</b> families hold together: each said they\\'d join a group that size or smaller'+(r.binds?', so it binds once '+r.binds+' sign, the most any of them asked for.':'.'):'')+(r.why?' '+esc(r.why):'')+'</p>'}
 }
 tick();setInterval(tick,3000);
 </script></body></html>`;

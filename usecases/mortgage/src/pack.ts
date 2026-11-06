@@ -26,6 +26,15 @@ export const mortgage: LakePack = {
     savings: { class: `${M}Savings`, kind: 'number', unit: 'AUD', label: 'savings', standard: `${CDR}#get-bulk-balances` },
     missed_payments_12m: { class: `${M}MissedPayments`, kind: 'number', label: 'dishonoured payments in the last year', standard: `${CDR}#get-transactions-for-account` },
     employment: { class: `${M}Employment`, kind: 'code', label: 'employment', standard: 'https://schema.org/employmentType' },
+    // An existing home loan, for those who have one (CDR residential mortgages), and the loyalty tax on it.
+    home_loan_lender: { class: `${M}HomeLoanLender`, kind: 'code', label: 'home loan with', standard: `${CDR}#get-accounts` },
+    home_loan_balance: { class: `${M}HomeLoanBalance`, kind: 'number', unit: 'AUD', label: 'home loan owed', standard: `${CDR}#get-account-detail` },
+    home_loan_rate: { class: `${M}HomeLoanRate`, kind: 'number', unit: '%', label: 'home loan rate', standard: `${CDR}#get-account-detail` },
+    home_value: { class: `${M}HomeValue`, kind: 'number', unit: 'AUD', label: 'home value (the bank\'s estimate)', standard: `${CDR}#get-account-detail` },
+    home_loan_years: { class: `${M}HomeLoanYears`, kind: 'number', label: 'years since the loan started', standard: `${CDR}#get-account-detail` },
+    loyalty_gap: { class: `${M}LoyaltyGap`, kind: 'number', unit: 'hundredths of a percentage point', label: 'rate above what the same bank offers new customers' },
+    overpay_yearly: { class: `${M}OverpayYearly`, kind: 'number', unit: 'AUD', label: 'paid a year more than a new customer would' },
+    lender_overpay: { class: `${M}LenderOverpay`, kind: 'code', label: 'home loan bank and loyalty tax band' },
   },
   identifying: ['name', 'dob', 'address', 'bsb', 'account_number', 'tfn', 'email', 'phone'],
   shapes: readFileSync(new URL('../shapes.ttl', import.meta.url), 'utf8'),
@@ -45,8 +54,10 @@ export const mortgage: LakePack = {
       price_band: { kind: 'band', label: 'Price', unit: 'AUD', options: PRICE_BANDS },
       term_years: { kind: 'number', label: 'Term (years)', options: [25, 30] },
       first_time_buyer: { kind: 'code', label: 'First home buyer', options: ['yes', 'no'] },
+      // Refinancing the loan you have (its balance and your bank's estimate of the home, from your own bank data).
+      purpose: { kind: 'code', label: 'Buying or refinancing', options: ['buy', 'refinance'] },
     },
-    groupBy: ['region', 'price_band', 'first_time_buyer'],
+    groupBy: ['region', 'price_band', 'first_time_buyer', 'purpose'],
     // `price_band: auto` picks the highest band the owner could plausibly borrow for: about 4.5× income plus most of their savings.
     auto: (claims) => {
       const n = (f: string) => Number(claims.find((c) => c.field === f)?.value ?? 0);

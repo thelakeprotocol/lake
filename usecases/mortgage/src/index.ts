@@ -4,3 +4,4 @@ export * from './synthetic.js';
 export * from './lenders.js';
 export * from './tax.js';
 export { mortgage as default } from './pack.js';
+export * from './loans.js';
