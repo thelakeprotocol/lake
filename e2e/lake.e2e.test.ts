@@ -2495,6 +2495,52 @@ describe('the weekly shop, priced inside the house', () => {
     for (let i = 0; i < 90 && !c.unveil?.opened; i++) { await new Promise((ok) => setTimeout(ok, 2000)); c = await count(); }
     expect(c).toMatchObject({ revealed: 3, bound: true, unveil: { opened: true } });
   }, 360_000);
+
+  it('a promise circle (SPEC §11.4c): each member promises the others a favour; a call goes to members drawn fairly, without the caller\'s name; the first yes is put in touch; the caller says it happened and the promise counts as kept', async () => {
+    const tally = `${specialistsUrl}/tally/a2a`, tallyAt = `${specialistsUrl}/tally`;
+    for (const b of buyers) {
+      const o = await b.call({ kind: 'panel.overview' });
+      if (!o.person.stamped) expect(await b.call({ kind: 'panel.person.request', consent: await signMessage({ kind: 'personhood.consent', house: o.webId }, b.phone, { iss: o.webId }) })).toMatchObject({ stamped: true });
+    }
+    const organiser = await visitor('circle.example');
+    const { reply: opened } = await ask(tally, organiser, { kind: 'tally.open', id: 'meal-circle', text: 'Sick-day circle for our street.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a home-cooked meal', times: 1 } });
+    expect(opened).toMatchObject({ kind: 'tally.opened', circle: { promise: 'a home-cooked meal', times_a_year: 1, open: false } });
+    for (const b of buyers) expect(await b.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'meal-circle' })).toMatchObject({ kind: expect.stringMatching(/^tally\.(signed|triggered)$/) });
+    // Filled and everyone known: it is open for calls, and each house lists it.
+    const circles = await buyers[0]!.call({ kind: 'panel.circles' });
+    expect(circles).toEqual([expect.objectContaining({ id: 'meal-circle', view: expect.objectContaining({ open: true, members: 3, you: expect.objectContaining({ kept: 0 }) }) })]);
+    // An outsider can't call it.
+    expect((await ask(tally, organiser, { kind: 'circle.call', id: 'meal-circle', need: 'soup' })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/only the circle's members/)] });
+    const called = await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'a meal on Thursday, I have the flu', when: 'Thursday' });
+    expect(called).toMatchObject({ kind: 'circle.called', asked: 2, round: expect.any(Number) });
+    expect(await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'again' })).toMatchObject({ kind: 'refused' });
+    // The other two are asked, without the caller's name.
+    const askOf = async (b: (typeof buyers)[number]) => {
+      for (let i = 0; i < 20; i++) {
+        const n = ((await b.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; contact?: string } }[]).find((x) => x.circle?.role === 'ask');
+        if (n) return n;
+        await new Promise((ok) => setTimeout(ok, 500));
+      }
+      throw new Error('no ask arrived');
+    };
+    const [ask1, ask2] = [await askOf(buyers[1]!), await askOf(buyers[2]!)];
+    expect(ask1.text).toMatch(/a meal on Thursday.*You promised: a home-cooked meal/);
+    expect(ask1.circle!.contact).toBeUndefined();
+    expect(JSON.stringify(ask1)).not.toContain(buyers[0]!.url);
+    // The first yes is put in touch with the caller; the other is told it's taken.
+    const yes = await buyers[1]!.call({ kind: 'panel.circle.answer', note: ask1.id, accept: true });
+    expect(yes).toMatchObject({ kind: 'circle.matched', caller: { url: expect.stringContaining(buyers[0]!.url.replace(/^http:\/\//, '')) } });
+    expect(await buyers[2]!.call({ kind: 'panel.circle.answer', note: ask2.id, accept: true })).toMatchObject({ kind: 'refused' });
+    const caller = async () => ((await buyers[0]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; contact?: string } }[]).find((x) => x.circle?.role === 'caller')!;
+    for (let i = 0; i < 20 && (await caller()).circle!.state !== 'matched'; i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect((await caller()).circle).toMatchObject({ state: 'matched', contact: expect.stringContaining(buyers[1]!.url.replace(/^http:\/\//, '')) });
+    // It happened: the helper's promise counts as kept, and the circle's record says so (never who).
+    expect(await buyers[0]!.call({ kind: 'panel.circle.kept', note: (await caller()).id })).toMatchObject({ kind: 'circle.kept', calls: 1, kept: 1, of: 1 });
+    expect((await buyers[1]!.call({ kind: 'panel.circles' }))[0].view).toMatchObject({ kept: 1, you: { kept: 1 } });
+    const page = await (await fetch(`${tallyAt}/p/meal-circle.json`)).json();
+    expect(page.circle).toMatchObject({ promise: 'a home-cooked meal', members: 3, kept: 1, of: 1 });
+    expect(JSON.stringify(page)).not.toMatch(/localhost:\d+\/a2a/);
+  }, 240_000);
 });
 
 describe('relay: a house behind a home router', () => {

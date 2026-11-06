@@ -35,6 +35,8 @@ export interface HousekeeperOptions {
   say?: (msg: string) => void;
   /** In the owner's own activity: what happened to their money in a pledge. */
   note?: (kind: string, text: string) => void;
+  /** Whether this house's owner is in the promise circle of this pledge at this tally (by the tally's WebID). */
+  inCircle?: (tally: string, id: string) => Promise<boolean>;
   /** Whether this house's owner answered the quorum of a pledge at this tally (by the tally's WebID). */
   answeredQuorum?: (tally: string, id: string) => Promise<boolean>;
   /** The nodes this house follows, and its links to them (for intents). */
@@ -188,6 +190,21 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
+    // A promise circle this house's owner is in (SPEC §11.4c), from its tally only: a member needs help (the caller unnamed),
+    // their own call was taken or couldn't be, or a promise of theirs counted as kept.
+    if (String(v.payload.kind).startsWith('circle.') && (await this.o.inCircle?.(v.profile.webId, String((v.payload as { id?: unknown }).id ?? '')))) {
+      const q = v.payload as unknown as { kind: string; id: string; call: string; need?: string; when?: string; promise?: string; helper?: { url?: string }; kept?: number };
+      const tally = ((data as LakeData).card?.supportedInterfaces?.[0]?.url ?? '').replace(/\/a2a$/, '');
+      const base = { tally, id: q.id, call: q.call, need: String(q.need ?? ''), ...(q.when ? { when: String(q.when).slice(0, 80) } : {}) };
+      const desk = this.o.desk;
+      if (q.kind === 'circle.ask') await desk.circleNote({ ...base, promise: String(q.promise ?? ''), role: 'ask', state: 'open' }, `Someone in your circle needs: ${base.need}${base.when ? ` (${base.when})` : ''}. You promised: ${q.promise}. You won't know who unless you say yes.`);
+      else if (q.kind === 'circle.matched') { await desk.circleUpdate(q.id, q.call, 'caller', { state: 'matched', contact: String(q.helper?.url ?? '') }); desk.notifyOwner('circle-matched', `Someone from your circle will help with: ${base.need}`); }
+      else if (q.kind === 'circle.filled') await desk.circleUpdate(q.id, q.call, 'ask', { state: 'taken' });
+      else if (q.kind === 'circle.withdrawn') await desk.circleUpdate(q.id, q.call, 'ask', { state: 'withdrawn' });
+      else if (q.kind === 'circle.unmet') { await desk.circleUpdate(q.id, q.call, 'caller', { state: 'withdrawn' }); await desk.circleNote({ ...base, role: 'unmet', state: 'done' }, `Nobody in your circle could take "${base.need}" this time.`); }
+      else if (q.kind === 'circle.kept') await desk.circleNote({ ...base, role: 'kept', state: 'done' }, `You kept your promise: "${base.need}". ${q.kept} kept so far, on the circle's record.`);
+      return this.reply({ kind: 'received' } as never);
+    }
     // A pledge whose quorum this house's owner answered: whether it opened, from that tally only (SPEC §11.4b).
     if (((v.payload.kind as string) === 'tally.quorum.opened' || (v.payload.kind as string) === 'tally.quorum.lapsed') && (await this.o.answeredQuorum?.(v.profile.webId, String((v.payload as { id?: unknown }).id ?? '')))) {
       const q = v.payload as unknown as { kind: string; id: string; text?: string; threshold?: number; deadline?: string; quorum?: { result?: { size?: number; counted?: number } } };

@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number } }; circle?: CircleItem; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -248,6 +248,7 @@ function Home({ go }: { go: (t: Tab) => void }) {
       stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
       stat('earned', `$${o.data.earned}`, 'money'),
       o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null) : h('div', { class: 'stats' }, h('span', { class: 'stat skeleton' }, '…')),
+    h(Circles, {}),
     // Everything else, one tap away.
     !o.data ? null : h('details', { class: 'fold' }, h('summary', {}, 'About your house'),
       h('dl', { class: 'facts' },
@@ -368,6 +369,7 @@ function NotifyItem() {
 }
 
 type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
+type CircleItem = { tally: string; id: string; call: string; need: string; when?: string; promise?: string; role: 'ask' | 'caller' | 'kept' | 'unmet'; state: string; contact?: string };
 type PledgeQuorum = { text: string; options: string[]; closes: string; least: number; answered?: boolean };
 type Signed = { kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] };
 
@@ -386,6 +388,58 @@ function PledgeTerms({ m }: { m: PledgeMoney }) {
   return h('div', { class: 'pledge-terms' },
     h('p', { class: 'item-meta' }, `“${m.text}”`),
     h('p', { class: 'item-meta' }, `Puts in ${money$(m.amount, m.currency)}, held until ${by}. If ${m.threshold} sign by then (${m.count} so far), it goes to ${shortName(m.payee)}. If not, it comes back to you${m.bond ? `, plus an equal share of their ${money$(m.bond, m.currency)} bond` : ''}. You can take it back until it fills.`));
+}
+
+/** Reach the other member at their house: its door page says how (a note, or their agent). */
+const doorOf = (url?: string) => (url ? url.replace(/\/a2a\/?$/, '') : '');
+
+/**
+ * A promise circle's note (SPEC §11.4c): a member needs what you promised (you don't know who unless you say yes), or
+ * your own call: asked, taken, done. Each answer is your tap.
+ */
+function CircleNote({ x, c }: { x: Note; c: CircleItem }) {
+  const send = (payload: Record<string, unknown>) => async () => { const r = await call<Signed>(payload); if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; ')); };
+  const line = (t: string) => h('p', { class: 'item-meta' }, t);
+  return h('div', { class: 'pledge-terms' },
+    c.role === 'ask' ? [
+      c.state === 'open' ? h('div', { class: 'choices' },
+        h(Act, { label: 'Yes, I\'ll do it', cls: 'primary', run: send({ kind: 'panel.circle.answer', note: x.id, accept: true }) }),
+        h(Act, { label: 'Not this time', run: send({ kind: 'panel.circle.answer', note: x.id, accept: false }) })) : null,
+      c.state === 'accepted' ? [line('You said yes. Reach them at their house:'), h('a', { href: doorOf(c.contact), target: '_blank', rel: 'noopener' }, doorOf(c.contact))] : null,
+      c.state === 'taken' ? line('Someone else in the circle took it.') : null,
+      c.state === 'declined' ? line('You said not this time. Someone else will be asked.') : null,
+      c.state === 'withdrawn' ? line('They withdrew it.') : null,
+    ] : null,
+    c.role === 'caller' ? [
+      c.state === 'asking' ? line('Asked, without your name. You hear when someone says yes.') : null,
+      c.state === 'matched' ? [line('Someone said yes. Reach them at their house:'), h('a', { href: doorOf(c.contact), target: '_blank', rel: 'noopener' }, doorOf(c.contact))] : null,
+      c.state === 'done' ? line('Done: their promise counts as kept, on the circle\'s record.') : null,
+      c.state === 'withdrawn' ? line('Withdrawn.') : null,
+      c.state === 'matched' ? h(Act, { label: 'It happened', cls: 'primary', run: send({ kind: 'panel.circle.kept', note: x.id }) }) : null,
+      c.state === 'asking' || c.state === 'matched' ? h(Act, { label: 'Withdraw', cls: 'quiet', run: send({ kind: 'panel.circle.kept', note: x.id, withdraw: true }) }) : null,
+    ] : null);
+}
+
+type CircleRow = { tally: string; url: string; id: string; view: { kind: string; text?: string; promise?: string; times_a_year?: number; members?: number; open?: boolean; kept?: number; of?: number; you?: { kept: number }; problems?: string[] } };
+/** The promise circles you're in: what you promised, how the circle keeps its promises, and a way to ask it for help. */
+function Circles() {
+  const d = useHouse<CircleRow[]>({ kind: 'panel.circles' });
+  const need = useRef<HTMLInputElement>(null), when = useRef<HTMLInputElement>(null);
+  const [said, setSaid] = useState('');
+  if (!d.data?.length) return null;
+  return h('div', { class: 'card' }, h('h3', {}, 'Your promise circles'),
+    ...d.data.map((c) => h('div', { key: `${c.url}|${c.id}`, style: 'margin-top:8px' },
+      h('p', { class: 'item-meta' }, c.view.promise ? `You promised: ${c.view.promise}, ${c.view.times_a_year === 1 ? 'once' : `${c.view.times_a_year} times`} a year, to ${Math.max(0, (c.view.members ?? 1) - 1)} others.` : (c.view.problems ?? []).join('; ')),
+      c.view.promise ? h('p', { class: 'item-meta' }, `The circle has kept ${c.view.kept} of ${c.view.of} calls; you've kept ${c.view.you?.kept ?? 0}.`) : null,
+      c.view.open ? h('div', {},
+        h('input', { ref: need, placeholder: 'What do you need? e.g. a meal on Thursday', style: 'width:100%;margin-top:6px' }),
+        h('input', { ref: when, placeholder: 'When (optional)', style: 'width:100%;margin-top:6px' }),
+        h(Act, { label: 'Ask my circle', cls: 'primary', run: async () => {
+          const r = await call<Signed & { asked?: number }>({ kind: 'panel.circle.call', tally: c.url, id: c.id, need: need.current!.value.trim(), when: when.current!.value.trim() || undefined });
+          if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; '));
+          setSaid(`Asked ${r.asked} member${r.asked === 1 ? '' : 's'}, without your name.`);
+        } })) : h('p', { class: 'item-meta' }, 'It opens for calls once it has filled and everyone is known.'))),
+    said ? h('p', { class: 'muted' }, said) : null);
 }
 
 /**
@@ -408,14 +462,20 @@ function SuggestionItem({ x }: { x: Note }) {
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   const fail = (r: { ok?: boolean; error?: string }) => { if (r.error) throw new Error(r.error); };
   return h('li', { class: 'item' },
-    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, `From ${shortName(x.from)}, your agent`),
+    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, x.circle ? 'Your promise circle' : `From ${shortName(x.from)}, your agent`),
       x.advice ? h('span', { class: `chip ${x.advice === 'do' ? 'ok' : x.advice === 'dont' ? 'no' : ''}` }, x.sender && x.advice === 'dont' ? 'Warning' : { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice]) : null),
     // A warning about another agent (run 63: a scam): who it is about, so the owner knows the name if it turns up again.
     x.sender ? h('p', { class: 'item-meta' }, `About: ${x.sender}`) : null,
     h('p', { class: 'item-text' }, x.text),
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.pledge?.money ? h(PledgeTerms, { m: x.pledge.money }) : null,
+    x.pledge?.circle ? h('div', { class: 'pledge-terms' }, h('p', { class: 'item-meta' }, `A promise circle: each of you promises the others ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year. When someone needs it, a few are asked, picked by a public draw, without knowing who asked. No money.`)) : null,
     x.pledge?.quorum ? h(QuorumQuestion, { x, q: x.pledge.quorum }) : null,
+    x.circle ? h(CircleNote, { x, c: x.circle }) : null,
+    // A count answered from your own record: you see what it says; it leaves only as two unreadable shares.
+    x.count ? h('div', { class: 'pledge-terms' },
+      h('p', { class: 'item-meta' }, x.count.mine ? `Your ${x.count.label}, from your own record: ${x.count.mine.replace(/:/g, ' · ')}` : `Your record has no ${x.count.label}: nothing to count.`),
+      h('p', { class: 'item-meta private-q' }, x.count.answered ? 'Counted. It left your house only as two unreadable shares; only totals come out, and your AI wasn\'t told what it was.' : 'If you count it in, it leaves your house only as two unreadable shares, and only totals come out. Your AI won\'t see it.')) : null,
     x.ask?.private ? h('p', { class: 'item-meta private-q' }, x.ask.answered ? 'Private: only you know this answer. It leaves your house only as two unreadable shares, and only totals come out.' : 'Private: your AI won\'t see your answer. It leaves your house only as two unreadable shares, and only totals come out.') : null,
     x.ask?.answered ? h('p', { class: 'item-meta' }, `You answered: ${x.ask.answered}`) : null,
     // A question: each choice is a button; the one your agent advises stands out.
@@ -437,6 +497,7 @@ function SuggestionItem({ x }: { x: Note }) {
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,
       // A pledge still finding its quorum has nothing to sign: your agent brings it again if it opens.
+      x.count?.mine && !x.count.answered ? h(Act, { label: 'Count it in', cls: 'primary', run: async () => { const r = await call<Signed>({ kind: 'panel.count.answer', note: x.id }); if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; ')); } }) : null,
       x.pledge && !x.pledge.quorum ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
     h('div', { class: 'item-foot' },
       x.reply ? h('p', { class: 'item-meta' }, `You wrote: “${x.reply}”`) : h(Reply, { label: 'Reply', placeholder: 'In your own words', send: (text: string) => call({ kind: 'panel.assistant.answer', id: x.id, text }) }),

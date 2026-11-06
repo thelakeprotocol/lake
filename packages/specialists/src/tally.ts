@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, cardUrlFor, countContext, isCurrency, makeEvent, pledgeAgreement, unshardCounts, verifyLakeCard, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
@@ -30,6 +30,7 @@ interface Tally {
    * nothing if it doesn't happen, and pays. `counted`: the signers' holds, kept past a lapse until the money is settled.
    */
   quorum?: Quorum;
+  circle?: Circle;
   money?: { contribution: number; currency: string; payee: { webId: string; url: string; name?: string }; bond?: { hold: string; amount: number }; counted: string[]; settled?: { outcome: 'filled' | 'lapsed'; at: string; each?: number } };
   /**
    * A blind pledge (SPEC §11.4): signatures are anonymous passes from a separate issuer, so this tally never learns who
@@ -57,6 +58,26 @@ interface Quorum {
 }
 
 /**
+ * A promise circle (SPEC §11.4c): a pledge whose signers each promise the others something (a meal, a school run, a
+ * day's cover), so many times a year, and which, once it has filled and everyone is known, stays open for calls. A member
+ * calls with what they need; the tally asks a few others, picked by a public drand round so it can't play favourites,
+ * without saying who called; the first to accept is put in touch with the caller; when the caller says it happened, the
+ * promise counts as kept. No money moves: what the circle holds is promises, and the record of keeping them.
+ */
+interface Circle {
+  promise: string; times: number;
+  calls: CircleCall[];
+  /** Promises kept and asked, by member: what a member's record says. */
+  kept: Record<string, number>; asked: Record<string, number>;
+}
+interface CircleCall {
+  id: string; need: string; when?: string; caller: string; callerUrl: string; at: number; round: number;
+  /** Members asked so far, in the drawn order, and who answered how. */
+  order: string[]; asked: string[]; declined: string[];
+  helper?: string; state: 'asking' | 'matched' | 'kept' | 'unmet' | 'withdrawn';
+}
+
+/**
  * The largest group that holds together (Granovetter's threshold model): the largest k such that at least k people said
  * they'd join a group of k or fewer. `totals[i]` people chose option i, whose threshold is `atLeast[i]` (null: never).
  */
@@ -79,6 +100,8 @@ export function quorumBinds(size: number, atLeast: (number | null)[]): number {
 }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** How many members a call asks at once; more are asked as these decline. */
+const ASK_AT_ONCE = 3;
 const MAX_DAYS = 30;
 
 export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string; paymentsUrl?: string; tellers?: string[] }) {
@@ -93,7 +116,17 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     ...(t.blind ? { blind: true, issuer: t.blind.issuer, revealed: t.blind.passes.filter((x) => x.revealed).length, bound: t.blind.passes.filter((x) => x.revealed).length >= t.threshold } : {}),
     ...(t.blind?.unveil ? { unveil: { round: t.blind.unveil, opens: new Date(roundTimeMs(t.blind.unveil)).toISOString(), ...(t.blind.unveiled ? { opened: true } : {}) } } : {}),
     ...(t.money ? { money: moneyView(t, t.money) } : {}),
+    ...(t.circle ? { circle: circleView(t, t.circle) } : {}),
     ...(t.quorum ? { quorum: { options: t.quorum.options, at_least: t.quorum.atLeast, closes: new Date(t.quorum.closes).toISOString(), count: t.quorum.count, tellers: t.quorum.tellers, answered: t.quorum.joined.length, ...(t.quorum.blind ? { blind: true } : {}), ...(t.quorum.result ? { result: t.quorum.result } : {}) } } : {}) });
+  // A circle's record, for anyone: what each promises, how many are in it, and how its promises have been kept. Never who.
+  const circleView = (t: Tally, c: Circle) => {
+    const done = c.calls.filter((x) => x.state === 'kept' || x.state === 'unmet');
+    return { promise: c.promise, times_a_year: c.times, members: members(t).length, open: circleOpen(t), calls: c.calls.filter((x) => x.state !== 'withdrawn').length, kept: c.calls.filter((x) => x.state === 'kept').length, unmet: c.calls.filter((x) => x.state === 'unmet').length, of: done.length };
+  };
+  // Who is in it, once that's known: a plain pledge's signers; a blind one's, once revealed.
+  const members = (t: Tally): { webId: string; url: string }[] => (t.blind ? t.blind.passes.flatMap((x) => (x.revealed ? [{ webId: x.revealed.webId, url: x.revealed.url }] : [])) : t.signers.map(({ webId, url }) => ({ webId, url })));
+  // Open for calls once it has filled and everyone is known (an unveiling pledge: once it has unveiled).
+  const circleOpen = (t: Tally) => t.state === 'triggered' && (!t.blind?.unveil || !!t.blind.unveiled);
   // What signing costs, where it goes, and what a lapse would pay each signer were it to lapse now.
   const moneyView = (t: Tally, m: NonNullable<Tally['money']>) => {
     const n = counted(t);
@@ -243,6 +276,89 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     }
   };
 
+  // A circle's calls (SPEC §11.4c): only its members call or answer, each caller is named only to the one who takes the
+  // call, and the order members are asked in comes from a public drand round.
+  const circle = async (t: Tally, p: Record<string, unknown>, from: string, card: AgentCard): Promise<{ kind: string } & Record<string, unknown>> => {
+    const c = t.circle;
+    const no = (why: string) => ({ kind: 'refused', problems: [why] });
+    if (!c) return no('this pledge is not a promise circle');
+    if (!circleOpen(t)) return no(`the circle opens for calls once the pledge has filled and everyone is known (it is ${t.state}${t.blind?.unveil && !t.blind.unveiled ? ', not yet unveiled' : ''})`);
+    const all = members(t);
+    const me = all.find((m) => m.webId === from);
+    if (!me) return no('only the circle\'s members call it or answer its calls');
+    const year = Date.now() - 365 * 86_400_000;
+    const keptThisYear = (w: string) => c.calls.filter((x) => x.helper === w && x.state === 'kept' && x.at > year).length;
+    const urlOf = (w: string) => all.find((m) => m.webId === w)?.url ?? '';
+    const ask = (call: CircleCall, who: string[]) => {
+      call.asked.push(...who);
+      for (const w of who) { c.asked[w] = (c.asked[w] ?? 0) + 1; void tell(urlOf(w), { kind: 'circle.ask', id: t.id, call: call.id, need: call.need, ...(call.when ? { when: call.when } : {}), promise: c.promise, text: t.text }); }
+    };
+    if (p.kind === 'circle.record') {
+      return { kind: 'circle.record', id: t.id, ...circleView(t, c), you: { kept: c.kept[from] ?? 0, asked: c.asked[from] ?? 0, calls: c.calls.filter((x) => x.caller === from).map(({ id, need, state, at }) => ({ id, need, state, at: new Date(at).toISOString() })) } };
+    }
+    if (p.kind === 'circle.call') {
+      const need = String(p.need ?? '').trim(), when = typeof p.when === 'string' ? p.when.slice(0, 80) : undefined;
+      if (!need || need.length > 300) return no('need: what you need, in a few words (up to 300 characters)');
+      const open = c.calls.find((x) => x.caller === from && (x.state === 'asking' || x.state === 'matched'));
+      if (open) return no(`your call "${open.need}" is still open: say it happened (circle.kept) or withdraw it (circle.withdraw) first`);
+      const mine = c.calls.filter((x) => x.caller === from && x.at > year && x.state !== 'withdrawn').length;
+      if (mine >= c.times) return no(`you have called ${mine} time${mine === 1 ? '' : 's'} this year; each member may call ${c.times}`);
+      // Who may be asked: everyone else who hasn't yet kept all they promised this year, in an order drawn from a drand
+      // round already out, so anyone can check the tally picked nobody.
+      const round = roundAfter(-6000) - 1;
+      const beacon = await getBeacon(round).catch(() => null);
+      const id = randomBytes(6).toString('hex');
+      const rank = (w: string) => createHash('sha256').update(`${beacon?.randomness ?? round}|${id}|${w}`).digest('hex');
+      const order = all.filter((m) => m.webId !== from && keptThisYear(m.webId) < c.times).map((m) => m.webId).sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
+      if (!order.length) return no('nobody in the circle can be asked: every other member has kept what they promised this year');
+      const call: CircleCall = { id, need, ...(when ? { when } : {}), caller: from, callerUrl: me.url || card.supportedInterfaces?.[0]?.url || '', at: Date.now(), round: beacon?.round ?? round, order, asked: [], declined: [], state: 'asking' };
+      c.calls.push(call);
+      ask(call, order.slice(0, ASK_AT_ONCE));
+      void save();
+      return { kind: 'circle.called', id: t.id, call: id, asked: call.asked.length, round: call.round, note: `asked ${call.asked.length} member${call.asked.length === 1 ? '' : 's'}, in an order drawn from drand round ${call.round}, without saying who you are; you hear when one says yes` };
+    }
+    const call = c.calls.find((x) => x.id === String(p.call ?? ''));
+    if (!call) return no('no call with that id in this circle');
+    if (p.kind === 'circle.accept' || p.kind === 'circle.decline') {
+      if (!call.asked.includes(from)) return no('you weren\'t asked to take this call');
+      if (call.state !== 'asking') return no(call.state === 'matched' ? 'someone else has taken it: thank you' : `it is ${call.state}`);
+      if (p.kind === 'circle.accept') {
+        call.helper = from;
+        call.state = 'matched';
+        void save();
+        // The two meet: each gets the other's house to reach. The others asked hear it's taken.
+        void tell(call.callerUrl, { kind: 'circle.matched', id: t.id, call: call.id, need: call.need, helper: { url: me.url } });
+        for (const w of call.asked) if (w !== from) void tell(urlOf(w), { kind: 'circle.filled', id: t.id, call: call.id });
+        return { kind: 'circle.matched', id: t.id, call: call.id, need: call.need, ...(call.when ? { when: call.when } : {}), caller: { url: call.callerUrl }, note: 'you have it: reach them at their house; when it\'s done, they say so and your promise counts as kept' };
+      }
+      call.declined.push(from);
+      // Everyone asked so far said no: the next few in the drawn order; nobody left: unmet.
+      if (call.asked.every((w) => call.declined.includes(w))) {
+        const next = call.order.filter((w) => !call.asked.includes(w)).slice(0, ASK_AT_ONCE);
+        if (next.length) ask(call, next);
+        else { call.state = 'unmet'; void tell(call.callerUrl, { kind: 'circle.unmet', id: t.id, call: call.id, need: call.need }); }
+      }
+      void save();
+      return { kind: 'circle.declined', id: t.id, call: call.id };
+    }
+    if (from !== call.caller) return no('only whoever called says it happened, or withdraws it');
+    if (p.kind === 'circle.kept') {
+      if (call.state !== 'matched') return no(`it is ${call.state}`);
+      call.state = 'kept';
+      c.kept[call.helper!] = (c.kept[call.helper!] ?? 0) + 1;
+      void save();
+      report(t);
+      void tell(urlOf(call.helper!), { kind: 'circle.kept', id: t.id, call: call.id, need: call.need, kept: c.kept[call.helper!] });
+      return { kind: 'circle.kept', id: t.id, call: call.id, ...circleView(t, c) };
+    }
+    // circle.withdraw
+    if (call.state !== 'asking' && call.state !== 'matched') return no(`it is ${call.state}`);
+    call.state = 'withdrawn';
+    void save();
+    for (const w of call.helper ? [call.helper] : call.asked) void tell(urlOf(w), { kind: 'circle.withdrawn', id: t.id, call: call.id });
+    return { kind: 'circle.withdrawn', id: t.id, call: call.id };
+  };
+
   /** A blind pledge's messages: a pass to sign, a secret to withdraw, a salt to reveal yourself once it has filled. */
   const blindly = async (t: Tally, p: Record<string, unknown>, from: string, profile: { ownerDomain: string }, card: AgentCard) => {
     const b = t.blind!;
@@ -293,7 +409,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     return { kind: 'tally.count', ...view(t), ...(show ? { signers: revealed().map(({ domain, url }) => ({ domain, url })), unrevealed: b.passes.length - revealed().length } : {}) };
   };
 
-  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. With quorum ({ options, at_least, closes }, people_only), nobody signs at first: each person privately answers "I\'m in if at least N of us are" from their house, as a secret count only this tally can close; when it closes, the tally opens the pledge to bind at the largest group whose every member said they\'d join a group that size (if that is at least threshold), or lets it lapse, and tells everyone who answered at once. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money?, quorum? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. With quorum ({ options, at_least, closes }, people_only), nobody signs at first: each person privately answers "I\'m in if at least N of us are" from their house, as a secret count only this tally can close; when it closes, the tally opens the pledge to bind at the largest group whose every member said they\'d join a group that size (if that is at least threshold), or lets it lapse, and tells everyone who answered at once. With circle ({ promise, times }, people_only), it is a promise circle: each signer promises the others something so many times a year; once it has filled and everyone is known, members send circle.call { id, need, when? }, a few others (in an order drawn from a public drand round) get circle.ask without the caller\'s name, the first circle.accept { id, call } is put in touch with the caller, and the caller\'s circle.kept { id, call } counts the promise kept (circle.decline, circle.withdraw, circle.record { id }). No money moves. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money?, quorum?, circle? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -327,6 +443,13 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       }
       const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
         ...(money ? { money: { contribution: cents, currency, payee: { webId: String(money.payee!.webId), url: String(money.payee!.url), ...(typeof money.payee!.name === 'string' ? { name: money.payee!.name.slice(0, 80) } : {}) }, ...(bond ? { bond } : {}), counted: [] } } : {}) };
+      if (p.circle !== undefined) {
+        const c = p.circle as { promise?: unknown; times?: unknown };
+        const times = Number(c.times ?? 1);
+        if (typeof c.promise !== 'string' || !c.promise.trim() || c.promise.length > 300 || !(Number.isInteger(times) && times >= 1 && times <= 12) || money) return { kind: 'refused', problems: ['circle: { promise: what each member promises the others (up to 300 characters), times: how many times a year, 1 to 12 }; not with money'] };
+        if (p.people_only !== true) return { kind: 'refused', problems: ['circle: for people_only pledges: one member per person, so nobody is asked twice by one person with two houses'] };
+        t.circle = { promise: c.promise.trim(), times, calls: [], kept: {}, asked: {} };
+      }
       if (p.quorum !== undefined) {
         // A quorum first (SPEC §11.4b): a secret count of everyone's "I'm in if at least N are", at this tally's tellers.
         const q = p.quorum as { options?: unknown; at_least?: unknown; closes?: unknown };
@@ -376,7 +499,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         filled: listed.filter((t) => t.state === 'triggered' && Date.now() - (t.triggeredAt ?? 0) < 86_400_000).map(view),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.kept', 'circle.withdraw', 'circle.record'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     const t = tallies.get(id);
     if (!t) return { kind: 'refused', problems: [`no tally called "${id}"`] };
     lapse(t);
@@ -393,6 +516,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       void save();
       return { kind: 'tally.joined', id: t.id, answered: q.joined.length, closes: new Date(q.closes).toISOString(), count: q.count, tellers: q.tellers, note: 'now send your answer to the count: one option, as two unreadable shares, one to each of these tellers. Only the totals come out, to this tally alone, when the quorum closes.' };
     }
+    if (String(p.kind).startsWith('circle.')) return circle(t, p, from, card);
     if (t.state === 'gathering' && p.kind !== 'tally.count') return { kind: 'refused', problems: [`it is still finding its quorum: it opens for signing at ${new Date(t.quorum!.closes).toISOString()} only if enough people privately said they'd join`] };
     if (t.blind) {
       await unveil(t);
@@ -495,7 +619,7 @@ main{max-width:640px;margin:0 auto;padding:28px 16px 48px}h1{font-size:22px;line
 .row b{flex:0 0 36px;text-align:right}p.note{color:var(--muted);font-size:14px}section{border-top:1px solid var(--line);margin-top:22px;padding-top:16px}
 </style></head><body><main>
 <h1>${esc(text)}</h1><div id="state" class="state">…</div>
-<div id="main"></div><section id="quorum" hidden></section>
+<div id="main"></div><section id="circle" hidden></section><section id="quorum" hidden></section>
 <p class="note">Counts only: this page never shows who answered or signed. Real signatures; on the sandbox, synthetic people and play money. <a href="https://lake.doneinfifty.com/docs/spec">How it works</a></p>
 </main><script>
 const id=${JSON.stringify(id)};const $=(x)=>document.getElementById(x);
@@ -511,6 +635,7 @@ async function tick(){
   else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">signed, '+v.threshold+' needed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
     if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}
   $('main').innerHTML=h;
+  const c=v.circle;if(c){$('circle').hidden=false;$('circle').innerHTML='<p><b>A promise circle.</b> Each member promised the others '+esc(c.promise)+', '+(c.times_a_year===1?'once':c.times_a_year+' times')+' a year. No money.</p>'+(c.open?'<p class="big">'+c.kept+' <span class="of">promises kept, of '+c.of+' calls</span></p><p class="of">'+c.members+' members. When one asks for help, a few others are asked, picked by a public draw, without knowing who asked.</p>':'<p class="of">It opens for calls once it has filled and everyone is known.</p>')}
   if(q&&q.result){const r=q.result,max=Math.max(1,...Object.values(r.totals));
     $('quorum').hidden=false;$('quorum').innerHTML='<p><b>The secret count:</b> '+r.counted+' families answered "I\\'m in if at least how many are?"</p>'+q.options.map((o,i)=>{const n=r.totals[o]||0,inq=q.at_least[i]!==null&&q.at_least[i]<=r.size;return '<div class="row"><span>'+esc(o)+'</span><div class="bar"><i class="'+(inq?'in':'')+'" style="width:'+(100*n/max)+'%"></i></div><b>'+n+'</b></div>'}).join('')+'<p class="of">'+(r.size?'<b>'+r.size+'</b> families hold together: each said they\\'d join a group that size or smaller'+(r.binds?', so it binds once '+r.binds+' sign, the most any of them asked for.':'.'):'')+(r.why?' '+esc(r.why):'')+'</p>'}
 }

@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -316,6 +316,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 
   const keeper = new Housekeeper({
     name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk, note: (kind, text) => note(kind, text),
+    inCircle: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/circles.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     answeredQuorum: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     signals: () => signals,
     // Run 58 and 59: a release replaced the held receipt in the pod, but Money kept its five-minute copy of the held one,
@@ -508,6 +509,11 @@ function panelFor(x: {
     if (payload.kind !== 'stamped') throw new Error(`the person checker: ${((payload.problems as string[]) ?? [String(payload.kind)]).join('; ')}`);
     return { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud, nonce }), card };
   };
+  // The promise circles this owner joined (SPEC §11.4c), by the tally's WebID: only those may send them calls.
+  const rememberCircle = async (counter: string, url: string, id: string) => {
+    const known = await owner.fetch(`${owner.podRoot}wallet/circles.json`).then((r) => (r.ok ? r.json() : [])).catch(() => []) as { tally: string; id: string }[];
+    if (!known.some((c) => c.tally === counter && c.id === id)) await put(owner, 'wallet/circles.json', JSON.stringify([...known.slice(-99), { tally: counter, url: url.replace(/\/a2a\/?$/, ''), id, at: new Date().toISOString() }]), 'application/json').catch(() => {});
+  };
   const signPledgeAt = async (tally: string, id: string, contribution?: { credential: string; owner: string }): Promise<Record<string, any>> => {
     const s = await stamp();
     const { payload: before, card: tallyCard } = await send(tally, { kind: 'tally.count', id });
@@ -543,11 +549,13 @@ function panelFor(x: {
       const pass = (await fetchPasses(issuer.supportedInterfaces[0]!.url, ask, person)).find((p) => p.tally === counter && p.id === id);
       if (!pass) return { kind: 'refused', problems: ['no pass for this pledge: this house may have one already, or it counts people and the house has no person stamp'] };
       const signed = await signBlind(tally, pass, owner.webId, { sandbox: x.o.sandbox, me: { identity: x.id, card: x.card } });
+      if (before.circle && (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered')) await rememberCircle(counter, tally, id);
       if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') await put(owner, 'wallet/pledges.json', JSON.stringify([...(await blindPledges()), { ...signed, tally, reply: undefined }]), 'application/json');
       return signed.reply;
     }
     const person = before.people_only ? await stampFor(s, countContext(counter, id), counter, id) : undefined;
     const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}), ...(hold ? { hold } : {}) });
+    if (before.circle && (payload.kind === 'tally.signed' || payload.kind === 'tally.triggered')) await rememberCircle(counter, tally, id);
     // Refused after paying: the money stays held for the tally, which never counted it, and comes back by itself when its
     // hold runs out (a day after the deadline).
     if (hold && payload.kind === 'refused') return { ...payload, note: 'your contribution was held but not counted: it comes back a day after the deadline' };
@@ -763,6 +771,30 @@ function panelFor(x: {
       const person = String((await readSdJwtVc(String(payload.credential))).person ?? '');
       await put(owner, 'wallet/personhood.json', JSON.stringify({ credential: payload.credential, card, person }), 'application/json');
       return { stamped: true, by: card.name };
+    },
+    async circles() {
+      // The circles this owner joined, each with where it stands (the tally's own view): what to call on.
+      const known = await owner.fetch(`${owner.podRoot}wallet/circles.json`).then((r) => (r.ok ? r.json() : [])).catch(() => []) as { tally: string; url: string; id: string }[];
+      return Promise.all(known.map(async (c) => ({ ...c, view: await send(c.url, { kind: 'circle.record', id: c.id }).then((r) => r.payload).catch((e: Error) => ({ kind: 'refused', problems: [e.message] })) })));
+    },
+    async circleSend(tally, payload) {
+      return (await send(tally, payload)).payload as Record<string, any>;
+    },
+    async recordCode(field) {
+      const c = (await x.keeper().allClaims()).find((k) => k.field === field);
+      return c ? String(c.code ?? c.value) : undefined;
+    },
+    async answerFromRecord(count) {
+      // Which answer it is comes from the owner's record (SPEC §11.5), and goes only to tellers this house trusts.
+      const c = (await x.keeper().allClaims()).find((k) => k.field === count.field);
+      const mine = c ? String(c.code ?? c.value) : undefined;
+      const cell = mine === undefined ? -1 : count.options.indexOf(mine);
+      if (cell < 0) return { kind: 'refused', problems: [mine === undefined ? `your record holds no ${count.label}` : `what your record says isn't one of this count's answers`] };
+      const tellers = await Promise.all([count.leader, count.helper].map(async (url) => ({ url, domain: (await verifyLakeCard((await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard)).ownerDomain })));
+      const sent = await x.keeper().answerCount(count.id, tellers, count.options.length, cell);
+      if (sent !== true) return { kind: 'refused', problems: [sent] };
+      x.note('count.answered', `You counted your ${count.label} into the secret count "${count.id}": it left your house only as two unreadable shares`);
+      return { kind: 'count.answered', id: count.id };
     },
     async answerQuorum(tally, id, choice) {
       // A pledge's quorum (SPEC §11.4b): the owner's own answer ("I'm in if at least N are"), sent by this house as two
