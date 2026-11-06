@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -315,7 +315,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   }
 
   const keeper = new Housekeeper({
-    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk,
+    name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk, note: (kind, text) => note(kind, text),
     signals: () => signals,
     // Run 58 and 59: a release replaced the held receipt in the pod, but Money kept its five-minute copy of the held one,
     // so Earned missed it.
@@ -473,7 +473,7 @@ function panelFor(x: {
     const spent = spentFiles.map((f) => {
       const vc = receiptCache.get(f)?.vc;
       const s = vc?.credentialSubject;
-      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? '') } : null;
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.how ? { how: String(s.how) } : {}) } : null;
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
     // What a payment for an agreement (a study, a key to some fields) was for: its consent record (who, which fields, what
     // for) and, for a study, its question, filed beside it when it ran. The owner saw only "urn:lake:agreement:d4ed…".
@@ -498,10 +498,28 @@ function panelFor(x: {
     // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
     return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
-  const signPledgeAt = async (tally: string, id: string): Promise<Record<string, any>> => {
+  const signPledgeAt = async (tally: string, id: string, contribution?: { credential: string; owner: string }): Promise<Record<string, any>> => {
     const s = await stamp();
     const { payload: before, card: tallyCard } = await send(tally, { kind: 'tally.count', id });
     const counter = lakeProfile(tallyCard)!.webId;
+    if (before.kind === 'refused') return before;
+    // A pledge with money (SPEC §11.4a): the contribution the owner signed on their device for this pledge is paid, held for
+    // the tally, through the payments agent of this house's own Lake; then the signature names that hold.
+    let hold: string | undefined;
+    const m = before.money as { contribution: { amount: number; currency: string }; payee: { webId: string; url: string; name?: string }; agreement: string; payments?: string } | undefined;
+    if (m) {
+      if (!contribution) return { kind: 'refused', problems: [`this pledge holds ${m.contribution.currency} ${m.contribution.amount.toFixed(2)} from each signer until its deadline: the owner puts it in and signs in their control panel, on their device (an assistant can't)`] };
+      if (before.state !== 'open' && before.state !== 'triggered') return { kind: 'refused', problems: [`it has ${before.state}`] };
+      const payments = (await Promise.all(x.nodes.map((n) => fetch(`${n}/cards?skill=payments`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ card: AgentCard }[]>).catch(() => [])))).flat().map((c) => c.card.supportedInterfaces?.[0]?.url);
+      if (!m.payments || !payments.includes(m.payments)) return { kind: 'refused', problems: [`its money is held by ${m.payments ?? 'nobody named'}, not a payments agent of this house's Lake: nothing was paid`] };
+      const payment = await signPaymentMandate(x.id, owner.webId, { payee: m.payee.webId, amount: m.contribution.amount, currency: m.contribution.currency, intentMandate: contribution.credential, agreement: m.agreement });
+      const until = new Date(Date.parse(String(before.deadline)) + 86_400_000).toISOString();
+      const { payload: paid } = await send(m.payments, { kind: 'settle', intent: { credential: contribution.credential, card: x.card, owner: contribution.owner }, payments: [payment], hold: true, pledge: { tally: counter, id, until, payee_url: m.payee.url } });
+      if (paid.kind !== 'settled' || typeof paid.hold !== 'string') return { kind: 'refused', problems: [`the payments agent: ${((paid.problems as string[]) ?? [String(paid.kind)]).join('; ')}`] };
+      hold = paid.hold;
+      const receipt = (paid.receipts as { credential: string }[] | undefined)?.[0]?.credential;
+      if (receipt) await put(owner, pledgeReceiptPath(m.agreement), receipt, 'text/plain').catch(() => {});
+    }
     // A person stamp for one context: its own person number, so counts can't link this owner's houses. The checker,
     // shown the stamp's hidden number, makes it; whoever counts is shown it, bound to this house's key.
     const stampFor = async (context: string, aud: string, nonce: string) => {
@@ -526,7 +544,10 @@ function panelFor(x: {
       return signed.reply;
     }
     const person = before.people_only ? await stampFor(countContext(counter, id), counter, id) : undefined;
-    const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}) });
+    const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}), ...(hold ? { hold } : {}) });
+    // Refused after paying: the money stays held for the tally, which never counted it, and comes back by itself when its
+    // hold runs out (a day after the deadline).
+    if (hold && payload.kind === 'refused') return { ...payload, note: 'your contribution was held but not counted: it comes back a day after the deadline' };
     return payload;
   };
   let recordCheck: { at: number; claims: Awaited<ReturnType<ReturnType<typeof x.keeper>['allClaims']>>; chain: Awaited<ReturnType<ReturnType<typeof x.keeper>['verifyOwnRecord']>> } | null = null;
@@ -740,9 +761,13 @@ function panelFor(x: {
       await put(owner, 'wallet/personhood.json', JSON.stringify({ credential: payload.credential, card, person }), 'application/json');
       return { stamped: true, by: card.name };
     },
-    async signPledge(tally, id) {
+    async pledgeTerms(tally, id) {
+      const { payload, card } = await send(tally, { kind: 'tally.count', id });
+      return { ...payload, tally: lakeProfile(card)!.webId };
+    },
+    async signPledge(tally, id, contribution) {
       // Signed in the owner's own record, and the assistants told (run 39: Tom's assistant found no trace of his signature).
-      const reply = await signPledgeAt(tally, id);
+      const reply = await signPledgeAt(tally, id, contribution);
       if (reply.kind === 'tally.signed' || reply.kind === 'tally.triggered') {
         x.note('pledge.signed', `You signed the pledge "${id}" (${tally})${reply.kind === 'tally.triggered' ? ': it filled' : ''}`);
         x.desk().news({ about: 'pledge.signed', pledge: id, tally, at: new Date().toISOString(), ...(reply.kind === 'tally.triggered' ? { filled: true } : {}) });

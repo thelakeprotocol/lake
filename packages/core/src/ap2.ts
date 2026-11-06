@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { JWK } from 'jose';
 import { issueCredential, digestSRI, verifyCredential } from './vc.js';
 import type { Identity } from './crypto.js';
@@ -99,6 +100,29 @@ export const allowanceDraft = (houseWebId: string, assistantWebId: string, amoun
   issuer: houseWebId,
   credentialSubject: {
     id: assistantWebId, natural_language_description: 'What my assistant may spend for me on the Lake', study: `urn:lake:allowance:${houseWebId}`,
+    budget: { currency, amount }, intent_expiry: until.toISOString(), user_cart_confirmation_required: false,
+  } satisfies IntentMandateSubject,
+  ...(status ? { credentialStatus: status } : {}),
+});
+
+/**
+ * What money held for a pledge names as its agreement (SPEC §11.4a): the tally that settles it and the pledge's id, and
+ * `|bond` for its opener's refund bond. A payments agent moves that money only on that tally's word.
+ */
+export const pledgeAgreement = (tally: string, id: string, bond = false) => `urn:lake:pledge:${tally}|${id}${bond ? '|bond' : ''}`;
+/** Where a house files what it put into a pledge (its held receipt, then how it ended): beside what its assistant spent. */
+export const pledgeReceiptPath = (agreement: string) => `receipts/spent-pledge-${createHash('sha256').update(agreement).digest('hex').slice(0, 16)}.receipt.jwt`;
+
+/**
+ * A contribution the owner signs on their device for one pledge: exactly its amount, to be held for that pledge and
+ * nothing else (its `study` is the pledge's agreement), until just after the pledge settles.
+ */
+export const pledgeDraft = (houseWebId: string, pledge: { tally: string; id: string; text: string }, amount: number, currency: string, until: Date, status?: unknown) => ({
+  '@context': ['https://www.w3.org/ns/credentials/v2'],
+  type: ['VerifiableCredential', 'IntentMandate'],
+  issuer: houseWebId,
+  credentialSubject: {
+    id: houseWebId, natural_language_description: `My contribution to the pledge "${pledge.text.slice(0, 200)}"`, study: pledgeAgreement(pledge.tally, pledge.id),
     budget: { currency, amount }, intent_expiry: until.toISOString(), user_cart_confirmation_required: false,
   } satisfies IntentMandateSubject,
   ...(status ? { credentialStatus: status } : {}),

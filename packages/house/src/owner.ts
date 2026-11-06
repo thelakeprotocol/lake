@@ -4,7 +4,7 @@ import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
 import {
-  allowanceDraft, dutyDraft, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, dutyDraft, pledgeDraft, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -77,13 +77,18 @@ export interface PanelProvider {
   offerPrice?(id: string): { amount: number; currency: string } | undefined;
   /** One person, one house (SPEC §6.4): ask the person checker for a stamp, with the owner's signed consent. */
   requestPersonhood(consent: unknown, ownerJwk: JWK): Promise<unknown>;
-  /** Sign a pledge on a blind tally, from this house, with its person stamp. */
-  signPledge(tally: string, id: string): Promise<unknown>;
+  /** Sign a pledge, from this house, with its person stamp; for a pledge with money, with the contribution the owner signed. */
+  signPledge(tally: string, id: string, contribution?: { credential: string; owner: string }): Promise<unknown>;
+  /** What a pledge says, where it stands, and what signing it costs (its tally's view, and the tally's webId). */
+  pledgeTerms?(tally: string, id: string): Promise<Record<string, any>>;
   /** Reveal this house on a blind pledge that has filled. */
   revealPledge(tally: string, id: string): Promise<unknown>;
   /** Takes the owner's signature back, before the pledge fills: it never binds them. */
   withdrawPledge?(tally: string, id: string): Promise<unknown>;
 }
+
+/** What signing a pledge with money costs, as its tally said when it was suggested (SPEC §11.4a). */
+export interface PledgeMoney { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string }
 
 export interface GrantRecord {
   id: string;
@@ -118,7 +123,7 @@ export interface AssistantKey { /** On duty: the grant it acts under while the o
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note. */ pledge?: { tally: string; id: string };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
@@ -382,6 +387,8 @@ export class OwnerDesk {
   private revokedIds = new Set<string>();
   readonly allowances = new Map<string, Allowance>();
   private allowanceDrafts = new Map<string, { kid: string; statusId: string; draft: Record<string, unknown> }>();
+  /** Contributions to pledges, drafted for the owner's device to sign: each for one pledge, kept until signed. */
+  private pledgeDrafts = new Map<string, { tally: string; id: string; draft: Record<string, unknown> }>();
   private saveAllowances = () => this.o.saveAllowances?.([...this.allowances.values()]);
   /** An allowance still good: not taken back, not past its date. */
   allowanceFor(kid: string): Allowance | undefined {
@@ -1019,6 +1026,9 @@ export class OwnerDesk {
             const tally = String(q.pledge.tally ?? '').replace(/\/a2a\/?$/, '').replace(/\/$/, '');
             if (!/^https?:\/\/\S+$/.test(tally) || !q.pledge.id) return void res.status(400).json({ error: 'pledge: { tally: the tally\'s address, id: the pledge\'s id }' });
             pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
+            // What it costs, on the Sign button: the owner reads the tally's own terms, never the assistant's account of them.
+            const t = await this.o.panel?.pledgeTerms?.(tally, pledge.id).catch(() => undefined);
+            if (t?.money) pledge.money = { amount: Number(t.money.contribution.amount), currency: String(t.money.contribution.currency), payee: String(t.money.payee.name ?? t.money.payee.webId), threshold: Number(t.threshold), deadline: String(t.deadline), count: Number(t.count), ...(t.money.bond ? { bond: Number(t.money.bond.amount) } : {}), text: String(t.text) };
           }
           if (q.advice !== undefined && !ADVICE.includes(q.advice as Advice)) return void res.status(400).json({ error: `advice: one of ${ADVICE.join(', ')}` });
           // New rules for the owner to apply with a tap (run 45: they agreed to a change nobody could make): checked now, so
@@ -1599,7 +1609,31 @@ export class OwnerDesk {
             return panel.acceptOffer(String(q.offer ?? ''));
           },
           'panel.person.request': () => panel.requestPersonhood((q as { consent?: unknown }).consent, this.ownerJwk!),
-          'panel.pledge.sign': () => panel.signPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
+          // A pledge with money (SPEC §11.4a): the house drafts the contribution for exactly this pledge, this device signs it,
+          // and the house pays it held for the tally and signs. Without money, the tap is the signature.
+          'panel.pledge.draft': async () => {
+            const w = q as { tally?: string; id?: string };
+            const terms = await panel.pledgeTerms?.(String(w.tally ?? ''), String(w.id ?? ''));
+            if (!terms || terms.kind === 'refused') return { error: terms ? ((terms.problems as string[]) ?? ['refused']).join('; ') : 'this house can\'t read pledges' };
+            if (!terms.money) return { free: true, terms };
+            if (!this.o.statusUrl) return { error: 'this house cannot keep allowances' };
+            const statusId = `pledge:${randomBytes(6).toString('hex')}`;
+            const draft = pledgeDraft(this.o.webId, { tally: String(terms.tally), id: String(terms.id), text: String(terms.text) }, Number(terms.money.contribution.amount), String(terms.money.contribution.currency), new Date(Date.parse(String(terms.deadline)) + 2 * 86_400_000), statusEntry(this.o.statusUrl(), await this.statusIndex(statusId)));
+            this.pledgeDrafts.set(statusId, { tally: String(w.tally), id: String(terms.id), draft });
+            return { id: statusId, draft, terms, note: 'sign it on this device and send it back with panel.pledge.sign { draft, credential }' };
+          },
+          'panel.pledge.sign': async () => {
+            const w = q as { tally?: string; id?: string; draft?: string; credential?: string };
+            if (!w.draft) return panel.signPledge(String(w.tally ?? ''), String(w.id ?? ''));
+            const d = this.pledgeDrafts.get(String(w.draft));
+            if (!d) return { error: 'no contribution drafted with that id: start again' };
+            let vc;
+            try { vc = await verifyCredential(String(w.credential ?? ''), this.ownerJwk!); } catch { return { error: 'the contribution is not signed by your key' }; }
+            if (!['issuer', 'type', 'credentialSubject', 'credentialStatus'].every((k) => JSON.stringify((vc as unknown as Record<string, unknown>)[k]) === JSON.stringify(d.draft[k]))) return { error: 'the contribution does not match its draft' };
+            if (!this.o.vouchOwner) return { error: 'this house cannot pay' };
+            this.pledgeDrafts.delete(String(w.draft));
+            return panel.signPledge(d.tally, d.id, { credential: String(w.credential), owner: await this.o.vouchOwner(this.ownerJwk!) });
+          },
           'panel.pledge.reveal': () => panel.revealPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
           'panel.pledge.withdraw': async () => panel.withdrawPledge?.(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')) ?? { error: 'this house can\'t take a signature back' },
         } as Record<string, () => Promise<unknown>>)[p.kind]?.().catch((e: Error) => ({ error: e.message }));

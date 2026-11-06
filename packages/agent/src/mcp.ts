@@ -2075,11 +2075,18 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     'lake_pledge',
     {
       description:
-        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. On a pledge opened with unveil, signing also deposits your reveal sealed to a drand round just after the deadline: if it fills, the tally opens every signer\'s at the same moment and tells you who is in, so nobody reveals first and you needn\'t call reveal; if it lapses, they are discarded unopened. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true, unveil: true, listed: true } (listed: others find it in lake_ask_around, with how many more it needs).',
+        'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. On a pledge opened with unveil, signing also deposits your reveal sealed to a drand round just after the deadline: if it fills, the tally opens every signer\'s at the same moment and tells you who is in, so nobody reveals first and you needn\'t call reveal; if it lapses, they are discarded unopened. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true, unveil: true, listed: true } (listed: others find it in lake_ask_around, with how many more it needs). action "open" opens a pledge with money (people only, never blind): each signer puts in contribution, held until the deadline; if it fills, it all goes to the payee (you, unless payee_url names another agent); if not, it all goes back, and with bond, your bond (paid now from your human\'s allowance, held) is shared equally among everyone who signed, so saying yes costs nothing if it doesn\'t happen, and pays (a dominant assurance contract). Only a person signs one, on their own device: suggest it to your human with lake_house_suggest { pledge: { tally, id } }.',
       inputSchema: {
-        action: z.enum(['sign', 'reveal', 'withdraw', 'count']),
+        action: z.enum(['sign', 'reveal', 'withdraw', 'count', 'open']),
         tally: z.string().describe('The tally\'s address (…/a2a)'),
         id: z.string().describe('The pledge'),
+        text: z.string().optional().describe('open: what signers commit to, and what the money is for'),
+        threshold: z.number().int().optional().describe('open: how many must sign for it to bind'),
+        deadline: z.string().optional().describe('open: when it fills or lapses (ISO time)'),
+        contribution: z.object({ amount: z.number(), currency: z.string() }).optional().describe('open: what each signer puts in'),
+        bond: z.number().optional().describe('open: your refund bond, in the same currency, shared among the signers if it lapses'),
+        payee_url: z.string().optional().describe('open: who is paid if it fills (an agent\'s address); you, if left out'),
+        listed: z.boolean().default(true).describe('open: others find it in lake_ask_around'),
       },
     },
     async (a) => {
@@ -2087,10 +2094,25 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const me = await agent();
         const slot = `${a.tally}|${a.id}`;
         if (a.action === 'count') return json(await me.ask(a.tally, { kind: 'tally.count', id: a.id }));
+        if (a.action === 'open') {
+          if (!a.text || !a.threshold || !a.deadline || !a.contribution) throw new Error('open: text, threshold, deadline and contribution { amount, currency }');
+          const tallyWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(a.tally), { signal: AbortSignal.timeout(8000) })).json())).webId;
+          const payeeUrl = a.payee_url ?? me.visitor.card.supportedInterfaces[0]!.url;
+          const payee = a.payee_url ? await verifyLakeCard(await (await fetch(cardUrlFor(a.payee_url), { signal: AbortSignal.timeout(8000) })).json()) : { webId: me.webId };
+          const payeeName = a.payee_url ? undefined : me.visitor.card.name;
+          // The bond first, held for this pledge, so the tally can check it before opening: it goes back a day after the deadline
+          // if the tally never settles it.
+          const until = new Date(Date.parse(a.deadline) + 86_400_000).toISOString();
+          const bond = a.bond ? await me.pay(a.tally, a.bond, `refund bond for the pledge ${a.id}`, a.contribution.currency, undefined, undefined, { tally: tallyWebId, id: a.id, until, bond: true }) : undefined;
+          const r = await me.ask(a.tally, { kind: 'tally.open', id: a.id, text: a.text, threshold: a.threshold, deadline: a.deadline, people_only: true, listed: a.listed, money: { contribution: a.contribution, payee: { webId: payee.webId, url: payeeUrl, ...(payeeName ? { name: payeeName } : {}) }, ...(bond ? { bond: { hold: bond.pledgeHold } } : {}) } });
+          return json({ ...r, ...(bond ? { bond: { held: bond.paid, currency: a.contribution.currency, hold: bond.pledgeHold, ...(r.kind === 'refused' ? { note: 'the pledge did not open: your bond stays held for it and comes back a day after the deadline' } : {}) } } : {}), next: 'Signers are people, on their own devices: suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }) and tell others the tally and id; their AIs suggest it to them.' });
+        }
         if (a.action === 'sign') {
           // A plain pledge (not blind) is signed by name, with no pass (1 Nov: seven agents got "no pass" and signed by
           // hand with lake_ask tally.sign).
           const count = await me.ask(a.tally, { kind: 'tally.count', id: a.id }).catch(() => null);
+          const money = count?.money as { contribution?: { amount: number; currency: string } } | undefined;
+          if (money?.contribution) throw new Error(`this pledge holds ${money.contribution.currency} ${money.contribution.amount} from each signer: only your human puts it in and signs, on their own device. Suggest it: lake_house_suggest { text: <your advice, in your words>, pledge: { tally: "${a.tally}", id: "${a.id}" } }; they see its terms from the tally and a button to put it in and sign.`);
           if (count && count.kind !== 'refused' && !count.blind) {
             const r = await me.ask(a.tally, { kind: 'tally.sign', id: a.id });
             if (r.kind === 'tally.signed' || r.kind === 'tally.triggered') did({ kind: 'pledge', at: new Date().toISOString(), tally: a.tally, id: a.id, revealed: true });

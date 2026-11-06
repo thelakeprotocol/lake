@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -367,6 +367,26 @@ function NotifyItem() {
       h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss }, said ? 'OK' : 'Not now')));
 }
 
+type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
+type Signed = { kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] };
+
+/** Signs a pledge from your house. One with money puts its contribution in first, signed here, on this device (SPEC §11.4a). */
+async function signPledge(tally: string, id: string): Promise<Signed> {
+  const d = await call<{ id?: string; draft?: Record<string, unknown>; free?: boolean; error?: string }>({ kind: 'panel.pledge.draft', tally, id });
+  if (d.error) throw new Error(d.error);
+  const r = await call<Signed>(d.free ? { kind: 'panel.pledge.sign', tally, id } : { kind: 'panel.pledge.sign', tally, id, draft: d.id, credential: signCredential({ ...d.draft!, validFrom: new Date().toISOString() }, loadKey()) });
+  if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; '));
+  return r;
+}
+
+/** What a pledge with money does with yours, from its tally's own terms: held, then on to them or back to you. */
+function PledgeTerms({ m }: { m: PledgeMoney }) {
+  const by = new Date(m.deadline).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return h('div', { class: 'pledge-terms' },
+    h('p', { class: 'item-meta' }, `“${m.text}”`),
+    h('p', { class: 'item-meta' }, `Puts in ${money$(m.amount, m.currency)}, held until ${by}. If ${m.threshold} sign by then (${m.count} so far), it goes to ${shortName(m.payee)}. If not, it comes back to you${m.bond ? `, plus an equal share of their ${money$(m.bond, m.currency)} bond` : ''}. You can take it back until it fills.`));
+}
+
 function SuggestionItem({ x }: { x: Note }) {
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   const fail = (r: { ok?: boolean; error?: string }) => { if (r.error) throw new Error(r.error); };
@@ -377,6 +397,7 @@ function SuggestionItem({ x }: { x: Note }) {
     x.sender ? h('p', { class: 'item-meta' }, `About: ${x.sender}`) : null,
     h('p', { class: 'item-text' }, x.text),
     x.door ? h('blockquote', {}, x.door.about) : null,
+    x.pledge?.money ? h(PledgeTerms, { m: x.pledge.money }) : null,
     x.ask?.private ? h('p', { class: 'item-meta private-q' }, x.ask.answered ? 'Private: only you know this answer. It leaves your house only as two unreadable shares, and only totals come out.' : 'Private: your AI won\'t see your answer. It leaves your house only as two unreadable shares, and only totals come out.') : null,
     x.ask?.answered ? h('p', { class: 'item-meta' }, `You answered: ${x.ask.answered}`) : null,
     // A question: each choice is a button; the one your agent advises stands out.
@@ -397,7 +418,7 @@ function SuggestionItem({ x }: { x: Note }) {
       x.note && x.mute ? h(Act, { label: 'Mute this sender', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }) : null,
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,
-      x.pledge ? h(Act, { label: 'Sign the pledge', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.pledge.sign', tally: x.pledge!.tally, id: x.pledge!.id })); await dismiss(); } }) : null),
+      x.pledge ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
     h('div', { class: 'item-foot' },
       x.reply ? h('p', { class: 'item-meta' }, `You wrote: “${x.reply}”`) : h(Reply, { label: 'Reply', placeholder: 'In your own words', send: (text: string) => call({ kind: 'panel.assistant.answer', id: x.id, text }) }),
       h(Act, { label: 'Dismiss', cls: 'quiet', run: dismiss })));
@@ -426,7 +447,7 @@ function PersonCard({ p }: { p?: { stamped: boolean; by?: string; person?: strin
       h('input', { ref: tally, placeholder: 'tally address, e.g. https://…/s/tally', style: 'width:100%' }),
       h('input', { ref: pid, placeholder: 'pledge id', style: 'width:100%;margin-top:6px' }),
       h(Act, { label: 'Sign this pledge', run: async () => {
-        const r = await call<{ kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] }>({ kind: 'panel.pledge.sign', tally: tally.current!.value.trim(), id: pid.current!.value.trim() }).catch((e): { error: string; problems?: string[]; kind?: string; count?: number; threshold?: number } => ({ error: (e as Error).message }));
+        const r = await signPledge(tally.current!.value.trim(), pid.current!.value.trim()).catch((e): Signed => ({ error: (e as Error).message }));
         setMsg(r.error ?? (r.problems ? r.problems.join('; ') : r.kind === 'tally.triggered' ? `Signed, and that was the last one needed: ${r.count} of ${r.threshold}. Everyone has been told.` : `Signed: ${r.count} of ${r.threshold}. Nobody knows who until it's full.`));
       } })),
     msg ? h('p', { class: 'muted' }, msg) : null);
@@ -1185,13 +1206,16 @@ const receiptWords = (e: { reply?: unknown; to?: { name?: string } }) => {
 };
 type Receipt = { about?: About; amount: number; currency: string; agreement: string; from: string; payer?: string; payerName?: string; via?: string; viaName?: string; at: string; settlement: string; heldUntil?: string; items?: { label: string; amount: { currency: string; value: number } }[] };
 /** What a payment was for, as its receipt says: the cart's items, or the order it paid. */
-const forWhat = (r: Receipt) => r.items?.length ? r.items.map((i) => i.label.replace(/^1 × /, '')).join(', ')
+/** A pledge's id, from money held for it (SPEC §11.4a): `urn:lake:pledge:<tally>|<id>`, with `|bond` for its organiser's bond. */
+const pledgeOf = (agreement: string) => (agreement.startsWith('urn:lake:pledge:') ? { id: agreement.split('|')[1] ?? '', bond: agreement.endsWith('|bond') } : undefined);
+const forWhat = (r: Receipt) => pledgeOf(r.agreement)?.bond ? `Your share of the bond: the pledge "${pledgeOf(r.agreement)!.id}" didn't happen`
+  : r.items?.length ? r.items.map((i) => i.label.replace(/^1 × /, '')).join(', ')
   : r.about ? (r.about.question ? `Study: ${r.about.question}` : `${r.about.purpose}: ${r.about.fields.join(', ')}`)
   : r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40);
 const named = (name: string | undefined, addr: string | undefined) => (name ? name.replace(/ \((.+), via MCP\)$/, ' ($1)') : addr ? who(addr) : 'someone');
 
 function Money() {
-  const m = useHouse<{ total: number; held?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string }[] }>({ kind: 'panel.money' });
+  const m = useHouse<{ total: number; held?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string; settlement?: string; how?: string }[] }>({ kind: 'panel.money' });
   if (!m.data) return h(Failed, { error: m.error });
   const when = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   const status = (r: Receipt) => r.settlement === 'held' ? 'held' : r.settlement === 'voided' ? 'refunded' : 'paid';
@@ -1220,13 +1244,16 @@ function Money() {
           ] : null,
           h('dt', {}, 'Paid by'), h('dd', {}, named(r.payerName, r.payer), r.payer ? h('div', { class: 'r-meta' }, r.payer) : null),
           r.via ? [h('dt', {}, 'Sold by'), h('dd', {}, `${named(r.viaName, r.via)}, your AI, for your house`)] : null,
-          h('dt', {}, 'Money'), h('dd', {}, status(r) === 'held' ? `Held until the buyer accepts${r.heldUntil ? `, or ${when(r.heldUntil)} at the latest` : ''}` : status(r) === 'refunded' ? 'Refunded to the buyer' : `Paid (${r.settlement})`),
+          h('dt', {}, 'Money'), h('dd', {}, pledgeOf(r.agreement)?.bond ? 'Paid: the organiser\'s bond, shared equally among everyone who said yes, because it didn\'t fill' : status(r) === 'held' ? `Held until the buyer accepts${r.heldUntil ? `, or ${when(r.heldUntil)} at the latest` : ''}` : status(r) === 'refunded' ? 'Refunded to the buyer' : `Paid (${r.settlement})`),
           h('dt', {}, 'Order'), h('dd', { class: 'r-meta' }, r.agreement),
           h('dt', {}, 'Receipt signed by'), h('dd', {}, who(r.from))))) })) : h('p', { class: 'empty' }, 'No payments yet.'),
     // What your own agent paid for you, under the allowance you signed: its receipts, handed back to your house.
     m.data.spent?.length ? h('div', {}, h('h2', {}, 'Spent by your agent'), h('ul', { class: 'rows' }, ...m.data.spent.map((r, i) => h('li', { key: i },
-      h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('div', { class: 'r-meta' }, `${when(r.at)} · under your allowance · ${r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40)}`)),
-      h('span', { class: 'chip share' }, 'signed'))))) : null);
+      pledgeOf(r.agreement)
+        // What you put into a pledge: held until its deadline, then paid on if it filled, or back to you.
+        ? h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} for the pledge "${pledgeOf(r.agreement)!.id}"`), h('div', { class: 'r-meta' }, `${when(r.at)} · ${r.settlement === 'held' ? 'held until its deadline: paid on only if it fills' : r.settlement === 'voided' ? (r.how === 'pledge_withdrawn' ? 'back to you: you took it back' : 'back to you: it didn\'t fill') : `paid to ${who(r.to)}: it filled`}`))
+        : h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('div', { class: 'r-meta' }, `${when(r.at)} · under your allowance · ${r.agreement.replace(/^urn:(lake:order|ap2:cart):/, 'order ').slice(0, 40)}`)),
+      h('span', { class: `chip ${r.settlement === 'held' ? '' : 'share'}` }, pledgeOf(r.agreement) ? (r.settlement === 'held' ? 'held' : r.settlement === 'voided' ? 'returned' : 'paid') : 'signed'))))) : null);
 }
 
 // ---- Data ----

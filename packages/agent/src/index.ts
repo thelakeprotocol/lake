@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { homedir, hostname } from 'node:os';
 import {
-  buildCard, cartParty, cardUrlFor, checkCart, keyThumbprint, signSplitConsent, type CartShare, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData,
+  buildCard, cartParty, cardUrlFor, checkCart, keyThumbprint, signSplitConsent, type CartShare, type CartParty, exampleStudies, isCurrency, menuProblems, signCart, verifyLakeCard, type CartMandate, type CartPayee, type DeliveryTerms, type MenuItem, issueCredential, generateIdentity, lakeProfile, loadPacks, lakeAgentApp, LakeLinks, loadOrCreateIdentity, makeEvent, ReplayGuard, signCard, signIntentMandate, signMessage, signPaymentMandate, pledgeAgreement, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeProfile, type Offer, type Study,
   deliverWithRetries,
 } from '@thelakeprotocol/core';
@@ -127,7 +127,9 @@ export interface LakeAgent {
    * nothing backs it but the signature and the payer's word.
    */
   /** `order`: an order id, or the sha256 of what was delivered; the payment and its receipt name it. */
-  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string; hold?: boolean; releaseAfterHours?: number; payee?: CartPayee }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string }>;
+  pay(agentUrl: string, amount: number, memo: string, unit?: string, order?: string, /** Set by payCart. */ cart?: { mandate: CartMandate; card: AgentCard; hash: string; detailsId: string; hold?: boolean; releaseAfterHours?: number; payee?: CartPayee },
+    /** Money held for a pledge (SPEC §11.4a): its tally's webId and the pledge's id, when it goes back if never settled, and whether it is the opener's bond. */
+    pledge?: { tally: string; id: string; until: string; bond?: boolean }): Promise<{ paid: number; unit: string; to: string; remaining?: number; receipt: string; under?: string; pledgeHold?: string }>;
   /**
    * Pay a cart a seller signed (SPEC §6.5): checked against the seller's card at `sellerUrl`, paid for exactly its total in
    * its currency, under this agent's allowance; the receipt names the cart and goes to the seller.
@@ -283,7 +285,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const { nonce: _n, iat: _i, exp: _e, iss: _s, ...reply } = r;
       return reply;
     },
-    async pay(agentUrl, amount, memo, unit = 'USD', order, cart) {
+    async pay(agentUrl, amount, memo, unit = 'USD', order, cart, pledge) {
       // Some rulebooks call the sandbox's play dollars "USD-sim"; they are the same dollars. A currency is its ISO code.
       if (/^usd([-_ ]?sim)?$/i.test(unit)) unit = 'USD';
       if (/^[a-z]{3}$/i.test(unit) && (/^[A-Z]{3}$/.test(unit) || MONEYLIKE.test(unit.toLowerCase()))) unit = unit.toUpperCase();
@@ -294,6 +296,7 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       const payee = cart?.payee?.webId ?? lakeProfile(payeeCard)?.webId;
       if (!payee) throw new Error(`no Lake agent at ${agentUrl}`);
       if (payee === visitor.webId) throw new Error('paying yourself moves nothing; pay another agent');
+      if (!isCurrency(unit) && pledge) throw new Error('money for a pledge is in a currency (USD, AUD…)');
       if (!isCurrency(unit)) {
         if (!/^[a-z][a-z0-9-]{0,31}$/.test(unit)) throw new Error('a unit is a currency code (USD, AUD…) or a short lowercase word, like hour or favour');
         // A self-signed IOU named like money ("usdsim", "eur") reads as money settled by a third party, which it isn't.
@@ -321,11 +324,13 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
         return { credential, card: human.card };
       })());
       const intent = own ?? (await playAllowances.get(currency)!);
-      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: cart ? `urn:ap2:cart:${order}` : order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 200)}`, currency, ...(cart ? { cart: { detailsId: cart.detailsId, hash: cart.hash } } : {}) });
+      const payment = await signPaymentMandate(id, visitor.webId, { payee, amount, intentMandate: intent.credential, agreement: pledge ? pledgeAgreement(pledge.tally, pledge.id, pledge.bond) : cart ? `urn:ap2:cart:${order}` : order ? `urn:lake:order:${order.slice(0, 120)}` : `urn:lake:memo:${memo.slice(0, 200)}`, currency, ...(cart ? { cart: { detailsId: cart.detailsId, hash: cart.hash } } : {}) });
       const payments = o.payments ?? 'http://payments:4600';
-      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment], ...(cart ? { cart: { mandate: cart.mandate, card: cart.card }, ...(cart.hold ? { hold: true, ...(cart.releaseAfterHours !== undefined ? { release_after_hours: cart.releaseAfterHours } : {}) } : {}) } : {}) })).reply;
+      const settled = (await ask(`${payments}/a2a`, visitor, { kind: 'settle', intent: { credential: intent.credential, card: intent.card, ...('owner' in intent && intent.owner ? { owner: intent.owner } : {}) }, payments: [payment], ...(cart ? { cart: { mandate: cart.mandate, card: cart.card }, ...(cart.hold ? { hold: true, ...(cart.releaseAfterHours !== undefined ? { release_after_hours: cart.releaseAfterHours } : {}) } : {}) } : {}), ...(pledge ? { hold: true, pledge: { ...pledge, ...(pledge.bond ? {} : { payee_url: agentUrl }) } } : {}) })).reply;
       if (settled.kind !== 'settled') throw new Error((settled.problems ?? [settled.why ?? 'refused']).join('; '));
       const receipt = settled.receipts[0].credential as string;
+      // Held for a pledge: nobody is paid until its tally says, so there is nothing to tell the payee yet.
+      if (pledge) return { paid: amount, unit, to: payee, remaining: settled.remaining as number, receipt, pledgeHold: String(settled.hold), under: own ? 'your human\'s signed allowance' : 'the sandbox\'s play-money allowance' };
       const paymentsCard = (await (await fetch(cardUrlFor(`${payments}/a2a`))).json()) as AgentCard;
       // The payee gets the signed receipt; its inbox shows it like any other message.
       const told = { kind: 'receipt', receipt: { credential: receipt, card: paymentsCard }, amount, currency, memo: memo.slice(0, 200), ...(order ? { order } : {}), ...(cart ? { cart: order } : {}) };

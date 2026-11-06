@@ -2202,7 +2202,7 @@ describe('the weekly shop, priced inside the house', () => {
       await writeFile(rules, `owner: ${name}\ndefault: decline\nrules: []\nintents:\n  - pack: shopping\n    terms: { region: vic, budget: 350, delivery: this-week }\n`);
       const [pp, hp] = [await freePort(), await freePort()];
       await start(['packages/house/dist/main.js', '--name', name, '--rules', rules, '--data', join(dir, 'houses'), '--packs', 'health,shopping', '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`,
-        '--issuers', `health=${issuerUrl},shopping=${specialistsUrl}/receipts`, '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--open-pairing'], /joined the Lake/);
+        '--issuers', `health=${issuerUrl},shopping=${specialistsUrl}/receipts`, '--auditor-url', auditor, '--person-url', `${specialistsUrl}/person`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--open-pairing'], /joined the Lake/);
       const url = `http://localhost:${hp}`;
       const phone = await generateIdentity('phone');
       await fetch(`${url}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk }) });
@@ -2377,6 +2377,87 @@ describe('the weekly shop, priced inside the house', () => {
     expect((await b.call({ kind: 'panel.money' })).spent).toEqual([expect.objectContaining({ amount: accepted.outputs.total, currency: 'AUD' })]);
     await me.close();
   });
+
+  it("a pledge you can't lose (SPEC §11.4a): each household's money is held until the deadline; filled, it goes to the payee; lapsed, it comes back with a share of the opener's bond", async () => {
+    const tally = `${specialistsUrl}/tally/a2a`;
+    const tallyWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(tally))).json())).webId;
+    // Three households, three people: each owner stamps their house on their own phone.
+    for (const b of buyers) {
+      const o = await b.call({ kind: 'panel.overview' });
+      if (!o.person.stamped) expect(await b.call({ kind: 'panel.person.request', consent: await signMessage({ kind: 'personhood.consent', house: o.webId }, b.phone, { iss: o.webId }) })).toMatchObject({ stamped: true });
+    }
+    const receipts: Record<string, any>[] = [];
+    const pc = await joinLake({ name: 'School P&C', domain: 'school-pc.example', node, port: await freePort(), payments, playMoney: { AUD: 100 }, onMessage: async (m) => { if (m.payload.kind === 'receipt') receipts.push(m.payload); return { kind: 'received' }; } });
+    try {
+      const deadline = new Date(Date.now() + 40_000).toISOString(), until = new Date(Date.now() + 86_400_000).toISOString();
+      const open = async (id: string, threshold: number) => {
+        // The opener's bond first, held for the pledge: what a lapse shares among those who signed.
+        const bond = await pc.pay(tally, 10, `bond for ${id}`, 'AUD', undefined, undefined, { tally: tallyWebId, id, until, bond: true });
+        expect(bond.pledgeHold).toEqual(expect.any(String));
+        return pc.ask(tally, { kind: 'tally.open', id, text: `Water filters for the school (${id})`, threshold, deadline, people_only: true, money: { contribution: { amount: 4, currency: 'AUD' }, payee: { webId: pc.webId, url: pc.card.supportedInterfaces[0]!.url, name: 'School P&C' }, bond: { hold: bond.pledgeHold } } });
+      };
+      // Without a person count, a bond would go mostly to whoever signs most often.
+      expect(await pc.ask(tally, { kind: 'tally.open', id: 'filters-x', text: 'x', threshold: 2, deadline, money: { contribution: { amount: 4, currency: 'AUD' }, payee: { webId: pc.webId, url: pc.card.supportedInterfaces[0]!.url }, bond: { hold: 'x' } } })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/people_only/)] });
+      expect(await open('filters-a', 2)).toMatchObject({ kind: 'tally.opened', money: { contribution: { amount: 4, currency: 'AUD' }, bond: { amount: 10 } } });
+      expect(await open('filters-b', 3)).toMatchObject({ kind: 'tally.opened' });
+      const tallyAt = `${specialistsUrl}/tally`;
+      // The owner's tap: the house drafts the contribution for this pledge, the phone signs it, the house pays it held and signs.
+      const sign = async (b: (typeof buyers)[number], id: string) => {
+        const d = await b.call({ kind: 'panel.pledge.draft', tally: tallyAt, id });
+        expect(d.draft.credentialSubject).toMatchObject({ budget: { amount: 4, currency: 'AUD' }, study: `urn:lake:pledge:${tallyWebId}|${id}` });
+        return b.call({ kind: 'panel.pledge.sign', tally: tallyAt, id, draft: d.id, credential: await issueCredential({ ...d.draft, validFrom: new Date().toISOString() } as never, b.phone) });
+      };
+      // An assistant's way (no contribution) is turned away; so is a contribution signed by another key.
+      expect(await buyers[0]!.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'filters-a' })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/holds AUD 4.00 from each signer/)] });
+      const d = await buyers[0]!.call({ kind: 'panel.pledge.draft', tally: tallyAt, id: 'filters-a' });
+      expect(await buyers[0]!.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'filters-a', draft: d.id, credential: await issueCredential({ ...d.draft, validFrom: new Date().toISOString() } as never, await generateIdentity()) })).toMatchObject({ error: expect.stringContaining('not signed by your key') });
+      expect(await sign(buyers[0]!, 'filters-a')).toMatchObject({ kind: 'tally.signed', count: 1, money: { held_so_far: 4 } });
+      expect(await sign(buyers[1]!, 'filters-a')).toMatchObject({ kind: 'tally.triggered', count: 2 });
+      // Filled, it can't be taken back.
+      expect(await buyers[1]!.call({ kind: 'panel.pledge.withdraw', tally: tallyAt, id: 'filters-a' })).toMatchObject({ kind: 'refused' });
+      expect(await sign(buyers[0]!, 'filters-b')).toMatchObject({ kind: 'tally.signed', count: 1 });
+      expect(await sign(buyers[1]!, 'filters-b')).toMatchObject({ kind: 'tally.signed', count: 2 });
+      // Taken back before it fills: the money goes back at once.
+      expect(await buyers[1]!.call({ kind: 'panel.pledge.withdraw', tally: tallyAt, id: 'filters-b' })).toMatchObject({ kind: 'tally.withdrawn', count: 1 });
+      expect(await sign(buyers[2]!, 'filters-b')).toMatchObject({ kind: 'tally.signed', count: 2, money: { held_so_far: 8, bond: { each_if_it_lapsed_now: 5 } } });
+      // Held, not paid: the payee has nothing yet.
+      expect(receipts.filter((r) => r.memo?.startsWith('released'))).toEqual([]);
+      // At the deadline the tally settles both, the payments agent moving each hold on its word.
+      const settled = async (id: string) => {
+        for (let i = 0; i < 60; i++) {
+          const c = await pc.ask(tally, { kind: 'tally.count', id });
+          if (c.money?.settled) return c;
+          await new Promise((ok) => setTimeout(ok, 2000));
+        }
+        throw new Error(`${id} never settled`);
+      };
+      expect(await settled('filters-a')).toMatchObject({ state: 'triggered', money: { settled: { outcome: 'filled' } } });
+      expect(await settled('filters-b')).toMatchObject({ state: 'lapsed', money: { settled: { outcome: 'lapsed', each: 5 } } });
+      // Filled: both contributions reached the payee, each with its receipt.
+      for (let i = 0; i < 20 && receipts.filter((r) => r.pledge === 'filters-a' && r.memo?.startsWith('released')).length < 2; i++) await new Promise((ok) => setTimeout(ok, 500));
+      expect(receipts.filter((r) => r.pledge === 'filters-a' && r.memo?.startsWith('released'))).toHaveLength(2);
+      // Lapsed: the two who stood by it got their A$4 back and A$5 each from the bond; the one who took it back, A$4 back.
+      const money = async (b: (typeof buyers)[number]) => {
+        for (let i = 0; i < 20; i++) {
+          const m = await b.call({ kind: 'panel.money' });
+          if (m.receipts.some((r: { agreement: string }) => r.agreement.includes('filters-b|bond')) || b === buyers[1]) return m;
+          await new Promise((ok) => setTimeout(ok, 500));
+        }
+        return b.call({ kind: 'panel.money' });
+      };
+      for (const b of [buyers[0]!, buyers[2]!]) {
+        const m = await money(b);
+        expect(m.receipts).toContainEqual(expect.objectContaining({ amount: 5, currency: 'AUD', agreement: `urn:lake:pledge:${tallyWebId}|filters-b|bond` }));
+        expect(m.spent).toContainEqual(expect.objectContaining({ amount: 4, settlement: 'voided', agreement: `urn:lake:pledge:${tallyWebId}|filters-b` }));
+      }
+      expect((await money(buyers[0]!)).spent).toContainEqual(expect.objectContaining({ amount: 4, settlement: 'simulated', agreement: `urn:lake:pledge:${tallyWebId}|filters-a` }));
+      expect((await money(buyers[1]!)).receipts.some((r: { agreement: string }) => r.agreement.includes('filters-b|bond'))).toBe(false);
+      // The owner hears how it ended, in words.
+      expect(JSON.stringify(await buyers[2]!.call({ kind: 'panel.activity' }))).toContain("didn't happen: you were paid AUD 5.00");
+    } finally {
+      await pc.close();
+    }
+  }, 240_000);
 });
 
 describe('relay: a house behind a home router', () => {

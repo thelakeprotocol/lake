@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, countContext, makeEvent, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
-import { specialist, type SpecialistOptions } from './review.js';
+import { checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, countContext, isCurrency, makeEvent, pledgeAgreement, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
+import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
  * A blind tally (SPEC §11.4): for pledges that bind only once enough sign ("nobody goes first"). Until the
@@ -21,7 +21,14 @@ interface Tally {
   triggeredAt?: number;
   /** Count people, not identities: each signature needs a person stamp, and one person counts once (SPEC §6.4). */
   peopleOnly?: boolean;
-  signers: { webId: string; domain: string; url: string; at: string; person?: string }[];
+  signers: { webId: string; domain: string; url: string; at: string; person?: string; hold?: string }[];
+  /**
+   * Money (SPEC §11.4a), in cents: each signer's contribution is held by the payments agent for this tally, whose word alone
+   * moves it once the deadline passes: on to the payee if the pledge filled, back if it lapsed. With a refund bond from its
+   * opener, a lapse also shares the bond among everyone who signed (a dominant assurance contract): saying yes costs
+   * nothing if it doesn't happen, and pays. `counted`: the signers' holds, kept past a lapse until the money is settled.
+   */
+  money?: { contribution: number; currency: string; payee: { webId: string; url: string; name?: string }; bond?: { hold: string; amount: number }; counted: string[]; settled?: { outcome: 'filled' | 'lapsed'; at: string; each?: number } };
   /**
    * A blind pledge (SPEC §11.4): signatures are anonymous passes from a separate issuer, so this tally never learns who
    * signed; each pass carries a commitment to its signer, opened by the signer once the pledge has filled. Opened with
@@ -36,7 +43,7 @@ interface Tally {
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const MAX_DAYS = 30;
 
-export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string }) {
+export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string; paymentsUrl?: string }) {
   const checkers = o.personCheckers ?? ['person.lake.local'];
   const file = `${o.dataDir}/tallies.json`;
   const tallies = new Map<string, Tally>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Tally[]).map((t) => [t.id, t]));
@@ -46,7 +53,19 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     // A blind pledge binds only when enough signers have revealed themselves, not just when enough passes are in (run 21:
     // "make pledges actually bind"): an anonymous signature is cheap until its signer stands by it.
     ...(t.blind ? { blind: true, issuer: t.blind.issuer, revealed: t.blind.passes.filter((x) => x.revealed).length, bound: t.blind.passes.filter((x) => x.revealed).length >= t.threshold } : {}),
-    ...(t.blind?.unveil ? { unveil: { round: t.blind.unveil, opens: new Date(roundTimeMs(t.blind.unveil)).toISOString(), ...(t.blind.unveiled ? { opened: true } : {}) } } : {}) });
+    ...(t.blind?.unveil ? { unveil: { round: t.blind.unveil, opens: new Date(roundTimeMs(t.blind.unveil)).toISOString(), ...(t.blind.unveiled ? { opened: true } : {}) } } : {}),
+    ...(t.money ? { money: moneyView(t, t.money) } : {}) });
+  // What signing costs, where it goes, and what a lapse would pay each signer were it to lapse now.
+  const moneyView = (t: Tally, m: NonNullable<Tally['money']>) => {
+    const n = counted(t);
+    return {
+      contribution: { amount: m.contribution / 100, currency: m.currency }, payee: m.payee, held_so_far: (n * m.contribution) / 100,
+      agreement: pledgeAgreement(s.webId, t.id), ...(o.paymentsUrl ? { payments: o.paymentsUrl } : {}),
+      ...(m.bond ? { bond: { amount: m.bond.amount / 100, currency: m.currency, each_if_it_lapsed_now: Math.floor(m.bond.amount / Math.max(1, n)) / 100 } } : {}),
+      ...(m.settled ? { settled: m.settled } : {}),
+      note: `each signer's ${m.currency} ${(m.contribution / 100).toFixed(2)} is held until the deadline: if it has filled, it goes to ${m.payee.name ?? m.payee.webId}; if not, it goes back${m.bond ? ', and the opener\'s bond is shared equally among everyone who signed' : ''}`,
+    };
+  };
   // Public counts go out late and in batches: a count that ticks the moment someone signs would let anyone match
   // it against that someone's other activity. (Six Claudes unmasked a blind pledge from the public feed that way.)
   const due = new Set<Tally>();
@@ -108,12 +127,31 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       unveiling.delete(t.id);
     }
   };
-  setInterval(() => { for (const t of tallies.values()) { lapse(t); void unveil(t); } }, 30_000).unref();
+  // Its money, once the deadline has passed (SPEC §11.4a): the payments agent moves it on this tally's word, and only then.
+  const settling = new Set<string>();
+  const settleMoney = async (t: Tally) => {
+    const m = t.money;
+    if (!m || m.settled || t.deadline > Date.now() || t.state === 'open' || !o.paymentsUrl || settling.has(t.id)) return;
+    settling.add(t.id);
+    try {
+      const outcome = t.state === 'triggered' ? 'filled' : 'lapsed';
+      const r = await ask(o.paymentsUrl, { kind: 'pledge.settle', id: t.id, outcome, holds: m.counted, ...(m.bond ? { bond: m.bond.hold } : {}) }, 600_000);
+      if (r.kind !== 'pledge.settled') return;
+      m.settled = { outcome, at: new Date().toISOString(), ...(r.bond ? { each: Number(r.bond.each) } : {}) };
+      void save();
+      report(t);
+    } catch {
+      // the payments agent unreachable: the next pass tries again (its holds last past the deadline)
+    } finally {
+      settling.delete(t.id);
+    }
+  };
+  setInterval(() => { for (const t of tallies.values()) { lapse(t); void unveil(t); void settleMoney(t); } }, 30_000).unref();
 
   // A signed request of the tally's own (to the pass issuer), and its verified reply.
-  const ask = async (url: string, body: Record<string, unknown>) => {
+  const ask = async (url: string, body: Record<string, unknown>, timeoutMs = 20_000) => {
     const envelope = await signMessage(body, o.id, { iss: s.webId });
-    const raw = await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs: 20_000 });
+    const raw = await sendLake(url, { lake: '0.1', card: s.card, envelope: envelope as LakeData['envelope'] }, { me: o.id, timeoutMs });
     const v = await verifyLakeData<Record<string, unknown>>(raw as LakeData<Record<string, unknown>>, { sandbox: o.sandbox });
     if (!v.ok) throw new Error(v.rejection.why);
     return v.payload as Record<string, any>;
@@ -169,7 +207,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     return { kind: 'tally.count', ...view(t), ...(show ? { signers: revealed().map(({ domain, url }) => ({ domain, url })), unrevealed: b.passes.length - revealed().length } : {}) };
   };
 
-  const s = await specialist(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -181,8 +219,28 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         ...(deadline > Date.now() && deadline < Date.now() + MAX_DAYS * 86_400_000 ? [] : [`deadline: a time in the next ${MAX_DAYS} days`]),
       ];
       if (p.unveil === true && p.blind !== true) problems.push('unveil: for blind pledges (blind: true), whose signers are hidden until they reveal');
+      // Money: what each signer puts in, held until the deadline, and to whom it goes if it fills; and the opener's bond.
+      const money = p.money as { contribution?: { amount?: unknown; currency?: unknown }; payee?: { webId?: unknown; url?: unknown; name?: unknown }; bond?: { hold?: unknown } } | undefined;
+      const cents = Math.round(Number(money?.contribution?.amount) * 100), currency = String(money?.contribution?.currency ?? '');
+      if (money) {
+        if (!o.paymentsUrl) problems.push('money: this tally has no payments agent to hold it');
+        if (p.blind === true) problems.push('money: not for blind pledges (whoever holds the money sees who paid it)');
+        if (!(cents >= 1 && cents <= 1_000_000 && Math.abs(Number(money.contribution?.amount) * 100 - cents) < 1e-6)) problems.push('money.contribution: { amount: what each signer puts in, in whole cents, up to 10000; currency }');
+        if (!isCurrency(currency)) problems.push('money.contribution.currency: a three-letter code, like AUD');
+        if (typeof money.payee?.webId !== 'string' || !/^https?:\/\/\S+$/.test(String(money.payee?.url ?? ''))) problems.push('money.payee: { webId, url, name? }: who is paid if it fills');
+        if (money.bond && p.people_only !== true) problems.push('money.bond: for people_only pledges, or one person could sign many times and take most of the bond');
+      }
       if (problems.length) return { kind: 'refused', problems };
-      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}) };
+      let bond: { hold: string; amount: number } | undefined;
+      if (money?.bond) {
+        // The bond, held for this pledge before it opens: what a lapse shares among the signers.
+        const r = await ask(o.paymentsUrl!, { kind: 'pledge.hold', id, hold: String(money.bond.hold ?? '') }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
+        const wrong = r.kind !== 'pledge.hold' ? `the payments agent: ${(r.problems ?? [r.kind]).join('; ')}` : r.status !== 'held' ? `it was ${r.status}` : r.bond !== true ? 'it was paid as a contribution, not a bond' : r.currency !== currency ? `it is in ${r.currency}, the contributions in ${currency}` : Date.parse(r.until) < deadline + 3_600_000 ? 'it goes back before the pledge can settle: hold it until at least an hour after the deadline' : '';
+        if (wrong) return { kind: 'refused', problems: [`money.bond: pay the bond held for this pledge first (hold: true, pledge: { tally: ${s.webId}, id: "${id}", bond: true, until }, agreement ${pledgeAgreement(s.webId, id, true)}), then open it with { bond: { hold } }: ${wrong}`] };
+        bond = { hold: String(r.hold), amount: Math.round(Number(r.amount) * 100) };
+      }
+      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
+        ...(money ? { money: { contribution: cents, currency, payee: { webId: String(money.payee!.webId), url: String(money.payee!.url), ...(typeof money.payee!.name === 'string' ? { name: money.payee!.name.slice(0, 80) } : {}) }, ...(bond ? { bond } : {}), counted: [] } } : {}) };
       if (p.blind === true) {
         // A blind pledge: the pass issuer makes a key for it alone; signers get their passes there, not here.
         if (!o.passesUrl) return { kind: 'refused', problems: ['this tally has no pass issuer for blind pledges'] };
@@ -224,7 +282,13 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     }
     if (p.kind === 'tally.withdraw') {
       if (t.state !== 'open') return { kind: 'refused', problems: [`it has ${t.state}; nothing to withdraw from`] };
+      const mine = t.signers.find((x) => x.webId === from);
       t.signers = t.signers.filter((x) => x.webId !== from);
+      // Its contribution goes back at once: taken back before it filled, it never bound them.
+      if (t.money && mine?.hold) {
+        t.money.counted = t.money.counted.filter((h) => h !== mine.hold);
+        await ask(o.paymentsUrl!, { kind: 'pledge.release', id: t.id, hold: mine.hold }).catch(() => undefined);
+      }
       void save();
       report(t);
       return { kind: 'tally.withdrawn', ...view(t) };
@@ -244,7 +308,22 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         person = String(stamp.claims.person ?? '');
       }
       const counted = signed || (person !== undefined && t.signers.some((x) => x.person === person));
-      if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}) });
+      // A pledge with money counts a signature only with its contribution held for it, paid for this very house.
+      let hold: string | undefined;
+      if (t.money) {
+        const m = t.money;
+        if (counted) return { kind: 'refused', problems: ['you have signed already, and your contribution is held'] };
+        hold = String(p.hold ?? '');
+        if (!hold) return { kind: 'refused', problems: [`this pledge holds ${m.currency} ${(m.contribution / 100).toFixed(2)} from each signer: pay it held for this pledge (to ${m.payee.webId} through ${o.paymentsUrl}, agreement ${pledgeAgreement(s.webId, t.id)}, hold: true, pledge: { tally: ${s.webId}, id: "${t.id}", until: after the deadline }), then sign with { hold }. A house's owner does both with one tap in their control panel.`] };
+        if (m.counted.includes(hold)) return { kind: 'refused', problems: ['that contribution is counted already'] };
+        const r = await ask(o.paymentsUrl!, { kind: 'pledge.hold', id: t.id, hold }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
+        const wrong = r.kind !== 'pledge.hold' ? `the payments agent: ${(r.problems ?? [r.kind]).join('; ')}` : r.status !== 'held' ? `it was ${r.status}` : r.bond ? 'that is a bond, not a contribution'
+          : Math.round(Number(r.amount) * 100) !== m.contribution || r.currency !== m.currency ? `it holds ${r.currency} ${r.amount}; this pledge takes ${m.currency} ${(m.contribution / 100).toFixed(2)}`
+          : r.payee !== m.payee.webId ? `it pays ${r.payee}, not this pledge's payee (${m.payee.webId})` : r.by !== from ? 'it was paid for another house' : Date.parse(r.until) < t.deadline + 3_600_000 ? 'it goes back before the pledge can settle: hold it until at least an hour after the deadline' : '';
+        if (wrong) return { kind: 'refused', problems: [`your contribution: ${wrong}`] };
+        m.counted.push(hold);
+      }
+      if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}), ...(hold ? { hold } : {}) });
       if (t.state === 'open' && t.signers.length >= t.threshold) {
         t.state = 'triggered';
         t.triggeredAt = Date.now();

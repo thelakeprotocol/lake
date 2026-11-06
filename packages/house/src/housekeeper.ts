@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, pledgeReceiptPath, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, keyThumbprint, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -33,6 +33,8 @@ export interface HousekeeperOptions {
   onReceiptFiled?: (path: string) => void;
   emit: (e: LakeEvent) => void;
   say?: (msg: string) => void;
+  /** In the owner's own activity: what happened to their money in a pledge. */
+  note?: (kind: string, text: string) => void;
   /** The nodes this house follows, and its links to them (for intents). */
   nodes?: string[];
   links?: () => import('@thelakeprotocol/core').LakeLinks | null;
@@ -594,18 +596,41 @@ export class Housekeeper {
 
   /** A receipt from a payments agent the owner trusts goes in /receipts/. */
   private async receipt(p: ReceiptPayload): Promise<LakeData> {
-    const check = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: this.o.webId, sandbox: this.o.sandbox });
+    let check = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: this.o.webId, sandbox: this.o.sandbox });
+    // What this house put into a pledge (SPEC §11.4a): how it ended comes on a receipt made out to the pledge's payee when it
+    // filled, and is filed beside what the house spent.
+    let given = false;
+    if (!check.ok) {
+      const claimed = (() => { try { return JSON.parse(Buffer.from(String(p.receipt?.credential ?? '').split('.')[1] ?? '', 'base64url').toString()).credentialSubject as Record<string, any>; } catch { return undefined; } })();
+      if (claimed?.pledge && !claimed.pledge.bond && claimed.payer === this.o.webId && typeof claimed.id === 'string') {
+        const again = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: claimed.id, sandbox: this.o.sandbox });
+        if (again.ok && (again.vc.credentialSubject as Record<string, any>).payer === this.o.webId) { check = again; given = true; }
+      }
+    }
     if (!check.ok) return this.reply({ kind: 'rejected', code: 'receipt', why: check.why });
-    const agreement = String(check.vc.credentialSubject.agreement ?? 'unknown').split(':').slice(-2).join('-').replace(/[^a-zA-Z0-9-]/g, '');
+    const sub = check.vc.credentialSubject as Record<string, any>;
+    if (sub.pledge && !sub.pledge.bond && sub.payer === this.o.webId) given = true;
+    const agreement = String(sub.agreement ?? 'unknown').split(':').slice(-2).join('-').replace(/[^a-zA-Z0-9-]/g, '');
+    const path = given ? pledgeReceiptPath(String(sub.agreement)) : `receipts/${agreement}.receipt.jwt`;
     // One file an order: a later receipt (released, refunded) replaces the held one, never the other way round (a held
     // one sent again, late, after a failed try, mustn't undo a release).
-    const filed = await this.read(`receipts/${agreement}.receipt.jwt`).catch(() => '');
+    const filed = await this.read(path.replace(/^receipts\//, 'receipts/')).catch(() => '');
     const issued = (jws: string) => { try { const v = JSON.parse(Buffer.from(jws.split('.')[1] ?? '', 'base64url').toString()) as { validFrom?: string; vc?: { validFrom?: string } }; return Date.parse(v.validFrom ?? v.vc?.validFrom ?? '') || 0; } catch { return 0; } };
     if (typeof filed === 'string' && filed.startsWith('ey') && issued(filed) > issued(p.receipt.credential)) return this.reply({ kind: 'filed', receipt: agreement });
-    await this.tool('pod_write', { path: `receipts/${agreement}.receipt.jwt`, content: p.receipt.credential, contentType: 'text/plain' });
+    await this.tool('pod_write', { path, content: p.receipt.credential, contentType: 'text/plain' });
     // An open panel shows it now (Money, Home's earnings), not on the owner's next tap, and not from a copy read before.
-    this.o.onReceiptFiled?.(`receipts/${agreement}.receipt.jwt`);
+    this.o.onReceiptFiled?.(path);
     this.o.desk.touch();
+    if (sub.pledge) {
+      // How a pledge ended, in words for the owner and their assistant: the money it moved is on the receipt.
+      const amount = `${sub.amount?.currency ?? ''} ${Number(sub.amount?.value ?? 0).toFixed(2)}`;
+      const story = !given ? `The pledge "${sub.pledge.id}" didn't happen: you were paid ${amount}, your share of its bond, for saying yes`
+        : sub.settlement === 'voided' ? `Your ${amount} for the pledge "${sub.pledge.id}" came back to you (${String(sub.why ?? 'it lapsed')})`
+        : `Your ${amount} for the pledge "${sub.pledge.id}" went on to ${String(sub.payee_name ?? sub.id)}: it filled`;
+      this.o.desk.news({ about: 'pledge.money', pledge: String(sub.pledge.id), amount: Number(sub.amount?.value ?? 0), currency: String(sub.amount?.currency ?? ''), how: String(sub.how ?? ''), note: story });
+      this.o.note?.('pledge.money', story);
+      return this.reply({ kind: 'filed', receipt: agreement });
+    }
     // The owner's assistant hears of money in as it lands (run 62: one told its human "In: A$0" with $10 earned).
     const cs = check.vc.credentialSubject as Record<string, any>;
     const items = Array.isArray(cs.items) ? cs.items.map((i: { label?: string }) => String(i.label ?? '')).filter(Boolean) : [];

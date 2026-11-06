@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, deliverWithRetries, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  packId, checkCart, checkSplitConsent, cardUrlFor, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
+  packId, pledgeAgreement, checkCart, checkSplitConsent, cardUrlFor, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
@@ -169,7 +169,8 @@ const MAX_DELIVERIES = 6;
  */
 interface Hold {
   id: string; payer: string; payerUrl?: string; payee: string; payeeUrl?: string; amount: number; currency: string; digest: string;
-  cart: { id: string; hash: string }; until: number;
+  /** The cart it pays; or, for money held for a pledge, the pledge (and the house whose owner signed for it). */
+  cart?: { id: string; hash: string }; pledge?: { tally: string; id: string; bond?: boolean; by: string }; until: number;
   /** What it was for and between whom, carried onto the receipt that settles it. */
   about?: Record<string, unknown>; status: 'held' | 'captured' | 'voided'; settledAt?: number;
   /** The arbiters the seller named in the cart (pinned by key): the buyer paid those terms, so their rulings count here. */
@@ -191,6 +192,11 @@ interface Hold {
 }
 
 const openDispute = (h: Hold) => h.disputes?.find((d) => !d.ended);
+/** What a held payment's receipts name as its agreement and order: its cart, or its pledge. */
+const agreementOf = (h: Hold) => (h.pledge ? pledgeAgreement(h.pledge.tally, h.pledge.id, h.pledge.bond) : `urn:ap2:cart:${h.cart!.id}`);
+const orderOf = (h: Hold) => (h.pledge ? `pledge:${h.pledge.id}` : h.cart!.id);
+/** Longest money is held for a pledge: its tally's longest deadline and a little over, so it can't sit there forever. */
+const PLEDGE_HOLD_DAYS = 32;
 
 /**
  * The demo Payments agent: checks the AP2 mandate chain (a human's Intent Mandate, the agent's Payment
@@ -232,8 +238,9 @@ export async function createPayments(o: SpecialistOptions & {
     return saving;
   };
   const arbiters = o.arbiters ?? ['arbiter.lake.local'];
-  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', `Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed. Pays an AP2 cart a seller signed (SPEC §6.5) for exactly its total, once. With hold: true it holds the money: the seller files each delivery { kind: "delivered", hold, sha256 } (within ${DELIVER_HOURS} hours, or it goes back to the buyer); the buyer accepts or disputes exactly that delivery by its sha256, or after release_after_hours (${HOLD_HOURS.min} to ${HOLD_HOURS.max}, default ${HOLD_HOURS.default}) with no answer it is released.`, 'payments', async (p, agentWebId, agent, agentCard) => {
+  const s: Specialist = await specialist<Reply>(o, 'Payments (demo)', `Verifies AP2 mandate chains and settles. Settlement is simulated; receipts are signed. Pays an AP2 cart a seller signed (SPEC §6.5) for exactly its total, once. With hold: true it holds the money: the seller files each delivery { kind: "delivered", hold, sha256 } (within ${DELIVER_HOURS} hours, or it goes back to the buyer); the buyer accepts or disputes exactly that delivery by its sha256, or after release_after_hours (${HOLD_HOURS.min} to ${HOLD_HOURS.max}, default ${HOLD_HOURS.default}) with no answer it is released. Money for a pledge (hold: true, pledge: { tally, id, until, bond?, payee_url? }, agreement urn:lake:pledge:<tally>|<id>) is held for that tally, and only its word moves it: on to the payee if the pledge fills, back if it lapses, the bond shared among its signers; if the tally never says, it goes back at until.`, 'payments', async (p, agentWebId, agent, agentCard) => {
     if (p.kind === 'capture' || p.kind === 'void' || p.kind === 'dispute' || p.kind === 'rule' || p.kind === 'delivered') return settleHold(p, agentWebId);
+    if (p.kind === 'pledge.hold' || p.kind === 'pledge.release' || p.kind === 'pledge.settle') return settlePledge(p, agentWebId) as never;
     if (p.kind !== 'settle') return { kind: 'refused', problems: ['send { kind: "settle", intent: { credential, card }, payments: [...], cart?, hold?, release_after_hours? }, or for a held payment: delivered { hold, sha256 } (the seller), capture { hold, sha256 } or dispute { hold, sha256, code } (the buyer), void { hold } (the seller refunds), rule { hold, ruling: { credential, card } }'] };
     // The buyer says when a held payment releases by itself, within bounds: long enough to check a delivery, short enough
     // that a seller isn't kept waiting for a week and a day.
@@ -274,7 +281,7 @@ export async function createPayments(o: SpecialistOptions & {
     // Taken back? The owner revokes an allowance on the house's public status list.
     const status = await checkCredentialStatus(mandate as never).catch((e: Error) => ({ checked: true as const, revoked: true, why: e.message }));
     if (status.checked && status.revoked) return { kind: 'refused', problems: ['the owner has taken this allowance back'] };
-    const m = mandate.credentialSubject as unknown as { id: string; budget: { amount: number; currency?: string }; intent_expiry: string };
+    const m = mandate.credentialSubject as unknown as { id: string; budget: { amount: number; currency?: string }; intent_expiry: string; study?: string };
     if (!mandate.type.includes('IntentMandate') || m.id !== agentWebId) return { kind: 'refused', problems: ['the Intent Mandate is not for this agent'] };
     if (Date.parse(m.intent_expiry) < Date.now()) return { kind: 'refused', problems: ['the Intent Mandate has expired'] };
     const digest = digestSRI(intent.credential);
@@ -319,6 +326,26 @@ export async function createPayments(o: SpecialistOptions & {
       }
       if (payments.length !== 1) return { kind: 'refused', problems: ['one payment per cart'] };
     }
+    // Money held for a pledge (SPEC §11.4a): a contribution, or its opener's refund bond, held for the tally it names, whose
+    // word alone moves it: on to the payee once the pledge has filled; back if it lapses, the bond shared among the signers.
+    const pl = p.pledge as { tally?: unknown; id?: unknown; bond?: unknown; until?: unknown; payee_url?: unknown } | undefined;
+    let pledge: Hold['pledge'];
+    let pledgeUntil = 0;
+    if (pl) {
+      const tally = String(pl.tally ?? ''), id = String(pl.id ?? '');
+      pledgeUntil = Date.parse(String(pl.until ?? ''));
+      const problems = [
+        ...(cart ? ['a cart or a pledge, not both'] : []),
+        ...(p.hold === true ? [] : ['money for a pledge is held: hold: true']),
+        ...(/^https?:\/\/\S+#\S+$/.test(tally) && id && id.length <= 80 ? [] : ['pledge: { tally: the tally\'s webId, id, until, bond?, payee_url? }']),
+        ...(pledgeUntil > Date.now() && pledgeUntil < Date.now() + PLEDGE_HOLD_DAYS * DAY ? [] : [`pledge.until: when it goes back to you if the tally never settles it, within ${PLEDGE_HOLD_DAYS} days`]),
+        ...(payments.length === 1 ? [] : ['one payment per pledge']),
+      ];
+      if (problems.length) return { kind: 'refused', problems };
+      pledge = { tally, id, ...(pl.bond === true ? { bond: true } : {}), by: intent.owner ? human.webId : agentWebId };
+    }
+    // An owner's signature for one pledge pays that pledge, and only once.
+    if (m.study?.startsWith('urn:lake:pledge:') && (!pledge || m.study !== pledgeAgreement(pledge.tally, pledge.id, pledge.bond))) return { kind: 'refused', problems: [`this allowance was signed for ${m.study} only`] };
     const checked: { payee: string; amount: number; agreement: string }[] = [];
     for (const pm of payments) {
       try {
@@ -335,13 +362,14 @@ export async function createPayments(o: SpecialistOptions & {
         }
         // A plain refund of a cart, once, and never of one whose held payment already went back.
         const refundOf = String(x.agreement ?? '').startsWith('urn:lake:order:refund:') ? String(x.agreement).slice('urn:lake:order:refund:'.length) : undefined;
-        if (refundOf && (refunded.has(refundOf) || [...holds.values()].some((h) => h.cart.id === refundOf && h.status === 'voided'))) return { kind: 'refused', problems: [`cart ${refundOf} was refunded already`] };
+        if (refundOf && (refunded.has(refundOf) || [...holds.values()].some((h) => h.cart?.id === refundOf && h.status === 'voided'))) return { kind: 'refused', problems: [`cart ${refundOf} was refunded already`] };
+        if (pledge && x.agreement !== pledgeAgreement(pledge.tally, pledge.id, pledge.bond)) return { kind: 'refused', problems: [`the payment's agreement must be the pledge: ${pledgeAgreement(pledge.tally, pledge.id, pledge.bond)}`] };
         checked.push({ payee: x.id, amount: Math.round(x.amount.value * 100), agreement: x.agreement });
       } catch {
         return { kind: 'refused', problems: ['a Payment Mandate is not signed by the agent under this Intent Mandate'] };
       }
     }
-    const hold = !!cart && p.hold === true;
+    const hold = (!!cart || !!pledge) && p.hold === true;
     // The cart's signed delivery terms, where it has them, set the clocks and the revisions: the buyer paid those terms.
     // Checked before anything is counted (run 41: a refusal here had already marked the cart paid, so it never could be).
     const d = cart?.delivery;
@@ -360,23 +388,26 @@ export async function createPayments(o: SpecialistOptions & {
     if (cart) paidCarts.add(cart.hash);
     for (const c of checked) if (c.agreement?.startsWith('urn:lake:order:refund:')) refunded.add(c.agreement.slice('urn:lake:order:refund:'.length));
     // Held: the seller's clock first. The buyer's (holdMs) starts at each delivery.
-    const until = Date.now() + (hold ? (d?.within_hours ?? DELIVER_HOURS) * 3_600_000 : holdMs);
+    const until = pledge ? pledgeUntil : Date.now() + (hold ? (d?.within_hours ?? DELIVER_HOURS) * 3_600_000 : holdMs);
     // What it was for and between whom, as the signed cart and cards say (an owner read "$4 from claude-code-2299….mcp.example"
     // and couldn't tell who paid or what for): the cart's items, and both agents' names.
     const about = {
       ...(agentCard?.name ? { payer_name: String(agentCard.name).slice(0, 80) } : {}),
       ...(cart ? { items: ((c!.mandate as CartMandate).contents.payment_request.details.display_items ?? []).slice(0, 10).map((x) => ({ label: String(x.label).slice(0, 120), amount: x.amount })), ...((c!.card as AgentCard | undefined)?.name ? { seller_name: String((c!.card as AgentCard).name).slice(0, 80) } : {}) } : {}),
     };
+    const held: string[] = [];
     const receipts = await Promise.all(
       checked.map(async (c) => {
         // A settlement id of its own: two payments with the same payer, payee, amount and memo are still two receipts.
         const settlementId = randomUUID();
         // Where both sides are reached when it settles: the seller's card came with the cart, the buyer's with this message.
         const sellerUrl = (p.cart as { card?: AgentCard })?.card?.supportedInterfaces?.[0]?.url;
-        if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: cart!.payee?.url ?? sellerUrl, ...(cart!.payee ? { seller: cart!.webId, sellerUrl } : {}), amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, about, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}), ...(cart!.split ? { split: cart!.split.map((x) => ({ webId: x.webId, url: x.url, amount: Math.round(x.amount * 100) })) } : {}) });
+        held.push(settlementId);
+        if (pledge) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, ...(typeof pl!.payee_url === 'string' ? { payeeUrl: pl!.payee_url } : {}), amount: c.amount, currency, digest, pledge, about, until, status: 'held' });
+        else if (hold) holds.set(settlementId, { id: settlementId, payer: agentWebId, payerUrl: agentCard?.supportedInterfaces?.[0]?.url, payee: c.payee, payeeUrl: cart!.payee?.url ?? sellerUrl, ...(cart!.payee ? { seller: cart!.webId, sellerUrl } : {}), amount: c.amount, currency, digest, cart: { id: cart!.id, hash: cart!.hash }, about, until, status: 'held', reviewMs: holdMs, ...(d?.revisions !== undefined ? { maxDeliveries: d.revisions + 1 } : {}), ...(cart!.arbiters.length ? { arbiters: cart!.arbiters } : {}), ...(cart!.split ? { split: cart!.split.map((x) => ({ webId: x.webId, url: x.url, amount: Math.round(x.amount * 100) })) } : {}) });
         return {
           payee: c.payee,
-          credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash }, seller: cart.webId } : {}), ...about, intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
+          credential: await s.vc('LakeReceipt', { id: c.payee, payer: agentWebId, amount: { currency, value: c.amount / 100 }, agreement: c.agreement, ...(cart ? { cart: { id: cart.id, hash: cart.hash }, seller: cart.webId } : {}), ...(pledge ? { pledge: { tally: pledge.tally, id: pledge.id, ...(pledge.bond ? { bond: true } : {}) } } : {}), ...about, intentMandate: digest, settlement: hold ? 'held' : 'simulated', settlementId, ...(hold ? { heldUntil: new Date(until).toISOString() } : {}) }, 3650),
         };
       }),
     );
@@ -384,7 +415,7 @@ export async function createPayments(o: SpecialistOptions & {
     o.onSettled?.(total / 100, checked.length, { cart: !!cart, held: hold, currency });
     // On the record: every receipt goes into the transparency log, so it can't be quietly rewritten or denied later.
     const logged = await Promise.all(receipts.map(async (r) => ({ ...r, ...(o.log ? { logged: await o.log(r.credential, 'receipt').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) } : {}) })));
-    return { kind: 'settled', receipts: logged, currency, total: total / 100, remaining: (cap - already - total) / 100, ...(hold ? { held: true, until: new Date(until).toISOString() } : {}) };
+    return { kind: 'settled', receipts: logged, currency, total: total / 100, remaining: (cap - already - total) / 100, ...(hold ? { held: true, until: new Date(until).toISOString() } : {}), ...(pledge ? { hold: held[0] } : {}) };
   });
 
   // The money of a held payment moves: to the seller (capture), or back under the buyer's budget (void). Both sides get
@@ -401,27 +432,30 @@ export async function createPayments(o: SpecialistOptions & {
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
     await save();
     const story = { how, ...(h.delivered ? { delivered: h.delivered.sha256, deliveries: h.delivered.revision } : {}), ...(h.disputes?.length ? { disputes: h.disputes.map((d) => ({ code: d.code, ended: d.ended })) } : {}) };
-    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, ...(h.about ?? {}), ...(to === 'captured' && h.split ? { paid_as_shares: h.split.map((x) => ({ member: x.webId, amount: x.amount / 100 })) } : {}), seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why, ...story }, 3650);
+    const what = h.pledge ? { pledge: { tally: h.pledge.tally, id: h.pledge.id, ...(h.pledge.bond ? { bond: true } : {}) } } : { cart: h.cart, seller: h.seller ?? h.payee };
+    const credential = await s.vc('LakeReceipt', { id: to === 'captured' ? h.payee : h.payer, payer: h.payer, amount: { currency: h.currency, value: h.amount / 100 }, agreement: agreementOf(h), ...what, ...(h.about ?? {}), ...(to === 'captured' && h.split ? { paid_as_shares: h.split.map((x) => ({ member: x.webId, amount: x.amount / 100 })) } : {}), intentMandate: h.digest, settlement: to === 'captured' ? 'simulated' : 'voided', settlementId: randomUUID(), [to === 'captured' ? 'captures' : 'voids']: h.id, why, ...story }, 3650);
     const logged = o.log ? await o.log(credential, to === 'captured' ? 'capture' : 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
-    const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `${to === 'captured' ? 'released' : 'voided'}: ${why}` };
+    const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: h.amount / 100, currency: h.currency, ...(h.cart ? { cart: h.cart.id } : { pledge: h.pledge!.id }), order: orderOf(h), hold: h.id, memo: `${to === 'captured' ? 'released' : 'voided'}: ${why}` };
     for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
       deliverWithRetries(async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
     }
     // A team's cart: released, each member is paid its share, with a receipt of its own naming the cart and the release.
     const shares = to === 'captured' && h.split ? await Promise.all(h.split.map(async (x) => {
-      const share = await s.vc('LakeReceipt', { id: x.webId, payer: h.payer, amount: { currency: h.currency, value: x.amount / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, ...(h.about ?? {}), seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: 'simulated', settlementId: randomUUID(), captures: h.id, share: true, why }, 3650);
-      const note = { kind: 'receipt', receipt: { credential: share, card: s.card }, amount: x.amount / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `your share of cart ${h.cart.id}, released: ${why}` };
+      const share = await s.vc('LakeReceipt', { id: x.webId, payer: h.payer, amount: { currency: h.currency, value: x.amount / 100 }, agreement: agreementOf(h), ...what, ...(h.about ?? {}), intentMandate: h.digest, settlement: 'simulated', settlementId: randomUUID(), captures: h.id, share: true, why }, 3650);
+      const note = { kind: 'receipt', receipt: { credential: share, card: s.card }, amount: x.amount / 100, currency: h.currency, ...(h.cart ? { cart: h.cart.id } : { pledge: h.pledge!.id }), order: orderOf(h), hold: h.id, memo: h.pledge ? `your share of the refund bond of the pledge "${h.pledge.id}": ${why}` : `your share of cart ${h.cart!.id}, released: ${why}` };
       deliverWithRetries(async () => sendLake(x.url, { lake: '0.1', card: s.card, envelope: (await signMessage(note, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
       return { member: x.webId, amount: x.amount / 100, credential: share };
     })) : undefined;
-    if (to === 'captured') o.onSettled?.(h.amount / 100, 1, { cart: true, released: true, currency: h.currency });
-    return { kind: to, hold: h.id, cart: h.cart.id, credential, ...(shares ? { shares } : {}), ...(logged ? { logged } : {}), why };
+    if (to === 'captured') o.onSettled?.(h.amount / 100, 1, { cart: !!h.cart, released: true, currency: h.currency });
+    return { kind: to, hold: h.id, ...(h.cart ? { cart: h.cart.id } : { pledge: h.pledge!.id }), credential, ...(shares ? { shares } : {}), ...(logged ? { logged } : {}), why };
   };
   // Its deadline passed with nothing open: nothing delivered goes back to the buyer; a delivery nobody answered is released.
   // Checked at start too, for holds whose time passed while this agent was down.
   const sweep = () => {
     for (const h of holds.values()) {
       if (h.status !== 'held' || h.until > Date.now() || h.disputed || openDispute(h)) continue;
+      // Money for a pledge its tally never settled goes back: nobody's word released it.
+      if (h.pledge) { void finish(h, 'voided', 'pledge_expired', 'the pledge was never settled by its tally'); continue; }
       if (h.reviewMs !== undefined && !h.delivered) void finish(h, 'voided', 'undelivered_expired', 'nothing was delivered in time');
       else void finish(h, 'captured', 'review_expired', 'its time ran out with no dispute');
     }
@@ -432,6 +466,7 @@ export async function createPayments(o: SpecialistOptions & {
     const h = holds.get(String(p.hold ?? ''));
     if (!h) return { kind: 'refused', problems: ['no held payment with that id (the receipt\'s settlementId)'] };
     if (h.status !== 'held') return { kind: 'refused', problems: [`it was ${h.status} already`] };
+    if (h.pledge) return { kind: 'refused', problems: [`it is held for the pledge "${h.pledge.id}": only its tally's word moves it`] };
     const filed = h.reviewMs !== undefined;
     const sha = String(p.sha256 ?? '').toLowerCase();
     // The buyer answers one delivery, by its sha256: the latest the seller filed (an older one was replaced by a revision).
@@ -468,13 +503,13 @@ export async function createPayments(o: SpecialistOptions & {
       h.amount -= part;
       spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - part));
       await save();
-      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: `urn:ap2:cart:${h.cart.id}`, cart: h.cart, seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
+      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: agreementOf(h), cart: h.cart, seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
       const logged = o.log ? await o.log(credential, 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
-      const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: part / 100, currency: h.currency, cart: h.cart.id, order: h.cart.id, hold: h.id, memo: `part refunded: ${h.currency} ${part / 100}; ${h.currency} ${h.amount / 100} still held` };
+      const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: part / 100, currency: h.currency, cart: h.cart!.id, order: h.cart!.id, hold: h.id, memo: `part refunded: ${h.currency} ${part / 100}; ${h.currency} ${h.amount / 100} still held` };
       for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
         deliverWithRetries(async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
       }
-      return { kind: 'voided', partial: true, hold: h.id, cart: h.cart.id, refunded: part / 100, still_held: h.amount / 100, credential, ...(logged ? { logged } : {}) } as never;
+      return { kind: 'voided', partial: true, hold: h.id, cart: h.cart!.id, refunded: part / 100, still_held: h.amount / 100, credential, ...(logged ? { logged } : {}) } as never;
     }
     if (p.kind === 'dispute') {
       if (from !== h.payer) return { kind: 'refused', problems: ['only the buyer disputes it'] };
@@ -512,7 +547,7 @@ export async function createPayments(o: SpecialistOptions & {
       if (!arbiters.includes(signer.ownerDomain) && !(await isParty(signer, h.arbiters))) throw new Error(`${signer.ownerDomain} (${signer.webId}) is neither an arbiter this payments agent trusts nor one the cart names`);
       const vc = await verifyCredential(String(r?.credential ?? ''), signer.publicJwk);
       const sub = vc.credentialSubject as unknown as { cart?: { hash: string }; paid?: boolean; delivered?: { sha256?: string; acknowledged?: boolean; meets_terms?: boolean } | null };
-      if (!vc.type.includes('LakeRuling') || sub.cart?.hash !== h.cart.hash) throw new Error('not a ruling on this cart');
+      if (!vc.type.includes('LakeRuling') || sub.cart?.hash !== h.cart!.hash) throw new Error('not a ruling on this cart');
       if (sub.paid !== true) throw new Error('a ruling that found the cart unpaid: ask the arbiter again, with the receipt');
       if (counted) {
         if (sub.delivered?.sha256 === open!.sha256 && sub.delivered.meets_terms === false) return (await finish(h, 'voided', 'ruling', 'an arbiter ruled the delivery misses the cart\'s signed terms')) as never;
@@ -524,6 +559,50 @@ export async function createPayments(o: SpecialistOptions & {
     } catch (e) {
       return { kind: 'refused', problems: [(e as Error).message] };
     }
+  };
+  /**
+   * A pledge's money, on its tally's word only (SPEC §11.4a), and only money that names that tally: whether a hold is good
+   * (pledge.hold: its amount, payee and the house whose owner signed for it; nothing about anyone else's), a signer taking
+   * theirs back before it fills (pledge.release), and how it ended (pledge.settle). Filled: each counted contribution goes
+   * on to its payee, and the bond back to its opener. Lapsed: every contribution goes back, and the opener's bond is shared
+   * equally among the counted signers: saying yes to a pledge that didn't happen pays (a dominant assurance contract).
+   */
+  const settlePledge = async (p: Record<string, unknown>, from: string): Promise<Record<string, unknown>> => {
+    const id = String(p.id ?? '');
+    const mine = (h: Hold | undefined): h is Hold => !!h && h.pledge?.tally === from && h.pledge.id === id;
+    const one = holds.get(String(p.hold ?? ''));
+    if (p.kind === 'pledge.hold') {
+      if (!mine(one)) return { kind: 'refused', problems: [`no money is held for your pledge "${id}" with that id`] };
+      return { kind: 'pledge.hold', hold: one.id, status: one.status, amount: one.amount / 100, currency: one.currency, payee: one.payee, by: one.pledge!.by, ...(one.pledge!.bond ? { bond: true } : {}), until: new Date(one.until).toISOString() };
+    }
+    if (p.kind === 'pledge.release') {
+      if (!mine(one) || one.pledge!.bond) return { kind: 'refused', problems: [`no contribution is held for your pledge "${id}" with that id`] };
+      return finish(one, 'voided', 'pledge_withdrawn', 'its signer took their signature back before the pledge filled');
+    }
+    if (p.outcome !== 'filled' && p.outcome !== 'lapsed') return { kind: 'refused', problems: ['pledge.settle { id, outcome: "filled" | "lapsed", holds: [the counted signers\' holds], bond?: the bond\'s hold }'] };
+    const counted = new Set((Array.isArray(p.holds) ? p.holds : []).map(String));
+    const open = [...holds.values()].filter((h) => mine(h) && h.status === 'held');
+    const gifts = open.filter((h) => !h.pledge!.bond), bonds = open.filter((h) => h.pledge!.bond);
+    const signers = gifts.filter((h) => counted.has(h.id));
+    // Many holds: settled a few at a time, each with its own receipt on the log.
+    const each = async <T,>(xs: T[], f: (x: T) => Promise<unknown>) => { for (let i = 0; i < xs.length; i += 20) await Promise.all(xs.slice(i, i + 20).map(f)); };
+    let shared: { amount: number; among: number; each: number } | undefined;
+    if (p.outcome === 'filled') {
+      await each(gifts, (h) => (counted.has(h.id) ? finish(h, 'captured', 'pledge_filled', 'the pledge filled') : finish(h, 'voided', 'pledge_withdrawn', 'it was never counted as a signature')));
+      await each(bonds, (h) => finish(h, 'voided', 'pledge_filled', 'the pledge filled: its bond goes back to its opener'));
+    } else {
+      await each(gifts, (h) => finish(h, 'voided', 'pledge_lapsed', 'the pledge lapsed: not enough signed in time'));
+      const bond = bonds.find((h) => h.id === String(p.bond ?? ''));
+      for (const h of bonds) {
+        if (h !== bond || !signers.length) { await finish(h, 'voided', 'pledge_lapsed', signers.length ? 'not the bond its tally counted' : 'the pledge lapsed with nobody to share its bond'); continue; }
+        // Equal shares in whole cents, the odd cents to the first signers; whoever paid for a house is paid at that house.
+        const base = Math.floor(h.amount / signers.length), odd = h.amount - base * signers.length;
+        h.split = signers.map((x, i) => ({ webId: x.pledge!.by, url: x.payerUrl ?? '', amount: base + (i < odd ? 1 : 0) })).filter((x) => x.amount > 0 && x.url);
+        shared = { amount: h.amount / 100, among: h.split.length, each: base / 100 };
+        await finish(h, 'captured', 'pledge_lapsed', 'the pledge lapsed: its opener\'s bond is shared among everyone who signed');
+      }
+    }
+    return { kind: 'pledge.settled', id, outcome: p.outcome, settled: open.length, ...(p.outcome === 'filled' ? { paid: signers.length } : { returned: gifts.length }), ...(shared ? { bond: shared } : {}) };
   };
   return { app: s.app, card: s.card, webId: s.webId };
 }

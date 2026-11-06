@@ -46,6 +46,8 @@ h3 { margin: 18px 0 8px; font-size: 15px; font-weight: 600; }
 code { font-family: var(--f-mono); font-size: 0.86em; background: var(--raised); padding: 3px 7px; border-radius: 6px; overflow-wrap: anywhere; }
 pre { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; overflow-x: auto; font: 400 12px/1.6 var(--f-mono); color: var(--mint); }
 blockquote { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--mint); background: var(--raised); border-radius: 0 8px 8px 0; }
+.pledge-terms { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--mint); background: var(--raised); border-radius: 0 8px 8px 0; }
+.pledge-terms .item-meta { margin: 4px 0; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 
 /* Buttons: one primary per place, the rest quiet. */

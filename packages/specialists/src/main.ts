@@ -31,6 +31,7 @@ const { positionals, values } = parseArgs({
     // all but these (comma-separated): the public sandbox runs no Sparring partner, which attacks any address on request.
     skip: { type: 'string', default: '' },
     'passes-url': { type: 'string' },
+    'payments-url': { type: 'string' },
     // A transparency log in another process (its A2A endpoint): where payments and the arbiter log what they sign when
     // 'log' doesn't run in this one.
     'log-url': { type: 'string', default: process.env.LAKE_LOG_URL },
@@ -128,7 +129,7 @@ async function start(k: string, url: string) {
     : k === 'inspector' ? await createInspector({ ...o, nodeUrl: nodes[0] })
     : k === 'sparring' ? await createSparring({ ...o, nodeUrl: nodes[0], everyMs: Number(values['spar-every']) * 1000 })
     : k === 'quests' ? await createQuests({ ...o, nodeUrl: nodes[0] ?? 'http://localhost:7000', dataDir: values.data! })
-    : k === 'tally' ? await createTally({ ...o, dataDir: values.data!, personCheckers: domains(everyDemo('person')), passesUrl: values['passes-url'] ?? (several && kinds.includes('passes') ? `${base}/passes/a2a` : undefined) })
+    : k === 'tally' ? await createTally({ ...o, dataDir: values.data!, personCheckers: domains(everyDemo('person')), passesUrl: values['passes-url'] ?? (several && kinds.includes('passes') ? `${base}/passes/a2a` : undefined), paymentsUrl: values['payments-url'] ?? (several && kinds.includes('payments') ? `${base}/payments/a2a` : undefined) })
     : k === 'passes' ? await createPasses({ ...o, dataDir: values.data!, personCheckers: domains(everyDemo('person')) })
     : k === 'person' ? await createPersonhood({ ...o, dataDir: values.data! })
     : k === 'rooms' ? await createRooms({ ...o, dataDir: values.data! })
