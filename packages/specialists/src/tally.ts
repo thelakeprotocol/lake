@@ -140,13 +140,12 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     try {
       // One fetch of the round, from any relay, checked against drand's key; if none answers, the next pass tries again.
       const beacon = await getBeacon(b.unveil);
-      for (const x of b.passes) {
-        if (x.sealed && !x.revealed) {
-          // A seal that doesn't open to its own signature leaves that signer unrevealed, as if it never revealed.
-          x.revealed = await checkReveal(await openSeal(x.sealed, beacon), { tally: s.webId, id: t.id, commit: x.commit, sandbox: o.sandbox }).catch(() => undefined);
-        }
-        delete x.sealed;
-      }
+      // Every seal opened first, then all of them shown at once: nobody's count should catch it half done.
+      const opened = await Promise.all(b.passes.map(async (x) => (x.sealed && !x.revealed
+        // A seal that doesn't open to its own signature leaves that signer unrevealed, as if it never revealed.
+        ? checkReveal(await openSeal(x.sealed, beacon), { tally: s.webId, id: t.id, commit: x.commit, sandbox: o.sandbox }).catch(() => undefined)
+        : x.revealed)));
+      b.passes.forEach((x, i) => { x.revealed = opened[i]; delete x.sealed; });
       b.unveiled = true;
       void save();
       const signers = b.passes.flatMap((x) => (x.revealed ? [x.revealed] : []));
