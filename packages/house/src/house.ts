@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -316,6 +317,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 
   const keeper = new Housekeeper({
     name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk, note: (kind, text) => note(kind, text),
+    fileFavour: async (jws, side) => { await put(owner, `wallet/favours/${side}-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {}); },
     inCircle: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/circles.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     answeredQuorum: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     signals: () => signals,
@@ -776,6 +778,12 @@ function panelFor(x: {
       // The circles this owner joined, each with where it stands (the tally's own view): what to call on.
       const known = await owner.fetch(`${owner.podRoot}wallet/circles.json`).then((r) => (r.ok ? r.json() : [])).catch(() => []) as { tally: string; url: string; id: string }[];
       return Promise.all(known.map(async (c) => ({ ...c, view: await send(c.url, { kind: 'circle.record', id: c.id }).then((r) => r.payload).catch((e: Error) => ({ kind: 'refused', problems: [e.message] })) })));
+    },
+    async favourNote(c) {
+      // What the owner owes for help received: signed by this house, sent to the circle, kept in the owner's wallet.
+      const jws = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeFavour'], issuer: owner.webId, validFrom: new Date().toISOString(), credentialSubject: { id: c.helper, call: c.call, circle: { id: c.id, tally: c.tally }, need: c.need.slice(0, 300), ...(c.help ? { help: c.help } : {}), favours: 1 } } as never, x.id);
+      await put(owner, `wallet/favours/owe-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {});
+      return jws;
     },
     async circleSend(tally, payload) {
       return (await send(tally, payload)).payload as Record<string, any>;

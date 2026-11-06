@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number } }; circle?: CircleItem; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -369,7 +369,7 @@ function NotifyItem() {
 }
 
 type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
-type CircleItem = { tally: string; id: string; call: string; need: string; when?: string; promise?: string; role: 'ask' | 'caller' | 'kept' | 'unmet'; state: string; contact?: string };
+type CircleItem = { tally: string; id: string; call: string; need: string; when?: string; promise?: string; help?: string; role: 'ask' | 'caller' | 'kept' | 'unmet'; state: string; contact?: string };
 type PledgeQuorum = { text: string; options: string[]; closes: string; least: number; answered?: boolean };
 type Signed = { kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] };
 
@@ -404,38 +404,65 @@ function CircleNote({ x, c }: { x: Note; c: CircleItem }) {
     c.role === 'ask' ? [
       c.state === 'open' ? h('div', { class: 'choices' },
         h(Act, { label: 'Yes, I\'ll do it', cls: 'primary', run: send({ kind: 'panel.circle.answer', note: x.id, accept: true }) }),
-        h(Act, { label: 'Not this time', run: send({ kind: 'panel.circle.answer', note: x.id, accept: false }) })) : null,
+        h(Act, { label: 'Not this time', run: send({ kind: 'panel.circle.answer', note: x.id, accept: false }) }),
+        // Something it shouldn't ask (money, a visit, anything unsafe): reported against the caller's key, and passed on.
+        h(Act, { label: 'Report', cls: 'danger', confirm: 'Tap again: reported, never named to them', run: send({ kind: 'panel.circle.answer', note: x.id, report: true }) })) : null,
       c.state === 'accepted' ? [line('You said yes. Reach them at their house:'), h('a', { href: doorOf(c.contact), target: '_blank', rel: 'noopener' }, doorOf(c.contact))] : null,
       c.state === 'taken' ? line('Someone else in the circle took it.') : null,
-      c.state === 'declined' ? line('You said not this time. Someone else will be asked.') : null,
+      c.state === 'declined' ? line('You said not this time. Someone else will be asked; nobody learns you said no.') : null,
+      c.state === 'reported' ? line('Reported. Someone else will be asked; the caller isn\'t told who reported it.') : null,
       c.state === 'withdrawn' ? line('They withdrew it.') : null,
     ] : null,
     c.role === 'caller' ? [
       c.state === 'asking' ? line('Asked, without your name. You hear when someone says yes.') : null,
       c.state === 'matched' ? [line('Someone said yes. Reach them at their house:'), h('a', { href: doorOf(c.contact), target: '_blank', rel: 'noopener' }, doorOf(c.contact))] : null,
-      c.state === 'done' ? line('Done: their promise counts as kept, on the circle\'s record.') : null,
+      c.state === 'done' ? line('Thanked: their promise counts as kept, and you owe one favour, signed by your house.') : null,
       c.state === 'withdrawn' ? line('Withdrawn.') : null,
-      c.state === 'matched' ? h(Act, { label: 'It happened', cls: 'primary', run: send({ kind: 'panel.circle.kept', note: x.id }) }) : null,
+      // Thanks is the receipt: your house signs a favour note to the member who helped.
+      c.state === 'matched' ? h(Act, { label: 'Thanks', cls: 'primary', run: send({ kind: 'panel.circle.kept', note: x.id }) }) : null,
       c.state === 'asking' || c.state === 'matched' ? h(Act, { label: 'Withdraw', cls: 'quiet', run: send({ kind: 'panel.circle.kept', note: x.id, withdraw: true }) }) : null,
     ] : null);
 }
 
-type CircleRow = { tally: string; url: string; id: string; view: { kind: string; text?: string; promise?: string; times_a_year?: number; members?: number; open?: boolean; kept?: number; of?: number; you?: { kept: number }; problems?: string[] } };
+/** "Say yes for me": your house answers asks that fit, up to a weekly limit, and tells you; the rest come to you. */
+function StandingYes({ c }: { c: CircleRow }) {
+  const [per, setPer] = useState(c.rule?.perWeek ?? 0);
+  const set = (n: number) => async () => { const r = await call<{ ok?: boolean }>({ kind: 'panel.circle.rule', tally: c.url, id: c.id, perWeek: n, kinds: c.view.you?.offers }); if (r.ok) setPer(n); };
+  return h('div', { class: 'choices' }, h('span', { class: 'item-meta' }, per ? `Your house says yes for you, up to ${per} a week.` : 'Your house could say yes for you:'),
+    per ? h(Act, { label: 'Stop', cls: 'quiet', run: set(0) }) : h(Act, { label: 'Say yes for me, once a week', run: set(1) }));
+}
+
+type CircleRow = { tally: string; url: string; id: string; rule?: { kinds?: string[]; perWeek: number }; view: { kind: string; text?: string; promise?: string; times_a_year?: number; kinds?: string[]; members?: number; open?: boolean; kept?: number; of?: number; you?: { kept: number; offers?: string[] }; problems?: string[] } };
+
+/** What you'll help with, of a circle's kinds: tap to change; calls for anything else never reach you. */
+function CircleOffers({ c }: { c: CircleRow }) {
+  const [mine, setMine] = useState<string[]>(c.view.you?.offers ?? c.view.kinds ?? []);
+  const toggle = async (k: string) => {
+    const next = mine.includes(k) ? mine.filter((x) => x !== k) : [...mine, k];
+    if (!next.length) return;
+    const r = await call<{ kind?: string; offers?: string[] }>({ kind: 'panel.circle.offer', tally: c.url, id: c.id, kinds: next });
+    if (r.kind === 'circle.offered') setMine(r.offers ?? next);
+  };
+  return h('div', { class: 'choices' }, h('span', { class: 'item-meta' }, 'You help with:'), ...(c.view.kinds ?? []).map((k) => h('button', { key: k, type: 'button', class: `btn small ${mine.includes(k) ? 'primary' : 'quiet'}`, onClick: () => void toggle(k) }, k)));
+}
 /** The promise circles you're in: what you promised, how the circle keeps its promises, and a way to ask it for help. */
 function Circles() {
   const d = useHouse<CircleRow[]>({ kind: 'panel.circles' });
-  const need = useRef<HTMLInputElement>(null), when = useRef<HTMLInputElement>(null);
+  const need = useRef<HTMLInputElement>(null), when = useRef<HTMLInputElement>(null), help = useRef<HTMLSelectElement>(null);
   const [said, setSaid] = useState('');
   if (!d.data?.length) return null;
   return h('div', { class: 'card' }, h('h3', {}, 'Your promise circles'),
     ...d.data.map((c) => h('div', { key: `${c.url}|${c.id}`, style: 'margin-top:8px' },
       h('p', { class: 'item-meta' }, c.view.promise ? `You promised: ${c.view.promise}, ${c.view.times_a_year === 1 ? 'once' : `${c.view.times_a_year} times`} a year, to ${Math.max(0, (c.view.members ?? 1) - 1)} others.` : (c.view.problems ?? []).join('; ')),
       c.view.promise ? h('p', { class: 'item-meta' }, `The circle has kept ${c.view.kept} of ${c.view.of} calls; you've kept ${c.view.you?.kept ?? 0}.`) : null,
+      c.view.open && c.view.kinds ? h(CircleOffers, { c }) : null,
+      c.view.open ? h(StandingYes, { c }) : null,
       c.view.open ? h('div', {},
-        h('input', { ref: need, placeholder: 'What do you need? e.g. a meal on Thursday', style: 'width:100%;margin-top:6px' }),
+        c.view.kinds ? h('select', { ref: help, style: 'width:100%;margin-top:6px' }, ...c.view.kinds.map((k) => h('option', { key: k, value: k }, k))) : null,
+        h('input', { ref: need, placeholder: 'What do you need? e.g. someone to look over my CV', style: 'width:100%;margin-top:6px' }),
         h('input', { ref: when, placeholder: 'When (optional)', style: 'width:100%;margin-top:6px' }),
         h(Act, { label: 'Ask my circle', cls: 'primary', run: async () => {
-          const r = await call<Signed & { asked?: number }>({ kind: 'panel.circle.call', tally: c.url, id: c.id, need: need.current!.value.trim(), when: when.current!.value.trim() || undefined });
+          const r = await call<Signed & { asked?: number }>({ kind: 'panel.circle.call', tally: c.url, id: c.id, need: need.current!.value.trim(), when: when.current!.value.trim() || undefined, help: help.current?.value || undefined });
           if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; '));
           setSaid(`Asked ${r.asked} member${r.asked === 1 ? '' : 's'}, without your name.`);
         } })) : h('p', { class: 'item-meta' }, 'It opens for calls once it has filled and everyone is known.'))),
@@ -469,7 +496,7 @@ function SuggestionItem({ x }: { x: Note }) {
     h('p', { class: 'item-text' }, x.text),
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.pledge?.money ? h(PledgeTerms, { m: x.pledge.money }) : null,
-    x.pledge?.circle ? h('div', { class: 'pledge-terms' }, h('p', { class: 'item-meta' }, `A promise circle: each of you promises the others ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year. When someone needs it, a few are asked, picked by a public draw, without knowing who asked. No money.`)) : null,
+    x.pledge?.circle ? h('div', { class: 'pledge-terms' }, h('p', { class: 'item-meta' }, `A promise circle: each of you promises the others ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year${x.pledge.circle.kinds ? ` (you pick which of ${x.pledge.circle.kinds.join(', ')})` : ''}. When someone needs it, a few who offer that are asked, picked by a public draw, without knowing who asked. You can always say not this time. No money.`)) : null,
     x.pledge?.quorum ? h(QuorumQuestion, { x, q: x.pledge.quorum }) : null,
     x.circle ? h(CircleNote, { x, c: x.circle }) : null,
     // A count answered from your own record: you see what it says; it leaves only as two unreadable shares.
@@ -497,6 +524,7 @@ function SuggestionItem({ x }: { x: Note }) {
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,
       // A pledge still finding its quorum has nothing to sign: your agent brings it again if it opens.
+      x.circleCall && !x.circleCall.sent ? h(Act, { label: `Ask my circle${x.circleCall.help ? ` (${x.circleCall.help})` : ''}`, cls: 'primary', run: async () => { const r = await call<Signed>({ kind: 'panel.circle.call', note: x.id }); if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; ')); } }) : null,
       x.count?.mine && !x.count.answered ? h(Act, { label: 'Count it in', cls: 'primary', run: async () => { const r = await call<Signed>({ kind: 'panel.count.answer', note: x.id }); if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; ')); } }) : null,
       x.pledge && !x.pledge.quorum ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
     h('div', { class: 'item-foot' },

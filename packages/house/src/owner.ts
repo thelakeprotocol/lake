@@ -83,6 +83,8 @@ export interface PanelProvider {
   pledgeTerms?(tally: string, id: string): Promise<Record<string, any>>;
   /** The promise circles the owner joined, and each one's record (theirs included). */
   circles?(): Promise<unknown[]>;
+  /** A favour note (SPEC §11.4c): this house's signed "I received this from that member: one favour", kept in its wallet. */
+  favourNote?(c: { tally: string; id: string; call: string; helper: string; need: string; help?: string }): Promise<string>;
   /** A message from this house to a tally (a promise circle's call, accept, decline, kept), and its verified reply. */
   circleSend?(tally: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
   /** What the owner's record says for one coded field (its first value), for a count answered from it. */
@@ -110,11 +112,11 @@ export interface PledgeMoney { amount: number; currency: string; payee: string; 
  * `caller`, their own call and how it stands; `kept`, a promise of theirs counted as kept; `unmet`, nobody could take it.
  */
 export interface CircleItem {
-  tally: string; id: string; call: string; need: string; when?: string; promise?: string;
-  role: 'ask' | 'caller' | 'kept' | 'unmet';
-  state: 'open' | 'accepted' | 'declined' | 'taken' | 'asking' | 'matched' | 'done' | 'withdrawn';
-  /** Whom to reach, once matched: the other member's house. */
-  contact?: string;
+  tally: string; id: string; call: string; need: string; when?: string; promise?: string; /** The kind of help asked for. */ help?: string;
+  role: 'ask' | 'caller' | 'kept' | 'unmet' | 'cleared';
+  state: 'open' | 'accepted' | 'declined' | 'reported' | 'taken' | 'asking' | 'matched' | 'done' | 'withdrawn';
+  /** Whom to reach, once matched: the other member's house (and its WebID, which a favour note names). */
+  contact?: string; contactWebId?: string;
 }
 
 export interface RecordCount { id: string; options: string[]; leader: string; helper: string; field: string; label: string; mine?: string; answered?: boolean }
@@ -155,7 +157,7 @@ export interface AssistantKey { /** On duty: the grant it acts under while the o
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem;
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
@@ -217,7 +219,7 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -233,6 +235,12 @@ export class OwnerDesk {
   readonly pending = new Map<string, PendingRequest>();
   /** How often each standing yes answered for the owner (by key and purpose), for the panel's list. */
   readonly standingUses = new Map<string, number>();
+  /**
+   * Standing yeses for promise circles (SPEC §11.4c): "say yes for me to these kinds, at most so many a week". The house
+   * answers an ask that fits, and tells the owner; anything else still comes to their phone.
+   */
+  circleRules: { tally: string; id: string; kinds?: string[]; perWeek: number; at: number[] }[] = [];
+  private saveCircleRules = () => writeFile(join(this.o.dataDir, 'circle-rules.json'), JSON.stringify(this.circleRules)).catch(() => {});
   standingUsed(jkt: string, purpose: string) {
     const k = `${jkt}|${purpose}`;
     this.standingUses.set(k, (this.standingUses.get(k) ?? 0) + 1);
@@ -390,6 +398,7 @@ export class OwnerDesk {
     for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
     for (const [k, n] of JSON.parse(await readFile(join(this.o.dataDir, 'standing-uses.json'), 'utf8').catch(() => '[]')) as [string, number][]) this.standingUses.set(k, n);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
+    this.circleRules = JSON.parse(await readFile(join(this.o.dataDir, 'circle-rules.json'), 'utf8').catch(() => '[]'));
     this.suggestions = JSON.parse(await readFile(join(this.o.dataDir, 'suggestions.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
@@ -535,12 +544,29 @@ export class OwnerDesk {
   private savePushes = () => writeFile(join(this.o.dataDir, 'push.json'), JSON.stringify(this.pushState), { mode: 0o600 }).catch(() => {});
   /** A promise circle's news for the owner: a note of its own (not an assistant's), and a nudge on their phones. */
   async circleNote(c: CircleItem, text: string) {
+    // An ask that fits the owner's standing yes is answered by the house, within its weekly limit; the owner is told.
+    const rule = c.role === 'ask' ? this.circleRules.find((x) => x.tally === c.tally && x.id === c.id) : undefined;
+    const week = Date.now() - 7 * 86_400_000;
+    if (rule && rule.perWeek > 0 && (!rule.kinds || (c.help && rule.kinds.includes(c.help))) && rule.at.filter((t) => t > week).length < rule.perWeek) {
+      const r = await this.circleSend(c.tally, { kind: 'circle.accept', id: c.id, call: c.call }) as { kind?: string; caller?: { url?: string } };
+      if (r.kind === 'circle.matched') {
+        rule.at = [...rule.at.filter((t) => t > week), Date.now()];
+        void this.saveCircleRules();
+        Object.assign(c, { state: 'accepted', contact: String(r.caller?.url ?? '') });
+        text = `Your house said yes for you, under your standing rule (${rule.kinds?.join(', ') ?? 'anything'}, up to ${rule.perWeek} a week): ${text.replace(/ You won't know who.*$/, '')}`;
+      }
+    }
     const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: 'Your promise circle', by: '', text: text.slice(0, 600), circle: c, at: new Date().toISOString() };
     this.suggestions = [sug, ...this.suggestions];
     this.trimSuggestions();
     await this.saveSuggestions();
     this.notifyOwner(`circle-${c.role}`, text.slice(0, 150));
     this.news({ about: `circle.${c.role}`, pledge: c.id, tally: c.tally, call: c.call, need: c.need, note: c.role === 'ask' ? 'your human\'s promise circle needs what they promised; they answer on their phone (you can advise, not answer)' : text });
+  }
+
+  /** A message to a circle's tally, for the housekeeper (a countersigned favour, a loop's consent). */
+  circleSend(tally: string, payload: Record<string, unknown>) {
+    return this.o.panel?.circleSend?.(tally, payload) ?? Promise.resolve({ kind: 'refused', problems: ['this house can\'t reach circles'] });
   }
 
   /** A circle's call changed (taken by someone else, withdrawn, matched): the note says so. */
@@ -1080,9 +1106,17 @@ export class OwnerDesk {
             pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
             // What it costs, on the Sign button: the owner reads the tally's own terms, never the assistant's account of them.
             const t = await this.o.panel?.pledgeTerms?.(tally, pledge.id).catch(() => undefined);
-            if (t?.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year) };
+            if (t?.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year), ...(Array.isArray(t.circle.kinds) ? { kinds: (t.circle.kinds as unknown[]).map(String) } : {}) };
             if (t?.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
             if (t?.money) pledge.money = { amount: Number(t.money.contribution.amount), currency: String(t.money.contribution.currency), payee: String(t.money.payee.name ?? t.money.payee.webId), threshold: Number(t.threshold), deadline: String(t.deadline), count: Number(t.count), ...(t.money.bond ? { bond: Number(t.money.bond.amount) } : {}), text: String(t.text) };
+          }
+          // Asking one of the owner's circles for something they need: proposed by their assistant, sent by their tap.
+          let circleCall: Suggestion['circleCall'];
+          const qcc = (p as { circle_call?: { tally?: unknown; id?: unknown; need?: unknown; help?: unknown } }).circle_call;
+          if (qcc) {
+            const need = String(qcc.need ?? '').trim();
+            if (!/^https?:\/\/\S+$/.test(String(qcc.tally ?? '')) || !qcc.id || !need || need.length > 300) return void res.status(400).json({ error: 'circle_call: { tally, id, need (up to 300 characters), help? }' });
+            circleCall = { tally: String(qcc.tally).replace(/\/a2a\/?$/, ''), id: String(qcc.id), need, ...(qcc.help ? { help: String(qcc.help) } : {}) };
           }
           // A secret count to answer from the owner's own record: the house checks the field is one of its coded facts now,
           // so the button never fails for that, and keeps what the record says for the owner's eyes only.
@@ -1131,7 +1165,7 @@ export class OwnerDesk {
             if (!assistant.webId) return void res.status(400).json({ error: 'allowance: you connected before allowances existed: reconnect with a new code first' });
             allowance = { amount: Math.round(amount * 100) / 100, currency, days };
           }
-          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !count && !aboutNote && !rules && !door && !sender && !allowance;
+          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !count && !circleCall && !aboutNote && !rules && !door && !sender && !allowance;
           if (adviceDropped) delete q.advice;
           let ask: Suggestion['ask'];
           if (q.ask) {
@@ -1147,7 +1181,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             if (!priv) ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(circleCall ? { circleCall } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions];
           this.trimSuggestions();
           await this.saveSuggestions();
@@ -1704,23 +1738,44 @@ export class OwnerDesk {
             return r;
           },
           // A promise circle (SPEC §11.4c): the owner calls on it, answers its asks, and says when help came. Each is a tap.
-          'panel.circles': async () => panel.circles?.() ?? [],
+          'panel.circles': async () => ((await panel.circles?.()) ?? []).map((c) => { const x = c as { url: string; id: string }; const rule = this.circleRules.find((r) => r.tally === x.url && r.id === x.id); return rule ? { ...x, rule: { kinds: rule.kinds, perWeek: rule.perWeek } } : x; }),
+          // "Say yes for me": a standing rule for one circle (perWeek 0 stops it).
+          'panel.circle.rule': async () => {
+            const w = q as { tally?: string; id?: string; kinds?: unknown; perWeek?: unknown };
+            const perWeek = Number(w.perWeek ?? 0);
+            if (!(Number.isInteger(perWeek) && perWeek >= 0 && perWeek <= 7)) return { error: 'perWeek: 0 (off) to 7' };
+            const tally = String(w.tally ?? '').replace(/\/a2a\/?$/, ''), id = String(w.id ?? '');
+            this.circleRules = this.circleRules.filter((r) => !(r.tally === tally && r.id === id));
+            if (perWeek > 0) this.circleRules.push({ tally, id, ...(Array.isArray(w.kinds) && w.kinds.length ? { kinds: w.kinds.map(String) } : {}), perWeek, at: [] });
+            await this.saveCircleRules();
+            return { ok: true, perWeek };
+          },
+          // What the owner will help with, of the circle's kinds: calls for anything else never reach them.
+          'panel.circle.offer': async () => {
+            const w = q as { tally?: string; id?: string; kinds?: unknown };
+            return panel.circleSend?.(String(w.tally ?? ''), { kind: 'circle.offer', id: String(w.id ?? ''), kinds: Array.isArray(w.kinds) ? w.kinds.map(String) : [] }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
+          },
           'panel.circle.call': async () => {
-            const w = q as { tally?: string; id?: string; need?: string; when?: string };
+            const w = q as { tally?: string; id?: string; need?: string; when?: string; help?: string; note?: string };
+            // From an assistant's proposal: its circle, need and kind, sent once.
+            const proposed = w.note ? this.suggestions.find((x) => x.id === w.note && x.circleCall && !x.circleCall.sent) : undefined;
+            if (w.note && !proposed) return { error: 'no unsent proposal with that note' };
+            if (proposed) { Object.assign(w, { tally: proposed.circleCall!.tally, id: proposed.circleCall!.id, need: proposed.circleCall!.need, help: proposed.circleCall!.help }); proposed.circleCall!.sent = true; await this.saveSuggestions(); }
             const tally = String(w.tally ?? '');
-            const r = await panel.circleSend?.(tally, { kind: 'circle.call', id: String(w.id ?? ''), need: String(w.need ?? ''), ...(w.when ? { when: String(w.when) } : {}) }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
+            const r = await panel.circleSend?.(tally, { kind: 'circle.call', id: String(w.id ?? ''), need: String(w.need ?? ''), ...(w.help ? { help: String(w.help) } : {}), ...(w.when ? { when: String(w.when) } : {}) }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
             if (r.kind === 'circle.called') await this.circleNote({ tally, id: String(w.id), call: String(r.call), need: String(w.need), ...(w.when ? { when: String(w.when) } : {}), role: 'caller', state: 'asking' }, `You asked your circle for: ${w.need}. ${r.asked} member${r.asked === 1 ? '' : 's'} asked, without your name; you hear when one says yes.`);
             return r;
           },
           'panel.circle.answer': async () => {
-            const w = q as { note?: string; accept?: boolean };
+            const w = q as { note?: string; accept?: boolean; report?: boolean };
             const sug = this.suggestions.find((x) => x.id === String(w.note ?? '') && x.circle?.role === 'ask');
             if (!sug?.circle) return { error: 'no ask from your circle with that note' };
             if (sug.circle.state !== 'open') return { error: `it is ${sug.circle.state}` };
             const c = sug.circle;
-            const r = await panel.circleSend?.(c.tally, { kind: w.accept ? 'circle.accept' : 'circle.decline', id: c.id, call: c.call }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
+            const r = await panel.circleSend?.(c.tally, { kind: w.report ? 'circle.report' : w.accept ? 'circle.accept' : 'circle.decline', id: c.id, call: c.call }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
             if (r.kind === 'circle.matched') Object.assign(c, { state: 'accepted', contact: String(r.caller?.url ?? '') });
             else if (r.kind === 'circle.declined') c.state = 'declined';
+            else if (r.kind === 'circle.reported') c.state = 'reported';
             else if (/taken/.test(JSON.stringify(r.problems ?? ''))) c.state = 'taken';
             await this.saveSuggestions();
             return r;
@@ -1729,7 +1784,10 @@ export class OwnerDesk {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && x.circle?.role === 'caller');
             if (!sug?.circle) return { error: 'no call of yours with that note' };
             const c = sug.circle;
-            const r = await panel.circleSend?.(c.tally, { kind: (q as { withdraw?: boolean }).withdraw ? 'circle.withdraw' : 'circle.kept', id: c.id, call: c.call }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
+            const withdraw = (q as { withdraw?: boolean }).withdraw;
+            // Thanks, as a favour note this house signs for its owner: one favour, to the member who helped.
+            const note = !withdraw && c.contactWebId ? await panel.favourNote?.({ tally: c.tally, id: c.id, call: c.call, helper: c.contactWebId, need: c.need, ...(c.help ? { help: c.help } : {}) }) : undefined;
+            const r = await panel.circleSend?.(c.tally, { kind: withdraw ? 'circle.withdraw' : 'circle.kept', id: c.id, call: c.call, ...(note ? { note } : {}) }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
             if (r.kind === 'circle.kept') c.state = 'done';
             if (r.kind === 'circle.withdrawn') c.state = 'withdrawn';
             await this.saveSuggestions();

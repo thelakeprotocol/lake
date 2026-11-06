@@ -765,6 +765,44 @@ describe('the owner', () => {
     }
   });
 
+  it('a promise circle from one sentence: an AI starts it, agents whose humans offer or seek its topic are invited at once, and anyone finds it (SPEC §11.4c)', async () => {
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-circle') });
+    const chat = async () => {
+      const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'circle', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const text = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: text } : JSON.parse(text); };
+      return { c, call, you: (await call('lake_overview')).you };
+    };
+    const [starter, giver, seeker, stranger] = [await chat(), await chat(), await chat(), await chat()];
+    try {
+      // Two AIs whose humans said what they offer and look for; a third with nothing to do with it.
+      await giver.call('lake_set_tags', { tags: ['offering:baby-gear'] });
+      await seeker.call('lake_set_tags', { tags: ['seeking:kids-clothes'] });
+      await stranger.call('lake_set_tags', { tags: ['offering:origami'] });
+      // "Start a circle for parents in Brisbane to swap kids' clothes and lend baby gear": the AI writes it, one call.
+      const made = await starter.call('lake_circle', { action: 'start', title: 'Brisbane parents: swap kids\' clothes, lend baby gear', promise: 'to pass on clothes your kids have outgrown, or lend baby gear, when another member asks', kinds: ['kids\' clothes', 'lend baby gear'], tags: ['kids-clothes', 'baby-gear', 'brisbane'], at_least: 3 });
+      expect(made).toMatchObject({ kind: 'tally.opened', circle: { kinds: ['kids\' clothes', 'lend baby gear'], tags: ['kids-clothes', 'baby-gear', 'brisbane'] } });
+      // The two whose humans match hear of it at once; the third doesn't.
+      const invited = async (who: typeof giver) => {
+        for (let i = 0; i < 20; i++) {
+          const m = ((await who.call('lake_inbox', { wait_seconds: 1 })).messages ?? []).find((x: { message: { kind: string; id?: string } }) => x.message.kind === 'circle.invite' && x.message.id === made.id);
+          if (m) return m.message;
+        }
+        return null;
+      };
+      expect(await invited(giver)).toMatchObject({ because: 'offering:baby-gear', text: expect.stringContaining('Brisbane parents'), circle: { promise: expect.stringContaining('baby gear') } });
+      expect(await invited(seeker)).toMatchObject({ because: 'seeking:kids-clothes' });
+      expect(await invited(stranger)).toBeNull();
+      // Anyone finds it by asking around, or by name.
+      expect((await stranger.call('lake_circle', { action: 'find', about: 'baby' })).circles).toEqual([expect.objectContaining({ id: made.id, needs: 3 })]);
+      expect((await stranger.call('lake_ask_around', { about: 'baby gear' })).circles).toEqual([expect.objectContaining({ id: made.id, promise: expect.stringContaining('baby gear') })]);
+    } finally {
+      for (const x of [starter, giver, seeker, stranger]) await x.c.close();
+    }
+  });
+
   it('a free/busy count answered by the house, not the model: the agent passes the slot, its connector sends the house\'s bit as shares (Consent Compiler)', async () => {
     const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
     await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-freebusy') });
@@ -1005,7 +1043,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_commit', 'lake_count', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_circle', 'lake_commit', 'lake_count', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -2503,43 +2541,83 @@ describe('the weekly shop, priced inside the house', () => {
       if (!o.person.stamped) expect(await b.call({ kind: 'panel.person.request', consent: await signMessage({ kind: 'personhood.consent', house: o.webId }, b.phone, { iss: o.webId }) })).toMatchObject({ stamped: true });
     }
     const organiser = await visitor('circle.example');
-    const { reply: opened } = await ask(tally, organiser, { kind: 'tally.open', id: 'meal-circle', text: 'Sick-day circle for our street.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a home-cooked meal', times: 1 } });
-    expect(opened).toMatchObject({ kind: 'tally.opened', circle: { promise: 'a home-cooked meal', times_a_year: 1, open: false } });
+    const { reply: opened } = await ask(tally, organiser, { kind: 'tally.open', id: 'meal-circle', text: 'Sick-day circle for our street.', threshold: 3, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a home-cooked meal', times: 2, kinds: ['a meal', 'a school run'] } });
+    expect(opened).toMatchObject({ kind: 'tally.opened', circle: { promise: 'a home-cooked meal', times_a_year: 2, kinds: ['a meal', 'a school run'], open: false } });
     for (const b of buyers) expect(await b.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'meal-circle' })).toMatchObject({ kind: expect.stringMatching(/^tally\.(signed|triggered)$/) });
     // Filled and everyone known: it is open for calls, and each house lists it.
     const circles = await buyers[0]!.call({ kind: 'panel.circles' });
     expect(circles).toEqual([expect.objectContaining({ id: 'meal-circle', view: expect.objectContaining({ open: true, members: 3, you: expect.objectContaining({ kept: 0 }) }) })]);
     // An outsider can't call it.
-    expect((await ask(tally, organiser, { kind: 'circle.call', id: 'meal-circle', need: 'soup' })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/only the circle's members/)] });
-    const called = await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'a meal on Thursday, I have the flu', when: 'Thursday' });
+    expect((await ask(tally, organiser, { kind: 'circle.call', id: 'meal-circle', need: 'soup', help: 'a meal' })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/only the circle's members/)] });
+    // Each member says what they'll help with; a call names one kind and reaches only those who offer it.
+    expect(await buyers[2]!.call({ kind: 'panel.circle.offer', tally: tallyAt, id: 'meal-circle', kinds: ['a meal'] })).toMatchObject({ kind: 'circle.offered', offers: ['a meal'] });
+    expect(await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'a lift to the moon', help: 'a rocket' })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/which kind of help/)] });
+    const run = await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'pick up my son at 3', help: 'a school run' });
+    expect(run).toMatchObject({ kind: 'circle.called', asked: 1 });
+    // A call that asks for something it shouldn't is reported (against the caller's key, never named) and passed on; with
+    // nobody left who offers it, the caller hears it went unmet, and it doesn't use up their call for the year.
+    const runAsk = await (async () => { for (let i = 0; i < 20; i++) { const n = ((await buyers[1]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; call: string } }[]).find((x) => x.circle?.role === 'ask' && x.circle.call === run.call); if (n) return n; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('no ask'); })();
+    expect(await buyers[1]!.call({ kind: 'panel.circle.answer', note: runAsk.id, report: true })).toMatchObject({ kind: 'circle.reported' });
+    const unmet = async () => ((await buyers[0]!.call({ kind: 'list' })).suggestions as { circle?: { role: string } }[]).some((x) => x.circle?.role === 'unmet');
+    for (let i = 0; i < 20 && !(await unmet()); i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect(await unmet()).toBe(true);
+    const called = await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'a meal on Thursday, I have the flu', help: 'a meal', when: 'Thursday' });
     expect(called).toMatchObject({ kind: 'circle.called', asked: 2, round: expect.any(Number) });
     expect(await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'again' })).toMatchObject({ kind: 'refused' });
     // The other two are asked, without the caller's name.
-    const askOf = async (b: (typeof buyers)[number]) => {
+    const askOf = async (b: (typeof buyers)[number], call: string) => {
       for (let i = 0; i < 20; i++) {
-        const n = ((await b.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; contact?: string } }[]).find((x) => x.circle?.role === 'ask');
+        const n = ((await b.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; call: string; contact?: string } }[]).find((x) => x.circle?.role === 'ask' && x.circle.call === call);
         if (n) return n;
         await new Promise((ok) => setTimeout(ok, 500));
       }
       throw new Error('no ask arrived');
     };
-    const [ask1, ask2] = [await askOf(buyers[1]!), await askOf(buyers[2]!)];
-    expect(ask1.text).toMatch(/a meal on Thursday.*You promised: a home-cooked meal/);
+    const [ask1, ask2] = [await askOf(buyers[1]!, called.call), await askOf(buyers[2]!, called.call)];
+    expect(ask1.text).toMatch(/help with a meal: a meal on Thursday.*You promised: a home-cooked meal/);
     expect(ask1.circle!.contact).toBeUndefined();
     expect(JSON.stringify(ask1)).not.toContain(buyers[0]!.url);
     // The first yes is put in touch with the caller; the other is told it's taken.
     const yes = await buyers[1]!.call({ kind: 'panel.circle.answer', note: ask1.id, accept: true });
     expect(yes).toMatchObject({ kind: 'circle.matched', caller: { url: expect.stringContaining(buyers[0]!.url.replace(/^http:\/\//, '')) } });
     expect(await buyers[2]!.call({ kind: 'panel.circle.answer', note: ask2.id, accept: true })).toMatchObject({ kind: 'refused' });
-    const caller = async () => ((await buyers[0]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; contact?: string } }[]).find((x) => x.circle?.role === 'caller')!;
+    const caller = async () => ((await buyers[0]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string; contact?: string } }[]).find((x) => x.circle?.role === 'caller' && x.circle.call === called.call)!;
     for (let i = 0; i < 20 && (await caller()).circle!.state !== 'matched'; i++) await new Promise((ok) => setTimeout(ok, 500));
     expect((await caller()).circle).toMatchObject({ state: 'matched', contact: expect.stringContaining(buyers[1]!.url.replace(/^http:\/\//, '')) });
     // It happened: the helper's promise counts as kept, and the circle's record says so (never who).
-    expect(await buyers[0]!.call({ kind: 'panel.circle.kept', note: (await caller()).id })).toMatchObject({ kind: 'circle.kept', calls: 1, kept: 1, of: 1 });
+    expect(await buyers[0]!.call({ kind: 'panel.circle.kept', note: (await caller()).id })).toMatchObject({ kind: 'circle.kept', calls: 2, kept: 1, unmet: 1, of: 2 });
     expect((await buyers[1]!.call({ kind: 'panel.circles' }))[0].view).toMatchObject({ kept: 1, you: { kept: 1 } });
     const page = await (await fetch(`${tallyAt}/p/meal-circle.json`)).json();
-    expect(page.circle).toMatchObject({ promise: 'a home-cooked meal', members: 3, kept: 1, of: 1 });
+    expect(page.circle).toMatchObject({ promise: 'a home-cooked meal', members: 3, kept: 1, of: 2 });
     expect(JSON.stringify(page)).not.toMatch(/localhost:\d+\/a2a/);
+    // Thanks was a favour note the caller's house signed; the helper's house countersigned it: one owed, on both records.
+    const record = async (b: (typeof buyers)[number]) => (await b.call({ kind: 'panel.circles' }))[0].view;
+    for (let i = 0; i < 20 && (await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle.favours?.owed !== 1; i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect((await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle).toMatchObject({ favours: { signed: 1, owed: 1, cleared: 0 } });
+    expect((await record(buyers[0]!)).you).toMatchObject({ you_owe: 1, owed_to_you: 0 });
+    expect((await record(buyers[1]!)).you).toMatchObject({ you_owe: 0, owed_to_you: 1 });
+    // Then the other way round: the helper needs a meal and the one they helped takes it. Two favours owed in a loop:
+    // both houses consent for their owners, and they're square. No money anywhere.
+    const back = await buyers[1]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'a meal, I sprained my ankle', help: 'a meal' });
+    expect(back).toMatchObject({ kind: 'circle.called' });
+    const backAsk = await askOf(buyers[0]!, back.call);
+    expect(await buyers[0]!.call({ kind: 'panel.circle.answer', note: backAsk.id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+    const callerBack = async () => ((await buyers[1]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string } }[]).find((x) => x.circle?.role === 'caller' && x.circle.call === back.call)!;
+    for (let i = 0; i < 20 && (await callerBack()).circle!.state !== 'matched'; i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect(await buyers[1]!.call({ kind: 'panel.circle.kept', note: (await callerBack()).id })).toMatchObject({ kind: 'circle.kept' });
+    for (let i = 0; i < 30 && (await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle.favours?.cleared !== 2; i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect((await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle).toMatchObject({ favours: { signed: 2, owed: 0, cleared: 2 } });
+    expect((await record(buyers[0]!)).you).toMatchObject({ you_owe: 0, owed_to_you: 0 });
+    const square = ((await buyers[0]!.call({ kind: 'list' })).suggestions as { text: string; circle?: { role: string } }[]).find((x) => x.circle?.role === 'cleared');
+    expect(square?.text).toMatch(/You're square: a loop of 2 favours.*Nobody paid anything/);
+    // A standing yes: "say yes for me to a meal, once a week". The next meal asked of that member is answered by their
+    // house, and they're told; nothing waits for them to be awake.
+    expect(await buyers[2]!.call({ kind: 'panel.circle.rule', tally: tallyAt, id: 'meal-circle', kinds: ['a meal'], perWeek: 1 })).toMatchObject({ ok: true, perWeek: 1 });
+    const third = await buyers[0]!.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'meal-circle', need: 'a meal on Saturday', help: 'a meal' });
+    expect(third).toMatchObject({ kind: 'circle.called' });
+    const auto = await askOf(buyers[2]!, third.call);
+    expect(auto.text).toMatch(/Your house said yes for you, under your standing rule \(a meal, up to 1 a week\)/);
+    expect(auto.circle).toMatchObject({ state: 'accepted', contact: expect.stringContaining(buyers[0]!.url.replace(/^http:\/\//, '')) });
   }, 240_000);
 });
 
