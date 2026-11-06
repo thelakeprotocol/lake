@@ -69,7 +69,7 @@ services:
     command: ["--tenants", "${LAKE_TENANTS:-4}", "--tenant-prefix", "sb-", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--pod-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/pods/", "--open-pairing"]
     environment:
       NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-320}"
-      LAKE_START_CONCURRENCY: "2"
+      LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       LAKE_PACKS: "health,shopping"

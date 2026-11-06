@@ -81,6 +81,8 @@ export interface PanelProvider {
   signPledge(tally: string, id: string, contribution?: { credential: string; owner: string }): Promise<unknown>;
   /** What a pledge says, where it stands, and what signing it costs (its tally's view, and the tally's webId). */
   pledgeTerms?(tally: string, id: string): Promise<Record<string, any>>;
+  /** The owner's private answer to a pledge's quorum question, sent by the house as a secret count's shares. */
+  answerQuorum?(tally: string, id: string, choice: string): Promise<Record<string, any>>;
   /** Reveal this house on a blind pledge that has filled. */
   revealPledge(tally: string, id: string): Promise<unknown>;
   /** Takes the owner's signature back, before the pledge fills: it never binds them. */
@@ -89,6 +91,9 @@ export interface PanelProvider {
 
 /** What signing a pledge with money costs, as its tally said when it was suggested (SPEC §11.4a). */
 export interface PledgeMoney { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string }
+
+/** A pledge's quorum question (SPEC §11.4b), as its tally asked it: answered privately on the owner's phone. */
+export interface PledgeQuorum { text: string; options: string[]; closes: string; least: number; answered?: boolean }
 
 export interface GrantRecord {
   id: string;
@@ -123,7 +128,7 @@ export interface AssistantKey { /** On duty: the grant it acts under while the o
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
@@ -1028,6 +1033,7 @@ export class OwnerDesk {
             pledge = { tally, id: String(q.pledge.id).slice(0, 80) };
             // What it costs, on the Sign button: the owner reads the tally's own terms, never the assistant's account of them.
             const t = await this.o.panel?.pledgeTerms?.(tally, pledge.id).catch(() => undefined);
+            if (t?.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
             if (t?.money) pledge.money = { amount: Number(t.money.contribution.amount), currency: String(t.money.contribution.currency), payee: String(t.money.payee.name ?? t.money.payee.webId), threshold: Number(t.threshold), deadline: String(t.deadline), count: Number(t.count), ...(t.money.bond ? { bond: Number(t.money.bond.amount) } : {}), text: String(t.text) };
           }
           if (q.advice !== undefined && !ADVICE.includes(q.advice as Advice)) return void res.status(400).json({ error: `advice: one of ${ADVICE.join(', ')}` });
@@ -1621,6 +1627,20 @@ export class OwnerDesk {
             const draft = pledgeDraft(this.o.webId, { tally: String(terms.tally), id: String(terms.id), text: String(terms.text) }, Number(terms.money.contribution.amount), String(terms.money.contribution.currency), new Date(Date.parse(String(terms.deadline)) + 2 * 86_400_000), statusEntry(this.o.statusUrl(), await this.statusIndex(statusId)));
             this.pledgeDrafts.set(statusId, { tally: String(w.tally), id: String(terms.id), draft });
             return { id: statusId, draft, terms, note: 'sign it on this device and send it back with panel.pledge.sign { draft, credential }' };
+          },
+          // A pledge's quorum question, answered on this device: the house sends it as a secret count's shares; nobody sees
+          // it, the assistant included (it hears only that it was answered).
+          'panel.pledge.quorum': async () => {
+            const w = q as { tally?: string; id?: string; choice?: string; note?: string };
+            const r = await panel.answerQuorum?.(String(w.tally ?? ''), String(w.id ?? ''), String(w.choice ?? '')) ?? { kind: 'refused', problems: ['this house can\'t answer a quorum'] };
+            if (r.kind !== 'quorum.answered') return r;
+            const sug = this.suggestions.find((x) => x.id === String(w.note ?? '') && x.pledge?.quorum);
+            if (sug) {
+              sug.pledge!.quorum!.answered = true;
+              await this.saveSuggestions();
+              this.news({ about: 'pledge.quorum.answered', pledge: sug.pledge!.id, tally: sug.pledge!.tally, note: 'your human answered the pledge\'s quorum question privately: you were not told the answer, and nobody else is. If enough people would join, the pledge opens for signing when its quorum closes: suggest it again then' }, sug.by);
+            }
+            return r;
           },
           'panel.pledge.sign': async () => {
             const w = q as { tally?: string; id?: string; draft?: string; credential?: string };

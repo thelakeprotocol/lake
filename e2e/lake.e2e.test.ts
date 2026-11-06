@@ -2458,6 +2458,43 @@ describe('the weekly shop, priced inside the house', () => {
       await pc.close();
     }
   }, 240_000);
+
+  it('a quorum found in secret before anyone signs (SPEC §11.4b): each family says privately how many must join first; the pledge opens at the largest group that holds together, blind, and everyone is revealed at once', async () => {
+    const tally = `${specialistsUrl}/tally/a2a`, tallyAt = `${specialistsUrl}/tally`;
+    for (const b of buyers) {
+      const o = await b.call({ kind: 'panel.overview' });
+      if (!o.person.stamped) expect(await b.call({ kind: 'panel.person.request', consent: await signMessage({ kind: 'personhood.consent', house: o.webId }, b.phone, { iss: o.webId }) })).toMatchObject({ stamped: true });
+    }
+    const organiser = await visitor('phone-free.example');
+    const closes = new Date(Date.now() + 70_000).toISOString(), deadline = new Date(Date.now() + 150_000).toISOString();
+    const options = ['Even if nobody else does', 'If at least 2 of us do', 'If at least 3 of us do', 'Not at all'];
+    const { reply: opened } = await ask(tally, organiser, { kind: 'tally.open', id: 'phone-free', text: 'No smartphones before high school: our families together.', threshold: 2, deadline, people_only: true, blind: true, unveil: true, listed: true, quorum: { options, at_least: [0, 2, 3, null], closes } });
+    expect(opened).toMatchObject({ kind: 'tally.opened', state: 'gathering', quorum: { options, answered: 0 } });
+    // Nobody can sign yet, and a house won't spend a blind pass trying.
+    expect(await buyers[0]!.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'phone-free' })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/answer its question first/)] });
+    // Each family answers on its phone; its house sends the answer as two shares and shows the tally its person stamp.
+    for (const [b, choice] of [[buyers[0]!, options[0]], [buyers[1]!, options[1]], [buyers[2]!, options[2]]] as const) {
+      const r = await b.call({ kind: 'panel.pledge.quorum', tally: tallyAt, id: 'phone-free', choice });
+      expect(r, JSON.stringify(r)).toMatchObject({ kind: 'quorum.answered' });
+    }
+    expect(await buyers[0]!.call({ kind: 'panel.pledge.quorum', tally: tallyAt, id: 'phone-free', choice: options[3] })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/one answer per person/)] });
+    // The tally knows who answered, never what: nothing in it says a choice.
+    const stored = JSON.parse(await readFile(join(dir, 'specialists', 'tallies.json'), 'utf8')).find((x: { id: string }) => x.id === 'phone-free');
+    expect(stored.quorum.joined).toHaveLength(3);
+    for (const j of stored.quorum.joined) expect(Object.keys(j).sort()).toEqual(['person', 'url', 'webId']);
+    expect(stored.quorum.result).toBeUndefined();
+    const count = async () => (await ask(tally, organiser, { kind: 'tally.count', id: 'phone-free' })).reply;
+    let c = await count();
+    for (let i = 0; i < 60 && c.state === 'gathering'; i++) { await new Promise((ok) => setTimeout(ok, 2000)); c = await count(); }
+    // 1 would go alone, 2 if two do, 3 if three do: all three hold together, so it opens to bind at 3.
+    expect(c).toMatchObject({ state: 'open', threshold: 3, blind: true, quorum: { result: { counted: 3, size: 3, totals: { 'Even if nobody else does': 1, 'If at least 2 of us do': 1, 'If at least 3 of us do': 1, 'Not at all': 0 } } } });
+    for (const b of buyers) expect(await b.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'phone-free' })).toMatchObject({ kind: expect.stringMatching(/^tally\.(signed|triggered)$/) });
+    c = await count();
+    expect(c).toMatchObject({ state: 'triggered', count: 3, revealed: 0 });
+    // After the deadline, at its drand round, every signer is revealed in the same moment.
+    for (let i = 0; i < 90 && !c.unveil?.opened; i++) { await new Promise((ok) => setTimeout(ok, 2000)); c = await count(); }
+    expect(c).toMatchObject({ revealed: 3, bound: true, unveil: { opened: true } });
+  }, 360_000);
 });
 
 describe('relay: a house behind a home router', () => {

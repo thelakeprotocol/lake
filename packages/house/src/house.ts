@@ -316,6 +316,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 
   const keeper = new Housekeeper({
     name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk, note: (kind, text) => note(kind, text),
+    answeredQuorum: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     signals: () => signals,
     // Run 58 and 59: a release replaced the held receipt in the pod, but Money kept its five-minute copy of the held one,
     // so Earned missed it.
@@ -498,11 +499,22 @@ function panelFor(x: {
     // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
     return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
+  // A person stamp for one context: its own person number, so counts can't link this owner's houses. The checker, shown
+  // the stamp's hidden number, makes it; whoever counts is shown it, bound to this house's key.
+  const stampFor = async (s: Awaited<ReturnType<typeof stamp>>, context: string, aud: string, nonce: string) => {
+    if (!s) return undefined;
+    const checker = lakeProfile(s.card)!.webId;
+    const { payload, card } = await send(s.card.supportedInterfaces[0]!.url, { kind: 'personhood.context', context, stamp: await presentSdJwtVc(s.credential, ['person'], x.id, { aud: checker, nonce: context }) });
+    if (payload.kind !== 'stamped') throw new Error(`the person checker: ${((payload.problems as string[]) ?? [String(payload.kind)]).join('; ')}`);
+    return { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud, nonce }), card };
+  };
   const signPledgeAt = async (tally: string, id: string, contribution?: { credential: string; owner: string }): Promise<Record<string, any>> => {
     const s = await stamp();
     const { payload: before, card: tallyCard } = await send(tally, { kind: 'tally.count', id });
     const counter = lakeProfile(tallyCard)!.webId;
     if (before.kind === 'refused') return before;
+    // Still finding its quorum: nothing to sign yet (and a blind pass fetched now would be spent for nothing).
+    if (before.state === 'gathering') return { kind: 'refused', problems: [`it opens for signing only if enough people privately say they'd join, when its quorum closes (${(before.quorum as { closes?: string } | undefined)?.closes ?? 'soon'}); answer its question first`] };
     // A pledge with money (SPEC §11.4a): the contribution the owner signed on their device for this pledge is paid, held for
     // the tally, through the payments agent of this house's own Lake; then the signature names that hold.
     let hold: string | undefined;
@@ -520,15 +532,6 @@ function panelFor(x: {
       const receipt = (paid.receipts as { credential: string }[] | undefined)?.[0]?.credential;
       if (receipt) await put(owner, pledgeReceiptPath(m.agreement), receipt, 'text/plain').catch(() => {});
     }
-    // A person stamp for one context: its own person number, so counts can't link this owner's houses. The checker,
-    // shown the stamp's hidden number, makes it; whoever counts is shown it, bound to this house's key.
-    const stampFor = async (context: string, aud: string, nonce: string) => {
-      if (!s) return undefined;
-      const checker = lakeProfile(s.card)!.webId;
-      const { payload, card } = await send(s.card.supportedInterfaces[0]!.url, { kind: 'personhood.context', context, stamp: await presentSdJwtVc(s.credential, ['person'], x.id, { aud: checker, nonce: context }) });
-      if (payload.kind !== 'stamped') throw new Error(`the person checker: ${((payload.problems as string[]) ?? [String(payload.kind)]).join('; ')}`);
-      return { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud, nonce }), card };
-    };
     if (before.blind) {
       // A blind pledge: passes for every open one at once, signed from a throwaway identity; the salt and secret stay
       // in the owner's wallet, to reveal the house once it fills.
@@ -536,14 +539,14 @@ function panelFor(x: {
       if (!issuer) return { kind: 'refused', problems: ['no pass issuer on this Lake'] };
       const issuerWebId = lakeProfile(issuer)!.webId;
       const ask = async (url: string, payload: Record<string, unknown>) => (await send(url, payload)).payload as Record<string, any>;
-      const person = before.people_only ? await stampFor(countContext(issuerWebId, 'passes'), issuerWebId, 'passes') : undefined;
+      const person = before.people_only ? await stampFor(s, countContext(issuerWebId, 'passes'), issuerWebId, 'passes') : undefined;
       const pass = (await fetchPasses(issuer.supportedInterfaces[0]!.url, ask, person)).find((p) => p.tally === counter && p.id === id);
       if (!pass) return { kind: 'refused', problems: ['no pass for this pledge: this house may have one already, or it counts people and the house has no person stamp'] };
       const signed = await signBlind(tally, pass, owner.webId, { sandbox: x.o.sandbox, me: { identity: x.id, card: x.card } });
       if (signed.reply.kind === 'tally.signed' || signed.reply.kind === 'tally.triggered') await put(owner, 'wallet/pledges.json', JSON.stringify([...(await blindPledges()), { ...signed, tally, reply: undefined }]), 'application/json');
       return signed.reply;
     }
-    const person = before.people_only ? await stampFor(countContext(counter, id), counter, id) : undefined;
+    const person = before.people_only ? await stampFor(s, countContext(counter, id), counter, id) : undefined;
     const { payload } = await send(tally, { kind: 'tally.sign', id, ...(person ? { person } : {}), ...(hold ? { hold } : {}) });
     // Refused after paying: the money stays held for the tally, which never counted it, and comes back by itself when its
     // hold runs out (a day after the deadline).
@@ -760,6 +763,28 @@ function panelFor(x: {
       const person = String((await readSdJwtVc(String(payload.credential))).person ?? '');
       await put(owner, 'wallet/personhood.json', JSON.stringify({ credential: payload.credential, card, person }), 'application/json');
       return { stamped: true, by: card.name };
+    },
+    async answerQuorum(tally, id, choice) {
+      // A pledge's quorum (SPEC §11.4b): the owner's own answer ("I'm in if at least N are"), sent by this house as two
+      // unreadable shares to the tellers the tally names, if this house trusts them; the tally learns only that this
+      // person answered (one answer per person), and only the totals come out.
+      const { payload: t, card } = await send(tally, { kind: 'tally.count', id });
+      const q = t.quorum as { options: string[]; count: string; tellers: { url: string; domain: string }[] } | undefined;
+      if (!q || t.state !== 'gathering') return { kind: 'refused', problems: [q ? `its quorum has closed (it is ${t.state})` : 'this pledge asks no quorum question'] };
+      const cell = q.options.indexOf(choice);
+      if (cell < 0) return { kind: 'refused', problems: [`choice: one of ${q.options.join(' | ')}`] };
+      const counter = lakeProfile(card)!.webId;
+      const person = await stampFor(await stamp(), countContext(counter, id), counter, id);
+      if (!person) return { kind: 'refused', problems: ['it counts people: get a person stamp first (Home → One person, one house)'] };
+      const { payload: joined } = await send(tally, { kind: 'tally.quorum', id, person });
+      if (joined.kind !== 'tally.joined') return joined;
+      const sent = await x.keeper().answerCount(q.count, q.tellers, q.options.length, cell);
+      if (sent !== true) return { kind: 'refused', problems: [sent] };
+      // Kept in the owner's wallet: the tally's word on how it went is taken only for a pledge they answered.
+      const known = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).then((r) => (r.ok ? r.json() : [])).catch(() => []) as { tally: string; id: string }[];
+      await put(owner, 'wallet/quorums.json', JSON.stringify([...known.slice(-199), { tally: counter, id, at: new Date().toISOString() }]), 'application/json').catch(() => {});
+      x.note('pledge.quorum', `You answered the quorum question of the pledge "${id}" (${tally}) privately: it left your house only as two unreadable shares`);
+      return { kind: 'quorum.answered', id, answered: joined.answered, closes: (t.quorum as { closes?: string }).closes };
     },
     async pledgeTerms(tally, id) {
       const { payload, card } = await send(tally, { kind: 'tally.count', id });

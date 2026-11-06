@@ -35,6 +35,8 @@ export interface HousekeeperOptions {
   say?: (msg: string) => void;
   /** In the owner's own activity: what happened to their money in a pledge. */
   note?: (kind: string, text: string) => void;
+  /** Whether this house's owner answered the quorum of a pledge at this tally (by the tally's WebID). */
+  answeredQuorum?: (tally: string, id: string) => Promise<boolean>;
   /** The nodes this house follows, and its links to them (for intents). */
   nodes?: string[];
   links?: () => import('@thelakeprotocol/core').LakeLinks | null;
@@ -186,6 +188,15 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
+    // A pledge whose quorum this house's owner answered: whether it opened, from that tally only (SPEC §11.4b).
+    if (((v.payload.kind as string) === 'tally.quorum.opened' || (v.payload.kind as string) === 'tally.quorum.lapsed') && (await this.o.answeredQuorum?.(v.profile.webId, String((v.payload as { id?: unknown }).id ?? '')))) {
+      const q = v.payload as unknown as { kind: string; id: string; text?: string; threshold?: number; deadline?: string; quorum?: { result?: { size?: number; counted?: number } } };
+      const opened = q.kind === 'tally.quorum.opened', url = (data as LakeData).card?.supportedInterfaces?.[0]?.url ?? '';
+      const story = opened ? `Enough of you would join: the pledge "${q.id}" is open for signing, and binds only if ${q.threshold} sign by ${q.deadline}` : `The pledge "${q.id}" didn't find its quorum: nobody signs anything`;
+      this.o.note?.('pledge.quorum', story);
+      this.o.desk.news({ about: opened ? 'pledge.quorum.opened' : 'pledge.quorum.lapsed', pledge: q.id, tally: url.replace(/\/a2a$/, ''), ...(opened ? { threshold: q.threshold, deadline: q.deadline } : {}), size: q.quorum?.result?.size, answered: q.quorum?.result?.counted, note: opened ? `${story}. Suggest it to your human again (lake_house_suggest { text, pledge: { tally, id } }) so they can sign it on their phone; nobody is shown as signing until everyone is` : story });
+      return this.reply({ kind: 'received' } as never);
+    }
     // Asking what became of its own request or note reaches nobody: a muted sender may still learn it was set aside.
     if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
     // A sender the owner muted, by key: nothing from it reaches them: no note, and no knock either (run 66: a muted sender's
@@ -478,6 +489,20 @@ export class Housekeeper {
     }
     if (new Set(kids).size !== kids.length) return { ok: false, why: 'both tellers are the same key' };
     return { ok: true, kids };
+  }
+
+  /**
+   * The owner's own answer to a secret count someone else opened (a pledge's quorum, SPEC §11.4b): one cell, sent as two
+   * unreadable shares, only to tellers this house trusts, checked as for a study. True, or why not.
+   */
+  async answerCount(count: string, tellers: { url: string; domain: string }[], length: number, cell: number): Promise<true | string> {
+    if (tellers.length !== 2) return 'a count needs exactly two tellers';
+    const checked = await this.checkTellers(tellers);
+    if (!checked.ok) return `its answers would go to tellers your owner doesn't trust: ${checked.why}`;
+    const report = await shardAnswer(length, cell);
+    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
+    const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
+    return failed.length ? failed.join('; ') : true;
   }
 
   /** Sends a signed message to a teller and checks the answer comes from the key that was checked: true, or why not. */

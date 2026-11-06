@@ -2087,6 +2087,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         bond: z.number().optional().describe('open: your refund bond, in the same currency, shared among the signers if it lapses'),
         payee_url: z.string().optional().describe('open: who is paid if it fills (an agent\'s address); you, if left out'),
         listed: z.boolean().default(true).describe('open: others find it in lake_ask_around'),
+        quorum: z.object({ options: z.array(z.string().max(100)).min(2).max(16), at_least: z.array(z.number().int().min(0).nullable()), closes: z.string() }).optional().describe('open, instead of contribution: find the quorum first. Each person answers privately from their house "I\'m in if at least N of us are" (options, each meaning at_least[i] people; null for never) until closes; then the pledge opens to bind at the largest group that holds together (if at least threshold), signed blind with everyone revealed at the same moment'),
       },
     },
     async (a) => {
@@ -2095,7 +2096,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const slot = `${a.tally}|${a.id}`;
         if (a.action === 'count') return json(await me.ask(a.tally, { kind: 'tally.count', id: a.id }));
         if (a.action === 'open') {
-          if (!a.text || !a.threshold || !a.deadline || !a.contribution) throw new Error('open: text, threshold, deadline and contribution { amount, currency }');
+          if (!a.text || !a.threshold || !a.deadline || (!a.contribution && !a.quorum)) throw new Error('open: text, threshold, deadline, and contribution { amount, currency } or quorum { options, at_least, closes }');
+          if (a.quorum) {
+            // Nobody goes first: a secret count of everyone's own threshold, then a blind pledge that reveals all at once.
+            const r = await me.ask(a.tally, { kind: 'tally.open', id: a.id, text: a.text, threshold: a.threshold, deadline: a.deadline, people_only: true, blind: true, unveil: true, listed: a.listed, quorum: a.quorum });
+            return json({ ...r, next: 'People answer its question privately in their house\'s control panel (suggest it: lake_house_suggest { text, pledge: { tally, id } }). When the quorum closes, everyone who answered is told whether it opened and at what size; then suggest it again for them to sign.' });
+          }
           const tallyWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(a.tally), { signal: AbortSignal.timeout(8000) })).json())).webId;
           const payeeUrl = a.payee_url ?? me.visitor.card.supportedInterfaces[0]!.url;
           const payee = a.payee_url ? await verifyLakeCard(await (await fetch(cardUrlFor(a.payee_url), { signal: AbortSignal.timeout(8000) })).json()) : { webId: me.webId };
@@ -2103,9 +2109,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // The bond first, held for this pledge, so the tally can check it before opening: it goes back a day after the deadline
           // if the tally never settles it.
           const until = new Date(Date.parse(a.deadline) + 86_400_000).toISOString();
-          const bond = a.bond ? await me.pay(a.tally, a.bond, `refund bond for the pledge ${a.id}`, a.contribution.currency, undefined, undefined, { tally: tallyWebId, id: a.id, until, bond: true }) : undefined;
-          const r = await me.ask(a.tally, { kind: 'tally.open', id: a.id, text: a.text, threshold: a.threshold, deadline: a.deadline, people_only: true, listed: a.listed, money: { contribution: a.contribution, payee: { webId: payee.webId, url: payeeUrl, ...(payeeName ? { name: payeeName } : {}) }, ...(bond ? { bond: { hold: bond.pledgeHold } } : {}) } });
-          return json({ ...r, ...(bond ? { bond: { held: bond.paid, currency: a.contribution.currency, hold: bond.pledgeHold, ...(r.kind === 'refused' ? { note: 'the pledge did not open: your bond stays held for it and comes back a day after the deadline' } : {}) } } : {}), next: 'Signers are people, on their own devices: suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }) and tell others the tally and id; their AIs suggest it to them.' });
+          const bond = a.bond ? await me.pay(a.tally, a.bond, `refund bond for the pledge ${a.id}`, a.contribution!.currency, undefined, undefined, { tally: tallyWebId, id: a.id, until, bond: true }) : undefined;
+          const r = await me.ask(a.tally, { kind: 'tally.open', id: a.id, text: a.text, threshold: a.threshold, deadline: a.deadline, people_only: true, listed: a.listed, money: { contribution: a.contribution!, payee: { webId: payee.webId, url: payeeUrl, ...(payeeName ? { name: payeeName } : {}) }, ...(bond ? { bond: { hold: bond.pledgeHold } } : {}) } });
+          return json({ ...r, ...(bond ? { bond: { held: bond.paid, currency: a.contribution!.currency, hold: bond.pledgeHold, ...(r.kind === 'refused' ? { note: 'the pledge did not open: your bond stays held for it and comes back a day after the deadline' } : {}) } } : {}), next: 'Signers are people, on their own devices: suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }) and tell others the tally and id; their AIs suggest it to them.' });
         }
         if (a.action === 'sign') {
           // A plain pledge (not blind) is signed by name, with no pass (1 Nov: seven agents got "no pass" and signed by

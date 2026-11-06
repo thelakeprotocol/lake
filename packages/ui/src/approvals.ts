@@ -199,7 +199,7 @@ function signOut() {
 // ---- Home ----
 type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
-type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
+type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
@@ -368,6 +368,7 @@ function NotifyItem() {
 }
 
 type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
+type PledgeQuorum = { text: string; options: string[]; closes: string; least: number; answered?: boolean };
 type Signed = { kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] };
 
 /** Signs a pledge from your house. One with money puts its contribution in first, signed here, on this device (SPEC §11.4a). */
@@ -387,6 +388,22 @@ function PledgeTerms({ m }: { m: PledgeMoney }) {
     h('p', { class: 'item-meta' }, `Puts in ${money$(m.amount, m.currency)}, held until ${by}. If ${m.threshold} sign by then (${m.count} so far), it goes to ${shortName(m.payee)}. If not, it comes back to you${m.bond ? `, plus an equal share of their ${money$(m.bond, m.currency)} bond` : ''}. You can take it back until it fills.`));
 }
 
+/**
+ * A pledge that first finds its quorum (SPEC §11.4b): you say privately how many would have to join before you would.
+ * Your house sends it as two unreadable shares; nobody sees it, your AI included, and only the totals come out.
+ */
+function QuorumQuestion({ x, q }: { x: Note; q: PledgeQuorum }) {
+  const closes = new Date(q.closes).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return h('div', { class: 'pledge-terms' },
+    h('p', { class: 'item-meta' }, `“${q.text}”`),
+    q.answered ? h('p', { class: 'item-meta private-q' }, `You answered privately. Nobody knows your answer, your AI included. If enough of you would join, it opens for signing at ${closes}, and binds only if that many sign.`)
+      : [h('p', { class: 'item-meta private-q' }, `Private: I'm in if at least how many families are? Your answer leaves your house only as two unreadable shares, and only the totals come out. Nobody signs anything until ${closes}, and then only if enough would join.`),
+        h('div', { class: 'choices' }, ...q.options.map((c) => h(Act, { key: c, label: c, run: async () => {
+          const r = await call<Signed>({ kind: 'panel.pledge.quorum', tally: x.pledge!.tally, id: x.pledge!.id, choice: c, note: x.id });
+          if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; '));
+        } })))]);
+}
+
 function SuggestionItem({ x }: { x: Note }) {
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   const fail = (r: { ok?: boolean; error?: string }) => { if (r.error) throw new Error(r.error); };
@@ -398,6 +415,7 @@ function SuggestionItem({ x }: { x: Note }) {
     h('p', { class: 'item-text' }, x.text),
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.pledge?.money ? h(PledgeTerms, { m: x.pledge.money }) : null,
+    x.pledge?.quorum ? h(QuorumQuestion, { x, q: x.pledge.quorum }) : null,
     x.ask?.private ? h('p', { class: 'item-meta private-q' }, x.ask.answered ? 'Private: only you know this answer. It leaves your house only as two unreadable shares, and only totals come out.' : 'Private: your AI won\'t see your answer. It leaves your house only as two unreadable shares, and only totals come out.') : null,
     x.ask?.answered ? h('p', { class: 'item-meta' }, `You answered: ${x.ask.answered}`) : null,
     // A question: each choice is a button; the one your agent advises stands out.
@@ -418,7 +436,7 @@ function SuggestionItem({ x }: { x: Note }) {
       x.note && x.mute ? h(Act, { label: 'Mute this sender', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }) : null,
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,
-      x.pledge ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
+      x.pledge && !(x.pledge.quorum && !x.pledge.quorum.answered) ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
     h('div', { class: 'item-foot' },
       x.reply ? h('p', { class: 'item-meta' }, `You wrote: “${x.reply}”`) : h(Reply, { label: 'Reply', placeholder: 'In your own words', send: (text: string) => call({ kind: 'panel.assistant.answer', id: x.id, text }) }),
       h(Act, { label: 'Dismiss', cls: 'quiet', run: dismiss })));

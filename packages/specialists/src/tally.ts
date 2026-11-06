@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, countContext, isCurrency, makeEvent, pledgeAgreement, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
+import { checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, cardUrlFor, countContext, isCurrency, makeEvent, pledgeAgreement, unshardCounts, verifyLakeCard, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -16,7 +16,8 @@ interface Tally {
   threshold: number;
   deadline: number;
   opener: string;
-  state: 'open' | 'triggered' | 'lapsed';
+  /** gathering: still finding its quorum (SPEC §11.4b); nobody can sign until it opens. */
+  state: 'gathering' | 'open' | 'triggered' | 'lapsed';
   /** When it filled: a listed pledge stays in tally.list for a day after, so agents see what bound. */
   triggeredAt?: number;
   /** Count people, not identities: each signature needs a person stamp, and one person counts once (SPEC §6.4). */
@@ -28,6 +29,7 @@ interface Tally {
    * opener, a lapse also shares the bond among everyone who signed (a dominant assurance contract): saying yes costs
    * nothing if it doesn't happen, and pays. `counted`: the signers' holds, kept past a lapse until the money is settled.
    */
+  quorum?: Quorum;
   money?: { contribution: number; currency: string; payee: { webId: string; url: string; name?: string }; bond?: { hold: string; amount: number }; counted: string[]; settled?: { outcome: 'filled' | 'lapsed'; at: string; each?: number } };
   /**
    * A blind pledge (SPEC §11.4): signatures are anonymous passes from a separate issuer, so this tally never learns who
@@ -40,10 +42,37 @@ interface Tally {
   blind?: { issuer: string; publicJwk: JsonWebKey; passes: { commit: string; withdraw: string; at: string; sealed?: string; revealed?: { webId: string; domain: string; url: string } }[]; spent: string[]; unveil?: number; unveiled?: boolean };
 }
 
+/**
+ * A quorum found in secret before anyone commits (SPEC §11.4b): each person privately answers "I'm in if at least N of us
+ * are" (an option and its N; null for never), as a secret count the tally opens at its tellers and alone can close. When
+ * it closes, the tally works out the largest group whose every member said they'd join a group that size, and opens the
+ * pledge to bind at exactly that many, if it is at least its threshold. `joined`: who answered (one per person), never what.
+ */
+interface Quorum {
+  options: string[]; atLeast: (number | null)[]; closes: number; count: string; tellers: { url: string; domain: string }[];
+  joined: { webId: string; person: string; url: string }[];
+  /** How it is signed once it opens: blind (and unveil), registered with the pass issuer only then. */
+  blind?: boolean; unveil?: boolean;
+  result?: { totals: Record<string, number>; counted: number; size: number; at: string; why?: string };
+}
+
+/**
+ * The largest group that holds together (Granovetter's threshold model): the largest k such that at least k people said
+ * they'd join a group of k or fewer. `totals[i]` people chose option i, whose threshold is `atLeast[i]` (null: never).
+ */
+export function quorumSize(totals: number[], atLeast: (number | null)[]): number {
+  let size = 0;
+  for (const v of [...new Set(atLeast.filter((x): x is number => x !== null))]) {
+    const n = totals.reduce((a, c, i) => a + (atLeast[i] !== null && atLeast[i]! <= v ? c : 0), 0);
+    if (n >= v) size = Math.max(size, n);
+  }
+  return size;
+}
+
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const MAX_DAYS = 30;
 
-export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string; paymentsUrl?: string }) {
+export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string; paymentsUrl?: string; tellers?: string[] }) {
   const checkers = o.personCheckers ?? ['person.lake.local'];
   const file = `${o.dataDir}/tallies.json`;
   const tallies = new Map<string, Tally>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Tally[]).map((t) => [t.id, t]));
@@ -54,7 +83,8 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     // "make pledges actually bind"): an anonymous signature is cheap until its signer stands by it.
     ...(t.blind ? { blind: true, issuer: t.blind.issuer, revealed: t.blind.passes.filter((x) => x.revealed).length, bound: t.blind.passes.filter((x) => x.revealed).length >= t.threshold } : {}),
     ...(t.blind?.unveil ? { unveil: { round: t.blind.unveil, opens: new Date(roundTimeMs(t.blind.unveil)).toISOString(), ...(t.blind.unveiled ? { opened: true } : {}) } } : {}),
-    ...(t.money ? { money: moneyView(t, t.money) } : {}) });
+    ...(t.money ? { money: moneyView(t, t.money) } : {}),
+    ...(t.quorum ? { quorum: { options: t.quorum.options, at_least: t.quorum.atLeast, closes: new Date(t.quorum.closes).toISOString(), count: t.quorum.count, tellers: t.quorum.tellers, answered: t.quorum.joined.length, ...(t.quorum.blind ? { blind: true } : {}), ...(t.quorum.result ? { result: t.quorum.result } : {}) } } : {}) });
   // What signing costs, where it goes, and what a lapse would pay each signer were it to lapse now.
   const moneyView = (t: Tally, m: NonNullable<Tally['money']>) => {
     const n = counted(t);
@@ -146,7 +176,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       settling.delete(t.id);
     }
   };
-  setInterval(() => { for (const t of tallies.values()) { lapse(t); void unveil(t); void settleMoney(t); } }, 30_000).unref();
+  setInterval(() => { for (const t of tallies.values()) { void gather(t); lapse(t); void unveil(t); void settleMoney(t); } }, Number(process.env.LAKE_TALLY_TICK_MS ?? 30_000)).unref();
 
   // A signed request of the tally's own (to the pass issuer), and its verified reply.
   const ask = async (url: string, body: Record<string, unknown>, timeoutMs = 20_000) => {
@@ -155,6 +185,54 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     const v = await verifyLakeData<Record<string, unknown>>(raw as LakeData<Record<string, unknown>>, { sandbox: o.sandbox });
     if (!v.ok) throw new Error(v.rejection.why);
     return v.payload as Record<string, any>;
+  };
+
+  // A blind pledge: the pass issuer makes a key for it alone; signers get their passes there, not here. A pledge that first
+  // finds its quorum registers only once it opens, so nobody fetches a pass for one that never does.
+  const registerBlind = async (t: Tally, unveil: boolean): Promise<string | null> => {
+    if (!o.passesUrl) return 'this tally has no pass issuer for blind pledges';
+    const r = await ask(o.passesUrl, { kind: 'pass.register', id: t.id, deadline: new Date(t.deadline).toISOString(), people_only: t.peopleOnly === true }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
+    if (r.kind !== 'pass.registered') return `the pass issuer: ${(r.problems ?? [r.kind]).join('; ')}`;
+    // Unveil: reveals sealed to the first drand round after the deadline, when the pledge has filled or lapsed for good.
+    t.blind = { issuer: String(r.issuer), publicJwk: r.publicJwk as JsonWebKey, passes: [], spent: [], ...(unveil ? { unveil: roundAfter(0, t.deadline) } : {}) };
+    return null;
+  };
+  // The quorum closes: the tally alone collects its count, over those who answered (one per person), and opens the pledge
+  // at the largest group that holds together, or lets it lapse. Everyone who answered is told, at once.
+  const gathering = new Set<string>();
+  const gather = async (t: Tally) => {
+    const q = t.quorum;
+    if (!q || t.state !== 'gathering' || q.closes > Date.now() || gathering.has(t.id)) return;
+    gathering.add(t.id);
+    try {
+      const [leader, helper] = q.tellers as [{ url: string; domain: string }, { url: string; domain: string }];
+      const reported = ((await ask(leader.url, { kind: 'count.members', id: q.count })).members as string[] | undefined) ?? [];
+      const members = reported.filter((m) => q.joined.some((j) => j.webId === m));
+      let totals: number[] | undefined, why: string | undefined, counted = 0;
+      if (members.length < 3) why = `${members.length} answered; a count needs at least 3`;
+      else {
+        const lead = await ask(leader.url, { kind: 'count.close', id: q.count, members }, 120_000);
+        const help = lead.kind === 'count.share' ? await ask(helper.url, { kind: 'count.collect', id: q.count }, 120_000) : lead;
+        if (lead.kind !== 'count.share' || help.kind !== 'count.share') why = `the tellers: ${((help.problems as string[] | undefined) ?? [String(help.kind)]).join('; ')}`;
+        else { totals = unshardCounts(q.options.length, [lead.share, help.share], Number(lead.count)); counted = Number(lead.count); }
+      }
+      const size = totals ? quorumSize(totals, q.atLeast) : 0;
+      q.result = { totals: Object.fromEntries(q.options.map((x, i) => [x, totals?.[i] ?? 0])), counted, size, at: new Date().toISOString(), ...(why ? { why } : totals && size < t.threshold ? { why: `the largest group that holds together is ${size}, under the ${t.threshold} it needs` } : {}) };
+      if (totals && size >= t.threshold) {
+        t.threshold = size;
+        const err = q.blind ? await registerBlind(t, !!q.unveil) : null;
+        if (err) q.result.why = err;
+        t.state = err ? 'lapsed' : 'open';
+      } else t.state = 'lapsed';
+      void save();
+      report(t);
+      for (const j of q.joined) if (j.url) void tell(j.url, { kind: t.state === 'open' ? 'tally.quorum.opened' : 'tally.quorum.lapsed', ...view(t) });
+    } catch {
+      // The tellers unreachable: the next pass tries again, for an hour.
+      if (Date.now() > q.closes + 3_600_000) { t.state = 'lapsed'; q.result = { totals: {}, counted: 0, size: 0, at: new Date().toISOString(), why: 'its tellers never answered' }; void save(); }
+    } finally {
+      gathering.delete(t.id);
+    }
   };
 
   /** A blind pledge's messages: a pass to sign, a secret to withdraw, a salt to reveal yourself once it has filled. */
@@ -207,7 +285,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     return { kind: 'tally.count', ...view(t), ...(show ? { signers: revealed().map(({ domain, url }) => ({ domain, url })), unrevealed: b.passes.length - revealed().length } : {}) };
   };
 
-  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. With quorum ({ options, at_least, closes }, people_only), nobody signs at first: each person privately answers "I\'m in if at least N of us are" from their house, as a secret count only this tally can close; when it closes, the tally opens the pledge to bind at the largest group whose every member said they\'d join a group that size (if that is at least threshold), or lets it lapse, and tells everyone who answered at once. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money?, quorum? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -241,13 +319,35 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       }
       const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
         ...(money ? { money: { contribution: cents, currency, payee: { webId: String(money.payee!.webId), url: String(money.payee!.url), ...(typeof money.payee!.name === 'string' ? { name: money.payee!.name.slice(0, 80) } : {}) }, ...(bond ? { bond } : {}), counted: [] } } : {}) };
-      if (p.blind === true) {
-        // A blind pledge: the pass issuer makes a key for it alone; signers get their passes there, not here.
-        if (!o.passesUrl) return { kind: 'refused', problems: ['this tally has no pass issuer for blind pledges'] };
-        const r = await ask(o.passesUrl, { kind: 'pass.register', id, deadline: new Date(deadline).toISOString(), people_only: t.peopleOnly === true }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
-        if (r.kind !== 'pass.registered') return { kind: 'refused', problems: [`the pass issuer: ${(r.problems ?? [r.kind]).join('; ')}`] };
-        // Unveil: reveals sealed to the first drand round after the deadline, when the pledge has filled or lapsed for good.
-        t.blind = { issuer: String(r.issuer), publicJwk: r.publicJwk as JsonWebKey, passes: [], spent: [], ...(p.unveil === true ? { unveil: roundAfter(0, deadline) } : {}) };
+      if (p.quorum !== undefined) {
+        // A quorum first (SPEC §11.4b): a secret count of everyone's "I'm in if at least N are", at this tally's tellers.
+        const q = p.quorum as { options?: unknown; at_least?: unknown; closes?: unknown };
+        const options = Array.isArray(q.options) ? q.options.map(String) : [];
+        const atLeast = Array.isArray(q.at_least) ? q.at_least.map((x) => (x === null ? null : Number(x))) : [];
+        const closes = Date.parse(String(q.closes ?? ''));
+        const wrong = [
+          ...(options.length >= 2 && options.length <= 16 && options.every((x) => x.trim() && x.length <= 100) && new Set(options).size === options.length ? [] : ['quorum.options: 2 to 16 different answers, each up to 100 characters']),
+          ...(atLeast.length === options.length && atLeast.every((x) => x === null || (Number.isInteger(x) && x >= 0 && x <= 100_000)) ? [] : ['quorum.at_least: for each option, the group size it means ("I\'m in if at least N of us are"), or null for never']),
+          ...(closes > Date.now() + 60_000 && closes < deadline - 60_000 && closes < Date.now() + 72 * 3_600_000 ? [] : ['quorum.closes: when answers stop, at least a minute from now and a minute before the deadline, within 72 hours']),
+          ...(p.people_only === true ? [] : ['quorum: for people_only pledges, one answer per person']),
+          ...(money ? ['quorum: not with money'] : []),
+          ...((o.tellers?.length ?? 0) >= 2 ? [] : ['this tally runs no pair of tellers to count a quorum']),
+        ];
+        if (wrong.length) return { kind: 'refused', problems: wrong };
+        let tellers: { url: string; domain: string }[];
+        try {
+          tellers = await Promise.all(o.tellers!.slice(0, 2).map(async (url) => ({ url, domain: (await verifyLakeCard((await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard)).ownerDomain })));
+        } catch (e) {
+          return { kind: 'refused', problems: [`its tellers: ${(e as Error).message}`] };
+        }
+        const count = `quorum:${id}`;
+        const r = await ask(tellers[0]!.url, { kind: 'count.open', id: count, length: options.length, min: 3, deadline: new Date(closes).toISOString(), helper: tellers[1] }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
+        if (r.kind !== 'count.opened') return { kind: 'refused', problems: [`the tellers: ${(r.problems ?? [r.kind]).join('; ')}`] };
+        t.state = 'gathering';
+        t.quorum = { options, atLeast, closes, count, tellers, joined: [], ...(p.blind === true ? { blind: true, ...(p.unveil === true ? { unveil: true } : {}) } : {}) };
+      } else if (p.blind === true) {
+        const err = await registerBlind(t, p.unveil === true);
+        if (err) return { kind: 'refused', problems: [err] };
       }
       tallies.set(id, t);
       void save();
@@ -263,13 +363,29 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return {
         kind: 'tally.list',
         pledges: listed.filter((t) => t.state === 'open').map((t) => ({ ...view(t), needs: Math.max(0, t.threshold - counted(t)) })),
+        // Still finding their quorum: answer privately from a house; they open for signing only if enough would join.
+        gathering: listed.filter((t) => t.state === 'gathering').map(view),
         filled: listed.filter((t) => t.state === 'triggered' && Date.now() - (t.triggeredAt ?? 0) < 86_400_000).map(view),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     const t = tallies.get(id);
     if (!t) return { kind: 'refused', problems: [`no tally called "${id}"`] };
     lapse(t);
+    if (p.kind === 'tally.quorum') {
+      // One answer per person: the house shows its person stamp for this pledge, then sends its answer to the count.
+      const q = t.quorum;
+      if (!q || t.state !== 'gathering' || q.closes < Date.now()) return { kind: 'refused', problems: [q ? 'its quorum has closed' : 'this pledge asks no quorum question'] };
+      const context = countContext(s.webId, t.id);
+      const stamp = await checkSdJwtAttachment(p.person as { credential?: unknown; card?: AgentCard } | undefined, { trusted: checkers, vct: PERSON_IN_CONTEXT_VCT, subject: from, holder: profile.publicJwk, aud: s.webId, nonce: t.id, sandbox: o.sandbox });
+      if (!stamp.ok || stamp.claims.context !== context) return { kind: 'refused', problems: [`its quorum counts people: attach a person stamp for "${context}" from ${checkers.join(' or ')} (${stamp.ok ? 'it is for another count' : stamp.why})`] };
+      const person = String(stamp.claims.person ?? '');
+      if (q.joined.some((x) => x.person === person || x.webId === from)) return { kind: 'refused', problems: ['you have answered already: one answer per person'] };
+      q.joined.push({ webId: from, person, url: card.supportedInterfaces?.[0]?.url ?? '' });
+      void save();
+      return { kind: 'tally.joined', id: t.id, answered: q.joined.length, closes: new Date(q.closes).toISOString(), count: q.count, tellers: q.tellers, note: 'now send your answer to the count: one option, as two unreadable shares, one to each of these tellers. Only the totals come out, to this tally alone, when the quorum closes.' };
+    }
+    if (t.state === 'gathering' && p.kind !== 'tally.count') return { kind: 'refused', problems: [`it is still finding its quorum: it opens for signing at ${new Date(t.quorum!.closes).toISOString()} only if enough people privately said they'd join`] };
     if (t.blind) {
       await unveil(t);
       return blindly(t, p, from, profile, card);
@@ -338,5 +454,58 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     }
     return { kind: 'refused', problems: ['send tally.open, tally.sign, tally.withdraw or tally.count'] };
   }, [], true, (p) => (p.kind === 'tally.sign' || p.kind === 'tally.withdraw') && (typeof p.pass === 'string' || typeof p.secret === 'string'));
+  // A pledge's public page, for anyone to follow (counts only, as tally.count shows anyone: never who signed or answered),
+  // and the same as JSON. A listed pledge only: an unlisted one is its signers' business.
+  s.app.get('/p/:id.json', (req, res) => {
+    const t = tallies.get(req.params.id);
+    if (!t?.listed) return void res.status(404).json({ error: 'no listed pledge with that id' });
+    lapse(t);
+    res.set('cache-control', 'no-store').json(view(t));
+  });
+  s.app.get('/p/:id', (req, res) => {
+    const t = tallies.get(req.params.id);
+    if (!t?.listed) return void res.status(404).type('text/plain').send('No listed pledge with that id.');
+    res.type('html').send(pledgePage(t.id, t.text));
+  });
   return s;
+}
+
+const esc = (x: string) => x.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+/** The public page: a static shell that reads the pledge's JSON every few seconds. */
+function pledgePage(id: string, text: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pledge: ${esc(text.slice(0, 60))}</title>
+<style>
+:root{--bg:#f7f7f4;--fg:#1c1d1f;--muted:#6b6f76;--line:#dcdcd6;--accent:#0f7a5c;--bar:#cfe6dc;--warn:#9a5b00}
+@media (prefers-color-scheme:dark){:root{--bg:#121416;--fg:#ecece8;--muted:#9aa0a6;--line:#2a2e33;--accent:#4fd1a5;--bar:#1f3b31;--warn:#e0a84b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:640px;margin:0 auto;padding:28px 16px 48px}h1{font-size:22px;line-height:1.3;margin:0 0 6px}
+.state{display:inline-block;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:2px 10px;margin:8px 0 18px}
+.big{font-size:56px;font-weight:700;line-height:1;margin:0}.of{color:var(--muted);font-size:18px}
+.row{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:14px}.row span:first-child{flex:0 0 46%;color:var(--muted)}
+.bar{flex:1;height:18px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--bar)}.bar i.in{background:var(--accent)}
+.row b{flex:0 0 36px;text-align:right}p.note{color:var(--muted);font-size:14px}section{border-top:1px solid var(--line);margin-top:22px;padding-top:16px}
+</style></head><body><main>
+<h1>${esc(text)}</h1><div id="state" class="state">…</div>
+<div id="main"></div><section id="quorum" hidden></section>
+<p class="note">Counts only. Nobody here, the tally included, shows who answered or signed. Play money, real signatures. <a href="https://lake.doneinfifty.com/docs/spec">How it works</a></p>
+</main><script>
+const id=${JSON.stringify(id)};const $=(x)=>document.getElementById(x);
+const when=(iso)=>new Date(iso).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+const esc=(x)=>String(x).replace(/[&<>"']/g,(c)=>'&#'+c.charCodeAt(0)+';');
+async function tick(){
+  let v; try{v=await (await fetch(id+'.json',{cache:'no-store'})).json()}catch{return}
+  const q=v.quorum, label={gathering:'Finding its quorum, in secret',open:'Open for signing',triggered:'Filled',lapsed:'Lapsed'}[v.state]||v.state;
+  $('state').textContent=v.unveil&&v.unveil.opened?'Filled · everyone revealed':label;
+  let h='';
+  if(v.state==='gathering'){h='<p class="big">'+q.answered+'</p><p class="of">families have answered privately. Answers close '+when(q.closes)+'. Nobody can sign until then, and only if enough would join.</p>'}
+  else if(v.state==='lapsed'){h='<p class="big">'+v.count+'</p><p class="of">'+esc((q&&q.result&&q.result.why)||('of '+v.threshold+' needed by '+when(v.deadline)))+'</p>'}
+  else{h='<p class="big">'+v.count+' <span class="of">of '+v.threshold+' signed</span></p><p class="of">'+(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.</p>';
+    if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}
+  $('main').innerHTML=h;
+  if(q&&q.result){const r=q.result,max=Math.max(1,...Object.values(r.totals));
+    $('quorum').hidden=false;$('quorum').innerHTML='<p><b>The secret count:</b> '+r.counted+' families answered "I\\'m in if at least how many are?"</p>'+q.options.map((o,i)=>{const n=r.totals[o]||0,inq=q.at_least[i]!==null&&q.at_least[i]<=r.size;return '<div class="row"><span>'+esc(o)+'</span><div class="bar"><i class="'+(inq?'in':'')+'" style="width:'+(100*n/max)+'%"></i></div><b>'+n+'</b></div>'}).join('')+'<p class="of">'+(r.size?'<b>'+r.size+'</b> families hold together: each said they\\'d join a group that size or smaller.':'')+(r.why?' '+esc(r.why):'')+'</p>'}
+}
+tick();setInterval(tick,3000);
+</script></body></html>`;
 }
