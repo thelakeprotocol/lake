@@ -436,7 +436,8 @@ function SuggestionItem({ x }: { x: Note }) {
       x.note && x.mute ? h(Act, { label: 'Mute this sender', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }) : null,
       x.rules ? h(Act, { label: 'Apply these rules', cls: 'primary', run: async () => { fail(await call({ kind: 'panel.rules.set', text: x.rules })); rulesDraft = null; await dismiss(); } }) : null,
       x.door ? h(Act, { label: 'Use this line', cls: 'primary', run: async () => { const cur = await call<{ name?: string }>({ kind: 'panel.door' }); fail(await call({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}) })); await dismiss(); } }) : null,
-      x.pledge && !(x.pledge.quorum && !x.pledge.quorum.answered) ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
+      // A pledge still finding its quorum has nothing to sign: your agent brings it again if it opens.
+      x.pledge && !x.pledge.quorum ? h(Act, { label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', cls: 'primary', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); } }) : null),
     h('div', { class: 'item-foot' },
       x.reply ? h('p', { class: 'item-meta' }, `You wrote: “${x.reply}”`) : h(Reply, { label: 'Reply', placeholder: 'In your own words', send: (text: string) => call({ kind: 'panel.assistant.answer', id: x.id, text }) }),
       h(Act, { label: 'Dismiss', cls: 'quiet', run: dismiss })));

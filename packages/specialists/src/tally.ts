@@ -488,7 +488,7 @@ main{max-width:640px;margin:0 auto;padding:28px 16px 48px}h1{font-size:22px;line
 </style></head><body><main>
 <h1>${esc(text)}</h1><div id="state" class="state">…</div>
 <div id="main"></div><section id="quorum" hidden></section>
-<p class="note">Counts only. Nobody here, the tally included, shows who answered or signed. Play money, real signatures. <a href="https://lake.doneinfifty.com/docs/spec">How it works</a></p>
+<p class="note">Counts only: this page never shows who answered or signed. Real signatures; on the sandbox, synthetic people and play money. <a href="https://lake.doneinfifty.com/docs/spec">How it works</a></p>
 </main><script>
 const id=${JSON.stringify(id)};const $=(x)=>document.getElementById(x);
 const when=(iso)=>new Date(iso).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -500,7 +500,7 @@ async function tick(){
   let h='';
   if(v.state==='gathering'){h='<p class="big">'+q.answered+'</p><p class="of">families have answered privately. Answers close '+when(q.closes)+'. Nobody can sign until then, and only if enough would join.</p>'}
   else if(v.state==='lapsed'){h='<p class="big">'+v.count+'</p><p class="of">'+esc((q&&q.result&&q.result.why)||('of '+v.threshold+' needed by '+when(v.deadline)))+'</p>'}
-  else{h='<p class="big">'+v.count+' <span class="of">of '+v.threshold+' signed</span></p><p class="of">'+(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.</p>';
+  else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">of '+v.threshold+' signed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
     if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}
   $('main').innerHTML=h;
   if(q&&q.result){const r=q.result,max=Math.max(1,...Object.values(r.totals));
