@@ -2805,6 +2805,19 @@ describe('the weekly shop, priced inside the house', () => {
     expect((await view()).votes[0]).toMatchObject({ answered: 3, result: { yes: 2, no: 1, voted: 3, passed: true } });
     expect((await b0.call({ kind: 'panel.circles' })).find((c: { id: string }) => c.id === 'meal-circle').view).toMatchObject({ limit: 1 });
     expect((await waitFor(async () => (await notes(b2)).find((x) => x.circle?.role === 'voted')))!.text).toBe('Your circle voted yes, 2 to 1: a member may owe at most 1 favour and still ask.');
+    // b0's own AI, given a key to the house, sees b0's circles: each record, the favours, the vote and its totals.
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-mine') });
+    const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+    const c = new Client({ name: 'mine', version: '0' });
+    await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+    const tool = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(((await c.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text);
+    const { code } = await b0.call({ kind: 'panel.assistant.invite', label: 'circles test' });
+    expect(await tool('lake_house_connect', { code, house_url: b0.url })).toMatchObject({ paired: true });
+    const mine = await tool('lake_circle', { action: 'mine' });
+    expect(mine.circles).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'meal-circle', limit: 1, votes: [expect.objectContaining({ result: expect.objectContaining({ yes: 2, no: 1, passed: true }) })], you: expect.objectContaining({ you_owe: expect.any(Number) }) })]));
+    expect(mine.favours).toMatchObject({ owed_to_you: expect.any(Number), you_owe: expect.any(Number) });
+    await c.close();
   }, 240_000);
 });
 

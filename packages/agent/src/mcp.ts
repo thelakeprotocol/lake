@@ -2160,9 +2160,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     'lake_circle',
     {
       description:
-        'Promise circles: strangers who each promise the others something (an hour of help, lending a tool, kids\' clothes, a meal) and call on each other when they need it. No money, no company: one count per person, nobody goes first, each kept promise on the circle\'s record. start: turn one sentence from your human ("start a circle for parents in Brisbane to swap kids\' clothes and lend baby gear") into a circle: a title, what each member promises, the kinds of help or things a call can ask for (members pick which they offer), tags for what it\'s about (agents whose humans have offering:<tag> or seeking:<tag> on their cards are invited at once), how many must join before it forms, and how long it takes members. find: circles forming or open, with what each promises. To join one, suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }): only they sign, on their phone. Once in, they call on it and answer its asks from their control panel.',
+        'Promise circles: strangers who each promise the others something (an hour of help, lending a tool, kids\' clothes, a meal) and call on each other when they need it. No money, no company: one count per person, nobody goes first, each kept promise on the circle\'s record. start: turn one sentence from your human ("start a circle for parents in Brisbane to swap kids\' clothes and lend baby gear") into a circle: a title, what each member promises, the kinds of help or things a call can ask for (members pick which they offer), tags for what it\'s about (agents whose humans have offering:<tag> or seeking:<tag> on their cards are invited at once), how many must join before it forms, and how long it takes members. find: circles forming or open, with what each promises. mine: your human\'s own circles (needs lake_house_connect): each one\'s record, the favours owed to and by them, votes open, and what they could do next. To join one, suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }): only they sign, on their phone. Once in, they call on it and answer its asks from their control panel.',
       inputSchema: {
-        action: z.enum(['need', 'start', 'find']),
+        action: z.enum(['need', 'start', 'find', 'mine']),
         need: z.string().max(300).optional().describe('need: what your human needs, in their words ("a pram for six weeks")'),
         help: z.string().max(40).optional().describe('need: which kind of help, if the circle lists kinds'),
         title: z.string().max(200).optional().describe('start: what the circle is, in one line'),
@@ -2197,6 +2197,23 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const list = await me.ask(tally.url, { kind: 'tally.list' });
           const open = ((list.circles ?? []) as Record<string, any>[]).filter(fits).slice(0, 5);
           return json(open.length ? { kind: 'circles.found', tally: tally.url, circles: open, next: 'suggest one to your human to join (lake_house_suggest { text, pledge: { tally, id } }); once in, they can ask it' } : { kind: 'none', next: 'no circle covers this yet: start one with this need as its first line (action "start"), so others who need or offer the same find it' });
+        }
+        if (a.action === 'mine') {
+          // Your human's circles, from their house (on any Lake's tally): what each promises, how it keeps its promises,
+          // the favours owed to and by them, votes open, and what they could do next. They act on their phone.
+          const mine = (await houseCall({ kind: 'panel.circles' })) as { url: string; id: string; view: Record<string, any> }[];
+          const circles = (Array.isArray(mine) ? mine : []).map((c) => {
+            const v = c.view ?? {};
+            return { id: c.id, tally: c.url, text: v.text, promise: v.promise, open: v.open, members: v.members, kept: v.kept, of: v.of, limit: v.limit, ...(v.kinds ? { kinds: v.kinds } : {}), ...(v.sisters ? { sisters: v.sisters } : {}),
+              ...(v.you ? { you: v.you } : {}), ...(v.votes ? { votes: v.votes } : {}), ...(v.on_the_log ? { on_the_log: v.on_the_log } : {}), ...(v.problems ? { problems: v.problems } : {}) };
+          });
+          const sum = (k: string) => circles.reduce((n, c) => n + Number((c.you as Record<string, unknown> | undefined)?.[k] ?? 0), 0);
+          const next = [
+            sum('owed_to_you') && sum('you_owe') ? 'they are owed a favour and owe one: they could pass the one on to settle the other (Pass a favour on, in their panel; the other person agrees first)' : '',
+            circles.some((c) => (c.votes as { result?: unknown }[] | undefined)?.some((x) => !x.result)) ? 'a vote on a circle\'s rules is open: they answer Yes or No on their phone, in secret (you can explain it, not answer it)' : '',
+            circles.some((c) => c.open) ? 'need something? lake_circle { action: "need", need } puts it to the circle that covers it, with one tap from them' : '',
+          ].filter(Boolean);
+          return json({ circles, favours: { owed_to_you: sum('owed_to_you'), you_owe: sum('you_owe') }, ...(next.length ? { next } : {}) });
         }
         if (a.action === 'find') {
           const list = await me.ask(tally.url, { kind: 'tally.list' });
