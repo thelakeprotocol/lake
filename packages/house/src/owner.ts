@@ -166,7 +166,7 @@ export interface AssistantKey { /** On duty: the grant it acts under while the o
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
@@ -1127,6 +1127,15 @@ export class OwnerDesk {
             if (!/^https?:\/\/\S+$/.test(String(qcc.tally ?? '')) || !qcc.id || !need || need.length > 300) return void res.status(400).json({ error: 'circle_call: { tally, id, need (up to 300 characters), help? }' });
             circleCall = { tally: String(qcc.tally).replace(/\/a2a\/?$/, ''), id: String(qcc.id), need, ...(qcc.help ? { help: String(qcc.help) } : {}) };
           }
+          // A change to one of the owner's circles, proposed by their assistant (a rule, or a partner it found): their tap
+          // puts it to the members' vote.
+          let circleVote: Suggestion['circleVote'];
+          const qcv = (p as { circle_vote?: { tally?: unknown; id?: unknown; change?: unknown } }).circle_vote;
+          if (qcv) {
+            const ch = (qcv.change ?? {}) as Record<string, unknown>;
+            if (!/^https?:\/\/\S+$/.test(String(qcv.tally ?? '')) || !qcv.id || typeof qcv.change !== 'object' || !Object.keys(ch).length || JSON.stringify(ch).length > 1000) return void res.status(400).json({ error: 'circle_vote: { tally, id, change: { limit?, times?, sisters?, partner?: { url, per_month? } } }' });
+            circleVote = { tally: String(qcv.tally).replace(/\/a2a\/?$/, ''), id: String(qcv.id), change: ch };
+          }
           // A secret count to answer from the owner's own record: the house checks the field is one of its coded facts now,
           // so the button never fails for that, and keeps what the record says for the owner's eyes only.
           let count: Suggestion['count'];
@@ -1174,7 +1183,7 @@ export class OwnerDesk {
             if (!assistant.webId) return void res.status(400).json({ error: 'allowance: you connected before allowances existed: reconnect with a new code first' });
             allowance = { amount: Math.round(amount * 100) / 100, currency, days };
           }
-          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !count && !circleCall && !aboutNote && !rules && !door && !sender && !allowance;
+          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !count && !circleCall && !circleVote && !aboutNote && !rules && !door && !sender && !allowance;
           if (adviceDropped) delete q.advice;
           let ask: Suggestion['ask'];
           if (q.ask) {
@@ -1190,7 +1199,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             if (!priv) ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(circleCall ? { circleCall } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(circleCall ? { circleCall } : {}), ...(circleVote ? { circleVote } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions];
           this.trimSuggestions();
           await this.saveSuggestions();
@@ -1806,7 +1815,11 @@ export class OwnerDesk {
           // It didn't go as it should: either side marks the call disputed; no favour is owed, and it counts against neither.
           // A change to a circle's rules, put to its members (SPEC §11.4c).
           'panel.circle.propose': async () => {
-            const w = q as { tally?: string; id?: string; change?: unknown };
+            const w = q as { tally?: string; id?: string; change?: unknown; note?: string };
+            // From an assistant's proposal: its circle and change, sent once.
+            const proposed = w.note ? this.suggestions.find((x) => x.id === w.note && x.circleVote && !x.circleVote.sent) : undefined;
+            if (w.note && !proposed) return { error: 'no unsent proposal with that note' };
+            if (proposed) { Object.assign(w, { tally: proposed.circleVote!.tally, id: proposed.circleVote!.id, change: proposed.circleVote!.change }); proposed.circleVote!.sent = true; await this.saveSuggestions(); }
             return panel.circleSend?.(String(w.tally ?? ''), { kind: 'circle.propose', id: String(w.id ?? ''), change: w.change ?? {} }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
           },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },

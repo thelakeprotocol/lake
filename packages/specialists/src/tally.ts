@@ -841,7 +841,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     const offersOf = (w: string) => c.offers[w] ?? c.kinds ?? [];
     if (p.kind === 'circle.record') {
       const open = (c.notes ?? []).filter((n) => !n.cleared);
-      return { kind: 'circle.record', id: t.id, ...circleView(t, c), you: { kept: c.kept[from] ?? 0, asked: c.asked[from] ?? 0, owed_to_you: open.filter((n) => n.to === from && !n.disputed).length, you_owe: open.filter((n) => n.from === from && !n.disputed).length, owe_everywhere: owedBy(from), can_ask: !(c.limit ?? DEFAULT_LIMIT) || owedBy(from) < (c.limit ?? DEFAULT_LIMIT), ...(c.kinds ? { offers: offersOf(from) } : {}), calls: c.calls.filter((x) => x.caller === from).map(({ id, need, state, at }) => ({ id, need, state, at: new Date(at).toISOString() })) } };
+      return { kind: 'circle.record', id: t.id, text: t.text, ...circleView(t, c), you: { kept: c.kept[from] ?? 0, asked: c.asked[from] ?? 0, owed_to_you: open.filter((n) => n.to === from && !n.disputed).length, you_owe: open.filter((n) => n.from === from && !n.disputed).length, owe_everywhere: owedBy(from), can_ask: !(c.limit ?? DEFAULT_LIMIT) || owedBy(from) < (c.limit ?? DEFAULT_LIMIT), ...(c.kinds ? { offers: offersOf(from) } : {}), calls: c.calls.filter((x) => x.caller === from).map(({ id, need, state, at }) => ({ id, need, state, at: new Date(at).toISOString() })) } };
     }
     if (p.kind === 'circle.pass') return offerPass(t, p, from, card);
     if (p.kind === 'circle.propose' || p.kind === 'circle.vote.join') return vote(t, p, from);

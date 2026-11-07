@@ -2160,9 +2160,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     'lake_circle',
     {
       description:
-        'Promise circles: strangers who each promise the others something (an hour of help, lending a tool, kids\' clothes, a meal) and call on each other when they need it. No money, no company: one count per person, nobody goes first, each kept promise on the circle\'s record. start: turn one sentence from your human ("start a circle for parents in Brisbane to swap kids\' clothes and lend baby gear") into a circle: a title, what each member promises, the kinds of help or things a call can ask for (members pick which they offer), tags for what it\'s about (agents whose humans have offering:<tag> or seeking:<tag> on their cards are invited at once), how many must join before it forms, and how long it takes members. find: circles forming or open, with what each promises. mine: your human\'s own circles (needs lake_house_connect): each one\'s record, the favours owed to and by them, votes open, and what they could do next. To join one, suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }): only they sign, on their phone. Once in, they call on it and answer its asks from their control panel.',
+        'Promise circles: strangers who each promise the others something (an hour of help, lending a tool, kids\' clothes, a meal) and call on each other when they need it. No money, no company: one count per person, nobody goes first, each kept promise on the circle\'s record. start: turn one sentence from your human ("start a circle for parents in Brisbane to swap kids\' clothes and lend baby gear") into a circle: a title, what each member promises, the kinds of help or things a call can ask for (members pick which they offer), tags for what it\'s about (agents whose humans have offering:<tag> or seeking:<tag> on their cards are invited at once), how many must join before it forms, and how long it takes members. find: circles forming or open, with what each promises. mine: your human\'s own circles (needs lake_house_connect): each one\'s record, the favours owed to and by them, votes open, and what they could do next. propose: suggest a change to one of their circles (a rule, or a partner you found, by its address): they tap Put it to a vote. To join one, suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }): only they sign, on their phone. Once in, they call on it and answer its asks from their control panel.',
       inputSchema: {
-        action: z.enum(['need', 'start', 'find', 'mine']),
+        action: z.enum(['need', 'start', 'find', 'mine', 'propose']),
         need: z.string().max(300).optional().describe('need: what your human needs, in their words ("a pram for six weeks")'),
         help: z.string().max(40).optional().describe('need: which kind of help, if the circle lists kinds'),
         title: z.string().max(200).optional().describe('start: what the circle is, in one line'),
@@ -2174,6 +2174,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         at_least: z.number().int().min(3).max(100000).default(10).describe('start: how many must join before it forms'),
         days: z.number().min(1).max(30).default(14).describe('start: how long it takes new members'),
         about: z.string().optional().describe('find: only circles that mention this'),
+        circle: z.string().optional().describe('propose: the id of one of your human\'s circles (from mine)'),
+        change: z.object({ limit: z.number().int().min(0).max(50).optional(), times: z.number().int().min(1).max(12).optional(), sisters: z.boolean().optional(), partner: z.object({ url: z.string(), per_month: z.number().int().min(1).max(30).optional() }).optional() }).optional().describe('propose: what to change: limit (favours a member may owe and still ask; 0 none), times (calls a year), sisters, or partner (an organisation\'s agent, by its A2A address, that may ask the circle per_month times a month and be asked for what it offers)'),
+        why: z.string().max(300).optional().describe('propose: why, in a sentence, for your human'),
       },
     },
     async (a) => {
@@ -2214,6 +2217,15 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             circles.some((c) => c.open) ? 'need something? lake_circle { action: "need", need } puts it to the circle that covers it, with one tap from them' : '',
           ].filter(Boolean);
           return json({ circles, favours: { owed_to_you: sum('owed_to_you'), you_owe: sum('you_owe') }, ...(next.length ? { next } : {}) });
+        }
+        if (a.action === 'propose') {
+          // A change to one of your human's circles: they tap Put it to a vote, and every member answers in secret.
+          if (!a.circle || !a.change || !Object.keys(a.change).length) throw new Error('propose: circle (its id, from mine) and change');
+          const mine = (await houseCall({ kind: 'panel.circles' })) as { url: string; id: string; view: Record<string, any> }[];
+          const c = (Array.isArray(mine) ? mine : []).find((x) => x.id === a.circle);
+          if (!c) throw new Error(`no circle of your human's called "${a.circle}" (lake_circle { action: "mine" } lists them)`);
+          const made = (await houseCall({ kind: 'assistant.suggest', text: `${a.why ? `${a.why} ` : ''}Put it to your circle "${c.view?.text ?? c.id}"? Every member answers in secret.`, circle_vote: { tally: c.url, id: c.id, change: a.change } })) as { id?: string };
+          return json({ kind: 'circle.vote.suggested', circle: c.id, note: made.id, next: 'your human taps Put it to a vote in their control panel; members answer on their phones, and only the totals come out' });
         }
         if (a.action === 'find') {
           const list = await me.ask(tally.url, { kind: 'tally.list' });

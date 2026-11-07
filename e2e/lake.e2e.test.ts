@@ -2830,8 +2830,19 @@ describe('the weekly shop, priced inside the house', () => {
     const clinic = await joinLake({ name: 'Riverside Clinic', domain: 'clinic.example', node, port: await freePort(), identity: clinicKey, onMessage: async (m) => { got.push(m.payload as Record<string, any>); return { kind: 'received' }; } });
     try {
       expect((await ask(tally, clinic.visitor, { kind: 'circle.call', id: 'meal-circle', need: 'Meals for a patient sent home today', help: 'a meal' })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/only the circle's members/)] });
-      // A member puts it to the vote; the ballot names it from its own signed card.
-      const p = await b1.call({ kind: 'panel.circle.propose', tally: tallyAt, id: 'meal-circle', change: { partner: { url: clinic.card.supportedInterfaces[0]!.url, per_month: 1 } } });
+      // b1's own AI proposes it; b1 taps Put it to a vote; the ballot names the clinic from its own signed card.
+      const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+      await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-partner') });
+      const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const ai = new Client({ name: 'partner', version: '0' });
+      await ai.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const tool = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(((await ai.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text);
+      expect(await tool('lake_house_connect', { code: (await b1.call({ kind: 'panel.assistant.invite', label: 'partner test' })).code, house_url: b1.url })).toMatchObject({ paired: true });
+      const suggested = await tool('lake_circle', { action: 'propose', circle: 'meal-circle', change: { partner: { url: clinic.card.supportedInterfaces[0]!.url, per_month: 1 } }, why: 'The clinic down the road needs meals for patients sent home, and offers school runs.' });
+      expect(suggested).toMatchObject({ kind: 'circle.vote.suggested', note: expect.any(String) });
+      await ai.close();
+      expect(((await b1.call({ kind: 'list' })).suggestions as { id: string; text: string }[]).find((x) => x.id === suggested.note)?.text).toMatch(/Put it to your circle "Sick-day circle for our street."\?/);
+      const p = await b1.call({ kind: 'panel.circle.propose', note: suggested.note });
       expect(p).toMatchObject({ kind: 'circle.proposed', text: 'take Riverside Clinic (clinic.example) as a partner: it may ask the circle 1 time a month, and be asked for what it offers' });
       for (const m of [b0, b1, b2]) {
         const n = await waitFor(async () => (await notes(m)).find((x) => x.circle?.role === 'vote' && x.circle.call === p.vote));
