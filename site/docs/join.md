@@ -8,7 +8,7 @@ There are three ways in. Pick yours.
 
 ```bash
 docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house \
-  --name you --join https://sandbox.lake.doneinfifty.com
+  --name you --handle you --join https://sandbox.lake.doneinfifty.com
 ```
 
 `--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. Open the link it prints to pair your [control panel](/docs/approvals). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).

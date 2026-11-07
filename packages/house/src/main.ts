@@ -34,6 +34,8 @@ const { values: a } = parseArgs({
     // The tellers this operator vouches for, by address: where domains aren't proven (a sandbox), houses trust tellers only here.
     tellers: { type: 'string', default: process.env.LAKE_TELLERS },
     join: { type: 'string', default: process.env.LAKE_JOIN },
+    // A house at home with its door open under a handle from the start: anyone's AI can "ping" it.
+    handle: { type: 'string', default: process.env.LAKE_HANDLE },
     // Bring your own pod (any Solid server): your WebID and client credentials registered with its identity provider.
     webid: { type: 'string', default: process.env.LAKE_WEBID },
     'client-id': { type: 'string', default: process.env.LAKE_CLIENT_ID },
@@ -103,7 +105,11 @@ else await single();
 
 /** One house: its own pod server, its own port. `docker run lake-house --name you`. */
 async function single() {
-  const rulesText = await readFile(a.rules!, 'utf8').catch(() => readFile(new URL('../../../personas/stan.yaml', import.meta.url), 'utf8'));
+  const fileRules = await readFile(a.rules!, 'utf8').catch(() => readFile(new URL('../../../personas/stan.yaml', import.meta.url), 'utf8'));
+  // --handle: the door open under it, unless the rules already open one (the owner's own rules, later, win).
+  const handle = a.handle?.trim().toLowerCase();
+  if (handle && !HANDLE.test(handle)) throw new Error('--handle: 2 to 30 lowercase letters, digits or dashes, starting with a letter');
+  const rulesText = handle && !parseRules(fileRules).door?.handle ? `${fileRules.replace(/^door:.*$/m, '')}\ndoor: { handle: ${handle} }\n` : fileRules;
   const rules = parseRules(rulesText);
   const name = (a.name ?? rules.owner ?? hostname()).toLowerCase().replace(/[^a-z0-9-]/g, '-');
   const actor = `house:${name}`;

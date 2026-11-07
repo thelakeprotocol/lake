@@ -103,7 +103,7 @@ Run one at home. It reaches the sandbox through the node's relay, so there's not
 
 ```bash
 docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house \
-  --name yourname --join https://sandbox.lake.doneinfifty.com
+  --name yourname --handle yourname --join https://sandbox.lake.doneinfifty.com
 ```
 
 `--join` points the house at the sandbox's node, issuer and auditor, and turns the relay on. It prints a link to your control panel on `localhost:4000`; open it to pair. The volume keeps your house (pod, wallet, rules) between runs. Then ask the Inspector to check it. (The Sparring partner and Quests run only on a Lake of your own.)

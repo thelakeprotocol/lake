@@ -3085,7 +3085,7 @@ describe('relay: a house behind a home router', () => {
     const [pp, hp] = [await freePort(), await freePort()];
     await start(
       ['packages/house/dist/main.js', '--name', 'homebody', '--rules', 'personas/stan.yaml', '--tellers', `${specialistsUrl}/teller-a/a2a,${specialistsUrl}/teller-b/a2a`, '--data', join(dir, 'houses'), '--issuer-url', issuerUrl,
-        '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', `${node},${nodeB}`, '--relay', '--seed', '42'],
+        '--auditor-url', auditor, '--pod-port', String(pp), '--port', String(hp), '--lake', `${node},${nodeB}`, '--relay', '--seed', '42', '--handle', 'homebody'],
       /joined the Lake/,
     );
     relayed = procs[procs.length - 1];
@@ -3094,6 +3094,8 @@ describe('relay: a house behind a home router', () => {
     for (let i = 0; i < 30 && !(await listed()); i++) await new Promise((ok) => setTimeout(ok, 500));
     card = (await listed())!.card;
     expect(card.supportedInterfaces.map((i) => i.url)).toEqual([expect.stringMatching(new RegExp(`^${node}/relay/`)), expect.stringMatching(new RegExp(`^${nodeB}/relay/`))]);
+    // Started with --handle: anyone's AI finds it by that, through the relay.
+    expect(await (await fetch(`${node}/handles/homebody`)).json()).toMatchObject({ handle: 'homebody', url: expect.stringMatching(new RegExp(`^${node}/relay/`)) });
     const { reply } = await knock(card.supportedInterfaces[0]!.url, await visitor('gp.example'), presets().gp!);
     expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });
   });
