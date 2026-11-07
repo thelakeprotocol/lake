@@ -41,7 +41,8 @@ export type Rejection = { code: 'malformed' | 'unsigned-card' | 'forged-card' | 
  */
 export async function verifyLakeData<T>(
   data: LakeData<T> | null,
-  opts: { replay?: ReplayGuard; sandbox?: boolean; fetch?: typeof fetch } = {},
+  /** `now`: check expiry as of then (seconds), for a signed message kept as evidence, as when a tally forwards consents. */
+  opts: { replay?: ReplayGuard; sandbox?: boolean; fetch?: typeof fetch; now?: number } = {},
 ): Promise<{ ok: true; profile: LakeProfile; payload: Signed<T>['payload']; domainVia: string } | { ok: false; rejection: Rejection }> {
   if (!data?.card || !data.envelope) return { ok: false, rejection: { code: 'malformed', why: 'not a Lake message sealed for this agent (SPEC §3)' } };
   let profile: LakeProfile;
@@ -54,7 +55,7 @@ export async function verifyLakeData<T>(
   const proof = await proveDomain(profile, opts);
   if (!proof.ok) return { ok: false, rejection: { code: 'domain', why: proof.reason } };
   try {
-    const payload = await verifyMessage(data.envelope, async (kid) => (kid === profile.publicJwk.kid ? profile.publicJwk : null), { replay: opts.replay });
+    const payload = await verifyMessage(data.envelope, async (kid) => (kid === profile.publicJwk.kid ? profile.publicJwk : null), { replay: opts.replay, now: opts.now });
     if (payload.iss !== profile.webId) return { ok: false, rejection: { code: 'impersonation', why: `message issued by ${payload.iss}, card belongs to ${profile.webId}` } };
     return { ok: true, profile, payload, domainVia: proof.via };
   } catch (e) {

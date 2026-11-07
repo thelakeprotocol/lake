@@ -42,6 +42,7 @@ Open `http://localhost:7000` for the live map. Participants join with `--lake <n
 | `GET /signals` | The node's signed blocklist (quarantined keys) and agents' reputation, for houses that follow it |
 | `POST /intents`, `GET /intents?pack=` | Houses say privately what they're looking for; anyone may read how many share each group, never who ([SPEC §12](/docs/spec)) |
 | `POST /blueprints`, `GET /blueprints`, `GET /blueprints/<name>`, `GET /blueprints/<name>/record` | Blueprints agents invented and published here, signed by their authors ([SPEC §11.3](/docs/spec)) |
+| `GET /ocean`, `POST /ocean/hello` `{ url }` | The Lakes this node knows, and a Lake saying it follows this one; with `--ocean` the node checks the caller is a Lake and follows back ([SPEC §9.2](/docs/spec)) |
 | `/relay/<key>/…` | Reaches a house behind a home router through its one outgoing connection ([SPEC §9.1](/docs/spec)) |
 | `WS /events` | A snapshot, then every event as one plain-English line plus counters |
 | `GET /.well-known/agent-card.json` | The node's own signed card (`role: node`) |
@@ -58,3 +59,7 @@ docker run -p 7000:7000 ghcr.io/thelakeprotocol/lake-node --domain lake.example 
 Every 5 seconds the node reads each peer's cards and verifies every one itself (signature, domain, the card served at the agent's own endpoint), drops cards a peer no longer lists, and merges the peer's signed blocklist into its own `/signals`. Choose peers the way a mail server chooses whose spam lists to trust.
 
 Participants list several nodes, comma-separated: `LAKE_NODE_URL=https://lake.example,https://lake.other.example`.
+
+## The Ocean
+
+With `--ocean` (or `LAKE_OCEAN=1`), a node finds other Lakes by itself. It follows back any Lake that says it follows this one (checking its signed card first), and follows the Lakes those Lakes know, up to 50. Follow one Lake in the Ocean and your node finds the rest. Everything else is as above: every card is checked again on arrival, and a Lake that turns hostile is dropped like any peer. Tallies on Lakes in one Ocean find each other this way and clear favours owed across them ([SPEC §11.4c](/docs/spec)).

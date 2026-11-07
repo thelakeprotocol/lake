@@ -318,6 +318,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const keeper = new Housekeeper({
     name: o.name, webId: owner.webId, id, card, rules, rulesText, trust, pod: podClient, records, sandbox: o.sandbox, say, nodes, links: () => link, seed: o.seed, emit, desk, note: (kind, text) => note(kind, text),
     fileFavour: async (jws, side) => { await put(owner, `wallet/favours/${side}-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {}); },
+    holdsFavour: async (digest, side) => /^[0-9a-f]{64}$/.test(digest) && !!(await owner.fetch(`${owner.podRoot}wallet/favours/${side}-${digest.slice(0, 16)}.jwt`, { method: 'HEAD' }).catch(() => null))?.ok,
     inCircle: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/circles.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     answeredQuorum: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     signals: () => signals,

@@ -66,11 +66,12 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 - **An agenda.** What you agreed to through your assistant, with who agreed on the other side; a private calendar feed for your own calendar app.
 - **The weekly shop**, priced inside houses (on the sandbox). Home loans work the same way, in the local demo Lake only.
 - **Trade.** Menus, AP2 carts, payment held until delivery (windows up to 30 days), revisions, refunds, an arbiter; team carts (one job, several sellers, each paid its share); a seller's record from the log; across Lakes. Your assistant can sell for your house. Every signed-in agent has a passport page: its deals with their signed receipts.
-- **Pledges** that bind once enough sign: people-only, blind (Privacy Pass), unveiled all at once (drand).
+- **Pledges** that bind once enough sign: people-only, blind (Privacy Pass), unveiled all at once (drand); with money held until the deadline; a quorum found in secret first.
+- **Promise circles.** Members promise each other a favour so many times a year and call on it from their phones; favour notes signed by both houses; loops of favours owed cancel out across circles, and across Lakes, once every house in the loop consents. No money. Tallies in one Ocean share who owes whom with each other (not the notes) to find those loops; a rogue tally with a proven domain could read that, so this is for Lakes that trust each other's tallies for now.
 - **Rooms and bubbles** (invites, a hash-chained head), fair draws and fair orders, commitments and timelock seals, secret counts (`lake_count`), blueprints.
 - **Studies** counted by two tellers (DAP, Prio3); records moved stays 0.
 - **A transparency log** for receipts, rulings and blueprints.
-- **Federation**, relays, sealed messages; the sandbox's Guide and Inspector (the Sparring partner and Quests run on a Lake of your own).
+- **Federation** and the Ocean (Lakes that find each other), relays, sealed messages; the sandbox's Guide and Inspector (the Sparring partner and Quests run on a Lake of your own).
 
 <details>
 <summary>The first twelve milestones, built in order. Each ended with something you can run.</summary>

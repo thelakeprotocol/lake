@@ -37,6 +37,8 @@ export interface HousekeeperOptions {
   note?: (kind: string, text: string) => void;
   /** Files a favour note in the owner's wallet: one they owe, or one owed to them. */
   fileFavour?: (jws: string, side: 'owe' | 'owed') => Promise<void>;
+  /** Does the owner's wallet hold this favour note (by its sha256), owed by them or to them? */
+  holdsFavour?: (digest: string, side: 'owe' | 'owed') => Promise<boolean>;
   /** Whether this house's owner is in the promise circle of this pledge at this tally (by the tally's WebID). */
   inCircle?: (tally: string, id: string) => Promise<boolean>;
   /** Whether this house's owner answered the quorum of a pledge at this tally (by the tally's WebID). */
@@ -195,9 +197,15 @@ export class Housekeeper {
     // A promise circle this house's owner is in (SPEC §11.4c), from its tally only: a member needs help (the caller unnamed),
     // their own call was taken or couldn't be, or a promise of theirs counted as kept.
     const circleIds = (x: Record<string, unknown>) => [String(x.id ?? ''), ...(Array.isArray(x.ids) ? x.ids.map(String) : [])];
-    const ours = async (x: Record<string, unknown>) => { for (const id of circleIds(x)) if (id && (await this.o.inCircle?.(v.profile.webId, id))) return true; return false; };
+    // A loop of favours can span circles on other Lakes' tallies (SPEC §11.4c): it names each circle with its tally.
+    const pairs = (x: Record<string, unknown>) => (Array.isArray(x.where) ? (x.where as { tally?: unknown; id?: unknown }[]).slice(0, 12).map((c) => [String(c?.tally ?? ''), String(c?.id ?? '')] as const) : []);
+    const ours = async (x: Record<string, unknown>) => {
+      for (const id of circleIds(x)) if (id && (await this.o.inCircle?.(v.profile.webId, id))) return true;
+      if (x.kind === 'circle.clear' || x.kind === 'circle.cleared') for (const [t, id] of pairs(x)) if (t && id && (await this.o.inCircle?.(t, id))) return true;
+      return false;
+    };
     if (String(v.payload.kind).startsWith('circle.') && (await ours(v.payload as unknown as Record<string, unknown>))) {
-      const q = v.payload as unknown as { kind: string; id: string; ids?: string[]; call: string; need?: string; help?: string; when?: string; promise?: string; helper?: { url?: string; webId?: string }; kept?: number; note?: string; digest?: string; clearing?: string; length?: number; circles?: number };
+      const q = v.payload as unknown as { kind: string; id: string; ids?: string[]; call: string; need?: string; help?: string; when?: string; promise?: string; helper?: { url?: string; webId?: string }; kept?: number; note?: string; digest?: string; clearing?: string; length?: number; circles?: number; lakes?: number; you_owe?: { digest?: string }; owed_to_you?: { digest?: string } };
       const tally = ((data as LakeData).card?.supportedInterfaces?.[0]?.url ?? '').replace(/\/a2a$/, '');
       const base = { tally, id: q.id, call: q.call, need: String(q.need ?? ''), ...(q.help ? { help: String(q.help).slice(0, 40) } : {}), ...(q.when ? { when: String(q.when).slice(0, 80) } : {}) };
       const desk = this.o.desk;
@@ -212,9 +220,13 @@ export class Housekeeper {
         if (q.note && q.digest) { await this.o.fileFavour?.(q.note, 'owed'); void desk.circleSend(tally, { kind: 'circle.ack', id: q.id, call: q.call, digest: q.digest }); }
         await desk.circleNote({ ...base, role: 'kept', state: 'done' }, `You kept your promise: "${base.need}". ${q.kept} kept so far, on the circle's record${q.note ? ', and you\'re owed one favour, signed' : ''}.`);
       }
-      // A loop of favours owed across circles: the owner owes one and is owed one, so the house consents for them.
-      else if (q.kind === 'circle.clear') void desk.circleSend(tally, { kind: 'circle.clear.consent', id: q.id, clearing: q.clearing });
-      else if (q.kind === 'circle.cleared') await desk.circleNote({ ...base, need: '', role: 'cleared', state: 'done' }, `You're square: a loop of ${q.length} favours across ${q.circles} circle${q.circles === 1 ? '' : 's'} cancelled out. Nobody paid anything.`);
+      // A loop of favours owed across circles: the owner owes one and is owed one, so the house consents for them, once it
+      // finds both notes in its own wallet (a tally can't talk it out of a favour owed to it that it doesn't hold).
+      else if (q.kind === 'circle.clear') {
+        const owe = String(q.you_owe?.digest ?? ''), owed = String(q.owed_to_you?.digest ?? '');
+        if (owe && owed && (await this.o.holdsFavour?.(owe, 'owe')) && (await this.o.holdsFavour?.(owed, 'owed'))) void desk.circleSend(tally, { kind: 'circle.clear.consent', id: q.id, clearing: q.clearing, owe, owed });
+      }
+      else if (q.kind === 'circle.cleared') await desk.circleNote({ ...base, need: '', role: 'cleared', state: 'done' }, `You're square: a loop of ${q.length} favours across ${q.circles} circle${q.circles === 1 ? '' : 's'}${(q.lakes ?? 1) > 1 ? ` on ${q.lakes} Lakes` : ''} cancelled out. Nobody paid anything.`);
       return this.reply({ kind: 'received' } as never);
     }
     // A pledge whose quorum this house's owner answered: whether it opened, from that tally only (SPEC §11.4b).

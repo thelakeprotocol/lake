@@ -62,11 +62,11 @@ beforeAll(async () => {
   node = `http://localhost:${nodePort}`;
   // The specialists' port first: the node logs published blueprints on their transparency log.
   const sp = await port();
-  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2', '--feed-batch-ms', '200', '--log-url', `http://localhost:${sp}/log/a2a`], /Lake node on/);
+  await start(['packages/lake/dist/main.js', '--port', nodePort, '--data', join(dir, 'node'), '--guild-min', '2', '--feed-batch-ms', '200', '--log-url', `http://localhost:${sp}/log/a2a`, '--ocean', '--sync-ms', '1000'], /Lake node on/);
   // A second node that follows the first: anyone can run one (SPEC §9).
   const nodeBPort = await port();
   nodeB = `http://localhost:${nodeBPort}`;
-  await start(['packages/lake/dist/main.js', '--port', nodeBPort, '--data', join(dir, 'nodeB'), '--domain', 'b.lake.local', '--follow', node, '--sync-ms', '1000'], /Lake node on/);
+  await start(['packages/lake/dist/main.js', '--port', nodeBPort, '--data', join(dir, 'nodeB'), '--domain', 'b.lake.local', '--follow', node, '--sync-ms', '1000', '--ocean'], /Lake node on/);
   // Every specialist in one process, each under its own path: how the public sandbox runs them.
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
@@ -776,6 +776,21 @@ describe('the owner', () => {
       return { c, call, you: (await call('lake_overview')).you };
     };
     const [starter, giver, seeker, stranger] = [await chat(), await chat(), await chat(), await chat()];
+    // And one on another Lake: the Ocean. Lake B followed this Lake and said hello; this Lake followed back.
+    const portB = String(await freePort()), urlB = `http://localhost:${portB}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', portB], /Lake MCP over HTTP/, { LAKE_NODE_URL: nodeB, LAKE_MCP_DATA: join(dir, 'mcp-circle-b') });
+    const chatB = async () => {
+      const tok = await (await fetch(`${urlB}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'circle-b', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(urlB), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const text = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: text } : JSON.parse(text); };
+      return { c, call, you: (await call('lake_overview')).you };
+    };
+    const far = await chatB();
+    expect((await (await fetch(`${node}/ocean`)).json()).following).toContain(nodeB);
+    await far.call('lake_set_tags', { tags: ['seeking:baby-gear'] });
+    // This Lake learns the far agent's card from Lake B within a sync or two.
+    for (let i = 0; i < 20 && !((await (await fetch(`${node}/cards?idle=1&tag=seeking:baby-gear`)).json()) as unknown[]).length; i++) await new Promise((ok) => setTimeout(ok, 500));
     try {
       // Two AIs whose humans said what they offer and look for; a third with nothing to do with it.
       await giver.call('lake_set_tags', { tags: ['offering:baby-gear'] });
@@ -795,11 +810,13 @@ describe('the owner', () => {
       expect(await invited(giver)).toMatchObject({ because: 'offering:baby-gear', text: expect.stringContaining('Brisbane parents'), circle: { promise: expect.stringContaining('baby gear') } });
       expect(await invited(seeker)).toMatchObject({ because: 'seeking:kids-clothes' });
       expect(await invited(stranger)).toBeNull();
+      // Across the Ocean: the agent on Lake B, whose human seeks baby gear, is invited too.
+      expect(await invited(far)).toMatchObject({ because: 'seeking:baby-gear' });
       // Anyone finds it by asking around, or by name.
       expect((await stranger.call('lake_circle', { action: 'find', about: 'baby' })).circles).toEqual([expect.objectContaining({ id: made.id, needs: 3 })]);
       expect((await stranger.call('lake_ask_around', { about: 'baby gear' })).circles).toEqual([expect.objectContaining({ id: made.id, promise: expect.stringContaining('baby gear') })]);
     } finally {
-      for (const x of [starter, giver, seeker, stranger]) await x.c.close();
+      for (const x of [starter, giver, seeker, stranger, far]) await x.c.close();
     }
   });
 
@@ -1139,7 +1156,8 @@ describe('the open door', () => {
     expect(o.what_you_can_do.studies.questions).toContain('Are people with heart failure on drug Y readmitted more?');
     // What an assistant finds first: what the Lake is, what is happening (everyday counts before security ones), and
     // everyday things to do before studies, which come last.
-    expect(Object.keys(o).slice(0, 3)).toEqual(['lake', 'happening_now', 'what_you_can_do']);
+    // (With the Ocean, this Lake follows Lake B back, so other_lakes comes right after what the Lake is.)
+    expect(Object.keys(o).filter((k) => k !== 'other_lakes').slice(0, 3)).toEqual(['lake', 'happening_now', 'what_you_can_do']);
     expect(o.lake).toMatch(/^Each person's data stays in their own house/);
     // Lake times are UTC, and the overview says so (runs 56-60: times told a day off).
     expect(o.time).toMatchObject({ now_utc: expect.stringMatching(/Z$/), note: expect.stringMatching(/UTC/) });
@@ -2625,6 +2643,49 @@ describe('the weekly shop, priced inside the house', () => {
     for (let i = 0; i < 20 && (await third_caller()).circle!.state !== 'matched'; i++) await new Promise((ok) => setTimeout(ok, 500));
     expect(await buyers[0]!.call({ kind: 'panel.circle.dispute', note: (await third_caller()).id })).toMatchObject({ kind: 'circle.disputed' });
     expect((await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle).toMatchObject({ disputed: 1, favours: { owed: 0 } });
+  }, 240_000);
+
+  it('favours clear across Lakes (SPEC §11.4c): a loop of three favours owed in circles on two Lakes\' tallies cancels out, each tally clearing its own notes on the houses\' signed consents', async () => {
+    const pB = String(await freePort());
+    await start(['packages/specialists/dist/main.js', 'tally', '--port', pB, '--data', join(dir, 'specialists-b'), '--lake', nodeB, '--domain', 'tally.b.lake.local'], /tally registered with the Lake node/, { LAKE_TALLY_LOOPS_MS: '3000' });
+    const a = { at: `${specialistsUrl}/tally`, webId: `${specialistsUrl}/tally/#tally` }, b = { at: `http://localhost:${pB}`, webId: `http://localhost:${pB}/#tally` };
+    // Each tally finds the other through its own Lake.
+    const sees = async (n: string, t: string) => ((await (await fetch(`${n}/cards?skill=tally&idle=1`)).json()) as { card: { supportedInterfaces: { url: string }[] } }[]).some((r) => r.card.supportedInterfaces[0]!.url === `${t}/a2a`);
+    for (let i = 0; i < 30 && !((await sees(node, b.at)) && (await sees(nodeB, a.at))); i++) await new Promise((ok) => setTimeout(ok, 500));
+    // The tally with the lower WebID offers a loop. Two people here are in circles only on the other: their houses take the
+    // offer from a tally they never joined, because it names their circles there, and they hold both notes.
+    const [p, q] = a.webId < b.webId ? [a, b] : [b, a];
+    const [b0, b1, b2] = buyers as [(typeof buyers)[number], (typeof buyers)[number], (typeof buyers)[number]];
+    const organiser = await visitor('ocean-circle.example');
+    const circle = async (t: typeof a, id: string, text: string, who: (typeof buyers)[number][]) => {
+      expect((await ask(`${t.at}/a2a`, organiser, { kind: 'tally.open', id, text, threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'an hour of help', times: 3 } })).reply).toMatchObject({ kind: 'tally.opened' });
+      for (const m of who) expect(await m.call({ kind: 'panel.pledge.sign', tally: t.at, id })).toMatchObject({ kind: expect.stringMatching(/^tally\.(signed|triggered)$/) });
+    };
+    await circle(p, 'ocean-x', 'Hours for neighbours.', [b0, b1]);
+    await circle(q, 'ocean-y', 'Hours for the allotment.', [b1, b2]);
+    await circle(q, 'ocean-z', 'Hours for the choir.', [b2, b0]);
+    const notes = async (m: (typeof buyers)[number]) => (await m.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; call: string } }[];
+    const waitFor = async <T,>(f: () => Promise<T | undefined>) => { for (let i = 0; i < 40; i++) { const v = await f(); if (v) return v; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('timed out'); };
+    // caller asks, helper says yes, caller says thanks: the caller owes the helper one, countersigned.
+    const favour = async (t: typeof a, id: string, caller: (typeof buyers)[number], helper: (typeof buyers)[number]) => {
+      const c = await caller.call({ kind: 'panel.circle.call', tally: t.at, id, need: 'help moving a sofa' });
+      expect(c).toMatchObject({ kind: 'circle.called' });
+      const asked = await waitFor(async () => (await notes(helper)).find((x) => x.circle?.role === 'ask' && x.circle.call === c.call));
+      expect(await helper.call({ kind: 'panel.circle.answer', note: asked.id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+      const mine = await waitFor(async () => (await notes(caller)).find((x) => x.circle?.role === 'caller' && x.circle.call === c.call && x.circle.state === 'matched'));
+      expect(await caller.call({ kind: 'panel.circle.kept', note: mine.id })).toMatchObject({ kind: 'circle.kept' });
+      await waitFor(async () => ((await (await fetch(`${t.at}/p/${id}.json`)).json()).circle.favours?.owed === 1 ? true : undefined));
+    };
+    await favour(p, 'ocean-x', b0, b1);
+    await favour(q, 'ocean-y', b1, b2);
+    // The last note is countersigned on the tally that doesn't offer loops: it tells the other to look.
+    await favour(q, 'ocean-z', b2, b0);
+    const cleared = async (t: typeof a, id: string) => (await (await fetch(`${t.at}/p/${id}.json`)).json()).circle.favours;
+    await waitFor(async () => ((await cleared(p, 'ocean-x')).cleared === 1 && (await cleared(q, 'ocean-y')).cleared === 1 && (await cleared(q, 'ocean-z')).cleared === 1 ? true : undefined));
+    for (const [t, id] of [[p, 'ocean-x'], [q, 'ocean-y'], [q, 'ocean-z']] as const) expect(await cleared(t, id)).toMatchObject({ signed: 1, owed: 0, cleared: 1 });
+    for (const m of [b0, b1, b2]) expect((await waitFor(async () => (await notes(m)).find((x) => x.circle?.role === 'cleared' && /on 2 Lakes/.test(x.text))))!.text).toMatch(/You're square: a loop of 3 favours across 3 circles on 2 Lakes cancelled out\. Nobody paid anything\./);
+    // A tally that isn't one can't ask another for its favours owed.
+    expect((await ask(`${q.at}/a2a`, organiser, { kind: 'tally.edges' })).reply).toMatchObject({ kind: 'refused', problems: ['for tallies only'] });
   }, 240_000);
 });
 

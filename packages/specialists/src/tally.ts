@@ -89,7 +89,17 @@ interface Circle {
 }
 interface FavourNote { call: string; from: string; to: string; help?: string; at: number; digest: string; acked?: boolean; cleared?: string; disputed?: boolean }
 /** A loop of favours owed across circles, offered to every house in it; it clears once each consents. */
-interface Clearing { id: string; notes: { circle: string; digest: string }[]; houses: string[]; consents: string[]; at: number; state: 'proposed' | 'cleared' | 'lapsed' }
+interface Clearing {
+  id: string;
+  /** The notes in the loop: here (no `tally`), or on another Lake's tally (its WebID and address). */
+  notes: { circle: string; digest: string; from: string; to: string; tally?: string; url?: string }[];
+  houses: string[]; consents: string[];
+  /** Each house's signed consent, as it arrived: what the other tallies in the loop check before clearing theirs. */
+  evidence?: Record<string, { card: AgentCard; envelope: LakeData['envelope'] }>;
+  at: number; state: 'proposed' | 'cleared' | 'lapsed';
+}
+/** A favour owed, as tallies share them across the Ocean (SPEC §11.4c): only with each other, by signed request. */
+interface Edge { tally: string; url: string; circle: string; text: string; digest: string; from: string; to: string; fromUrl: string; toUrl: string; help?: string }
 interface CircleCall {
   id: string; need: string; kind?: string; when?: string; caller: string; callerKey: string; callerUrl: string; at: number; round: number;
   /** When the latest members were asked: unanswered for ASK_WITHIN, the next are asked. */
@@ -316,52 +326,109 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   // Loops of favours owed, across every circle here (SPEC §11.4c): A owes B in one circle, B owes C in another, C owes A in
   // a third. Each such loop is offered to its houses; once all consent, every note in it is cleared and they're square.
   // Only countersigned notes, each in at most one open offer; loops of up to six.
-  const findLoops = async () => {
-    const busy = new Set([...clearings.values()].filter((x) => x.state === 'proposed').flatMap((x) => x.notes.map((n) => n.digest)));
-    const edges: { circle: string; note: FavourNote }[] = [];
-    for (const t of tallies.values()) for (const n of t.circle?.notes ?? []) if (n.acked && !n.cleared && !n.disputed && !busy.has(n.digest)) edges.push({ circle: t.id, note: n });
+  // This tally's own favours owed, as edges: what it shares with the Ocean's other tallies.
+  const busyHere = () => new Set([...clearings.values()].filter((x) => x.state === 'proposed').flatMap((x) => x.notes.map((n) => n.digest)));
+  const localEdges = (): Edge[] => {
+    const busy = busyHere();
+    const out: Edge[] = [];
+    for (const t of tallies.values()) {
+      const ms = t.circle ? members(t) : [];
+      for (const n of t.circle?.notes ?? []) if (n.acked && !n.cleared && !n.disputed && !busy.has(n.digest)) out.push({ tally: s.webId, url: s.card.supportedInterfaces?.[0]?.url ?? '', circle: t.id, text: t.text, digest: n.digest, from: n.from, to: n.to, fromUrl: ms.find((m) => m.webId === n.from)?.url ?? '', toUrl: ms.find((m) => m.webId === n.to)?.url ?? '', ...(n.help ? { help: n.help } : {}) });
+    }
+    return out;
+  };
+  // The Ocean's other tallies (on the Lakes this one's node knows), and their edges, asked for by signed request.
+  const remoteEdges = async (): Promise<Edge[]> => {
+    if (!o.nodeUrl) return [];
+    const rows = await fetch(`${o.nodeUrl}/cards?skill=tally&idle=1`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ card: AgentCard }[]>).catch(() => []);
+    const urls = [...new Set(rows.map((r) => r.card?.supportedInterfaces?.[0]?.url).filter((u): u is string => !!u && u !== s.card.supportedInterfaces?.[0]?.url))].slice(0, 20);
+    const got = await Promise.all(urls.map((u) => ask(u, { kind: 'tally.edges' }, 8000).then((r) => (Array.isArray(r.edges) ? (r.edges as Edge[]).slice(0, 2000) : [])).catch(() => [])));
+    return got.flat();
+  };
+  // Loops of favours owed (SPEC §11.4c), here and across the Ocean's tallies: A owes B in one circle, B owes C in another,
+  // C owes A in a third. Of the tallies holding a loop's notes, the one with the lowest WebID offers it to its houses (so
+  // nobody offers it twice); once all consent, each tally clears its own notes. Only countersigned notes; loops of up to six.
+  let looking: Promise<void> | null = null, again = false;
+  const findLoops = (): Promise<void> => {
+    if (looking) { again = true; return looking; }
+    return (looking = lookForLoops().finally(() => { looking = null; if (again) { again = false; void findLoops(); } }));
+  };
+  const lookForLoops = async () => {
+    const edges = [...localEdges(), ...(await remoteEdges())];
     const used = new Set<string>();
+    const nudge = new Set<string>();
     for (const start of edges) {
-      if (used.has(start.note.digest)) continue;
-      // Depth-first from a debtor along "owes" edges back to itself.
-      const path: typeof edges = [start];
+      if (used.has(start.digest)) continue;
+      const path: Edge[] = [start];
       const walk = (at: string, depth: number): boolean => {
-        if (at === start.note.from) return true;
+        if (at === start.from) return true;
         if (depth >= 6) return false;
         for (const e of edges) {
-          if (e.note.from !== at || used.has(e.note.digest) || path.includes(e)) continue;
+          if (e.from !== at || used.has(e.digest) || path.includes(e)) continue;
           path.push(e);
-          if (walk(e.note.to, depth + 1)) return true;
+          if (walk(e.to, depth + 1)) return true;
           path.pop();
         }
         return false;
       };
-      if (!walk(start.note.to, 1)) continue;
-      for (const e of path) used.add(e.note.digest);
-      const x: Clearing = { id: randomBytes(6).toString('hex'), notes: path.map((e) => ({ circle: e.circle, digest: e.note.digest })), houses: [...new Set(path.map((e) => e.note.from))], consents: [], at: Date.now(), state: 'proposed' };
+      if (!walk(start.to, 1)) continue;
+      for (const e of path) used.add(e.digest);
+      const proposer = [...new Set(path.map((e) => e.tally))].sort()[0];
+      // Another tally offers this one: it may not have looked since the last note was countersigned here, so say so.
+      if (proposer !== s.webId) { nudge.add(path.find((e) => e.tally === proposer)!.url); continue; }
+      const x: Clearing = { id: randomBytes(6).toString('hex'), notes: path.map((e) => ({ circle: e.circle, digest: e.digest, from: e.from, to: e.to, ...(e.tally !== s.webId ? { tally: e.tally, url: e.url } : {}) })), houses: [...new Set(path.map((e) => e.from))], consents: [], evidence: {}, at: Date.now(), state: 'proposed' };
       clearings.set(x.id, x);
+      const circles = [...new Map(path.map((e) => [`${e.tally}|${e.circle}`, { tally: e.tally, id: e.circle }])).values()];
       for (const e of path) {
-        const t = tallies.get(e.circle)!;
-        const url = members(t).find((m) => m.webId === e.note.from)?.url;
-        const owed = path.find((y) => y.note.to === e.note.from)!;
-        if (url) void tell(url, { kind: 'circle.clear', clearing: x.id, ids: [...new Set(path.map((y) => y.circle))], length: path.length, you_owe: { circle: e.circle, text: t.text, help: e.note.help }, owed_to_you: { circle: owed.circle, text: tallies.get(owed.circle)!.text, help: owed.note.help }, note: 'a loop of favours owed across circles: you owe one and are owed one, so consenting squares you and everyone in the loop' });
+        const owed = path.find((y) => y.to === e.from)!;
+        void tell(e.fromUrl, { kind: 'circle.clear', clearing: x.id, ids: circles.map((c) => c.id), where: circles, circles: circles.length, lakes: new Set(path.map((y) => y.tally)).size, length: path.length, you_owe: { circle: e.circle, text: e.text, help: e.help, digest: e.digest }, owed_to_you: { circle: owed.circle, text: owed.text, help: owed.help, digest: owed.digest }, note: 'a loop of favours owed across circles: you owe one and are owed one, so consenting squares you and everyone in the loop' });
       }
     }
     void saveClearings();
+    for (const url of nudge) void ask(url, { kind: 'tally.look' }, 8000).catch(() => {});
   };
-  const consent = async (id: string, from: string) => {
+  // Loops can close on another Lake's tally without a word to this one; look now and then as well.
+  if (o.nodeUrl) setInterval(() => void findLoops(), Number(process.env.LAKE_TALLY_LOOPS_MS ?? 600_000)).unref();
+  // Another tally's loop has cleared: it forwards each house's signed consent, and this tally clears a note of its own only
+  // if both its houses signed consent to this very loop, naming that note (the one owing it, and the one owed).
+  const clearRemote = async (p: Record<string, unknown>) => {
+    const notes = (Array.isArray(p.notes) ? p.notes : []) as { circle: string; digest: string }[];
+    const evidence = (p.evidence ?? {}) as Record<string, { card: AgentCard; envelope: LakeData['envelope'] }>;
+    let cleared = 0;
+    for (const n of notes) {
+      const note = tallies.get(n.circle)?.circle?.notes?.find((y) => y.digest === n.digest);
+      if (!note || note.cleared || note.disputed) continue;
+      const signed = async (w: string, side: 'owe' | 'owed') => {
+        const ev = evidence[w];
+        const v = ev ? await verifyLakeData<Record<string, unknown>>({ lake: '0.1', card: ev.card, envelope: ev.envelope } as LakeData<Record<string, unknown>>, { sandbox: o.sandbox, now: (ev.envelope as { payload?: { iat?: number } }).payload?.iat }).catch(() => null) : null;
+        return !!v?.ok && v.profile.webId === w && v.payload.kind === 'circle.clear.consent' && v.payload.clearing === p.clearing && v.payload[side] === note.digest;
+      };
+      if (!(await signed(note.from, 'owe')) || !(await signed(note.to, 'owed'))) continue;
+      note.cleared = String(p.clearing);
+      cleared++;
+    }
+    if (cleared) void save();
+    return { kind: 'tally.cleared', clearing: p.clearing, cleared };
+  };
+  const consent = async (id: string, from: string, owe: string, owed: string, card: AgentCard, envelope: LakeData['envelope']) => {
     const x = clearings.get(id);
     if (!x || x.state !== 'proposed') return { kind: 'refused', problems: ['no loop waiting with that id'] };
     if (!x.houses.includes(from)) return { kind: 'refused', problems: ['you are not in this loop'] };
+    if (!x.notes.some((n) => n.from === from && n.digest === owe) || !x.notes.some((n) => n.to === from && n.digest === owed)) return { kind: 'refused', problems: ['name the note you owe (owe) and the one owed to you (owed) in this loop'] };
     if (!x.consents.includes(from)) x.consents.push(from);
+    (x.evidence ??= {})[from] = { card, envelope };
     if (x.consents.length === x.houses.length) {
       x.state = 'cleared';
-      for (const n of x.notes) { const note = tallies.get(n.circle)?.circle?.notes?.find((y) => y.digest === n.digest); if (note) note.cleared = x.id; }
+      for (const n of x.notes) if (!n.tally) { const note = tallies.get(n.circle)?.circle?.notes?.find((y) => y.digest === n.digest); if (note) note.cleared = x.id; }
       void save();
+      // The other Lakes' tallies in the loop clear theirs, on the houses' own signed consents.
+      for (const url of new Set(x.notes.filter((n) => n.url).map((n) => n.url!))) void ask(url, { kind: 'tally.cleared', clearing: x.id, notes: x.notes.filter((n) => n.url === url).map(({ circle, digest }) => ({ circle, digest })), evidence: x.evidence }, 20_000).catch(() => {});
+      const where = [...new Map(x.notes.map((n) => [`${n.tally ?? s.webId}|${n.circle}`, { tally: n.tally ?? s.webId, id: n.circle }])).values()];
+      const lakes = new Set(x.notes.map((n) => n.tally ?? s.webId)).size;
+      const urlOf = new Map<string, string>([...tallies.values()].flatMap((tt) => (tt.circle ? members(tt) : [])).map((m) => [m.webId, m.url]));
       for (const w of x.houses) {
-        const t = tallies.get(x.notes[0]!.circle)!;
-        const url = [...tallies.values()].flatMap((tt) => (tt.circle ? members(tt) : [])).find((m) => m.webId === w)?.url;
-        if (url) void tell(url, { kind: 'circle.cleared', clearing: x.id, id: t.id, length: x.notes.length, circles: [...new Set(x.notes.map((n) => n.circle))].length });
+        const url = urlOf.get(w) ?? (x.evidence?.[w]?.card.supportedInterfaces?.[0]?.url ?? '');
+        if (url) void tell(url, { kind: 'circle.cleared', clearing: x.id, id: x.notes[0]!.circle, ids: x.notes.map((n) => n.circle), where, circles: where.length, lakes, length: x.notes.length });
       }
     }
     void saveClearings();
@@ -592,7 +659,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     return { kind: 'tally.count', ...view(t), ...(show ? { signers: revealed().map(({ domain, url }) => ({ domain, url })), unrevealed: b.passes.length - revealed().length } : {}) };
   };
 
-  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. With quorum ({ options, at_least, closes }, people_only), nobody signs at first: each person privately answers "I\'m in if at least N of us are" from their house, as a secret count only this tally can close; when it closes, the tally opens the pledge to bind at the largest group whose every member said they\'d join a group that size (if that is at least threshold), or lets it lapse, and tells everyone who answered at once. With circle ({ promise, times }, people_only), it is a promise circle: each signer promises the others something so many times a year; once it has filled and everyone is known, members send circle.call { id, need, when? }, a few others (in an order drawn from a public drand round) get circle.ask without the caller\'s name, the first circle.accept { id, call } is put in touch with the caller, and the caller\'s circle.kept { id, call } counts the promise kept (circle.decline, circle.withdraw, circle.record { id }). No money moves. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money?, quorum?, circle? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard) => {
+  const s: Specialist = await specialist<{ kind: string }>(o, 'Tally', 'A blind tally for pledges that bind only once enough sign. Until the threshold it says how many have signed, never who (not even to whoever opened it); then it tells every signer at once. With people_only, it counts people instead of identities: each signature needs a person stamp for this tally (its context is \"<this tally\'s webId>|<id>\"), presented to this tally. A pledge that counts households or people should be people_only: otherwise any agent\'s key counts as one (run 39: an organiser\'s agent counted itself as a household). A house signs as its owner, with the owner\'s person stamp. Opened with blind: true, nobody (this tally included) learns who signed: signatures are anonymous passes from a pass issuer, and signers reveal themselves once it fills (lake_pledge does it). With unveil: true as well, nobody reveals first: each signer\'s reveal is sealed to a drand round just after the deadline, and if it filled, this tally opens them all at once then; if it lapsed, it discards them unopened. With money ({ contribution: { amount, currency }, payee: { webId, url, name? }, bond?: { hold } }), each signature needs its contribution held for this pledge by the payments agent (sign with { hold }); at the deadline the payments agent, on this tally\'s word, pays them all to the payee if it filled, or gives them all back if it lapsed, and shares the opener\'s bond (people_only pledges) equally among the signers: saying yes costs nothing if it doesn\'t happen, and pays. With quorum ({ options, at_least, closes }, people_only), nobody signs at first: each person privately answers "I\'m in if at least N of us are" from their house, as a secret count only this tally can close; when it closes, the tally opens the pledge to bind at the largest group whose every member said they\'d join a group that size (if that is at least threshold), or lets it lapse, and tells everyone who answered at once. With circle ({ promise, times }, people_only), it is a promise circle: each signer promises the others something so many times a year; once it has filled and everyone is known, members send circle.call { id, need, when? }, a few others (in an order drawn from a public drand round) get circle.ask without the caller\'s name, the first circle.accept { id, call } is put in touch with the caller, and the caller\'s circle.kept { id, call } counts the promise kept (circle.decline, circle.withdraw, circle.record { id }). No money moves. Send { kind: "tally.open", id, text, threshold, deadline, people_only?, blind?, unveil?, listed?, money?, quorum?, circle? } (listed: anyone can find it with tally.list, with how many more it needs), { kind: "tally.sign", id }, { kind: "tally.withdraw", id }, { kind: "tally.count", id } or { kind: "tally.list" }.', 'tally', async (p, from, profile, card: AgentCard, envelope) => {
     const id = String(p.id ?? '');
     if (p.kind === 'tally.open') {
       const threshold = Number(p.threshold), deadline = Date.parse(String(p.deadline ?? ''));
@@ -692,8 +759,14 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         filled: listed.filter((t) => t.state === 'triggered' && Date.now() - (t.triggeredAt ?? 0) < 86_400_000).map(view),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
-    if (p.kind === 'circle.clear.consent') return consent(String(p.clearing ?? ''), from);
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (p.kind === 'circle.clear.consent') return consent(String(p.clearing ?? ''), from, String(p.owe ?? ''), String(p.owed ?? ''), card, envelope);
+    // Between tallies across the Ocean: favours owed (to tallies only), and a loop another tally cleared.
+    if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look') {
+      if (profile.role !== 'specialist' || !profile.tags.includes('tally')) return { kind: 'refused', problems: ['for tallies only'] };
+      if (p.kind === 'tally.look') { void findLoops(); return { kind: 'tally.looking' }; }
+      return p.kind === 'tally.edges' ? { kind: 'tally.edges', edges: localEdges() } : clearRemote(p);
+    }
     const t = tallies.get(id);
     if (!t) return { kind: 'refused', problems: [`no tally called "${id}"`] };
     lapse(t);

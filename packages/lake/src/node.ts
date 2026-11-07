@@ -33,7 +33,7 @@ export interface NodeOptions {
   /** Peer nodes to follow: their cards (re-verified here) and their blocklists. */
   follow?: string[];
   /**
-   * The Ocean (SPEC §9.1): Lakes that find each other. A node that follows another says hello; one in ocean mode checks
+   * The Ocean (SPEC §9.2): Lakes that find each other. A node that follows another says hello; one in ocean mode checks
    * the caller's signed card and follows back, and learns, from the Lakes it follows, the Lakes they know. At most
    * `oceanMax` followed in all.
    */

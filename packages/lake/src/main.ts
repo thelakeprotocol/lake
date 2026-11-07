@@ -22,7 +22,7 @@ const { values: a } = parseArgs({
     'show-intent-houses': { type: 'boolean', default: false },
     follow: { type: 'string', default: process.env.LAKE_FOLLOW },
     'sync-ms': { type: 'string', default: '5000' },
-    // The Ocean: follow back Lakes that say hello, and the Lakes they know (SPEC §9.1).
+    // The Ocean: follow back Lakes that say hello, and the Lakes they know (SPEC §9.2).
     ocean: { type: 'boolean', default: process.env.LAKE_OCEAN === '1' },
     record: { type: 'string', default: process.env.LAKE_RECORD },
     // A transparency log's A2A endpoint: published blueprints go on its record (SPEC §11.8). Off unless set.
