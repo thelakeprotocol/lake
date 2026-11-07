@@ -39,6 +39,8 @@ export interface NodeOptions {
    */
   ocean?: boolean;
   oceanMax?: number;
+  /** The most cards taken from one followed Lake, and the largest listing read from it: a Lake in the Ocean can't flood this one. */
+  peerMax?: number;
   syncMs?: number;
   /** Lets an operator wipe counters, history and quarantines (demo resets). Off unless set. */
   resetToken?: string;
@@ -598,12 +600,17 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     }
     peerHealth.set(peer, h);
   };
+  const peerMax = o.peerMax ?? 5000, PEER_BYTES = 50_000_000;
   async function syncPeer(peer: string) {
     let listed: { card: AgentCard }[];
     try {
       const r = await fetch(`${peer}/cards`, { signal: AbortSignal.timeout(5000) });
       if (!r.ok) throw new Error(String(r.status));
-      listed = (await r.json()) as { card: AgentCard }[];
+      // A followed Lake can point this one at agents, but only so many: past the cap the rest are left out (and a listing
+      // too big to be honest isn't read at all).
+      const text = await r.text();
+      if (text.length > PEER_BYTES) throw new Error('listing too large');
+      listed = ((JSON.parse(text) as { card: AgentCard }[]) ?? []).slice(0, peerMax);
     } catch {
       return peerSays(peer, false);
     }

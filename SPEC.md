@@ -385,7 +385,7 @@ Lakes MAY find each other without anyone configuring them, into one **Ocean**: e
 - `GET /ocean` lists the Lakes a node knows: `{ lake, domain, ocean, lakes, following }` (`lakes`: those it follows and those that said hello). Anyone may ask.
 - A node that follows another (configured, or found) says hello: `POST <peer>/ocean/hello { url }`. A node in ocean mode checks that a Lake node answers at that address (its signed card at `/.well-known/agent-card.json`, role `node`) and follows it back.
 - A node in ocean mode reads `/ocean` of each Lake it follows and follows the Lakes listed there in turn, each checked the same way first, up to a limit of its own (reference: 50).
-- Following is §9 as before: the node verifies every card it syncs itself, and a peer can point it at agents, never vouch for them. A Lake that turns hostile is dropped like any peer; its agents' keys are blocked like any others (§9, blocklists).
+- Following is §9 as before: the node verifies every card it syncs itself, and a peer can point it at agents, never vouch for them. A node SHOULD cap how many cards it takes from any one Lake (reference: 5,000, `--peer-max`), so one Lake can't flood the Ocean. A Lake that turns hostile is dropped like any peer; its agents' keys are blocked like any others (§9, blocklists).
 - A tally reaches the other tallies in the Ocean through its own node's `/cards` (skill `tally`), and they clear favours owed across Lakes between them (§11.4c).
 
 ## 10. Canonical data model and packs

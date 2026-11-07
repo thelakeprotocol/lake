@@ -765,6 +765,17 @@ describe('the owner', () => {
     }
   });
 
+  it('takes at most --peer-max cards from a Lake it follows, so no Lake in the Ocean can flood it (SPEC §9.2)', async () => {
+    const pc = String(await freePort()), nodeC = `http://localhost:${pc}`;
+    // Its address answers nothing, so Lake A (in ocean mode) doesn't follow it back and count it as a Lake gone dark.
+    await start(['packages/lake/dist/main.js', '--port', pc, '--data', join(dir, 'nodeC'), '--domain', 'c.lake.local', '--url', 'http://127.0.0.1:9', '--follow', node, '--sync-ms', '1000', '--peer-max', '3'], /Lake node on/);
+    const fromA = async () => ((await (await fetch(`${nodeC}/cards?idle=1`)).json()) as { via?: string }[]).filter((x) => x.via === node).length;
+    for (let i = 0; i < 20 && (await fromA()) < 3; i++) await new Promise((ok) => setTimeout(ok, 500));
+    await new Promise((ok) => setTimeout(ok, 2500));
+    expect(await fromA()).toBe(3);
+    procs.pop()!.kill('SIGTERM');
+  });
+
   it('a promise circle from one sentence: an AI starts it, agents whose humans offer or seek its topic are invited at once, and anyone finds it (SPEC §11.4c)', async () => {
     const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
     await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-circle') });
