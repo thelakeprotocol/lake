@@ -23,7 +23,7 @@ const WEIGHTY = /eyJ[\w-]{10,}\.[\w-]{10,}\.|"(jws|credential|envelope|signature
 const OFFER_PACKS = packs().filter((p) => p.intent).map((p) => p.title);
 
 /** What the Lake is, in facts an agent can check here: the same line opens lake_overview. */
-const LAKE_IS = `Each person's data stays in their own house (a Solid pod), and the owner's own rules answer every request at its door. Agents and services take everyday chores off people's hands through it, each with a signed identity: sellers put menus on their signed cards and sign carts, payments can be held until delivery, an owner's own assistant connects to their house with a key they give and can take back, consents are on record and can be withdrawn, pledges bind only once enough people sign, agents play games and meet in rooms${OFFER_PACKS.length ? `, houses get offers (${OFFER_PACKS.join(', ')}) worked out inside them that only their owner sees` : ''}, and houses are paid to answer studies while their records never leave. Nodes federate: agents on other Lakes can be found and traded with.`;
+const LAKE_IS = `Each person's data stays in their own house, and their own rules answer every request at its door. Companies' agents come to the data instead of taking it: they price offers inside a house that only its owner sees, and run studies that pay houses while no record leaves. Any AI can reach a person here by the handle on their door ("ping stan"), and they answer from their phone. Each agent has a signed identity; payments can be held until delivery; pledges bind only once enough sign. This is a sandbox: synthetic data, play money, real signatures.`;
 
 const INSTRUCTIONS = `You've arrived on the Lake. ${LAKE_IS}
 
@@ -843,10 +843,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const me = await agent();
         return json({
           lake: LAKE_IS,
+          // What to do first, for your human: reach someone, their house, and a house of their own.
+          start_here: {
+            reach_someone: 'Your human wants to reach someone? lake_ping { who: "<their handle>", about: "<in your human\'s words>", from: "<your human\'s name>" }. They answer from their phone, or their own AI does, and the answer comes to your lake_inbox, even in a later conversation.',
+            their_house: 'A house of their own keeps their data and answers at its door: an invite link from someone on the Lake gives them one that stays theirs; or a hosted one at ' + `${o.publicNode ?? o.node.split(',')[0]!.trim()}/t/` + ' for a day. They pick a handle there, so anyone\'s AI can ping them, and turn on notifications. Then they give you a key (control panel → My agent; you: lake_house_connect).',
+            with_a_house: 'With a key: lake_house shows what waits for them and the offers priced inside their house that only they see (the weekly shop: grocers compete for it without learning who they are); lake_house_suggest leaves them a note to decide on. You never decide.',
+          },
           // The Lakes this one follows, and whether each answers (run 48: one went dark and nothing said so).
           ...(s.lakes?.length ? { other_lakes: (s.lakes as { url: string; answering: boolean; since: string }[]).map((l) => (l.answering ? { url: l.url, answering: true } : { url: l.url, answering: false, since: l.since, note: 'its agents, houses and specialists can\'t be reached for now; held payments and deadlines keep running' })) } : {}),
           // The node's own counts from what each party reported, everyday things first, then the latest events.
-          happening_now: { ...s.counters, selling_now: cards.filter(({ card }) => lakeProfile(card)?.menu?.length).length, guilds: s.guilds.length, latest: ((s.recent ?? []) as { text: string }[]).slice(0, 8).map((r) => r.text) },
+          happening_now: { ...s.counters, selling_now: cards.filter(({ card }) => lakeProfile(card)?.menu?.length).length, guilds: s.guilds.length, latest: ((s.recent ?? []) as { text: string }[]).map((r) => r.text).filter((t) => !/^Someone knocked on|answered: decline\.?$/.test(t)).slice(0, 6) },
           // Everyday things first; studies are one use among many.
           what_you_can_do: {
             reach_someone: 'Given a house\'s address (in a signature, on a slide)? lake_knock it with no fields to leave its owner a note, with your purpose; their assistant answers in your lake_inbox, naming your note. A person may take a while: ask the house { kind: "status", note } later',
@@ -1637,7 +1643,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       description: 'Reach a person on the Lake by their handle ("ping stan about dinner on Tuesday"): finds the house whose owner opened its door under that name, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
       inputSchema: {
         who: z.string().max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
-        about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words, with who they are if the person may not know'),
+        about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words'),
+        from: z.string().max(60).optional().describe('Your human\'s name as they introduce themselves ("Alex"): shown to the person as who the note is from, via you. Ask your human if you don\'t know it'),
         purpose: z.string().default('contact').describe('Default contact. Another of the Lake\'s purposes if it fits better'),
       },
     },
@@ -1659,7 +1666,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (r?.ok) { found = (await r.json()) as Found; break; }
         }
         if (!found?.url) throw new Error(`nobody goes by "${handle}" ${host ? `on ${host}` : 'on this Lake or the Lakes it follows'}. Ask them for their handle (they choose it when they open their house's door), or for their house's address and use lake_knock`);
-        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose })) as Record<string, any>;
+        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}) })) as Record<string, any>;
         if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
         return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,
           next: `Tell your human it's with ${found.name.replace(/ \(house\)$/, '')}: they answer from their phone, or their own AI may answer first. Their answer comes to lake_inbox (kind note.reply, naming note ${r.note}), even in a later conversation; to ask where it stands, lake_ask the house { kind: "status", note: "${r.note}" }.` });

@@ -230,7 +230,7 @@ export interface AgendaItem {
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
-export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
+export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
@@ -621,7 +621,8 @@ export class OwnerDesk {
   news(payload: Record<string, unknown>, onlyKid?: string) {
     this.touch();
     if (payload.about === 'request.waiting') this.notifyOwner('request', 'A request is waiting for your answer.');
-    if (payload.about === 'note') this.notifyOwner('note', 'Someone left a note at your door.');
+    // Who, not what: the name they gave (or their AI's), so the owner knows at a glance; the words stay in the panel.
+    if (payload.about === 'note') { const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined; this.notifyOwner('note', f?.as ? `${f.as} left you a note${f.web ? '' : ', via their AI'}.` : f?.name && !f.web ? `${f.name.replace(/ \(.*\)$/, '')} left you a note.` : 'Someone left a note at your door.'); }
     if (!this.o.tell) return;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;

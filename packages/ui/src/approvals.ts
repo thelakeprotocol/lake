@@ -201,7 +201,7 @@ type DoorState = { open: boolean; about?: string; name?: string; handle?: string
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
 type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; circleVote?: { sent?: boolean }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
-type DoorNote = { id: string; from: { web?: boolean; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
+type DoorNote = { id: string; from: { web?: boolean; as?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 interface Connect { id: string; app: string; from: string; number: string; at: string }
 interface ListView { connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
@@ -320,7 +320,7 @@ function AgendaList({ agenda }: { agenda: AgendaItem[] }) {
 /** Notes agents left at your door: their words, nothing asked of your data. Your agent hears of them too. */
 function NoteItem({ n }: { n: DoorNote }) {
   return h('li', { class: 'item' },
-    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, `Note from ${shortName(n.from.name)}`),
+    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, n.from.as ? `Note from ${n.from.as}, via ${shortName(n.from.name)}` : `Note from ${shortName(n.from.name)}`),
       h('span', { class: `chip ${n.from.checked || n.from.speaks_for?.checked ? 'ok' : ''}`, title: n.from.checked ? 'its domain is proved' : 'anyone could send this' }, n.from.web ? 'From the web' : n.from.speaks_for?.checked ? 'Speaks for a house' : n.from.checked ? 'Verified' : 'Unverified')),
     h('p', { class: 'item-text' }, `“${n.text}”`),
     h('p', { class: 'item-meta' }, `${n.from.web ? 'left over the web; nobody checked who' : n.from.domain} · ${time(n.at)}`),

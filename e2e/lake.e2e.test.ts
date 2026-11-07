@@ -481,10 +481,12 @@ describe('the owner', () => {
     await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
     const tool = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const t = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: t } : JSON.parse(t); };
     expect(await tool('lake_ping', { who: 'nobody-here', about: 'hi' })).toMatchObject({ error: expect.stringMatching(/nobody goes by "nobody-here"/) });
-    const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? This is Alex from the Claude Code class.' });
+    const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? From the Claude Code class.', from: 'Alex' });
     expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they answer from their phone/) });
     // Sam sees it on the phone and answers there; it goes back to Alex's AI, signed by Sam's house.
-    const note = ((await ownerCall({ kind: 'list' })).notes as { id: string; text: string }[]).find((x) => x.text.startsWith('Dinner on Tuesday?'))!;
+    const note = ((await ownerCall({ kind: 'list' })).notes as { id: string; text: string; from: { as?: string } }[]).find((x) => x.text.startsWith('Dinner on Tuesday?'))!;
+    // Who it's from, as Alex's AI says: shown on Sam's phone as "Alex, via <their AI>" (unchecked words).
+    expect(note.from.as).toBe('Alex');
     expect(await ownerCall({ kind: 'panel.note.reply', id: note.id, text: 'Yes! 7pm at mine?' })).toEqual({ ok: true });
     expect(((await ownerCall({ kind: 'list' })).notes as { id: string; answered?: { text: string } }[]).find((x) => x.id === note.id)?.answered).toMatchObject({ text: 'Yes! 7pm at mine?' });
     const inbox = await tool('lake_inbox', { wait_seconds: 5 });
@@ -1212,7 +1214,8 @@ describe('the open door', () => {
     // What an assistant finds first: what the Lake is, what is happening (everyday counts before security ones), and
     // everyday things to do before studies, which come last.
     // (With the Ocean, this Lake follows Lake B back, so other_lakes comes right after what the Lake is.)
-    expect(Object.keys(o).filter((k) => k !== 'other_lakes').slice(0, 3)).toEqual(['lake', 'happening_now', 'what_you_can_do']);
+    expect(Object.keys(o).filter((k) => k !== 'other_lakes').slice(0, 4)).toEqual(['lake', 'start_here', 'happening_now', 'what_you_can_do']);
+    expect(o.start_here.reach_someone).toMatch(/lake_ping/);
     expect(o.lake).toMatch(/^Each person's data stays in their own house/);
     // Lake times are UTC, and the overview says so (runs 56-60: times told a day off).
     expect(o.time).toMatchObject({ now_utc: expect.stringMatching(/Z$/), note: expect.stringMatching(/UTC/) });
