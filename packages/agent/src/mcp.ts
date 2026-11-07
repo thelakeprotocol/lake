@@ -1736,7 +1736,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_ping',
     {
-      description: 'Reach a person on the Lake by their handle ("ping stan about dinner on Tuesday"): finds the house whose owner opened its door under that name, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
+      description: 'Message a person on the Lake by their handle ("ping stan about dinner on Tuesday", "message stan", "reach stan"): finds the house whose owner opened its door under that name, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
       inputSchema: {
         who: z.string().max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
         about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words'),

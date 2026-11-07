@@ -338,10 +338,13 @@ function NoteItem({ n }: { n: DoorNote }) {
 function Reply({ label, placeholder, send, open = false, help }: { label: string; placeholder: string; send: (text: string) => Promise<unknown>; open?: boolean; help?: string }) {
   const input = useRef<HTMLInputElement>(null);
   const bump = useBump();
+  // Said at once, before the list comes back (7 Nov: on the sandbox the note took a few seconds to show it).
+  const [sent, setSent] = useState('');
+  if (sent) return h('p', { class: 'item-meta sent' }, `✓ Sent: “${sent}”`);
   return h('details', { class: 'reply', open }, h('summary', {}, label),
     h('div', { class: 'row' }, h('input', { ref: input, type: 'text', maxlength: 1000, placeholder }),
       // Sent: the list is asked again, so the note shows what you answered (7 Nov: the box just emptied, and nothing said it went).
-      h(Act, { label: 'Send', cls: 'primary', run: async () => { const t = input.current!.value.trim(); if (t) { const r = await send(t) as { error?: string } | undefined; if (r?.error) throw new Error(r.error); input.current!.value = ''; bump(); } } })),
+      h(Act, { label: 'Send', cls: 'primary', run: async () => { const t = input.current!.value.trim(); if (t) { const r = await send(t) as { error?: string } | undefined; if (r?.error) throw new Error(r.error); input.current!.value = ''; setSent(t); bump(); } } })),
     help ? h('p', { class: 'item-meta' }, help) : null);
 }
 /** An agent's card name, as a person says it: "Rook (Claude, via MCP)" is their Claude. */
@@ -1597,7 +1600,7 @@ function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) {
       h('p', { class: 'big' }, handle && !owned ? 'Make this phone its key' : 'Make this phone its key'),
       owned
         ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (More → Your key), or type your recovery code.')
-        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it.'),
+        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it. Lose this phone? A recovery code (More → Your key) brings your house back.'),
       owned ? null : h('button', { class: 'btn primary', type: 'button', disabled: open === null, onClick: () => void pair() }, 'Use this phone'),
       msg ? h('p', { class: 'muted' }, msg) : null,
       h('details', { class: 'fold', style: 'margin-top:24px', open: owned }, h('summary', {}, 'Have a recovery code?'),

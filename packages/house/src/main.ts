@@ -221,7 +221,7 @@ async function hosted(n: number) {
   // Who sent it, as they're known on the Lake: their door's name, else their handle.
   const inviterOf = (by: string) => { const d = houses.find((x) => x.name === by)?.keeper.rules.door; return d?.name ?? d?.handle ?? ''; };
   const invitePage = (code: string, why = '', by = '') => page('Your invite to the Lake', `<p class="eyebrow"><i></i>The Lake</p><h1>${by ? `${by.replace(/[<>&"]/g, '')} invited you to the Lake` : 'You\'re invited to the Lake'}</h1>
-<p class="lead">Pick a handle. From then on anyone can ask their AI to ping it, and the message lands on your phone.</p>
+<p class="lead">Want people to reach you through their AI too? Pick a handle, your name on the Lake: anyone can then ask their AI to message it, and it lands on your phone.</p>
 ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
 <form method="post" action="${code}" style="display:grid;gap:14px;margin-top:18px">
 <label style="display:grid;gap:6px"><b>Handle</b><input name="handle" required maxlength="30" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="e.g. alex" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'')" style="width:100%;font-size:17px;padding:10px"><span class="small">Lowercase letters, numbers and dashes, starting with a letter.</span></label>
