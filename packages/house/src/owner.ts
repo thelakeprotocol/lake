@@ -92,6 +92,8 @@ export interface PanelProvider {
   fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
   /** A message from this house to a tally (a promise circle's call, accept, decline, kept), and its verified reply. */
   circleSend?(tally: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
+  /** A one-time link that gives someone a house of their own on this hosted Lake. */
+  invite?(): Promise<{ link: string; left: number } | { error: string }>;
   /** A signed message from this house to another agent (the owner's answer to a note its AI left). */
   replyAgent?(url: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
   /** What the owner's record says for one coded field (its first value), for a count answered from it. */
@@ -1837,6 +1839,8 @@ export class OwnerDesk {
             if (proposed) { Object.assign(w, { tally: proposed.circleVote!.tally, id: proposed.circleVote!.id, change: proposed.circleVote!.change }); proposed.circleVote!.sent = true; await this.saveSuggestions(); }
             return panel.circleSend?.(String(w.tally ?? ''), { kind: 'circle.propose', id: String(w.id ?? ''), change: w.change ?? {} }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
           },
+          // Bring someone onto the Lake: a one-time link to a house of their own (a hosted Lake; a few per owner).
+          'panel.invite': async () => panel.invite?.() ?? { error: 'this house can\'t invite' },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },
           'panel.circle.dispute': async () => {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));

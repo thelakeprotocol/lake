@@ -2913,6 +2913,51 @@ describe('the weekly shop, priced inside the house', () => {
   }, 240_000);
 });
 
+describe('invites: a hosted Lake gives someone a house of their own, from an owner\'s link', () => {
+  let hosted: ChildProcess | undefined;
+  afterAll(async () => {
+    hosted?.kill('SIGTERM');
+    await new Promise((r) => setTimeout(r, 2500)); // let the node drop them before the federation tests count houses
+  });
+
+  it('an owner makes a one-time link; the friend picks a handle and gets a house, pairs their phone, and anyone\'s AI can ping them', async () => {
+    const [pp, hp] = [await freePort(), await freePort()];
+    const base = `http://localhost:${hp}`;
+    await start(['packages/house/dist/main.js', '--tenants', '1', '--tenant-prefix', 'inv-', '--kept', 'teacher', '--open-pairing', '--invites-each', '2', '--max-houses', '10',
+      '--public-url', base, '--pod-port', String(pp), '--pod-url', `http://localhost:${pp}/`, '--port', String(hp), '--data', join(dir, 'hosted-invites'), '--lake', node,
+      '--issuer-url', issuerUrl, '--auditor-url', auditor, '--person-url', `${specialistsUrl}/person`, '--personas-dir', 'personas', '--seed', '42'], /houses joined in/);
+    hosted = procs[procs.length - 1];
+    // The teacher's kept house: paired with its one-time token, as the operator hands it over.
+    const phone = await generateIdentity('teacher-phone');
+    const token = (await readFile(join(dir, 'hosted-invites', 'hosted', 'houses', 'teacher', 'pairing-token'), 'utf8')).trim();
+    expect((await fetch(`${base}/t/teacher/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk, token }) })).status).toBe(200);
+    const teacher = async (payload: Record<string, unknown>) => (await fetch(`${base}/t/teacher/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: 'owner' })) })).json();
+    const inv = await teacher({ kind: 'panel.invite' });
+    expect(inv).toMatchObject({ link: expect.stringMatching(new RegExp(`^${base}/t/join/[\\w-]+$`)), left: 1 });
+    // The link's page asks for a handle; the friend picks one, and their house starts.
+    expect(await (await fetch(inv.link)).text()).toMatch(/You're invited[\s\S]*Create my house/);
+    expect(await (await fetch(inv.link, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'Not Valid' }) })).json()).toMatchObject({ error: expect.stringMatching(/a handle/) });
+    const made = await (await fetch(inv.link, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alex', name: 'Alex' }) })).json();
+    expect(made).toMatchObject({ handle: 'alex', house: expect.stringMatching(new RegExp(`^${base}/t/h-[0-9a-f]{8}$`)), panel: expect.stringMatching(/\/owner\/$/) });
+    // Used once.
+    expect((await fetch(inv.link)).status).toBe(404);
+    // Alex's phone becomes its key (the first device to pair), and nobody else's can after.
+    const alexPhone = await generateIdentity('alex-phone');
+    expect((await fetch(`${made.house}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: alexPhone.publicJwk }) })).status).toBe(200);
+    expect((await fetch(`${made.house}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: (await generateIdentity('intruder')).publicJwk }) })).status).not.toBe(200);
+    // Its door is open under the handle: the node finds it, and a stranger's AI can ping it.
+    for (let i = 0; i < 30 && (await fetch(`${node}/handles/alex`)).status !== 200; i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect(await (await fetch(`${node}/handles/alex`)).json()).toMatchObject({ handle: 'alex', name: 'Alex (house)' });
+    const stranger = await visitor('ping-test.example');
+    expect((await ask(`${made.house}/a2a`, stranger, { kind: 'note', text: 'Hi Alex, welcome to the Lake.' })).reply).toMatchObject({ kind: 'noted' });
+    // The handle is taken now; a second invite can't claim it.
+    const inv2 = await teacher({ kind: 'panel.invite' });
+    expect(await (await fetch(inv2.link, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alex' }) })).json()).toMatchObject({ error: expect.stringMatching(/taken/) });
+    // Two invites each.
+    expect(await teacher({ kind: 'panel.invite' })).toMatchObject({ error: expect.stringMatching(/used your 2 invites/) });
+  }, 240_000);
+});
+
 describe('relay: a house behind a home router', () => {
   let relayed: ChildProcess | undefined;
   let card: { supportedInterfaces: { url: string }[] };

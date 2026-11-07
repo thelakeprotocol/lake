@@ -243,6 +243,7 @@ function Home({ go }: { go: (t: Tab) => void }) {
         : h('p', { class: 'empty' }, 'Nothing needs you. Your rules and your agent are handling it.')),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
     door.data?.open ? h(ShareDoor, { address: door.data.address, handle: door.data.handle }) : null,
+    h(InviteCard, {}),
     o.data ? h('div', { class: 'stats' },
       stat(o.data.knocksToday === 1 ? 'knock today' : 'knocks today', o.data.knocksToday, 'agents'),
       stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
@@ -898,6 +899,20 @@ function DoorCard({ d }: { d: DoorState }) {
       h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Your handle (optional): people ask their AI to "ping" it'), h('input', { ref: handle, type: 'text', maxlength: 30, autocapitalize: 'none', autocomplete: 'off', placeholder: 'e.g. stan', defaultValue: d.handle ?? '' })),
       h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Open my door', cls: 'primary', run: save(true) }),
         d.open ? h(Act, { label: 'Close my door', run: save(false) }) : null, msg ? h('span', { class: 'muted' }, msg) : null)));
+}
+
+/** Bring someone onto the Lake: a one-time link to a house of their own (a hosted Lake gives each owner a few). */
+function InviteCard() {
+  const [inv, setInv] = useState<{ link: string; left: number } | null>(null);
+  const share = 'share' in navigator;
+  return h('section', { class: 'block' }, h('h2', {}, 'Bring someone onto the Lake'),
+    h('p', { class: 'muted' }, 'A one-time link: they pick a handle, and their own house starts, with their phone as its key. Then anyone\'s AI can ping them too.'),
+    inv ? h('div', { class: 'address' }, h('div', {}, h('code', {}, inv.link),
+      h('div', { class: 'row' },
+        share ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Your house on the Lake', text: 'Here\'s a house of your own on the Lake:', url: inv.link }).catch(() => {}) }, 'Share') : null,
+        h(CopyButton, { text: inv.link })),
+      h('p', { class: 'item-meta' }, `Works once. ${inv.left} invite${inv.left === 1 ? '' : 's'} left.`)))
+      : h('div', { class: 'row' }, h(Act, { label: 'Make an invite link', run: async () => { const r = await call<{ link?: string; left?: number; error?: string }>({ kind: 'panel.invite' }); if (r.error || !r.link) throw new Error(r.error ?? 'no link'); setInv({ link: r.link, left: r.left ?? 0 }); } })));
 }
 
 /**

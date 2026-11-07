@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import express from 'express';
 import { page } from './page.js';
-import { describe, keepAliveBehindProxy, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
+import { describe, HANDLE, keepAliveBehindProxy, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
+import { randomBytes } from 'node:crypto';
 
 import { startHouse, type House } from './house.js';
 import { loadPacks } from './packs.js';
@@ -59,6 +60,9 @@ const { values: a } = parseArgs({
     // Hosted houses kept for someone (comma-separated names): no lease, not on the claim list, paired only with the token
     // in the house's data folder, which the operator hands to its owner.
     kept: { type: 'string', default: process.env.LAKE_KEPT },
+    // Invites (a hosted Lake): each owner may bring this many people in, each with a house of their own, up to a total.
+    'invites-each': { type: 'string', default: process.env.LAKE_INVITES_EACH ?? '5' },
+    'max-houses': { type: 'string', default: process.env.LAKE_MAX_HOUSES ?? '40' },
   },
 });
 
@@ -148,8 +152,16 @@ async function hosted(n: number) {
   const t0 = Date.now();
   const prefix = (a['tenant-prefix'] ?? `${hostname().replace(/[^a-z0-9]/gi, '').slice(-6).toLowerCase()}-`).replace(/[^a-z0-9-]/g, '');
   const kept = new Set((a.kept ?? '').split(',').map((x) => x.trim().toLowerCase()).filter((x) => /^[a-z0-9-]{2,30}$/.test(x)));
-  const names = [...Array.from({ length: n }, (_, i) => `${prefix}${i}`), ...kept];
   const dataDir = join(a.data!, 'hosted');
+  // Houses people were invited into: kept (no lease), and back after a restart. Invites: one-time codes, a few per owner.
+  type Invite = { code: string; by: string; at: string; used?: string };
+  const invitedFile = join(dataDir, 'invited.json'), invitesFile = join(dataDir, 'invites.json');
+  const invited: { name: string; by: string; at: string }[] = existsSync(invitedFile) ? JSON.parse(await readFile(invitedFile, 'utf8')) : [];
+  const invites: Invite[] = existsSync(invitesFile) ? JSON.parse(await readFile(invitesFile, 'utf8')) : [];
+  for (const i of invited) kept.add(i.name);
+  // An invited house is open to pair until its new owner's phone pairs it (then it's theirs, with no lease).
+  const isInvited = (name: string) => invited.some((i) => i.name === name) || invites.some((i) => i.used === name);
+  const names = [...Array.from({ length: n }, (_, i) => `${prefix}${i}`), ...kept];
   const log = (msg: string) => console.log(`[hosted ${prefix}*] ${msg}`);
   // One process holds every hosted house: a slip in one (a pod write that timed out) must not take down the rest.
   process.on('unhandledRejection', (e) => log(`unhandled: ${(e as Error)?.message ?? e}`));
@@ -168,7 +180,7 @@ async function hosted(n: number) {
   const houses: House[] = [];
   let warnings = 0;
   const at = Math.max(1, Number(a['start-concurrency']) || 8);
-  await pool(names, at, async (name) => {
+  const startOne = async (name: string, door?: { handle: string; name?: string }) => {
     // Each hosted house gets its own rules file: a persona, its own owner name, one or two interests.
     const h = seedFrom(name);
     // Personas are picked by their `# weight:`, the same one every time for the same house; `{{pick:a,b}}` picks a choice the same way.
@@ -178,19 +190,71 @@ async function hosted(n: number) {
     let k = 0;
     const filled = persona.replace(/\{\{pick:([^}]+)\}\}/g, (_, list: string) => { const xs = list.split(','); return xs[seedFrom(`${name}|${k++}`) % xs.length]!.trim(); });
     const tags = [TAGS[h % TAGS.length]!, ...(h % 3 === 0 ? [TAGS[(h >> 3) % TAGS.length]!] : [])];
-    const rulesText = filled.replace(/^owner: .*$/m, `owner: ${name}`).replace(/^tags: .*$/m, '') + `\ntags: [${[...new Set(tags)].join(', ')}]\n`;
+    const rulesText = filled.replace(/^owner: .*$/m, `owner: ${name}`).replace(/^tags: .*$/m, '').replace(/^door:.*$/m, '') + `\ntags: [${[...new Set(tags)].join(', ')}]\n` + (door ? `door: { handle: ${door.handle}${door.name ? `, name: ${JSON.stringify(door.name)}` : ''} }\n` : '');
     const houseDir = join(dataDir, 'houses', name);
     await mkdir(houseDir, { recursive: true });
     await writeFile(join(houseDir, 'rules.yaml'), rulesText);
     const house = await startHouse({
-      ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'] && !kept.has(name),
+      ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'] && (!kept.has(name) || isInvited(name)),
       leaseHours: a['open-pairing'] && !kept.has(name) ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
-      emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true,
+      emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true, invite: () => inviteFor(name)(),
     });
     app.use(`/t/${name}`, house.app);
     houses.push(house);
-  });
+    return house;
+  };
+  // An owner's invite: a one-time link to a house of their own, if the owner has some left and the Lake has room.
+  const inviteFor = (by: string) => async () => {
+    const mine = invites.filter((x) => x.by === by).length, each = Number(a['invites-each']) || 0;
+    if (mine >= each) return { error: `you have used your ${each} invites` };
+    if (houses.length + invites.filter((x) => !x.used).length >= (Number(a['max-houses']) || 0)) return { error: 'this Lake is full for now: they can run a house of their own (lake.doneinfifty.com/docs/join)' };
+    const code = randomBytes(9).toString('base64url');
+    invites.push({ code, by, at: new Date().toISOString() });
+    await writeFile(invitesFile, JSON.stringify(invites));
+    return { link: `${baseUrl}/t/join/${code}`, left: each - mine - 1 };
+  };
+  await pool(names, at, async (name) => { await startOne(name); });
   app.get('/health', (_req, res) => void res.json({ ok: true, houses: houses.length }));
+  // An invite's link: pick a handle, and a house of your own starts for you (yours to pair, kept, no lease).
+  const invitePage = (code: string, why = '') => page('Your house on the Lake', `<p class="eyebrow"><i></i>The Lake</p><h1>You're invited</h1>
+<p class="lead">A house of your own on the Lake: your data stays in it, your rules answer at its door, and anyone's AI can reach you by your handle.</p>
+${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
+<form method="post" action="${code}"><label>Your handle (people ask their AI to "ping" it)<input name="handle" required pattern="[a-z][a-z0-9-]{1,29}" autocapitalize="none" autocomplete="off" placeholder="e.g. alex"></label>
+<label>A name to show (optional)<input name="name" maxlength="60" placeholder="e.g. Alex"></label>
+<button class="btn primary" type="submit">Create my house</button></form>
+<p class="small">Synthetic data, play money, real signatures. Next, your phone becomes your house's key.</p>`);
+  app.get('/t/join/:code', (req, res) => {
+    const inv = invites.find((x) => x.code === req.params.code);
+    if (!inv || inv.used) return void res.status(404).type('html').send(page('Invite', '<h1>This invite has been used, or never was</h1><p class="lead">Ask whoever sent it for a new one.</p>'));
+    res.type('html').send(invitePage(inv.code));
+  });
+  app.post('/t/join/:code', express.urlencoded({ extended: false }), express.json(), async (req, res) => {
+    const inv = invites.find((x) => x.code === req.params.code);
+    const wantsJson = req.is('application/json');
+    const fail = (status: number, why: string) => void (wantsJson ? res.status(status).json({ error: why }) : res.status(status).type('html').send(invitePage(String(req.params.code), why)));
+    if (!inv || inv.used) return fail(404, 'this invite has been used, or never was');
+    const handle = String(req.body?.handle ?? '').trim().toLowerCase(), shown = String(req.body?.name ?? '').trim().slice(0, 60);
+    if (!HANDLE.test(handle)) return fail(400, 'a handle: 2 to 30 lowercase letters, digits or dashes, starting with a letter');
+    const taken = await fetch(`${String(a.lake ?? '').split(',')[0]!.trim().replace(/\/$/, '')}/handles/${handle}`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok).catch(() => false);
+    if (taken) return fail(409, `"${handle}" is taken on this Lake; choose another`);
+    inv.used = `h-${randomBytes(4).toString('hex')}`;
+    await writeFile(invitesFile, JSON.stringify(invites));
+    try {
+      await tenantSessions({ dataDir, baseUrl: podUrl, names: [inv.used] }).then((m) => sessions.set(inv.used!, m.get(inv.used!)!));
+      await closePodRoot(sessions.get(inv.used)!).catch(() => false);
+      kept.add(inv.used);
+      const house = await startOne(inv.used, { handle, ...(shown ? { name: shown } : {}) });
+      await house.join();
+      invited.push({ name: inv.used, by: inv.by, at: new Date().toISOString() });
+      await writeFile(invitedFile, JSON.stringify(invited));
+      log(`${inv.by} invited ${inv.used} (${handle})`);
+      const panel = `${baseUrl}/t/${inv.used}/owner/`;
+      return void (wantsJson ? res.json({ house: `${baseUrl}/t/${inv.used}`, panel, handle }) : res.redirect(303, panel));
+    } catch (e) {
+      log(`invite ${inv.code}: ${(e as Error).message}`);
+      return fail(500, 'the house could not start just now; try again in a minute');
+    }
+  });
   // Which houses are free to claim right now, and when the taken ones free up.
   app.get('/t/', (_req, res) => {
     const rows = houses.filter((h) => !kept.has(h.name)).sort((x, y) => x.name.localeCompare(y.name, 'en', { numeric: true })).map((h) => ({ name: h.name, until: h.desk.ownerJwk ? h.desk.leaseUntil()?.toISOString() ?? 'kept' : null }));

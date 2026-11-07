@@ -50,6 +50,8 @@ export interface HouseOptions {
   openPairing?: boolean;
   /** With open pairing: a claim lasts this long, then the house resets for the next person. */
   leaseHours?: number;
+  /** A hosted Lake's invites: the owner makes a one-time link that gives someone a house of their own. */
+  invite?: () => Promise<{ link: string; left: number } | { error: string }>;
   domain?: string;
   /** The demo domain(s) the deployment's demo specialists are named under (default lake.local), its own first. */
   demoDomains?: string[];
@@ -829,6 +831,9 @@ function panelFor(x: {
       return { kind: 'circle.vote.answered', id, vote };
     },
     async fileFavour(jws, side) { await put(owner, `wallet/favours/${side}-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {}); },
+    async invite() {
+      return x.o.invite ? x.o.invite() : { error: 'this house is run by its owner, not hosted: point people at the docs to run their own (lake.doneinfifty.com/docs/join)' };
+    },
     async replyAgent(url, payload) {
       return (await send(url, payload)).payload as Record<string, any>;
     },

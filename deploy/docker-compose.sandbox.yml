@@ -62,6 +62,10 @@ services:
       LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
       # Houses kept for someone: no lease, not on the claim list, paired with the token in their data folder.
       LAKE_KEPT: "${LAKE_KEPT:-}"
+      # Invites: each owner may bring this many people in, each with a house that stays theirs, up to this many houses in all
+      # (each house adds about 12 MB: raise LAKE_HOUSES_MEM with it).
+      LAKE_INVITES_EACH: "${LAKE_INVITES_EACH:-5}"
+      LAKE_MAX_HOUSES: "${LAKE_MAX_HOUSES:-20}"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
       # Health and the weekly shop (shopping@1); never mortgage on the sandbox.
