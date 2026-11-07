@@ -471,8 +471,11 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     void tell(call.callerUrl, { kind: 'circle.unmet', id: t.id, call: call.id, need: call.need });
   };
   // The Ocean's other tallies, from this tally's node: each one's address and WebID, from its card the node checked.
+  let tallyCache: { at: number; list: { url: string; webId: string }[] } | undefined;
   const otherTallies = async () => {
     if (!o.nodeUrl) return [];
+    // Briefly: a tally that has just joined the Ocean shouldn't wait long to be found (and an empty list isn't kept).
+    if (tallyCache && Date.now() - tallyCache.at < 15_000) return tallyCache.list;
     const rows = await fetch(`${o.nodeUrl}/cards?skill=tally&idle=1`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ card: AgentCard }[]>).catch(() => []);
     const out = new Map<string, { url: string; webId: string }>();
     for (const r of rows.slice(0, 50)) {
@@ -481,8 +484,13 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       const prof = await verifyLakeCard(r.card).catch(() => null);
       if (prof?.role === 'specialist' && prof.tags.includes('tally')) out.set(url, { url, webId: prof.webId });
     }
-    return [...out.values()].slice(0, 20);
+    const list = [...out.values()].slice(0, 20);
+    tallyCache = list.length ? { at: Date.now(), list } : undefined;
+    return list;
   };
+  // Give before you take, across the Ocean: what a member owes on this tally and on every other tally it can reach (a
+  // tally that doesn't answer counts nothing), so owing the limit in one circle can't be dodged by calling another's.
+  const standing = async (w: string) => owedBy(w) + (await Promise.all((await otherTallies()).map((t2) => ask(t2.url, { kind: 'tally.standing', webId: w }, 5000).then((r) => Math.max(0, Math.min(1000, Number(r.owes) || 0))).catch(() => 0)))).reduce((a, b) => a + b, 0);
   // What one tally tells another about a call handed between sister circles: `from` is the sending tally's WebID.
   const between = async (p: Record<string, unknown>, from: string, fromUrl: string): Promise<{ kind: string } & Record<string, any>> => {
     const no = (why: string) => ({ kind: 'refused', problems: [why] });
@@ -496,7 +504,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       if (kind ? !c.kinds?.includes(kind) : !!c.kinds) return no('this circle offers no such help');
       const caller = (p.caller ?? {}) as { webId?: string; url?: string }, origin = (p.from ?? {}) as { circle?: string; call?: string; text?: string };
       if (!caller.webId || !caller.url || !origin.circle || !origin.call) return no('caller and from are needed');
-      const lim = c.limit ?? DEFAULT_LIMIT, owe = owedBy(caller.webId);
+      const lim = c.limit ?? DEFAULT_LIMIT, owe = lim > 0 ? await standing(caller.webId) : 0;
       if (lim > 0 && owe >= lim) return no('the caller owes as many favours here as this circle allows');
       const year = Date.now() - 365 * 86_400_000;
       const keptThisYear = (w: string) => c.calls.filter((x) => x.helper === w && x.state === 'kept' && x.at > year).length;
@@ -644,8 +652,8 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       const mine = c.calls.filter((x) => x.caller === from && x.at > year && (x.state === 'asking' || x.state === 'matched' || x.state === 'kept')).length;
       if (mine >= c.times) return no(`you have called ${mine} time${mine === 1 ? '' : 's'} this year; each member may call ${c.times}`);
       // Give before you take: owing as many favours as the circle allows, help someone first (a loop may square you).
-      const lim = c.limit ?? DEFAULT_LIMIT, owe = owedBy(from);
-      if (lim > 0 && owe >= lim) return no(`you owe ${owe} favour${owe === 1 ? '' : 's'}, as many as this circle lets a member owe and still ask: help someone first (say yes to an ask), and you can ask again`);
+      const lim = c.limit ?? DEFAULT_LIMIT, owe = lim > 0 ? await standing(from) : 0;
+      if (lim > 0 && owe >= lim) return no(`you owe ${owe} favour${owe === 1 ? '' : 's'} across your circles, as many as this circle lets a member owe and still ask: help someone first (say yes to an ask), and you can ask again`);
       // Who may be asked: everyone else who hasn't yet kept all they promised this year, in an order drawn from a drand
       // round already out, so anyone can check the tally picked nobody.
       const round = roundAfter(-6000) - 1;
@@ -898,13 +906,14 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         sisters: sisterCircles(),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     if (p.kind === 'circle.clear.consent') return consent(String(p.clearing ?? ''), from, String(p.owe ?? ''), String(p.owed ?? ''), card, envelope);
     // Between tallies across the Ocean: favours owed (to tallies only), and a loop another tally cleared.
-    if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look' || String(p.kind).startsWith('tally.overflow')) {
+    if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look' || p.kind === 'tally.standing' || String(p.kind).startsWith('tally.overflow')) {
       if (profile.role !== 'specialist' || !profile.tags.includes('tally')) return { kind: 'refused', problems: ['for tallies only'] };
       if (String(p.kind).startsWith('tally.overflow')) return between(p, from, card.supportedInterfaces?.[0]?.url ?? '');
       if (p.kind === 'tally.look') { void findLoops(); return { kind: 'tally.looking' }; }
+      if (p.kind === 'tally.standing') return { kind: 'tally.standing', owes: owedBy(String(p.webId ?? '')) };
       return p.kind === 'tally.edges' ? { kind: 'tally.edges', edges: localEdges() } : clearRemote(p);
     }
     const t = tallies.get(id);

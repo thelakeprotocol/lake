@@ -2720,6 +2720,11 @@ describe('the weekly shop, priced inside the house', () => {
     await lift(a, 'street-a', b0, b2, 'Our street, north end.');
     await waitFor(async () => ((await (await fetch(`${bAt}/p/street-b.json`)).json()).circle.favours?.owed === 1 ? true : undefined));
     expect((await (await fetch(`${a}/p/street-a.json`)).json()).circle).toMatchObject({ calls: 1, kept: 1, sisters: { met_by_sisters: 1, helped_sisters: 0 } });
+    // Give before you take counts across the Ocean: b0 now owes one favour on Lake B, so a circle on this Lake that lets a
+    // member owe only one won't take b0's call until it's squared.
+    expect((await ask(`${a}/a2a`, organiser, { kind: 'tally.open', id: 'tight-a', text: 'Owe one at most.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, circle: { promise: 'a hand', times: 3, limit: 1 } })).reply).toMatchObject({ kind: 'tally.opened' });
+    for (const m of [b0, b1]) await m.call({ kind: 'panel.pledge.sign', tally: a, id: 'tight-a' });
+    expect(await b0.call({ kind: 'panel.circle.call', tally: a, id: 'tight-a', need: 'a hand with boxes' })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/you owe 1 favour across your circles/)] });
     // Then b2 needs a lift, and nobody over the river drives either: b0 takes it. Two favours owed across two Lakes: square.
     await lift(bAt, 'street-b', b2, b0, 'The street over the river.');
     const fav = async (at: string, id: string) => (await (await fetch(`${at}/p/${id}.json`)).json()).circle.favours;
