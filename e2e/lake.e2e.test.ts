@@ -2958,6 +2958,11 @@ describe('invites: a hosted Lake gives someone a house of their own, from an own
     expect(await (await fetch(inv2.link, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alex' }) })).json()).toMatchObject({ error: expect.stringMatching(/taken/) });
     // Two invites each.
     expect(await teacher({ kind: 'panel.invite' })).toMatchObject({ error: expect.stringMatching(/used your 2 invites/) });
+    // A house claimed for a day can't invite (it could fill the Lake).
+    const dayPhone = await generateIdentity('day-phone');
+    expect((await fetch(`${base}/t/inv-0/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: dayPhone.publicJwk }) })).status).toBe(200);
+    const day = await (await fetch(`${base}/t/inv-0/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.invite' }, dayPhone, { iss: 'owner' })) })).json();
+    expect(day).toMatchObject({ error: expect.stringMatching(/only a house that stays yours can invite/) });
   }, 240_000);
 });
 

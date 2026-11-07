@@ -62,7 +62,7 @@ const { values: a } = parseArgs({
     kept: { type: 'string', default: process.env.LAKE_KEPT },
     // Invites (a hosted Lake): each owner may bring this many people in, each with a house of their own, up to a total.
     'invites-each': { type: 'string', default: process.env.LAKE_INVITES_EACH ?? '5' },
-    'max-houses': { type: 'string', default: process.env.LAKE_MAX_HOUSES ?? '40' },
+    'max-houses': { type: 'string', default: process.env.LAKE_MAX_HOUSES ?? '20' },
   },
 });
 
@@ -205,6 +205,8 @@ async function hosted(n: number) {
   };
   // An owner's invite: a one-time link to a house of their own, if the owner has some left and the Lake has room.
   const inviteFor = (by: string) => async () => {
+    // Only a house that stays someone's invites: a house claimed for a day could otherwise fill the Lake.
+    if (!kept.has(by)) return { error: 'only a house that stays yours can invite (one you were invited into, or kept for you); a house claimed for a day can\'t' };
     const mine = invites.filter((x) => x.by === by).length, each = Number(a['invites-each']) || 0;
     if (mine >= each) return { error: `you have used your ${each} invites` };
     if (houses.length + invites.filter((x) => !x.used).length >= (Number(a['max-houses']) || 0)) return { error: 'this Lake is full for now: they can run a house of their own (lake.doneinfifty.com/docs/join)' };
