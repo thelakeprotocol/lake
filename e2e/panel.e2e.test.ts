@@ -299,7 +299,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await note.getByText('Answer').click();
     await note.locator('input').fill('Yes: Tuesday 10:00?');
     await note.getByRole('button', { name: 'Send', exact: true }).click();
-    await note.getByText(/You answered: “Yes: Tuesday 10:00\?”/).waitFor({ timeout: 4000 });
+    await page.locator('details.fold', { has: page.locator('summary', { hasText: 'Answered' }) }).evaluate((d) => { (d as HTMLDetailsElement).open = true; });
+    await page.getByText(/You answered: “Yes: Tuesday 10:00\?”/).waitFor({ timeout: 4000 });
     expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
     await tidy();
   });
@@ -316,7 +317,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await note.getByText(/Goes back to their AI, signed by your house\./).waitFor();
       await note.locator('input').fill('Thursday 4pm works.');
       await note.getByRole('button', { name: 'Send', exact: true }).click();
-      await note.getByText(/✓ You answered: “Thursday 4pm works\.”/).waitFor({ timeout: 6000 });
+      // Answered: it leaves Needs you for the Answered list below.
+      await page.locator('details.fold', { has: page.locator('summary', { hasText: 'Answered' }) }).evaluate((d) => { (d as HTMLDetailsElement).open = true; });
+      await page.getByText(/✓ You answered: “Thursday 4pm works\.”/).waitFor({ timeout: 6000 });
       expect(got.find((x) => x.kind === 'note.reply')).toMatchObject({ kind: 'note.reply', text: 'Thursday 4pm works.' });
       await tidy();
     } finally { await alex.close(); }

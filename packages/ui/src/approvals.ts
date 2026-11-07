@@ -222,7 +222,8 @@ function Home({ go }: { go: (t: Tab) => void }) {
     // Your AI isn't reading and people are waiting for it: only you can open it again.
     ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
-    ...(notes ?? []).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
+    // Answered notes are done: they move to Answered, below.
+    ...(notes ?? []).filter((n) => !n.answered).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
     // Below what's waiting (7 Nov: a push brought the owner to a note that sat under this offer).
     ...(notifyOffer() ? [{ k: 'notify', v: () => h(NotifyItem, { key: 'notify' }) }] : []),
   ];
@@ -238,7 +239,9 @@ function Home({ go }: { go: (t: Tab) => void }) {
               h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onClick: () => go('requests') }, 'Look at them')))) : null,
             needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
         : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'Nothing needs you. Your rules and your agent are handling it.')),
-    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null)
+    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
+    (notes ?? []).some((n) => n.answered) ? h('details', { class: 'fold' }, h('summary', {}, 'Answered'),
+      h('ul', { class: 'items' }, ...(notes ?? []).filter((n) => n.answered).slice(0, 10).map((n) => h(NoteItem, { key: `a-${n.id}`, n })))) : null)
 }
 
 /** No handle yet: the one setting that makes you reachable, on Inbox until it's done. */
