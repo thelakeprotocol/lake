@@ -12,6 +12,8 @@
 | 4 | **Faster houses, bigger Lakes** | A fresh house joins in about 11 s (target 5 s); 1,000 houses finish a paid study in 10.6 min on a laptop (target 60 s). Both are the pod server's start-up and storage. | <span class="status later">help wanted</span> |
 | 5 | **Selective disclosure** | Prove one fact from a credential without showing the rest: SD-JWT now, BBS+ later. ([SPEC §13](/docs/spec)) | <span class="status later">open</span> |
 | 6 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
+| 7 | **Favours across Lakes, privately** | To find loops of favours owed across Lakes, tallies share who owes whom (not what for) with each other, by WebID: a tally with a proven domain could read that. Loops found without showing the graph (private set intersection, MPC) would close it. Cross-Lake clearing has run between two Lakes on one laptop, not yet between operators. ([SPEC §11.4c](/docs/spec)) | <span class="status later">open</span> |
+| 8 | **Do people turn up?** | Circles, favour notes and loop clearing run; whether strangers keep promises they signed is not something code proves. The answers here are give-before-you-take (counted across every Lake), a record only the person helped can confirm, and reports against a key. The public circle on the sandbox is where it gets tested. | <span class="status later">open</span> |
 
 ## Standards we're adopting
 
