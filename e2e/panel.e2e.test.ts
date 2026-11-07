@@ -798,7 +798,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.reload();
     const circles = page.locator('.card', { hasText: 'Your promise circles' });
     await circles.getByText('You promised: a lift or a meal, 3 times a year, to 1 others.').waitFor({ timeout: 15_000 });
-    await circles.locator('select').selectOption('a lift');
+    await circles.getByLabel('Kind of help').selectOption('a lift');
     await circles.getByPlaceholder(/What do you need/).fill('A lift to the station on Friday');
     await circles.getByRole('button', { name: 'Ask my circle' }).click();
     await circles.getByText('Asked 1 member, without your name.').waitFor({ timeout: 10_000 });
@@ -819,6 +819,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const callerNote = async () => { for (let i = 0; i < 30; i++) { const n = ((await asNb({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string } }[]).find((x) => x.circle?.role === 'caller' && x.circle.state === 'matched'); if (n) return n; await page.waitForTimeout(500); } throw new Error('not matched'); };
     expect(await asNb({ kind: 'panel.circle.kept', note: (await callerNote()).id })).toMatchObject({ kind: 'circle.kept' });
     await page.getByText(/You're square: a loop of 2 favours across 1 circle cancelled out\. Nobody paid anything\./).waitFor({ timeout: 20_000 });
+    await tidy();
+    // Changing a rule is put to a vote; a circle of two can't hold one, and the panel says why.
+    await circles.locator('summary', { hasText: 'Change a rule, by vote' }).click();
+    await circles.getByLabel('Favours a member may owe').selectOption('1');
+    await circles.getByRole('button', { name: 'Put it to a vote' }).click();
+    await circles.getByText('a vote needs at least 3 members').waitFor({ timeout: 10_000 });
     await tidy();
     expect(await asOwner({ kind: 'panel.circles' })).toEqual([expect.objectContaining({ id: 'street-circle', view: expect.objectContaining({ kept: 2, you: expect.objectContaining({ you_owe: 0, owed_to_you: 0 }) }) })]);
     procs.pop()!.kill('SIGTERM');

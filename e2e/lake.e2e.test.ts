@@ -2785,6 +2785,27 @@ describe('the weekly shop, priced inside the house', () => {
     await favour('ocean-z', b2, b0);
     await waitFor(async () => ((await fav('ocean-x')).owed === 0 && (await fav('ocean-z')).owed === 0 ? true : undefined));
   }, 240_000);
+
+  it('a circle changes its own rules by secret vote (SPEC §11.4c): a member proposes, every member answers yes or no on their phone as two unreadable shares, and only the totals come out', async () => {
+    const tallyAt = `${specialistsUrl}/tally`;
+    const [b0, b1, b2] = buyers as [(typeof buyers)[number], (typeof buyers)[number], (typeof buyers)[number]];
+    const notes = async (m: (typeof buyers)[number]) => (await m.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; call: string } }[];
+    const waitFor = async <T,>(f: () => Promise<T | undefined>) => { for (let i = 0; i < 60; i++) { const v = await f(); if (v) return v; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('timed out'); };
+    const p = await b0.call({ kind: 'panel.circle.propose', tally: tallyAt, id: 'meal-circle', change: { limit: 1 } });
+    expect(p).toMatchObject({ kind: 'circle.proposed', text: 'a member may owe at most 1 favour and still ask' });
+    expect(await b1.call({ kind: 'panel.circle.propose', tally: tallyAt, id: 'meal-circle', change: { limit: 3 } })).toMatchObject({ kind: 'refused', problems: ['a vote is already open in this circle'] });
+    for (const [m, yes] of [[b0, true], [b1, true], [b2, false]] as const) {
+      const n = await waitFor(async () => (await notes(m)).find((x) => x.circle?.role === 'vote' && x.circle.call === p.vote));
+      expect(n.text).toMatch(/Your circle votes on a change to its rules: a member may owe at most 1 favour/);
+      expect(await m.call({ kind: 'panel.circle.answer', note: n.id, accept: yes })).toMatchObject({ kind: 'circle.vote.answered' });
+    }
+    // Everyone answered, so it closes without waiting three days: 2 to 1, and the rule changes.
+    const view = async () => (await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle;
+    await waitFor(async () => ((await view()).votes?.[0]?.result ? true : undefined));
+    expect((await view()).votes[0]).toMatchObject({ answered: 3, result: { yes: 2, no: 1, voted: 3, passed: true } });
+    expect((await b0.call({ kind: 'panel.circles' })).find((c: { id: string }) => c.id === 'meal-circle').view).toMatchObject({ limit: 1 });
+    expect((await waitFor(async () => (await notes(b2)).find((x) => x.circle?.role === 'voted')))!.text).toBe('Your circle voted yes, 2 to 1: a member may owe at most 1 favour and still ask.');
+  }, 240_000);
 });
 
 describe('relay: a house behind a home router', () => {

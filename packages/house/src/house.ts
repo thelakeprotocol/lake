@@ -808,6 +808,16 @@ function panelFor(x: {
       }
       return last;
     },
+    // A circle's vote on its own rules (SPEC §11.4c): the owner's yes or no, sent by this house as two unreadable shares
+    // to the tellers the tally names, if this house trusts them; the tally learns only that this member answered.
+    async voteCircle(tally, id, vote, yes) {
+      const { payload: j } = await send(tally, { kind: 'circle.vote.join', id, vote });
+      if (j.kind !== 'circle.vote.joined') return j;
+      const sent = await x.keeper().answerCount(String(j.count), j.tellers as { url: string; domain: string }[], 2, yes ? 0 : 1);
+      if (sent !== true) return { kind: 'refused', problems: [sent] };
+      x.note('circle.voted', `You answered your circle's vote privately: it left your house only as two unreadable shares`);
+      return { kind: 'circle.vote.answered', id, vote };
+    },
     async fileFavour(jws, side) { await put(owner, `wallet/favours/${side}-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {}); },
     async circleSend(tally, payload) {
       return (await send(tally, payload)).payload as Record<string, any>;
