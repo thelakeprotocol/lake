@@ -852,6 +852,13 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     procs.pop()!.kill('SIGTERM');
   });
 
+  it('turns notifications on, off or tests them from More → Notifications, whatever was tapped on Home (7 Nov)', async () => {
+    await tab('Notifications');
+    await page.getByRole('heading', { name: /for this device/ }).waitFor();
+    expect(await page.getByText(/It says who, never what/).count()).toBe(1);
+    await tidy();
+  });
+
   it('signs out on this device: back to the pairing screen', async () => {
     const keyNow = () => page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))?.[1] ?? null);
     const before = await keyNow();

@@ -149,7 +149,7 @@ function Failed({ error }: { error?: string }) {
 // Your agent and the agents that knock are different things: "My agent" is yours, "Visitors" are strangers.
 const TABS = [
   ['home', 'Home'], ['requests', 'Requests'], ['offers', 'Offers'], ['myagent', 'My agent'], ['keys', 'Keys'], ['rules', 'Rules'],
-  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'], ['key', 'Your key'],
+  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'], ['key', 'Your key'], ['notify', 'Notifications'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 /** Four tabs for every day; the rest one tap away under More. */
@@ -378,7 +378,8 @@ function NotifyItem() {
     h('p', { class: 'item-text' }, said || (ios ? 'Get a notification when something needs you: on iPhone, tap Share, then Add to Home Screen, and open your house from there.' : 'Get a notification on this device when something needs you: a request, a note at your door, a question from your AI.')),
     h('div', { class: 'item-actions' },
       !ios && !said ? h(Act, { label: 'Turn on', cls: 'primary', run: async () => setSaid(await turnOnNotifications()) }) : null,
-      h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss }, said ? 'OK' : 'Not now')));
+      h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss, title: 'You can turn them on later: More → Notifications' }, said ? 'OK' : 'Not now')),
+    said ? null : h('p', { class: 'item-meta' }, 'Later: More → Notifications.'));
 }
 
 type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
@@ -1477,7 +1478,30 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings };
+
+/**
+ * Notifications on this device, always reachable (7 Nov: once "Not now" was tapped on Home, nothing brought them back):
+ * on, a test, off; on an iPhone, how to install the panel first.
+ */
+function NotifySettings() {
+  const [said, setSaid] = useState('');
+  const [perm, setPerm] = useState(pushable() ? Notification.permission : 'unsupported');
+  const ios = iosNotInstalled();
+  const run = (f: () => Promise<string>) => async () => { setSaid(await f()); setPerm(pushable() ? Notification.permission : 'unsupported'); };
+  return h('div', {},
+    h('p', { class: 'lede' }, 'A notification on this device when something needs you: a note at your door, a request, a question from your AI. It says who, never what: the words stay here.'),
+    h('section', { class: 'block' }, h('h2', {}, perm === 'granted' ? 'On for this device' : 'Off for this device'),
+      ios ? h('p', { class: 'muted' }, 'On an iPhone: tap Share, then Add to Home Screen, and open your house from that icon. Then come back here and turn them on.')
+        : perm === 'unsupported' ? h('p', { class: 'muted' }, 'This browser can\'t take notifications. Try Chrome, Firefox or Edge, or on an iPhone the Home Screen app.')
+        : perm === 'denied' ? h('p', { class: 'muted' }, 'This browser blocks notifications from your house. Allow them in its site settings, then turn them on here.')
+        : null,
+      h('div', { class: 'row' },
+        !ios && perm !== 'unsupported' ? h(Act, { label: perm === 'granted' ? 'Turn on again' : 'Turn on', cls: perm === 'granted' ? '' : 'primary', run: run(turnOnNotifications) }) : null,
+        perm === 'granted' ? h(Act, { label: 'Send a test', run: run(async () => { await call({ kind: 'panel.push.test' }); return 'A test notification is on its way.'; }) }) : null,
+        perm === 'granted' ? h(Act, { label: 'Turn off', cls: 'quiet', run: run(async () => { const reg = await navigator.serviceWorker.getRegistration('./'); const sub = await reg?.pushManager.getSubscription(); await call({ kind: 'panel.push.off', ...(sub ? { endpoint: sub.endpoint } : {}) }); await sub?.unsubscribe().catch(() => false); try { localStorage.setItem('lake-notify', 'dismissed'); } catch { /* private mode */ } return 'Off for this device.'; }) }) : null),
+      said ? h('p', { class: 'muted' }, said) : null));
+}
 
 /**
  * Your key lives only on this device. Two ways not to lose your house with it, as sign-ins do it: a recovery code you
