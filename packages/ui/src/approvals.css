@@ -302,8 +302,8 @@ pre.json { white-space: pre-wrap; word-break: break-all; max-height: 220px; over
 .back { background: transparent; border: 0; color: var(--muted); font: inherit; font-size: 15px; padding: 4px 0; margin: 0 0 6px; cursor: pointer; }
 .page-title { font-size: 22px; margin: 0 0 14px; }
 /* Settings: one row per page, its name and what it's for. */
-ul.rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-ul.rows li + li { border-top: 1px solid var(--line); }
+ul.setrows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+ul.setrows li + li { border-top: 1px solid var(--line); }
 .rowlink { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; background: transparent; border: 0; color: var(--fg); text-align: left; cursor: pointer; font: inherit; }
 .rowlink b { display: block; font-weight: 600; }
 .rowlink small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
@@ -312,3 +312,16 @@ ul.rows li + li { border-top: 1px solid var(--line); }
 /* Me: your handle, big. */
 .block.me .handle { font-size: 30px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 
+/* Inbox: notifications offered in one line. */
+.notifybar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin: 0 0 14px; border: 1px solid var(--line); border-radius: var(--r); color: var(--muted); font-size: 14px; }
+.notifybar > span:first-child { flex: 1; min-width: 12em; }
+/* Me: how people reach you, one card. */
+.reach { display: grid; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r); }
+.reach-row { display: grid; gap: 8px; }
+.reach-row code { overflow-wrap: anywhere; }
+.reach-row .item-meta { margin: 0; }
+/* Settings: groups of compact rows. */
+.rowgroup + .rowgroup { margin-top: 18px; }
+.rowgroup h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }
+.rowlink { padding: 11px 14px; }
+.rowlink small { font-size: 12.5px; }

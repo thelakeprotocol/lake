@@ -224,12 +224,12 @@ function Home({ go }: { go: (t: Tab) => void }) {
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
     // Answered notes are done: they move to Answered, below.
     ...(notes ?? []).filter((n) => !n.answered).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
-    // Below what's waiting (7 Nov: a push brought the owner to a note that sat under this offer).
-    ...(notifyOffer() ? [{ k: 'notify', v: () => h(NotifyItem, { key: 'notify' }) }] : []),
   ];
   return h('div', {},
     // No handle yet: the one thing that makes the house reachable, right here.
     door.data && !door.data.error && !door.data.handle ? h(HandleCard, { d: door.data }) : null,
+    // Notifications: one line, not an item that needs you (Fable, 8 Nov: it was the biggest thing on the screen).
+    notifyOffer() ? h(NotifyBar, {}) : null,
     // The morning: what your AI on duty did while you were away, first.
     h(WhileYouSlept, {}),
     h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
@@ -266,35 +266,26 @@ function MeTab({ go }: { go: (t: Tab) => void }) {
   const door = useHouse<DoorState>({ kind: 'panel.door' });
   const d = door.data && !door.data.error ? door.data : null;
   if (!d) return h(Failed, { error: door.error });
+  void go;
   return h('div', {},
-    d.handle ? h('section', { class: 'block me' },
-      h('p', { class: 'handle' }, d.handle), d.name ? h('p', { class: 'muted' }, d.name) : null) : h(HandleCard, { d }),
+    d.handle ? null : h(HandleCard, { d }),
     d.open ? h(ShareDoor, { address: d.address, handle: d.handle }) : null,
     h(InviteCard, {}),
     h(Circles, {}),
-    h('details', { class: 'fold' }, h('summary', {}, 'Edit your name, handle and door'), h(DoorCard, { d })),
-    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn small quiet', type: 'button', onClick: () => go('free') }, 'When you can meet ›')));
+    h('details', { class: 'fold' }, h('summary', {}, 'Edit your name, handle and door'), h(DoorCard, { d })));
 }
 
 /** Everything else, as a plain list: each row is a page with a way back. */
 function SettingsTab({ go }: { go: (t: Tab) => void }) {
-  const rows: [Tab, string][] = [
-    ['notify', 'On this phone, when something needs you'],
-    ['free', 'The hours your AI may offer people'],
-    ['rules', 'What your house says yes or no to'],
-    ['requests', 'What agents asked for, and your answers'],
-    ['offers', 'Offers priced inside your house'],
-    ['keys', 'Who you gave a key to, and taking it back'],
-    ['agents', 'Agents that knocked'],
-    ['money', 'What you earned and paid'],
-    ['data', 'What your house holds, and exporting it'],
-    ['key', 'This phone\'s key, recovery code, a new phone'],
-    ['move', 'Take your house elsewhere'],
-    ['about', 'Your record, your identity, recent activity'],
+  const groups: [string, [Tab, string][]][] = [
+    ['Reaching you', [['notify', 'On this phone, when something needs you'], ['free', 'The hours your AI may offer people']]],
+    ['Your house', [['rules', 'What it says yes or no to'], ['requests', 'What agents asked for, and your answers'], ['offers', 'Offers priced inside it'], ['keys', 'Who you gave a key to'], ['agents', 'Agents that knocked'], ['money', 'What you earned and paid'], ['data', 'What it holds, and exporting it']]],
+    ['This phone', [['key', 'Your key, recovery code, a new phone'], ['move', 'Take your house elsewhere'], ['about', 'Your record, identity, recent activity']]],
   ];
   return h('div', {},
-    h('ul', { class: 'rows' }, ...rows.map(([t, hint]) => h('li', { key: t }, h('button', { type: 'button', class: 'rowlink', onClick: () => go(t) },
-      h('span', {}, h('b', {}, labelOf(t)), h('small', {}, hint)), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'))))),
+    ...groups.map(([title, rows]) => h('div', { key: title, class: 'rowgroup' }, h('h3', {}, title),
+      h('ul', { class: 'setrows' }, ...rows.map(([t, hint]) => h('li', { key: t }, h('button', { type: 'button', class: 'rowlink', onClick: () => go(t) },
+        h('span', {}, h('b', {}, labelOf(t)), h('small', {}, hint)), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'))))))),
     h('div', { style: 'margin-top:18px' }, h(SignOut, { cls: 'btn small danger' })));
 }
 
@@ -388,17 +379,17 @@ function AgendaList({ agenda }: { agenda: AgendaItem[] }) {
 /** Notes agents left at your door: their words, nothing asked of your data. Your agent hears of them too. */
 function NoteItem({ n }: { n: DoorNote }) {
   return h('li', { class: 'item' },
-    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, n.from.as ? `Note from ${n.from.as}, via ${shortName(n.from.name)}` : `Note from ${shortName(n.from.name)}`),
+    h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, n.from.as ? h('span', {}, h('b', {}, n.from.as), ` · via ${aiOf(n.from.name)}`) : `Note from ${shortName(n.from.name)}`),
       h('span', { class: `chip ${n.from.checked || n.from.speaks_for?.checked ? 'ok' : ''}`, title: n.from.checked ? 'its domain is proved' : 'its name and words are its own: nobody checked who it is' }, n.from.web ? 'From the web' : n.from.speaks_for?.checked ? 'Speaks for a house' : n.from.checked ? 'Verified' : 'New sender')),
     h('p', { class: 'item-text' }, `“${n.text}”`),
-    h('p', { class: 'item-meta' }, n.from.web ? `${time(n.at)} · left over the web; nobody checked who` : `${time(n.at)} · from ${n.from.as ? `${n.from.as}'s ` : ''}${aiOf(n.from.name)}${n.from.checked ? ` (${n.from.domain})` : ''}`),
+    h('p', { class: 'item-meta' }, n.from.web ? `${time(n.at)} · left over the web; nobody checked who` : `${time(n.at)}${n.from.as ? '' : ` · from their ${aiOf(n.from.name)}`}${n.from.checked ? ` · ${n.from.domain}` : ''}`),
     n.from.web ? (n.answered ? h('p', { class: 'item-meta' }, `${n.answered.by === 'you' ? 'You' : shortName(n.answered.by)} answered: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Your answer', send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })) : null,
     n.from.web ? null : h('div', {},
       // Their AI left it ("ping you"): your answer goes back to it, signed by your house.
       n.answered ? h('p', { class: 'item-meta sent' }, `✓ You answered${n.from.as ? ` ${n.from.as}` : ''}: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Reply', open: true, help: `Goes back to ${n.from.as ? `${n.from.as}'s` : 'their'} AI, signed by your house.`, send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })),
     n.from.web ? null : h('div', { class: 'item-actions' },
       h(Act, { label: 'Dismiss', cls: 'quiet', run: () => call({ kind: 'panel.note.dismiss', id: n.id }) }),
-      h(Act, { label: 'Mute sender', cls: 'quiet', run: () => call({ kind: 'panel.note.mute', id: n.id }) })));
+      n.answered ? null : h(Act, { label: 'Mute sender', cls: 'quiet', run: () => call({ kind: 'panel.note.mute', id: n.id }) })));
 }
 
 /** Your own words back: folded until you want it. */
@@ -435,6 +426,16 @@ async function turnOnNotifications(): Promise<string> {
   await call({ kind: 'panel.push.subscribe', subscription: sub.toJSON() });
   await call({ kind: 'panel.push.test' });
   return 'Notifications are on for this device. A test one is on its way.';
+}
+function NotifyBar() {
+  const bump = useBump();
+  const [said, setSaid] = useState('');
+  const ios = iosNotInstalled();
+  const dismiss = () => { try { localStorage.setItem('lake-notify', 'dismissed'); } catch { /* private mode */ } bump(); };
+  return h('div', { class: 'notifybar' },
+    h('span', {}, said || (ios ? 'For notifications: Share → Add to Home Screen, then open it from there.' : 'Get notified when something needs you.')),
+    !ios && !said ? h(Act, { label: 'Turn on', cls: 'primary', run: async () => setSaid(await turnOnNotifications()) }) : null,
+    h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss, title: 'Later: Settings → Notifications' }, said ? 'OK' : 'Not now'));
 }
 function NotifyItem() {
   const bump = useBump();
@@ -1001,17 +1002,14 @@ function ShareDoor({ address, handle }: { address: string; handle?: string }) {
   const share = 'share' in navigator;
   // What to tell people: their AI needs the Lake's connector, then just the handle.
   const say = handle ? `Ask your AI to "ping ${handle}" on the Lake` : '';
-  const shareable = 'share' in navigator;
-  return h('section', { class: 'block' }, h('h2', {}, handle ? 'You\'re reachable' : 'Your door'),
-    handle ? h('div', { class: 'address' }, h('div', {}, h('p', { class: 'item-meta' }, 'Tell people:'), h('code', {}, say), h('div', { class: 'row' },
-      shareable ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Reach me on the Lake', text: `${say}: my phone gets it, or my AI answers.` }).catch(() => {}) }, 'Share') : null,
-      h(CopyButton, { text: say })))) : null,
-    h('div', { class: 'address' },
-      h('div', {}, h('code', {}, address),
-        h('div', { class: 'row' },
-          share ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Knock on my door', text: 'Talk to my agent:', url: address }).catch(() => {}) }, 'Share') : null,
-          h(CopyButton, { text: address }),
-          h('button', { class: 'btn small', type: 'button', onClick: async () => setQr(qr ? null : await QRCode.toDataURL(address, { margin: 1, width: 480 })) }, qr ? 'Hide QR code' : 'QR code'))),
+  return h('section', { class: 'block' }, h('h2', {}, 'How people reach you'),
+    h('div', { class: 'reach' },
+      handle ? h('div', { class: 'reach-row' }, h('code', {}, say), h('div', { class: 'row' },
+        share ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Reach me on the Lake', text: `${say}: my phone gets it, or my AI answers.` }).catch(() => {}) }, 'Share') : null,
+        h(CopyButton, { text: say }))) : null,
+      h('div', { class: 'reach-row' }, h('p', { class: 'item-meta' }, 'Your address'), h('code', {}, address), h('div', { class: 'row' },
+        h(CopyButton, { text: address }),
+        h('button', { class: 'btn small', type: 'button', onClick: async () => setQr(qr ? null : await QRCode.toDataURL(address, { margin: 1, width: 480 })) }, qr ? 'Hide QR code' : 'QR code'))),
       qr ? h('img', { class: 'qr', alt: 'QR code of your door\'s address', width: 200, height: 200, src: qr }) : null));
 }
 
@@ -1272,9 +1270,9 @@ function MyAgent() {
       h('textarea', { readonly: true, rows: 5, class: 'copybox', value: invite.msg, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
       h('div', { class: 'row' }, h(CopyButton, { text: invite.msg }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => { invite = null; redraw(); } }, 'Done')))
       : h('div', { class: 'block' }, give),
-    h(DutyCard, { houseUrl, log: duty.data }),
     h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
-      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and on Home.')));
+      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and in your Inbox.')),
+    h(DutyCard, { houseUrl, log: duty.data }));
 }
 
 /**
@@ -1382,7 +1380,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       h('div', { class: 'item-foot' }, h(Act, { label: 'Off duty', cls: 'danger', confirm: 'Tap again: it stops now', run: () => call({ kind: 'panel.duty.off', kid: d.kid }) })));
   })));
   const flip = (k: string, on: boolean) => setKinds(on ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k));
-  return h('section', { class: 'block duty' }, head,
+  return h('section', { class: 'block duty' }, h('details', { class: 'fold' }, h('summary', {}, 'AI on duty: replies and bookings while you\'re away'),
     h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know, bookings in your free hours. Never money. Anything new waits for you.'),
     ...DUTY_KINDS.map(([k, label]) => h(Toggle, { key: k, label, checked: kinds.includes(k), onChange: (v: boolean) => flip(k, v) })),
     h('div', { class: 'times' },
@@ -1403,7 +1401,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       const d = await call<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
       const r = await call<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
       dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
-    } })));
+    } }))));
 }
 
 /** One thing it did, said plainly: "Replied to Sam's AI: Yes, Monday works." */
@@ -1656,9 +1654,9 @@ function App() {
       h('aside', { class: 'side' }, h('div', { class: 'brand' }, h('span', { class: 'sq' }), 'Your house'),
         h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers })),
       h('main', {},
-        h('header', { class: 'top' },
+        MAIN.includes(tab) ? h('header', { class: 'top' },
           h('div', { class: 'eyebrow' }, h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? 'live' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
-          h('h1', {}, name || 'Your house')),
+          h('h1', {}, name || 'Your house')) : null,
         MAIN.includes(tab) ? null : h('button', { class: 'back', type: 'button', onClick: () => go(tab === 'requests' ? 'home' : 'settings') }, tab === 'requests' ? '‹ Inbox' : '‹ Settings'),
         MAIN.includes(tab) ? null : h('h2', { class: 'page-title' }, labelOf(tab)),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));

@@ -53,7 +53,7 @@ const tab = async (name: string) => {
   const label = RENAMED[name] ?? name;
   const main = page.locator('#nav > button', { hasText: label });
   if (await main.count()) await main.click();
-  else { await page.locator('#nav > button', { hasText: 'Settings' }).click(); await page.locator('ul.rows .rowlink', { hasText: label }).first().click(); }
+  else { await page.locator('#nav > button', { hasText: 'Settings' }).click(); await page.locator('ul.setrows .rowlink', { hasText: label }).first().click(); }
   await page.waitForTimeout(300);
 };
 
@@ -194,9 +194,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('shares how to reach you from Me: the line to tell people, the address, Copy, and a QR code a tap away', async () => {
     await tab('Me');
-    await page.locator('.block.me .handle', { hasText: 'panelowner' }).waitFor();
     await page.getByText('Ask your AI to "ping panelowner" on the Lake').waitFor();
-    const share = page.locator('section.block', { has: page.getByRole('heading', { name: 'You\'re reachable' }) });
+    const share = page.locator('section.block', { has: page.getByRole('heading', { name: 'How people reach you' }) });
     await share.getByText(house, { exact: true }).waitFor();
     await share.getByRole('button', { name: 'QR code' }).click();
     await share.locator('img.qr').waitFor();
@@ -405,7 +404,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tidy();
     }
     await page.locator('button.back').click();
-    await page.locator('ul.rows').waitFor();
+    await page.locator('ul.setrows').first().waitFor();
   });
 
   it('opens at once with what it showed last time, even when the house is slow', async () => {
@@ -655,7 +654,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(again.error).toMatch(/doesn't match/);
     // And moves to a third device with a one-use link.
     await phone2.locator('#nav > button', { hasText: 'Settings' }).click();
-    await phone2.locator('ul.rows .rowlink', { hasText: 'Your key and recovery' }).click();
+    await phone2.locator('ul.setrows .rowlink', { hasText: 'Your key and recovery' }).click();
     await phone2.getByRole('button', { name: 'Make a pairing link' }).click();
     const link = (await phone2.locator('.address code').textContent())!;
     const ctx3 = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -741,6 +740,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('puts the owner\'s AI on duty: a signed grant and a code, the morning page with Undo, and off duty in two taps (5 Nov)', async () => {
     await tab('My agent');
     const card = page.locator('section.duty');
+    // Folded until opened: the form isn't the first thing on My AI.
+    await card.locator('summary', { hasText: 'AI on duty' }).click();
     await card.getByText('Never money. Anything new waits for you.').waitFor({ timeout: 10_000 });
     // Hours around now, so what it does below counts as on duty.
     const [from, to] = await page.evaluate(() => { const hh = (d: number) => String((new Date().getHours() + d + 24) % 24).padStart(2, '0') + ':00'; return [hh(-1), hh(2)]; });
@@ -796,6 +797,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
     await on.getByRole('button', { name: 'Off duty' }).click();
     await on.getByRole('button', { name: /Tap again/ }).click();
+    // Off duty: back to the folded form.
+    await card.locator('summary', { hasText: 'AI on duty' }).waitFor({ timeout: 10_000 });
+    await card.locator('summary', { hasText: 'AI on duty' }).click();
     await card.getByRole('button', { name: 'Sign and get a code' }).waitFor({ timeout: 10_000 });
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
     await tidy();
