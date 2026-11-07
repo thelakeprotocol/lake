@@ -778,19 +778,22 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const nbWebId = (await (await fetch(`${nb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.overview' }, phone, { iss: 'owner' })) })).json()).webId;
     const asNb = async (payload: Record<string, unknown>) => (await fetch(`${nb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: nbWebId })) })).json();
     expect(await asNb({ kind: 'panel.person.request', consent: await signMessage({ kind: 'personhood.consent', house: nbWebId }, phone, { iss: nbWebId }) })).toMatchObject({ stamped: true });
-    // The owner gets a person stamp from About your house.
-    await tab('Home');
-    await page.locator('details.fold > summary', { hasText: 'About your house' }).click();
-    await page.getByRole('button', { name: 'Get a person stamp' }).click();
-    await page.getByText('One person, one house: stamped').waitFor({ timeout: 15_000 });
-    await tidy();
-    // A circle of two, its AI suggests it, the owner signs on the phone; the neighbour signs too, and it opens.
+    // A circle of two on the street. Signing before having a person stamp says plainly what to do.
     const organiser = await makeVisitor(await generateIdentity(), 'street.example');
     expect((await ask(`${specialists}/tally/a2a`, organiser, { kind: 'tally.open', id: 'street-circle', text: 'Our street helps out.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a lift or a meal', times: 3, kinds: ['a lift', 'a meal'] } })).reply).toMatchObject({ kind: 'tally.opened' });
-    // (Its AI would suggest it; this owner's AI was removed above, so they sign it from About your house.)
+    await tab('Home');
+    await page.locator('details.fold > summary', { hasText: 'About your house' }).click();
     await page.locator('summary', { hasText: 'Sign a pledge from your house' }).click();
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
     await page.getByPlaceholder('pledge id').fill('street-circle');
+    await page.getByRole('button', { name: 'Sign this pledge' }).click();
+    await page.getByText(/it counts people, once each: get a person stamp first/).waitFor({ timeout: 15_000 });
+    // The owner gets a person stamp from About your house.
+    await page.getByRole('button', { name: 'Get a person stamp' }).click();
+    await page.getByText('One person, one house: stamped').waitFor({ timeout: 15_000 });
+    await tidy();
+    // Now the owner signs on the phone; the neighbour signs too, and it opens.
+    // (Its AI would suggest it; this owner's AI was removed above, so they sign it from About your house.)
     await page.getByRole('button', { name: 'Sign this pledge' }).click();
     await page.getByText(/Signed: 1 of 2/).waitFor({ timeout: 15_000 });
     expect(await asNb({ kind: 'panel.pledge.sign', tally: `${specialists}/tally`, id: 'street-circle' })).toMatchObject({ kind: 'tally.triggered' });
