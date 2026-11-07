@@ -114,7 +114,7 @@ export interface PledgeMoney { amount: number; currency: string; payee: string; 
 export interface CircleItem {
   tally: string; id: string; call: string; need: string; when?: string; promise?: string; /** The kind of help asked for. */ help?: string;
   role: 'ask' | 'caller' | 'kept' | 'unmet' | 'cleared';
-  state: 'open' | 'accepted' | 'declined' | 'reported' | 'taken' | 'asking' | 'matched' | 'done' | 'withdrawn';
+  state: 'open' | 'accepted' | 'declined' | 'reported' | 'taken' | 'asking' | 'matched' | 'done' | 'withdrawn' | 'disputed';
   /** Whom to reach, once matched: the other member's house (and its WebID, which a favour note names). */
   contact?: string; contactWebId?: string;
 }
@@ -1763,7 +1763,7 @@ export class OwnerDesk {
             if (proposed) { Object.assign(w, { tally: proposed.circleCall!.tally, id: proposed.circleCall!.id, need: proposed.circleCall!.need, help: proposed.circleCall!.help }); proposed.circleCall!.sent = true; await this.saveSuggestions(); }
             const tally = String(w.tally ?? '');
             const r = await panel.circleSend?.(tally, { kind: 'circle.call', id: String(w.id ?? ''), need: String(w.need ?? ''), ...(w.help ? { help: String(w.help) } : {}), ...(w.when ? { when: String(w.when) } : {}) }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
-            if (r.kind === 'circle.called') await this.circleNote({ tally, id: String(w.id), call: String(r.call), need: String(w.need), ...(w.when ? { when: String(w.when) } : {}), role: 'caller', state: 'asking' }, `You asked your circle for: ${w.need}. ${r.asked} member${r.asked === 1 ? '' : 's'} asked, without your name; you hear when one says yes.`);
+            if (r.kind === 'circle.called') await this.circleNote({ tally, id: String(w.id), call: String(r.call), need: String(w.need), ...(w.when ? { when: String(w.when) } : {}), role: 'caller', state: 'asking' }, `You asked your circle for: ${String(w.need).replace(/[.!?]+$/, '')}. ${r.asked} member${r.asked === 1 ? '' : 's'} asked, without your name; you hear when one says yes.`);
             return r;
           },
           'panel.circle.answer': async () => {
@@ -1778,6 +1778,14 @@ export class OwnerDesk {
             else if (r.kind === 'circle.reported') c.state = 'reported';
             else if (/taken/.test(JSON.stringify(r.problems ?? ''))) c.state = 'taken';
             await this.saveSuggestions();
+            return r;
+          },
+          // It didn't go as it should: either side marks the call disputed; no favour is owed, and it counts against neither.
+          'panel.circle.dispute': async () => {
+            const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));
+            if (!sug?.circle) return { error: 'no call of yours, or one you took, with that note' };
+            const r = await panel.circleSend?.(sug.circle.tally, { kind: 'circle.dispute', id: sug.circle.id, call: sug.circle.call }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
+            if (r.kind === 'circle.disputed') { sug.circle.state = 'disputed'; await this.saveSuggestions(); }
             return r;
           },
           'panel.circle.kept': async () => {

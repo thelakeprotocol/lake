@@ -512,10 +512,12 @@ function panelFor(x: {
     return { credential: await presentSdJwtVc(String(payload.credential), [], x.id, { aud, nonce }), card };
   };
   // The promise circles this owner joined (SPEC §11.4c), by the tally's WebID: only those may send them calls.
-  const rememberCircle = async (counter: string, url: string, id: string) => {
+  // One write at a time: joining two circles at once had the second write lose the first (the 300-house run).
+  let circlesWrite = Promise.resolve();
+  const rememberCircle = (counter: string, url: string, id: string) => (circlesWrite = circlesWrite.then(async () => {
     const known = await owner.fetch(`${owner.podRoot}wallet/circles.json`).then((r) => (r.ok ? r.json() : [])).catch(() => []) as { tally: string; id: string }[];
     if (!known.some((c) => c.tally === counter && c.id === id)) await put(owner, 'wallet/circles.json', JSON.stringify([...known.slice(-99), { tally: counter, url: url.replace(/\/a2a\/?$/, ''), id, at: new Date().toISOString() }]), 'application/json').catch(() => {});
-  };
+  }));
   const signPledgeAt = async (tally: string, id: string, contribution?: { credential: string; owner: string }): Promise<Record<string, any>> => {
     const s = await stamp();
     const { payload: before, card: tallyCard } = await send(tally, { kind: 'tally.count', id });

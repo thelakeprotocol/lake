@@ -2618,6 +2618,13 @@ describe('the weekly shop, priced inside the house', () => {
     const auto = await askOf(buyers[2]!, third.call);
     expect(auto.text).toMatch(/Your house said yes for you, under your standing rule \(a meal, up to 1 a week\)/);
     expect(auto.circle).toMatchObject({ state: 'accepted', contact: expect.stringContaining(buyers[0]!.url.replace(/^http:\/\//, '')) });
+    // Fairness: give before you take (the circle lets a member owe 2 and still ask), and a call that went wrong is marked
+    // disputed by either side: no favour is owed for it, and it counts against neither.
+    expect((await record(buyers[0]!))).toMatchObject({ limit: 2, you: { can_ask: true } });
+    const third_caller = async () => ((await buyers[0]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string } }[]).find((x) => x.circle?.role === 'caller' && x.circle.call === third.call)!;
+    for (let i = 0; i < 20 && (await third_caller()).circle!.state !== 'matched'; i++) await new Promise((ok) => setTimeout(ok, 500));
+    expect(await buyers[0]!.call({ kind: 'panel.circle.dispute', note: (await third_caller()).id })).toMatchObject({ kind: 'circle.disputed' });
+    expect((await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle).toMatchObject({ disputed: 1, favours: { owed: 0 } });
   }, 240_000);
 });
 

@@ -32,6 +32,13 @@ export interface NodeOptions {
   intentMin?: number;
   /** Peer nodes to follow: their cards (re-verified here) and their blocklists. */
   follow?: string[];
+  /**
+   * The Ocean (SPEC §9.1): Lakes that find each other. A node that follows another says hello; one in ocean mode checks
+   * the caller's signed card and follows back, and learns, from the Lakes it follows, the Lakes they know. At most
+   * `oceanMax` followed in all.
+   */
+  ocean?: boolean;
+  oceanMax?: number;
   syncMs?: number;
   /** Lets an operator wipe counters, history and quarantines (demo resets). Off unless set. */
   resetToken?: string;
@@ -631,11 +638,49 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
       // A peer that's down is just a peer that's down. We carry on.
     }
   }
-  for (const peer of o.follow ?? []) {
+  // Whom this node follows, and the Lakes it has heard of; following starts a sync, and (Ocean) a hello.
+  const following = new Set<string>();
+  const heardOf = new Map<string, { from: string; at: string }>();
+  const oceanMax = o.oceanMax ?? 50;
+  const sayHello = (peer: string) => fetch(`${peer}/ocean/hello`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: o.url }), signal: AbortSignal.timeout(5000) }).catch(() => {});
+  const followLake = (peer: string, why: string) => {
     const p = peer.replace(/\/$/, '');
-    setInterval(() => void syncPeer(p), o.syncMs ?? 5000).unref();
+    if (following.has(p) || p === o.url || following.size >= oceanMax) return false;
+    following.add(p);
+    setInterval(() => void syncPeer(p).then(() => (o.ocean ? learnLakes(p) : undefined)), o.syncMs ?? 5000).unref();
     setTimeout(() => void syncPeer(p), 500).unref();
+    void sayHello(p);
+    publish(makeEvent('lake.status', o.url, undefined, { lake: p, answering: true, followed: why }));
+    return true;
+  };
+  // Gossip: the Lakes a followed Lake knows, followed in turn (ocean mode), each checked by its own signed card first.
+  const isLake = async (url: string) => {
+    try {
+      const c = await verifyLakeCard((await (await fetch(`${url}/.well-known/agent-card.json`, { signal: AbortSignal.timeout(5000) })).json()) as AgentCard);
+      return c.role === 'node';
+    } catch { return false; }
+  };
+  async function learnLakes(peer: string) {
+    const r = await fetch(`${peer}/ocean`, { signal: AbortSignal.timeout(5000) }).then((x) => x.json() as Promise<{ lakes?: string[] }>).catch(() => ({ lakes: [] }));
+    for (const l of (r.lakes ?? []).slice(0, 200)) {
+      const u = String(l).replace(/\/$/, '');
+      if (!/^https?:\/\/\S+$/.test(u) || u === o.url || following.has(u)) continue;
+      if (!heardOf.has(u)) heardOf.set(u, { from: peer, at: new Date().toISOString() });
+      if (following.size < oceanMax && (await isLake(u))) followLake(u, `heard of from ${peer}`);
+    }
   }
+  // The Lakes this node knows: those it follows and those that said hello. Anyone may ask: it's how the Ocean grows.
+  app.get('/ocean', (_req, res) => void res.json({ lake: o.url, domain: o.domain, ocean: !!o.ocean, lakes: [...new Set([...following, ...heardOf.keys()])], following: [...following] }));
+  app.post('/ocean/hello', async (req, res) => {
+    const url = String((req.body as { url?: unknown })?.url ?? '').replace(/\/$/, '');
+    if (!/^https?:\/\/\S+$/.test(url) || url === o.url) return void res.status(400).json({ error: 'url: your Lake node\'s address' });
+    if (!heardOf.has(url)) heardOf.set(url, { from: 'hello', at: new Date().toISOString() });
+    // A hello is only a hint: the caller's own signed card says it is a Lake node before anything is followed.
+    if (!o.ocean) return void res.json({ heard: true, following: following.has(url) });
+    if (!following.has(url) && !(await isLake(url))) return void res.status(400).json({ error: 'no Lake node answers at that address' });
+    res.json({ heard: true, following: following.has(url) || followLake(url, 'said hello') });
+  });
+  for (const peer of o.follow ?? []) followLake(peer, 'configured');
 
   const server = createServer(app);
   const wss = new WebSocketServer({ noServer: true });

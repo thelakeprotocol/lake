@@ -205,6 +205,7 @@ export class Housekeeper {
       else if (q.kind === 'circle.matched') { await desk.circleUpdate(q.id, q.call, 'caller', { state: 'matched', contact: String(q.helper?.url ?? ''), ...(q.helper?.webId ? { contactWebId: String(q.helper.webId) } : {}) }); desk.notifyOwner('circle-matched', `Someone from your circle will help with: ${base.need}`); }
       else if (q.kind === 'circle.filled') await desk.circleUpdate(q.id, q.call, 'ask', { state: 'taken' });
       else if (q.kind === 'circle.withdrawn') await desk.circleUpdate(q.id, q.call, 'ask', { state: 'withdrawn' });
+      else if (q.kind === 'circle.disputed') { (await desk.circleUpdate(q.id, q.call, 'caller', { state: 'disputed' })) || (await desk.circleUpdate(q.id, q.call, 'ask', { state: 'disputed' })); desk.notifyOwner('circle-disputed', `A call in your circle was marked disputed: "${base.need}". No favour is owed for it.`); }
       else if (q.kind === 'circle.unmet') { await desk.circleUpdate(q.id, q.call, 'caller', { state: 'withdrawn' }); await desk.circleNote({ ...base, role: 'unmet', state: 'done' }, `Nobody in your circle could take "${base.need}" this time.`); }
       else if (q.kind === 'circle.kept') {
         // A favour note: filed in the owner's wallet and countersigned, so it can clear in a loop.

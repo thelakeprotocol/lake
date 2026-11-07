@@ -407,7 +407,8 @@ function CircleNote({ x, c }: { x: Note; c: CircleItem }) {
         h(Act, { label: 'Not this time', run: send({ kind: 'panel.circle.answer', note: x.id, accept: false }) }),
         // Something it shouldn't ask (money, a visit, anything unsafe): reported against the caller's key, and passed on.
         h(Act, { label: 'Report', cls: 'danger', confirm: 'Tap again: reported, never named to them', run: send({ kind: 'panel.circle.answer', note: x.id, report: true }) })) : null,
-      c.state === 'accepted' ? [line('You said yes. Reach them at their house:'), h('a', { href: doorOf(c.contact), target: '_blank', rel: 'noopener' }, doorOf(c.contact))] : null,
+      c.state === 'accepted' ? [line('You said yes. Reach them at their house:'), h('a', { href: doorOf(c.contact), target: '_blank', rel: 'noopener' }, doorOf(c.contact)), h(Act, { label: 'Something went wrong', cls: 'quiet', confirm: 'Tap again: marked disputed, no favour owed', run: send({ kind: 'panel.circle.dispute', note: x.id }) })] : null,
+      c.state === 'disputed' ? line('Marked disputed: no favour is owed for it, and it counts against neither of you.') : null,
       c.state === 'taken' ? line('Someone else in the circle took it.') : null,
       c.state === 'declined' ? line('You said not this time. Someone else will be asked; nobody learns you said no.') : null,
       c.state === 'reported' ? line('Reported. Someone else will be asked; the caller isn\'t told who reported it.') : null,
@@ -421,6 +422,8 @@ function CircleNote({ x, c }: { x: Note; c: CircleItem }) {
       // Thanks is the receipt: your house signs a favour note to the member who helped.
       c.state === 'matched' ? h(Act, { label: 'Thanks', cls: 'primary', run: send({ kind: 'panel.circle.kept', note: x.id }) }) : null,
       c.state === 'asking' || c.state === 'matched' ? h(Act, { label: 'Withdraw', cls: 'quiet', run: send({ kind: 'panel.circle.kept', note: x.id, withdraw: true }) }) : null,
+      c.state === 'matched' ? h(Act, { label: 'It didn\'t happen', cls: 'quiet', confirm: 'Tap again: marked disputed, no favour owed', run: send({ kind: 'panel.circle.dispute', note: x.id }) }) : null,
+      c.state === 'disputed' ? line('Marked disputed: no favour is owed for it, and it counts against neither of you.') : null,
     ] : null);
 }
 
@@ -498,7 +501,7 @@ function SuggestionItem({ x }: { x: Note }) {
     x.pledge?.money ? h(PledgeTerms, { m: x.pledge.money }) : null,
     x.pledge?.circle ? h('div', { class: 'pledge-terms' }, h('p', { class: 'item-meta' }, `A promise circle: each of you promises the others ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year${x.pledge.circle.kinds ? ` (you pick which of ${x.pledge.circle.kinds.join(', ')})` : ''}. When someone needs it, a few who offer that are asked, picked by a public draw, without knowing who asked. You can always say not this time. No money.`)) : null,
     x.pledge?.quorum ? h(QuorumQuestion, { x, q: x.pledge.quorum }) : null,
-    x.circle ? h(CircleNote, { x, c: x.circle }) : null,
+    x.circle && (x.circle.role === 'ask' || x.circle.role === 'caller') ? h(CircleNote, { x, c: x.circle }) : null,
     // A count answered from your own record: you see what it says; it leaves only as two unreadable shares.
     x.count ? h('div', { class: 'pledge-terms' },
       h('p', { class: 'item-meta' }, x.count.mine ? `Your ${x.count.label}, from your own record: ${x.count.mine.replace(/:/g, ' · ')}` : `Your record has no ${x.count.label}: nothing to count.`),
