@@ -1811,6 +1811,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // Asked to show a house's word with none to show: said, not silently dropped (run 43).
         if (a.reveal_house && !speaksFor) throw new Error('reveal_house: you have no house\'s word to show: only an assistant connected to its human\'s house (lake_house_connect) carries one. Send it without reveal_house; it arrives as your own words');
         const reply = await (await agent()).ask(a.agent_url, a.message as { kind: string });
+        // Answering someone who left a note at the human's door: the house marks that note answered, by you.
+        if (noteRe && house) { const text = String((a.message as { text?: unknown }).text ?? '').slice(0, 1000); if (text) void houseCall({ kind: 'assistant.answered', note: noteRe, text }).catch(() => {}); }
         // Waiting on an answer for the human: the house holds it as an errand, matched later by the other side's key.
         if (a.expect_reply && !house) reply.errand = 'not kept: only an assistant connected to its human\'s house (lake_house_connect) has a house to keep it';
         else if (a.expect_reply) {

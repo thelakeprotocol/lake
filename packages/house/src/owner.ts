@@ -234,7 +234,7 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -595,7 +595,7 @@ export class OwnerDesk {
   }
 
   /** Tell the owner's phones, at most once every two minutes for each kind of thing. */
-  notifyOwner(tag: string, body: string) {
+  notifyOwner(tag: string, body: string, url?: string) {
     void (async () => {
       const st = await this.pushes();
       // Counted only when sent: a note before any phone was signed up mustn't silence the first one after.
@@ -608,7 +608,7 @@ export class OwnerDesk {
       // house sends it itself, so a push service is reached the same way whatever its address.
       await Promise.all(st.subs.map(async (sub) => {
         try {
-          const d = webpush.generateRequestDetails(sub, JSON.stringify({ title: 'Your house', body, tag }), { vapidDetails: { subject, publicKey: st.keys!.publicKey, privateKey: st.keys!.privateKey }, TTL: 6 * 3600 });
+          const d = webpush.generateRequestDetails(sub, JSON.stringify({ title: 'Your house', body, tag, ...(url ? { url } : {}) }), { vapidDetails: { subject, publicKey: st.keys!.publicKey, privateKey: st.keys!.privateKey }, TTL: 6 * 3600 });
           const r = await fetch(d.endpoint, { method: d.method, headers: d.headers as Record<string, string>, body: d.body as unknown as BodyInit, signal: AbortSignal.timeout(10_000) });
           if (r.status === 404 || r.status === 410) gone.push(sub.endpoint);
           else if (!r.ok) console.log(`push to a device: ${r.status}`);
@@ -624,7 +624,7 @@ export class OwnerDesk {
     this.touch();
     if (payload.about === 'request.waiting') this.notifyOwner('request', 'A request is waiting for your answer.');
     // Who, not what: the name they gave (or their AI's), so the owner knows at a glance; the words stay in the panel.
-    if (payload.about === 'note') { const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined; this.notifyOwner('note', f?.as ? `${f.as} left you a note${f.web ? '' : ', via their AI'}.` : f?.name && !f.web ? `${f.name.replace(/ \(.*\)$/, '')} left you a note.` : 'Someone left a note at your door.'); }
+    if (payload.about === 'note') { const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined; this.notifyOwner('note', f?.as ? `${f.as} left you a note${f.web ? '' : ', via their AI'}.` : f?.name && !f.web ? `${f.name.replace(/ \(.*\)$/, '')} left you a note.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`); }
     if (!this.o.tell) return;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;
@@ -1275,6 +1275,16 @@ export class OwnerDesk {
           return void res.json({ ok: true, id: item.id, status: agreed ? `agreed: by ${agreed.by}${agreed.speaks_for?.checked ? `, which speaks for ${agreed.speaks_for.house}` : ', an agent that showed no house it speaks for'}` : 'proposed: it holds the time (your human\'s calendar shows it as tentative); when they agree, send agenda { id, agreed_in }', note: 'in your human\'s agenda, in their house' });
         }
         // An answer to a note left over plain web: its sender reads it at the private link it was given.
+        // The owner's AI answered an agent's note itself (on duty, to someone the owner knows): the note says so.
+        if (p.kind === 'assistant.answered') {
+          const q = p as unknown as { note?: string; text?: string };
+          const n = this.notes.find((x) => x.id === String(q.note ?? '') && !x.from.web);
+          if (!n) return void res.status(404).json({ error: 'no note from an agent with that id' });
+          n.answered = { text: String(q.text ?? '').trim().slice(0, 1000), by: assistant.label, at: new Date().toISOString() };
+          void this.saveNotes();
+          this.touch();
+          return void res.json({ ok: true });
+        }
         if (p.kind === 'assistant.reply') {
           const q = p as unknown as { note?: string; text?: string; final?: boolean };
           const r = this.answerWebNote(String(q.note ?? ''), String(q.text ?? ''), assistant.label, q.final !== false);

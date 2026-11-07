@@ -309,9 +309,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const got: Record<string, unknown>[] = [];
     const alex = await joinLake({ name: 'Alex (Claude)', domain: 'alex.example', node: nodeUrl, port: await freePort(), onMessage: async (m) => { got.push(m.payload as Record<string, unknown>); return { kind: 'received' }; } });
     try {
-      expect(await alex.ask(`${house}/a2a`, { kind: 'note', text: 'Alex here, from the Claude Code class: free for a call Thursday?' })).toMatchObject({ kind: 'noted' });
-      const note = page.locator('.item', { hasText: 'free for a call Thursday' });
-      await note.waitFor({ timeout: 6000 });
+      const left = await alex.ask(`${house}/a2a`, { kind: 'note', text: 'Alex here, from the Claude Code class: free for a call Thursday?' }) as { kind: string; note: string };
+      expect(left).toMatchObject({ kind: 'noted' });
+      // A notification about it opens the app at it: the Inbox, that note first and lit.
+      await page.goto(`${house}/owner/#note=${left.note}`);
+      const note = page.locator('.item.lit', { hasText: 'free for a call Thursday' });
+      await note.waitFor({ timeout: 8000 });
       // Open already, with where it goes: an answer is one line and Send.
       await note.getByText(/Goes back to their AI, signed by your house\./).waitFor();
       await note.locator('input').fill('Thursday 4pm works.');

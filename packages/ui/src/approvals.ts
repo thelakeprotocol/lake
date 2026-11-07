@@ -157,7 +157,9 @@ const TABS = [
 type Tab = (typeof TABS)[number][0];
 const MAIN: Tab[] = ['home', 'me', 'myagent', 'settings'];
 const labelOf = (t: Tab) => TABS.find(([id]) => id === t)?.[1] ?? t;
-const tabFromHash = (): Tab => TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home';
+const tabFromHash = (): Tab => (location.hash.startsWith('#note=') ? 'home' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home');
+/** A note a notification was about (#note=<id>): the Inbox scrolls to it and lights it up. */
+const focusNote = () => (location.hash.startsWith('#note=') ? location.hash.slice(6) : '');
 
 function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean }) {
   const [open, setOpen] = useState(false);
@@ -221,9 +223,9 @@ function Home({ go }: { go: (t: Tab) => void }) {
     ...(list.data.connects ?? []).map((c) => ({ k: `c-${c.id}`, v: () => h(ConnectRequest, { key: `c-${c.id}`, c }) })),
     // Your AI isn't reading and people are waiting for it: only you can open it again.
     ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
-    ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
-    // Answered notes are done: they move to Answered, below.
+    // People first (8 Nov: a note the owner was pushed about sat under six of their AI's suggestions); answered ones below.
     ...(notes ?? []).filter((n) => !n.answered).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
+    ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
   ];
   return h('div', {},
     // No handle yet: the one thing that makes the house reachable, right here.
@@ -240,7 +242,7 @@ function Home({ go }: { go: (t: Tab) => void }) {
             needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
         : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'Nothing needs you. Your rules and your agent are handling it.')),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
-    (notes ?? []).some((n) => n.answered) ? h('details', { class: 'fold' }, h('summary', {}, 'Answered'),
+    (notes ?? []).some((n) => n.answered) ? h('details', { class: 'fold', open: (notes ?? []).some((n) => n.answered && n.id === focusNote()) }, h('summary', {}, 'Answered'),
       h('ul', { class: 'items' }, ...(notes ?? []).filter((n) => n.answered).slice(0, 10).map((n) => h(NoteItem, { key: `a-${n.id}`, n })))) : null)
 }
 
@@ -378,7 +380,8 @@ function AgendaList({ agenda }: { agenda: AgendaItem[] }) {
 
 /** Notes agents left at your door: their words, nothing asked of your data. Your agent hears of them too. */
 function NoteItem({ n }: { n: DoorNote }) {
-  return h('li', { class: 'item' },
+  const lit = focusNote() === n.id;
+  return h('li', { class: `item${lit ? ' lit' : ''}`, id: `note-${n.id}`, ref: lit ? (el: HTMLElement | null) => el?.scrollIntoView({ block: 'center' }) : undefined },
     h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, n.from.as ? h('span', {}, h('b', {}, n.from.as), ` · via ${aiOf(n.from.name)}`) : `Note from ${shortName(n.from.name)}`),
       h('span', { class: `chip ${n.from.checked || n.from.speaks_for?.checked ? 'ok' : ''}`, title: n.from.checked ? 'its domain is proved' : 'its name and words are its own: nobody checked who it is' }, n.from.web ? 'From the web' : n.from.speaks_for?.checked ? 'Speaks for a house' : n.from.checked ? 'Verified' : 'New sender')),
     h('p', { class: 'item-text' }, `“${n.text}”`),
@@ -386,7 +389,7 @@ function NoteItem({ n }: { n: DoorNote }) {
     n.from.web ? (n.answered ? h('p', { class: 'item-meta' }, `${n.answered.by === 'you' ? 'You' : shortName(n.answered.by)} answered: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Your answer', send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })) : null,
     n.from.web ? null : h('div', {},
       // Their AI left it ("ping you"): your answer goes back to it, signed by your house.
-      n.answered ? h('p', { class: 'item-meta sent' }, `✓ You answered${n.from.as ? ` ${n.from.as}` : ''}: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Reply', open: true, help: `Goes back to ${n.from.as ? `${n.from.as}'s` : 'their'} AI, signed by your house.`, send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })),
+      n.answered ? h('p', { class: 'item-meta sent' }, `✓ ${n.answered.by === 'you' ? 'You' : `${shortName(n.answered.by)} (your AI)`} answered${n.from.as ? ` ${n.from.as}` : ''}: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Reply', open: true, help: `Goes back to ${n.from.as ? `${n.from.as}'s` : 'their'} AI, signed by your house.`, send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })),
     n.from.web ? null : h('div', { class: 'item-actions' },
       h(Act, { label: 'Dismiss', cls: 'quiet', run: () => call({ kind: 'panel.note.dismiss', id: n.id }) }),
       n.answered ? null : h(Act, { label: 'Mute sender', cls: 'quiet', run: () => call({ kind: 'panel.note.mute', id: n.id }) })));
@@ -1615,6 +1618,16 @@ function App() {
   const [noOffers, setNoOffers] = useState(false);
   const go = (t: Tab) => { setTab(t); if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`); scrollTo(0, 0); };
   useEffect(() => { const f = () => setTab(tabFromHash()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  // Pull down at the top to refresh, as phone apps do (8 Nov: a Home Screen app has no reload button).
+  const [pull, setPull] = useState(0);
+  useEffect(() => {
+    let y0: number | null = null, d = 0;
+    const start = (e: TouchEvent) => { y0 = scrollY <= 0 ? e.touches[0]!.clientY : null; d = 0; };
+    const move = (e: TouchEvent) => { if (y0 === null) return; d = Math.max(0, e.touches[0]!.clientY - y0); setPull(Math.min(d, 120)); };
+    const end = () => { if (y0 !== null && d > 80) bump(); y0 = null; d = 0; setPull(0); };
+    addEventListener('touchstart', start, { passive: true }); addEventListener('touchmove', move, { passive: true }); addEventListener('touchend', end);
+    return () => { removeEventListener('touchstart', start); removeEventListener('touchmove', move); removeEventListener('touchend', end); };
+  }, []);
   // The house's "something changed" (SSE), opened with a one-use token from a signed call (an EventSource can't sign);
   // a burst of changes is one refetch. A look every minute anyway, and when you come back to the page.
   useEffect(() => {
@@ -1654,6 +1667,7 @@ function App() {
       h('aside', { class: 'side' }, h('div', { class: 'brand' }, h('span', { class: 'sq' }), 'Your house'),
         h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers })),
       h('main', {},
+        pull ? h('div', { class: 'pull', style: `height:${pull / 2}px` }, pull > 80 ? 'Release to refresh' : 'Pull to refresh') : null,
         MAIN.includes(tab) ? h('header', { class: 'top' },
           h('div', { class: 'eyebrow' }, h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? 'live' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
           h('h1', {}, name || 'Your house')) : null,

@@ -11,7 +11,8 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = new URL((e.notification.data && e.notification.data.url) || './approvals.html', self.registration.scope).href;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((all) => {
-    for (const c of all) if (c.url.startsWith(self.registration.scope)) return c.focus();
+    // Already open: go to what it was about (a note), not just to the app.
+    for (const c of all) if (c.url.startsWith(self.registration.scope)) return c.focus().then((w) => (w && 'navigate' in w ? w.navigate(url) : w));
     return self.clients.openWindow(url);
   }));
 });
