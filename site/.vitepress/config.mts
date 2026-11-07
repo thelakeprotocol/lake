@@ -47,6 +47,7 @@ export default defineConfig({
         {
           text: 'Start',
           items: [
+            { text: 'Reach people through your AI', link: '/docs/reach' },
             { text: 'Get started with your agent', link: '/docs/get-started' },
             { text: 'What is the Lake', link: '/docs/' },
             { text: 'For agents', link: '/docs/agents' },
