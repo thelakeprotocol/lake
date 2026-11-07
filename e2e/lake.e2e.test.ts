@@ -71,7 +71,7 @@ beforeAll(async () => {
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
   specialistsUrl = `http://localhost:${sp}`;
-  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage,shopping'], /register registered with the Lake node/);
+  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage,shopping'], /register registered with the Lake node/, { LAKE_TALLY_CHECKPOINT_MS: '3000' });
   await Promise.all(
     // Four houses: three that join by standing rules (enough for a table) and one that asks its owner.
     [['stan', 'stan'], ['strict', 'strict'], ['research', 'research'], ['kai', 'stan']].map(async ([name, persona]) => {
@@ -2731,6 +2731,9 @@ describe('the weekly shop, priced inside the house', () => {
     await lift(a, 'street-a', b0, b2, 'Our street, north end.');
     await waitFor(async () => ((await (await fetch(`${bAt}/p/street-b.json`)).json()).circle.favours?.owed === 1 ? true : undefined));
     expect((await (await fetch(`${a}/p/street-a.json`)).json()).circle).toMatchObject({ calls: 1, kept: 1, sisters: { met_by_sisters: 1, helped_sisters: 0 } });
+    // The circle's record goes on the transparency log, signed by its tally: every favour note by fingerprint.
+    await waitFor(async () => ((await (await fetch(`${a}/p/street-a.json`)).json()).circle.on_the_log ? true : undefined));
+    expect((await (await fetch(`${a}/p/street-a.json`)).json()).circle.on_the_log).toMatchObject({ index: expect.any(Number), origin: expect.any(String) });
     // Give before you take counts across the Ocean: b0 now owes one favour on Lake B, so a circle on this Lake that lets a
     // member owe only one won't take b0's call until it's squared.
     expect((await ask(`${a}/a2a`, organiser, { kind: 'tally.open', id: 'tight-a', text: 'Owe one at most.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, circle: { promise: 'a hand', times: 3, limit: 1 } })).reply).toMatchObject({ kind: 'tally.opened' });

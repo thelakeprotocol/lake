@@ -89,6 +89,8 @@ interface Circle {
    */
   notes?: FavourNote[];
   passes?: Pass[];
+  /** Its record's latest checkpoint on the transparency log, and a digest of what it said, to log again only on a change. */
+  checkpoint?: { index: number; origin: string; at: number; digest: string };
 }
 interface FavourNote {
   call: string; from: string; to: string; help?: string; at: number; digest: string; acked?: boolean; cleared?: string; disputed?: boolean;
@@ -161,7 +163,7 @@ const CONFIRM_WITHIN = Number(process.env.LAKE_CIRCLE_CONFIRM_MS ?? 7 * 86_400_0
 const DEFAULT_LIMIT = 2;
 const MAX_DAYS = 30;
 
-export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string; paymentsUrl?: string; tellers?: string[]; nodeUrl?: string }) {
+export async function createTally(o: SpecialistOptions & { dataDir: string; personCheckers?: string[]; passesUrl?: string; paymentsUrl?: string; tellers?: string[]; nodeUrl?: string; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }> }) {
   const checkers = o.personCheckers ?? ['person.lake.local'];
   const file = `${o.dataDir}/tallies.json`;
   const tallies = new Map<string, Tally>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Tally[]).map((t) => [t.id, t]));
@@ -182,7 +184,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const circleView = (t: Tally, c: Circle) => {
     const done = c.calls.filter((x) => x.state === 'kept' || x.state === 'unmet');
     const notes = c.notes ?? [];
-    return { promise: c.promise, times_a_year: c.times, ...(c.kinds ? { kinds: c.kinds } : {}), ...(c.sisters ? { sisters: { met_by_sisters: c.calls.filter((x) => x.away && x.state === 'kept').length, helped_sisters: c.calls.filter((x) => x.guest && x.state === 'kept').length } } : {}), ...(c.tags ? { tags: c.tags, invited: c.invited?.length ?? 0 } : {}), members: members(t).length, open: circleOpen(t), calls: c.calls.filter((x) => x.state !== 'withdrawn').length, kept: c.calls.filter((x) => x.state === 'kept').length, unmet: c.calls.filter((x) => x.state === 'unmet').length, of: done.length, unconfirmed: c.calls.filter((x) => x.state === 'unconfirmed').length, disputed: c.calls.filter((x) => x.state === 'disputed').length, limit: c.limit ?? DEFAULT_LIMIT, ...(notes.length ? { favours: { signed: notes.length, owed: notes.filter((n) => !n.cleared).length, cleared: notes.filter((n) => n.cleared).length } } : {}) };
+    return { promise: c.promise, times_a_year: c.times, ...(c.kinds ? { kinds: c.kinds } : {}), ...(c.checkpoint ? { on_the_log: { index: c.checkpoint.index, origin: c.checkpoint.origin, at: new Date(c.checkpoint.at).toISOString() } } : {}), ...(c.sisters ? { sisters: { met_by_sisters: c.calls.filter((x) => x.away && x.state === 'kept').length, helped_sisters: c.calls.filter((x) => x.guest && x.state === 'kept').length } } : {}), ...(c.tags ? { tags: c.tags, invited: c.invited?.length ?? 0 } : {}), members: members(t).length, open: circleOpen(t), calls: c.calls.filter((x) => x.state !== 'withdrawn').length, kept: c.calls.filter((x) => x.state === 'kept').length, unmet: c.calls.filter((x) => x.state === 'unmet').length, of: done.length, unconfirmed: c.calls.filter((x) => x.state === 'unconfirmed').length, disputed: c.calls.filter((x) => x.state === 'disputed').length, limit: c.limit ?? DEFAULT_LIMIT, ...(notes.length ? { favours: { signed: notes.length, owed: notes.filter((n) => !n.cleared).length, cleared: notes.filter((n) => n.cleared).length } } : {}) };
   };
   // Who is in it, once that's known: a plain pledge's signers; a blind one's, once revealed.
   const members = (t: Tally): { webId: string; url: string }[] => (t.blind ? t.blind.passes.flatMap((x) => (x.revealed ? [{ webId: x.revealed.webId, url: x.revealed.url }] : [])) : t.signers.map(({ webId, url }) => ({ webId, url })));
@@ -650,6 +652,25 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     const r = await noteOn({ url: myUrl(), circle: String(p.circle ?? ''), digest: String(p.digest ?? '') });
     return r ? { kind: 'tally.note', ...r } : { kind: 'refused', problems: ['no such favour here'] };
   };
+
+  // A circle's record on the transparency log (SPEC §11.4c): its counts and every favour note's digest with where it stands,
+  // signed by this tally, whenever it changed. Nobody holds the record but the log: a note can't later be dropped or
+  // rewritten without an earlier checkpoint showing it, and a member can check their own notes are there.
+  const checkpoint = async (t: Tally) => {
+    const c = t.circle;
+    if (!o.log || !c || !circleOpen(t)) return;
+    const v = circleView(t, c);
+    const notes = (c.notes ?? []).map((n) => `${n.digest.slice(0, 32)}:${n.disputed ? 'disputed' : n.cleared ? 'cleared' : n.acked ? 'owed' : 'signed'}${n.passed?.length ? `:passed${n.passed.length}` : ''}`).sort();
+    const body = { kind: 'circle.checkpoint', tally: s.webId, id: t.id, text: t.text, members: v.members, calls: v.calls, kept: v.kept, unmet: v.unmet, notes };
+    const digest = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+    if (c.checkpoint?.digest === digest) return;
+    const envelope = await signMessage({ ...body, at: new Date().toISOString() }, o.id, { iss: s.webId, ttl: 10 * 365 * 86_400 });
+    const entry = JSON.stringify({ card: s.card, envelope });
+    if (entry.length > 60_000) return;
+    const r = await o.log(entry, 'agent').catch(() => null);
+    if (r) { c.checkpoint = { index: r.index, origin: r.origin, at: Date.now(), digest }; void save(); }
+  };
+  setInterval(() => { for (const t of tallies.values()) void checkpoint(t); }, Number(process.env.LAKE_TALLY_CHECKPOINT_MS ?? 3_600_000)).unref();
 
   // Agents whose cards say offering:<tag> or seeking:<tag> for one of the circle's tags, on this tally's node: each hears of
   // it once (circle.invite), and its AI brings it to its human, who decides. At most 500 a circle.
@@ -1141,7 +1162,7 @@ async function tick(){
   else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">signed, '+v.threshold+' needed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
     if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}
   $('main').innerHTML=h;
-  const c=v.circle;if(c){$('circle').hidden=false;$('circle').innerHTML='<p><b>A promise circle.</b> Each member promised the others '+esc(c.promise)+', '+(c.times_a_year===1?'once':c.times_a_year+' times')+' a year. No money.</p>'+(c.open?'<p class="big">'+c.kept+' <span class="of">promises kept, of '+c.of+' calls</span></p>'+(c.favours?'<p class="of">'+c.favours.signed+' favours signed as owed; <b>'+c.favours.cleared+'</b> cleared in loops across circles, so those members are square. Nobody paid anything.</p>':'')+'<p class="of">'+c.members+' members. When one asks for help, a few others are asked, picked by a public draw, without knowing who asked.</p>':'<p class="of">It opens for calls once it has filled and everyone is known.</p>')}
+  const c=v.circle;if(c){$('circle').hidden=false;$('circle').innerHTML='<p><b>A promise circle.</b> Each member promised the others '+esc(c.promise)+', '+(c.times_a_year===1?'once':c.times_a_year+' times')+' a year. No money.</p>'+(c.open?'<p class="big">'+c.kept+' <span class="of">promises kept, of '+c.of+' calls</span></p>'+(c.favours?'<p class="of">'+c.favours.signed+' favours signed as owed; <b>'+c.favours.cleared+'</b> cleared in loops across circles, so those members are square. Nobody paid anything.</p>':'')+(c.on_the_log?'<p class="of">Its record is on the transparency log ('+esc(c.on_the_log.origin)+', entry '+c.on_the_log.index+', '+new Date(c.on_the_log.at).toLocaleString()+'): every favour note, by fingerprint, and where it stands.</p>':'')+'<p class="of">'+c.members+' members. When one asks for help, a few others are asked, picked by a public draw, without knowing who asked.</p>':'<p class="of">It opens for calls once it has filled and everyone is known.</p>')}
   if(q&&q.result){const r=q.result,max=Math.max(1,...Object.values(r.totals));
     $('quorum').hidden=false;$('quorum').innerHTML='<p><b>The secret count:</b> '+r.counted+' families answered "I\\'m in if at least how many are?"</p>'+q.options.map((o,i)=>{const n=r.totals[o]||0,inq=q.at_least[i]!==null&&q.at_least[i]<=r.size;return '<div class="row"><span>'+esc(o)+'</span><div class="bar"><i class="'+(inq?'in':'')+'" style="width:'+(100*n/max)+'%"></i></div><b>'+n+'</b></div>'}).join('')+'<p class="of">'+(r.size?'<b>'+r.size+'</b> families hold together: each said they\\'d join a group that size or smaller'+(r.binds?', so it binds once '+r.binds+' sign, the most any of them asked for.':'.'):'')+(r.why?' '+esc(r.why):'')+'</p>'}
 }
