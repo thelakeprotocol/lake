@@ -123,7 +123,7 @@ async function start(k: string, url: string) {
   // Who this agent is, once it exists: what it signs log entries with when the log is elsewhere.
   const toLog = logTo(() => (self ? { id, card: self.card, webId: self.webId } : undefined));
   const s: { app: express.Express; card: AgentCard; webId: string } =
-    DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack! })
+    DEFAULTS[k]!.authority ? await createAuthority({ ...o, pack: DEFAULTS[k]!.pack!, dataDir: values.data! })
     : DEFAULTS[k]!.pack ? await createIssuer({ ...o, pack: DEFAULTS[k]!.pack!, asOf: values.seed ? Date.UTC(2026, 9, 1) : undefined })
     : k === 'ethics' ? await createEthics(o)
     : k === 'payments' ? await createPayments({ ...o, log: toLog, dataDir: values.data!, arbiters: domains(values['trust-arbiters'] ?? everyDemo('arbiter')), onSettled: (amount, count, how = {}) => link?.report(makeEvent('payment.settled', 'self', undefined, { amount, count, ...(how.currency ? { currency: how.currency } : {}), ...(how.cart ? { cart: true } : {}), ...(how.held ? { held: true } : {}), ...(how.released ? { released: true } : {}) })) })

@@ -147,7 +147,8 @@ export interface LakeAgent {
    */
   sellFor(house: CartPayee | null): Promise<void>;
   /** A cart for one buyer, signed by this agent: what it will sell them, for how much, until when. */
-  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string, sku?: string, delivery?: DeliveryTerms, team?: { id: string; split: CartShare[] }): Promise<CartMandate>;
+  /** `assets`: a cart in a unit that isn't money (SPEC §6.7), and whose word that it was paid counts. */
+  cart(buyerWebId: string, items: { label: string; amount: { currency: string; value: number } }[], minutes?: number, brief?: string, sku?: string, delivery?: DeliveryTerms, team?: { id: string; split: CartShare[] }, assets?: Record<string, { accept: CartParty[] }>): Promise<CartMandate>;
   /** This agent's signed consent to its share of a team's cart (SPEC §6.5). */
   consentToShare(o: { cart: string; splitHash: string; amount: number; currency: string }): Promise<string>;
   /** The RFC 7638 thumbprint of this agent's card key, as a cart pins it. */
@@ -381,11 +382,11 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
     async jkt() {
       return keyThumbprint(id.publicJwk);
     },
-    async cart(buyerWebId, items, minutes, brief, sku, delivery, team) {
+    async cart(buyerWebId, items, minutes, brief, sku, delivery, team, assets) {
       // Ordered from the menu: the cart names it (its digest, as on this card) and the item, inside what the seller signs,
       // with the item's delivery terms unless this cart gives its own.
       const item = sku ? menu.find((m) => m.sku === sku) : undefined;
-      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(item ? { menu: { items: menu, sku: item.sku } } : {}), ...(await sellerTerms()), ...(delivery ?? item?.delivery ? { delivery: delivery ?? item?.delivery } : {}), ...(team ? { id: team.id, split: team.split } : sellingFor ? { payee: sellingFor } : {}) });
+      return signCart({ seller: id, sellerWebId: visitor.webId, sellerName: visitor.card.name, buyerWebId, items, minutes, brief, ...(item ? { menu: { items: menu, sku: item.sku } } : {}), ...(await sellerTerms()), ...(delivery ?? item?.delivery ? { delivery: delivery ?? item?.delivery } : {}), ...(team ? { id: team.id, split: team.split } : sellingFor ? { payee: sellingFor } : {}), ...(assets ? { assets } : {}) });
     },
     async payCart(sellerUrl, cart, hold, releaseAfterHours) {
       const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;

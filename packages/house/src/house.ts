@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, cartHash, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -802,6 +802,27 @@ function panelFor(x: {
     },
     // A favour owed to the owner, passed on to settle one they owe (SPEC §11.4c): the house finds a pair in the owner's
     // wallet, endorses the one to whom the other is owed, and offers it; they agree on their phone.
+    // A cart priced in favours (SPEC §6.7), paid with one owed to the owner: endorsed to the cart's seller for that cart, at
+    // the tally that holds the note, on the owner's tap.
+    async payWithFavour(cart, sellerUrl) {
+      const sellerCard = (await (await fetch(cardUrlFor(sellerUrl))).json()) as AgentCard;
+      const seller = await verifyLakeCard(sellerCard);
+      const contents = (cart as CartMandate).contents;
+      const dir = `${owner.podRoot}wallet/favours/`;
+      const listing = await owner.fetch(dir, { headers: { accept: 'text/turtle' } }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+      const names = [...new Set([...listing.matchAll(/owed-[0-9a-f]{16}\.jwt/g)].map((m) => m[0]))].slice(0, 100);
+      let last: Record<string, any> = { kind: 'refused', problems: ['no favour owed to you to pay with: help someone in one of your circles first'] };
+      for (const name of names) {
+        const jws = await owner.fetch(`${dir}${name}`).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+        let sub: { id?: string; circle?: { id?: string; tally?: string } };
+        try { sub = (JSON.parse(Buffer.from(jws.split('.')[1] ?? '', 'base64url').toString()) as { credentialSubject?: typeof sub }).credentialSubject ?? {}; } catch { continue; }
+        if (sub.id !== owner.webId || !sub.circle?.id || !sub.circle.tally) continue;
+        const endorsement = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeFavourEndorsement'], issuer: owner.webId, validFrom: new Date().toISOString(), credentialSubject: { id: seller.webId, note: createHash('sha256').update(jws).digest('hex'), settles: `urn:ap2:cart:${contents.id}`, cart_hash: cartHash(contents) } } as never, x.id);
+        last = (await send(sub.circle.tally, { kind: 'circle.pay', id: sub.circle.id, note: jws, endorsement, cart, seller_card: sellerCard }).catch((e: Error) => ({ payload: { kind: 'refused', problems: [e.message] } }))).payload as Record<string, any>;
+        if (last.kind === 'circle.paid') { x.note('favour.paid', `You paid ${sellerCard.name} with a favour owed to you: the one who owed it owes them now`); return last; }
+      }
+      return last;
+    },
     async passFavour() {
       const dir = `${owner.podRoot}wallet/favours/`;
       const listing = await owner.fetch(dir, { headers: { accept: 'text/turtle' } }).then((r) => (r.ok ? r.text() : '')).catch(() => '');

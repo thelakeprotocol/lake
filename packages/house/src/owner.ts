@@ -87,6 +87,8 @@ export interface PanelProvider {
   favourNote?(c: { tally: string; id: string; call: string; helper: string; need: string; help?: string }): Promise<string>;
   /** Pass a favour owed to the owner on, to settle one they owe (SPEC §11.4c). */
   passFavour?(): Promise<Record<string, any>>;
+  /** Pay a cart priced in favours with one owed to the owner (SPEC §6.7). */
+  payWithFavour?(cart: unknown, sellerUrl: string): Promise<Record<string, any>>;
   /** Answer a circle's vote on its rules, privately (SPEC §11.4c). */
   voteCircle?(tally: string, id: string, vote: string, yes: boolean): Promise<Record<string, any>>;
   fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
@@ -170,7 +172,7 @@ export interface AssistantKey { /** On duty: the grant it acts under while the o
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
@@ -1134,6 +1136,14 @@ export class OwnerDesk {
           }
           // A change to one of the owner's circles, proposed by their assistant (a rule, or a partner it found): their tap
           // puts it to the members' vote.
+          // A cart priced in favours (SPEC §6.7): the owner's tap pays it with one owed to them.
+          let favourPay: Suggestion['favourPay'];
+          const qfp = (p as { favour_pay?: { cart?: { contents?: { id?: string; merchant_name?: string; payment_request?: { details?: { total?: { amount?: { currency?: string; value?: number } } } } } }; seller_url?: unknown } }).favour_pay;
+          if (qfp) {
+            const total = qfp.cart?.contents?.payment_request?.details?.total?.amount;
+            if (!qfp.cart?.contents?.id || !/^https?:\/\/\S+$/.test(String(qfp.seller_url ?? '')) || total?.currency !== 'FAV') return void res.status(400).json({ error: 'favour_pay: { cart (a cart in FAV, as its seller signed it), seller_url }' });
+            favourPay = { cart: qfp.cart, seller: String(qfp.seller_url), sellerName: String(qfp.cart.contents.merchant_name ?? '').slice(0, 80), total: `${total.value} favour` };
+          }
           let circleVote: Suggestion['circleVote'];
           const qcv = (p as { circle_vote?: { tally?: unknown; id?: unknown; change?: unknown } }).circle_vote;
           if (qcv) {
@@ -1188,7 +1198,7 @@ export class OwnerDesk {
             if (!assistant.webId) return void res.status(400).json({ error: 'allowance: you connected before allowances existed: reconnect with a new code first' });
             allowance = { amount: Math.round(amount * 100) / 100, currency, days };
           }
-          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !count && !circleCall && !circleVote && !aboutNote && !rules && !door && !sender && !allowance;
+          const adviceDropped = q.advice !== undefined && !request && !offer && !pledge && !count && !circleCall && !circleVote && !favourPay && !aboutNote && !rules && !door && !sender && !allowance;
           if (adviceDropped) delete q.advice;
           let ask: Suggestion['ask'];
           if (q.ask) {
@@ -1204,7 +1214,7 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             if (!priv) ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
-          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(circleCall ? { circleCall } : {}), ...(circleVote ? { circleVote } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(circleCall ? { circleCall } : {}), ...(circleVote ? { circleVote } : {}), ...(favourPay ? { favourPay } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions];
           this.trimSuggestions();
           await this.saveSuggestions();
@@ -1842,6 +1852,13 @@ export class OwnerDesk {
           },
           // Bring someone onto the Lake: a one-time link to a house of their own (a hosted Lake; a few per owner).
           'panel.invite': async () => panel.invite?.() ?? { error: 'this house can\'t invite' },
+          'panel.favour.pay': async () => {
+            const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && x.favourPay && !x.favourPay.paid);
+            if (!sug?.favourPay) return { error: 'no unpaid cart with that note' };
+            const r = await panel.payWithFavour?.(sug.favourPay.cart, sug.favourPay.seller) ?? { kind: 'refused', problems: ['this house can\'t pay with favours'] };
+            if (r.kind === 'circle.paid') { sug.favourPay.paid = true; await this.saveSuggestions(); this.news({ about: 'favour.paid', cart: r.cart, note: 'your human paid it with a favour owed to them: the seller has the tally\'s receipt' }, sug.by); }
+            return r;
+          },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },
           'panel.circle.dispute': async () => {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));

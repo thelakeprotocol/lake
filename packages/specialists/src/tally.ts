@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
-import { checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, cardUrlFor, countContext, isCurrency, makeEvent, pledgeAgreement, unshardCounts, verifyCredential, verifyLakeCard, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
+import { checkCart, cartTerms, isParty, issueCredential, FAVOUR_ASSET, type CartMandate, checkPass, checkReveal, checkSdJwtAttachment, commitTo, getBeacon, openSeal, roundAfter, roundTimeMs, sealedRound, cardUrlFor, countContext, isCurrency, makeEvent, pledgeAgreement, unshardCounts, verifyCredential, verifyLakeCard, passChallenge, PERSON_IN_CONTEXT_VCT, sendLake, signMessage, verifyLakeData, type AgentCard, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -637,6 +637,43 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     void findLoops();
     return { kind: 'circle.pass.accepted', id: t.id, pass: x.id, note: 'the favour is yours now: the one who owed it owes you, and whoever passed it to you is square with you' };
   };
+  // A favour as payment (SPEC §6.7): B, owed a favour by A, pays a cart priced in favours with it. The seller agreed when it
+  // signed a cart in FAV naming this tally; B's house endorses A's note to the seller for that cart. The note is then owed
+  // to the seller (A is told), and this tally signs the receipt the seller counts. Once: the note leaves B as it moves.
+  const payWithFavour = async (t: Tally, p: Record<string, unknown>, from: string, card: AgentCard) => {
+    const no = (why: string) => ({ kind: 'refused', problems: [why] });
+    const c = t.circle!;
+    const jws = String(p.note ?? ''), digest = createHash('sha256').update(jws).digest('hex');
+    const n = (c.notes ?? []).find((x) => x.digest === digest);
+    if (!n || n.to !== from || !n.acked || n.cleared || n.disputed) return no('no favour owed to you with that note here, countersigned and not yet cleared');
+    if ((n.passed?.length ?? 0) >= 2) return no('this favour has been passed on as often as it can be (three holders)');
+    if (busyHere().has(n.digest)) return no('this favour is in a loop being cleared just now');
+    let seller, cart;
+    try {
+      seller = await verifyLakeCard(p.seller_card as AgentCard);
+      cart = await checkCart(p.cart as CartMandate, seller.publicJwk);
+    } catch (e) { return no(`cart: ${(e as Error).message}`); }
+    // Made out to the buyer, or to its human's own AI (the house pays what its assistant ordered: its endorsement names this very cart).
+    if (cart.seller !== seller.webId) return no('the cart was not signed by that seller');
+    if (cart.total.currency !== FAVOUR_ASSET || cart.total.value !== 1) return no(`the cart is ${cart.total.currency} ${cart.total.value}; a favour pays a cart of ${FAVOUR_ASSET} 1`);
+    const accept = cartTerms((p.cart as CartMandate).contents).assets?.[FAVOUR_ASSET]?.accept ?? [];
+    if (!(await isParty({ webId: s.webId, publicJwk: o.id.publicJwk } as never, accept))) return no('the cart doesn\'t name this tally as the one whose word it was paid counts');
+    try {
+      const vc = await verifyCredential(String(p.endorsement ?? ''), (await verifyLakeCard(card)).publicJwk);
+      const sub = vc.credentialSubject as { id?: string; note?: string; settles?: string; cart_hash?: string };
+      if (!vc.type.includes('LakeFavourEndorsement') || vc.issuer !== from || sub.id !== seller.webId || sub.note !== digest || sub.settles !== `urn:ap2:cart:${cart.id}` || sub.cart_hash !== cart.hash) throw new Error('it does not pass this note to this cart\'s seller, for this cart');
+    } catch (e) { return no(`endorsement: ${(e as Error).message}`); }
+    (n.passed ??= []).push(n.to);
+    n.to = seller.webId; n.toUrl = (p.seller_card as AgentCard).supportedInterfaces?.[0]?.url ?? '';
+    void save();
+    const receipt = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeReceipt', 'LakeFavourReceipt'], issuer: s.webId, validFrom: new Date().toISOString(),
+      credentialSubject: { id: seller.webId, payer: from, amount: { value: 1, currency: FAVOUR_ASSET }, cart: { id: cart.id, hash: cart.hash }, agreement: `urn:ap2:cart:${cart.id}`, settlement: 'favour', note: digest } } as never, o.id);
+    void tell(n.toUrl, { kind: 'receipt', receipt: { credential: receipt, card: s.card }, cart: cart.id });
+    void tell(members(t).find((m) => m.webId === n.from)?.url ?? '', { kind: 'circle.passed', id: t.id, call: n.call, note: n.digest });
+    void findLoops();
+    return { kind: 'circle.paid', id: t.id, cart: cart.id, receipt, note: 'paid with a favour: the one who owed it to you owes it to the seller now' };
+  };
+
   // Here, the favour a pass settles: cleared once its debtor endorsed the pass to its creditor and the creditor said yes.
   const settle = async (p: Record<string, unknown>): Promise<{ kind: string } & Record<string, any>> => {
     const no = (why: string) => ({ kind: 'refused', problems: [why] });
@@ -844,6 +881,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: 'circle.record', id: t.id, text: t.text, ...circleView(t, c), you: { kept: c.kept[from] ?? 0, asked: c.asked[from] ?? 0, owed_to_you: open.filter((n) => n.to === from && !n.disputed).length, you_owe: open.filter((n) => n.from === from && !n.disputed).length, owe_everywhere: owedBy(from), can_ask: !(c.limit ?? DEFAULT_LIMIT) || owedBy(from) < (c.limit ?? DEFAULT_LIMIT), ...(c.kinds ? { offers: offersOf(from) } : {}), calls: c.calls.filter((x) => x.caller === from).map(({ id, need, state, at }) => ({ id, need, state, at: new Date(at).toISOString() })) } };
     }
     if (p.kind === 'circle.pass') return offerPass(t, p, from, card);
+    if (p.kind === 'circle.pay') return payWithFavour(t, p, from, card);
     if (p.kind === 'circle.propose' || p.kind === 'circle.vote.join') return vote(t, p, from);
     if (p.kind === 'circle.offer') {
       // What this member will help with, of the circle's kinds: calls for anything else never reach them.
@@ -1125,7 +1163,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         sisters: sisterCircles(),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.note', 'tally.passed', 'circle.pass', 'circle.pass.accept', 'circle.pass.decline', 'circle.propose', 'circle.vote.join', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.note', 'tally.passed', 'circle.pass', 'circle.pay', 'circle.pass.accept', 'circle.pass.decline', 'circle.propose', 'circle.vote.join', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     if (p.kind === 'circle.clear.consent') return consent(String(p.clearing ?? ''), from, String(p.owe ?? ''), String(p.owed ?? ''), card, envelope);
     // Between tallies across the Ocean: favours owed (to tallies only), and a loop another tally cleared.
     if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look' || p.kind === 'tally.standing' || p.kind === 'tally.note' || p.kind === 'tally.passed' || String(p.kind).startsWith('tally.overflow')) {

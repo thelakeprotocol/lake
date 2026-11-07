@@ -20,6 +20,7 @@
     "@thelakeprotocol/usecase-health": "workspace:^",
     "@thelakeprotocol/usecase-mortgage": "workspace:^",
     "@thelakeprotocol/usecase-shopping": "workspace:^",
+    "@thelakeprotocol/usecase-goodturn": "workspace:^",
     "@thelakeprotocol/visitor": "workspace:^",
     "express": "5",
     "ws": "8"

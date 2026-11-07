@@ -222,6 +222,9 @@ importers:
       '@thelakeprotocol/core':
         specifier: workspace:^
         version: link:../core
+      '@thelakeprotocol/usecase-goodturn':
+        specifier: workspace:^
+        version: link:../../usecases/goodturn
       '@thelakeprotocol/usecase-health':
         specifier: workspace:^
         version: link:../../usecases/health
@@ -314,6 +317,12 @@ importers:
       vue:
         specifier: ^3.5.13
         version: 3.5.44(typescript@5.9.3)
+
+  usecases/goodturn:
+    dependencies:
+      '@thelakeprotocol/core':
+        specifier: workspace:^
+        version: link:../../packages/core
 
   usecases/health:
     dependencies:
