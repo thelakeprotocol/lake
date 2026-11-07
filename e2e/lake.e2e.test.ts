@@ -2819,6 +2819,43 @@ describe('the weekly shop, priced inside the house', () => {
     expect(mine.favours).toMatchObject({ owed_to_you: expect.any(Number), you_owe: expect.any(Number) });
     await c.close();
   }, 240_000);
+
+  it('a circle takes a partner by vote (SPEC §11.4c): an organisation\'s agent the members voted in asks the circle within its monthly cap, is asked only for what it offers, and its thanks is a favour note like anyone\'s', async () => {
+    const tally = `${specialistsUrl}/tally/a2a`, tallyAt = `${specialistsUrl}/tally`;
+    const [b0, b1, b2] = buyers as [(typeof buyers)[number], (typeof buyers)[number], (typeof buyers)[number]];
+    const notes = async (m: (typeof buyers)[number]) => (await m.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; call: string } }[];
+    const waitFor = async <T,>(f: () => Promise<T | undefined>) => { for (let i = 0; i < 60; i++) { const v = await f(); if (v) return v; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('timed out'); };
+    const got: Record<string, any>[] = [];
+    const clinicKey = await generateIdentity('clinic');
+    const clinic = await joinLake({ name: 'Riverside Clinic', domain: 'clinic.example', node, port: await freePort(), identity: clinicKey, onMessage: async (m) => { got.push(m.payload as Record<string, any>); return { kind: 'received' }; } });
+    try {
+      expect((await ask(tally, clinic.visitor, { kind: 'circle.call', id: 'meal-circle', need: 'Meals for a patient sent home today', help: 'a meal' })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/only the circle's members/)] });
+      // A member puts it to the vote; the ballot names it from its own signed card.
+      const p = await b1.call({ kind: 'panel.circle.propose', tally: tallyAt, id: 'meal-circle', change: { partner: { url: clinic.card.supportedInterfaces[0]!.url, per_month: 1 } } });
+      expect(p).toMatchObject({ kind: 'circle.proposed', text: 'take Riverside Clinic (clinic.example) as a partner: it may ask the circle 1 time a month, and be asked for what it offers' });
+      for (const m of [b0, b1, b2]) {
+        const n = await waitFor(async () => (await notes(m)).find((x) => x.circle?.role === 'vote' && x.circle.call === p.vote));
+        expect(await m.call({ kind: 'panel.circle.answer', note: n.id, accept: true })).toMatchObject({ kind: 'circle.vote.answered' });
+      }
+      const view = async () => (await (await fetch(`${tallyAt}/p/meal-circle.json`)).json()).circle;
+      await waitFor(async () => ((await view()).partners?.length ? true : undefined));
+      expect(await view()).toMatchObject({ members: 3, partners: [{ name: 'Riverside Clinic', domain: 'clinic.example', per_month: 1 }] });
+      // A partner can't put changes to a vote; it says what it offers, and asks.
+      expect((await ask(tally, clinic.visitor, { kind: 'circle.propose', id: 'meal-circle', change: { limit: 5 } })).reply).toMatchObject({ kind: 'refused', problems: ['only its members put changes to a vote'] });
+      expect((await ask(tally, clinic.visitor, { kind: 'circle.offer', id: 'meal-circle', kinds: ['a school run'] })).reply).toMatchObject({ kind: 'circle.offered' });
+      const call = (await ask(tally, clinic.visitor, { kind: 'circle.call', id: 'meal-circle', need: 'Meals for a patient sent home today', help: 'a meal' })).reply as Record<string, any>;
+      expect(call).toMatchObject({ kind: 'circle.called' });
+      // Whoever says yes is put in touch with the clinic's agent; the clinic thanks them with a note it signs.
+      const helperNote = await waitFor(async () => { for (const m of [b0, b1, b2]) { const n = (await notes(m)).find((x) => x.circle?.role === 'ask' && x.circle.call === call.call && (x.circle.state === 'open' || x.circle.state === 'accepted')); if (n) return { m, n }; } return undefined; });
+      if (helperNote.n.circle!.state === 'open') expect(await helperNote.m.call({ kind: 'panel.circle.answer', note: helperNote.n.id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+      const matched = await waitFor(async () => got.find((x) => x.kind === 'circle.matched' && x.call === call.call));
+      const note = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeFavour'], issuer: clinic.webId, validFrom: new Date().toISOString(), credentialSubject: { id: matched.helper.webId, call: call.call, circle: { id: 'meal-circle', tally: tallyAt }, need: 'Meals for a patient sent home today', favours: 1 } } as never, clinicKey);
+      expect((await ask(tally, clinic.visitor, { kind: 'circle.kept', id: 'meal-circle', call: call.call, note })).reply).toMatchObject({ kind: 'circle.kept' });
+      await waitFor(async () => (await notes(helperNote.m)).find((x) => /You kept your promise: "Meals for a patient sent home today"/.test(x.text)));
+      // Its monthly cap, as voted.
+      expect((await ask(tally, clinic.visitor, { kind: 'circle.call', id: 'meal-circle', need: 'More meals', help: 'a meal' })).reply).toMatchObject({ kind: 'refused', problems: ['a partner may ask 1 time a month; the members voted that'] });
+    } finally { await clinic.close(); }
+  }, 240_000);
 });
 
 describe('relay: a house behind a home router', () => {

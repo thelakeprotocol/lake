@@ -89,6 +89,8 @@ interface Circle {
    */
   notes?: FavourNote[];
   passes?: Pass[];
+  /** Organisations its members voted in (a clinic, a library): they call it, capped each month, and are asked for what they offer. */
+  partners?: { webId: string; url: string; name: string; domain: string; perMonth: number; at: number }[];
   /** Changes to its rules its members put to a secret vote (SPEC §11.4c): one open at a time. */
   votes?: CircleVote[];
   /** Its record's latest checkpoint on the transparency log, and a digest of what it said, to log again only on a change. */
@@ -100,7 +102,7 @@ interface FavourNote {
   passed?: string[]; toUrl?: string;
 }
 /** A change to a circle's rules, put to its members: each answers yes or no as a secret count at the tally's tellers. */
-interface CircleVote { id: string; change: { limit?: number; times?: number; sisters?: boolean }; by: string; closes: number; count: string; joined: string[]; result?: { yes: number; no: number; voted: number; passed: boolean; why?: string; at: string } }
+interface CircleVote { id: string; change: { limit?: number; times?: number; sisters?: boolean; partner?: { webId: string; url: string; name: string; domain: string; perMonth: number }; unpartner?: string }; by: string; closes: number; count: string; joined: string[]; result?: { yes: number; no: number; voted: number; passed: boolean; why?: string; at: string } }
 /** A favour owed to a member, offered by them to someone they owe, to settle that: accepted, the debtor owes the new holder. */
 interface Pass { id: string; note: string; from: string; to: string; toUrl: string; settles: { tally: string; url: string; circle: string; digest: string }; endorsement: string; card: AgentCard; at: number; state: 'offered' | 'accepted' | 'declined' }
 /** A loop of favours owed across circles, offered to every house in it; it clears once each consents. */
@@ -188,10 +190,12 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const circleView = (t: Tally, c: Circle) => {
     const done = c.calls.filter((x) => x.state === 'kept' || x.state === 'unmet');
     const notes = c.notes ?? [];
-    return { promise: c.promise, times_a_year: c.times, ...(c.kinds ? { kinds: c.kinds } : {}), ...(c.votes?.length ? { votes: c.votes.map((v) => ({ id: v.id, text: describeChange(v.change), closes: new Date(v.closes).toISOString(), answered: v.joined.length, ...(v.result ? { result: v.result } : {}) })) } : {}), ...(c.checkpoint ? { on_the_log: { index: c.checkpoint.index, origin: c.checkpoint.origin, at: new Date(c.checkpoint.at).toISOString() } } : {}), ...(c.sisters ? { sisters: { met_by_sisters: c.calls.filter((x) => x.away && x.state === 'kept').length, helped_sisters: c.calls.filter((x) => x.guest && x.state === 'kept').length } } : {}), ...(c.tags ? { tags: c.tags, invited: c.invited?.length ?? 0 } : {}), members: members(t).length, open: circleOpen(t), calls: c.calls.filter((x) => x.state !== 'withdrawn').length, kept: c.calls.filter((x) => x.state === 'kept').length, unmet: c.calls.filter((x) => x.state === 'unmet').length, of: done.length, unconfirmed: c.calls.filter((x) => x.state === 'unconfirmed').length, disputed: c.calls.filter((x) => x.state === 'disputed').length, limit: c.limit ?? DEFAULT_LIMIT, ...(notes.length ? { favours: { signed: notes.length, owed: notes.filter((n) => !n.cleared).length, cleared: notes.filter((n) => n.cleared).length } } : {}) };
+    return { promise: c.promise, times_a_year: c.times, ...(c.kinds ? { kinds: c.kinds } : {}), ...(c.partners?.length ? { partners: c.partners.map((x) => ({ name: x.name, domain: x.domain, per_month: x.perMonth })) } : {}), ...(c.votes?.length ? { votes: c.votes.map((v) => ({ id: v.id, text: describeChange(v.change), closes: new Date(v.closes).toISOString(), answered: v.joined.length, ...(v.result ? { result: v.result } : {}) })) } : {}), ...(c.checkpoint ? { on_the_log: { index: c.checkpoint.index, origin: c.checkpoint.origin, at: new Date(c.checkpoint.at).toISOString() } } : {}), ...(c.sisters ? { sisters: { met_by_sisters: c.calls.filter((x) => x.away && x.state === 'kept').length, helped_sisters: c.calls.filter((x) => x.guest && x.state === 'kept').length } } : {}), ...(c.tags ? { tags: c.tags, invited: c.invited?.length ?? 0 } : {}), members: people(t).length, open: circleOpen(t), calls: c.calls.filter((x) => x.state !== 'withdrawn').length, kept: c.calls.filter((x) => x.state === 'kept').length, unmet: c.calls.filter((x) => x.state === 'unmet').length, of: done.length, unconfirmed: c.calls.filter((x) => x.state === 'unconfirmed').length, disputed: c.calls.filter((x) => x.state === 'disputed').length, limit: c.limit ?? DEFAULT_LIMIT, ...(notes.length ? { favours: { signed: notes.length, owed: notes.filter((n) => !n.cleared).length, cleared: notes.filter((n) => n.cleared).length } } : {}) };
   };
   // Who is in it, once that's known: a plain pledge's signers; a blind one's, once revealed.
-  const members = (t: Tally): { webId: string; url: string }[] => (t.blind ? t.blind.passes.flatMap((x) => (x.revealed ? [{ webId: x.revealed.webId, url: x.revealed.url }] : [])) : t.signers.map(({ webId, url }) => ({ webId, url })));
+  // Its partners as well (SPEC §11.4c): organisations its members voted in, who call it and are asked like members.
+  const members = (t: Tally): { webId: string; url: string }[] => [...people(t), ...(t.circle?.partners ?? []).map(({ webId, url }) => ({ webId, url }))];
+  const people = (t: Tally): { webId: string; url: string }[] => (t.blind ? t.blind.passes.flatMap((x) => (x.revealed ? [{ webId: x.revealed.webId, url: x.revealed.url }] : [])) : t.signers.map(({ webId, url }) => ({ webId, url })));
   // Open for calls once it has filled and everyone is known (an unveiling pledge: once it has unveiled).
   const circleOpen = (t: Tally) => t.state === 'triggered' && (!t.blind?.unveil || !!t.blind.unveiled);
   // What signing costs, where it goes, and what a lapse would pay each signer were it to lapse now.
@@ -458,7 +462,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   };
   // Sister circles (SPEC §11.4c): a call nobody in its circle can take goes, unnamed, to another circle that takes such
   // calls, here or on another tally in the Ocean, in an order drawn from the call's drand round; up to three are tried.
-  const sisterCircles = () => [...tallies.values()].filter((t) => t.circle?.sisters && circleOpen(t)).map((t) => ({ id: t.id, text: t.text, promise: t.circle!.promise, ...(t.circle!.kinds ? { kinds: t.circle!.kinds } : {}), members: members(t).length }));
+  const sisterCircles = () => [...tallies.values()].filter((t) => t.circle?.sisters && circleOpen(t)).map((t) => ({ id: t.id, text: t.text, promise: t.circle!.promise, ...(t.circle!.kinds ? { kinds: t.circle!.kinds } : {}), members: people(t).length }));
   const myUrl = () => s.card.supportedInterfaces?.[0]?.url ?? '';
   // To another tally, or to this one when the sister circle is here.
   const toTally = (url: string, body: Record<string, unknown>): Promise<Record<string, any>> => (url === myUrl() ? between(body, s.webId, url) : ask(url, body, 15_000)).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
@@ -525,7 +529,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       const beacon = await getBeacon(round).catch(() => null);
       const id = randomBytes(6).toString('hex');
       const rank = (w: string) => createHash('sha256').update(`${beacon?.randomness ?? round}|${id}|${w}`).digest('hex');
-      const order = members(t).filter((m) => m.webId !== caller.webId && keptThisYear(m.webId) < c.times && (!kind || (c.offers[m.webId] ?? c.kinds ?? []).includes(kind))).map((m) => m.webId).sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
+      const order = members(t).filter((m) => m.webId !== caller.webId && keptThisYear(m.webId) < c.times && (!kind || (c.offers[m.webId] ?? c.kinds ?? []).includes(kind)) && (!(c.partners ?? []).some((x) => x.webId === m.webId) || (!!kind && !!c.offers[m.webId]?.includes(kind)))).map((m) => m.webId).sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
       if (!order.length) return no('nobody here offers that just now');
       const call: CircleCall = { id, need: String(p.need ?? '').slice(0, 300), ...(kind ? { kind } : {}), ...(typeof p.when === 'string' ? { when: p.when.slice(0, 80) } : {}), caller: caller.webId, callerKey: `guest:${caller.webId}`, callerUrl: caller.url, at: Date.now(), round: beacon?.round ?? round, askedAt: Date.now(), order, asked: [], declined: [], state: 'asking', guest: { tally: from, url: fromUrl, circle: origin.circle, call: origin.call, text: String(origin.text ?? '').slice(0, 200), promise: String(p.promise ?? '').slice(0, 300) } };
       c.calls.push(call);
@@ -661,19 +665,32 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   // privately, as two unreadable shares to this tally's tellers; it closes at its deadline, or once every member has
   // answered. It passes with more yes than no, if at least a third of the members answered. Only the totals come out.
   const VOTE_DAYS = 3;
-  const describeChange = (ch: CircleVote['change']) => [ch.limit !== undefined ? (ch.limit === 0 ? 'no limit on favours owed (need-based)' : `a member may owe at most ${ch.limit} favour${ch.limit === 1 ? '' : 's'} and still ask`) : '', ch.times !== undefined ? `each member may call ${ch.times} time${ch.times === 1 ? '' : 's'} a year` : '', ch.sisters !== undefined ? (ch.sisters ? 'take calls sister circles can\'t meet, and pass ours on' : 'no sister circles') : ''].filter(Boolean).join('; ');
+  const describeChange = (ch: CircleVote['change']) => [ch.limit !== undefined ? (ch.limit === 0 ? 'no limit on favours owed (need-based)' : `a member may owe at most ${ch.limit} favour${ch.limit === 1 ? '' : 's'} and still ask`) : '', ch.times !== undefined ? `each member may call ${ch.times} time${ch.times === 1 ? '' : 's'} a year` : '', ch.sisters !== undefined ? (ch.sisters ? 'take calls sister circles can\'t meet, and pass ours on' : 'no sister circles') : '', ch.partner ? `take ${ch.partner.name} (${ch.partner.domain}) as a partner: it may ask the circle ${ch.partner.perMonth} time${ch.partner.perMonth === 1 ? '' : 's'} a month, and be asked for what it offers` : '', ch.unpartner ? 'end a partnership' : ''].filter(Boolean).join('; ');
   const vote = async (t: Tally, p: Record<string, unknown>, from: string) => {
     const no = (why: string) => ({ kind: 'refused', problems: [why] });
     const c = t.circle!;
     if (p.kind === 'circle.propose') {
       if ((o.tellers?.length ?? 0) < 2) return no('this tally runs no pair of tellers to count a vote');
       if ((c.votes ?? []).some((v) => !v.result)) return no('a vote is already open in this circle');
-      if (members(t).length < 3) return no('a vote needs at least 3 members');
+      if (!people(t).some((m) => m.webId === from)) return no('only its members put changes to a vote');
+      if (people(t).length < 3) return no('a vote needs at least 3 members');
       const ch = (p.change ?? {}) as Record<string, unknown>, change: CircleVote['change'] = {};
       if (ch.limit !== undefined) { const n = Number(ch.limit); if (!(Number.isInteger(n) && n >= 0 && n <= 50)) return no('change.limit: 0 (no limit) to 50'); change.limit = n; }
       if (ch.times !== undefined) { const n = Number(ch.times); if (!(Number.isInteger(n) && n >= 1 && n <= 12)) return no('change.times: 1 to 12 a year'); change.times = n; }
       if (ch.sisters !== undefined) change.sisters = ch.sisters === true;
-      if (!Object.keys(change).length) return no('change: { limit?, times?, sisters? }: what to change');
+      if (ch.partner !== undefined) {
+        // An organisation's agent, by its address: named on the ballot from its own signed card.
+        const pt = ch.partner as { url?: unknown; per_month?: unknown };
+        const perMonth = Number(pt.per_month ?? 2);
+        if (!(Number.isInteger(perMonth) && perMonth >= 1 && perMonth <= 30)) return no('change.partner.per_month: 1 to 30 calls a month');
+        const url = String(pt.url ?? '');
+        const prof = await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) }).then((r) => r.json() as Promise<AgentCard>).then(async (card) => ({ card, prof: await verifyLakeCard(card) })).catch(() => null);
+        if (!prof) return no('change.partner.url: an agent\'s A2A address, whose signed card this tally can check');
+        if (people(t).some((m) => m.webId === prof.prof.webId) || (c.partners ?? []).some((x) => x.webId === prof.prof.webId)) return no('it is in this circle already');
+        change.partner = { webId: prof.prof.webId, url: prof.card.supportedInterfaces?.[0]?.url ?? url, name: String(prof.card.name).slice(0, 80), domain: prof.prof.ownerDomain, perMonth };
+      }
+      if (typeof ch.unpartner === 'string') { if (!(c.partners ?? []).some((x) => x.webId === ch.unpartner)) return no('change.unpartner: the WebID of one of its partners'); change.unpartner = ch.unpartner; }
+      if (!Object.keys(change).length) return no('change: { limit?, times?, sisters?, partner?: { url, per_month? }, unpartner? }: what to change');
       const id = randomBytes(5).toString('hex'), count = `vote:${t.id}:${id}`, closes = Date.now() + VOTE_DAYS * 86_400_000;
       const [leader, helper] = await Promise.all(o.tellers!.slice(0, 2).map(async (url) => ({ url, domain: (await verifyLakeCard((await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard)).ownerDomain }))).catch(() => [] as { url: string; domain: string }[]);
       if (!leader || !helper) return no('its tellers can\'t be reached');
@@ -685,19 +702,20 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       void save();
       voteTellers.set(count, [leader, helper]);
       const text = describeChange(change);
-      for (const m of members(t)) void tell(m.url, { kind: 'circle.vote', id: t.id, vote: id, change, text, closes: new Date(closes).toISOString() });
+      for (const m of people(t)) void tell(m.url, { kind: 'circle.vote', id: t.id, vote: id, change, text, closes: new Date(closes).toISOString() });
       return { kind: 'circle.proposed', id: t.id, vote: id, text, closes: new Date(closes).toISOString() };
     }
     // circle.vote.join: a member answers; the tally notes that they did (once), and names the count and its tellers.
     const v = (c.votes ?? []).find((x) => x.id === String(p.vote ?? ''));
     if (!v || v.result || v.closes < Date.now()) return no('no open vote with that id');
+    if (!people(t).some((m) => m.webId === from)) return no('only its members vote');
     if (v.joined.includes(from)) return no('you have answered already');
     const tellers = voteTellers.get(v.count) ?? await Promise.all(o.tellers!.slice(0, 2).map(async (url) => ({ url, domain: (await verifyLakeCard((await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard)).ownerDomain })));
     voteTellers.set(v.count, tellers);
     v.joined.push(from);
     void save();
     // Once the last member's shares are in, it closes without waiting for its deadline.
-    if (v.joined.length === members(t).length) setTimeout(() => void closeVote(t, true), 4000);
+    if (v.joined.length === people(t).length) setTimeout(() => void closeVote(t, true), 4000);
     return { kind: 'circle.vote.joined', id: t.id, vote: v.id, count: v.count, tellers, options: ['yes', 'no'] };
   };
   const voteTellers = new Map<string, { url: string; domain: string }[]>();
@@ -708,7 +726,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     if (!c || !v || closing.has(v.count) || (!early && v.closes > Date.now())) return;
     closing.add(v.count);
     try {
-      const all = members(t);
+      const all = people(t);
       const tellers = voteTellers.get(v.count) ?? (await Promise.all(o.tellers!.slice(0, 2).map(async (url) => ({ url, domain: (await verifyLakeCard((await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(8000) })).json()) as AgentCard)).ownerDomain }))));
       const [leader, helper] = tellers as unknown as [{ url: string }, { url: string }];
       const reported = ((await ask(leader.url, { kind: 'count.members', id: v.count })).members as string[] | undefined) ?? [];
@@ -726,7 +744,12 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       if (!why && !enough) why = `only ${counted.length} of ${all.length} members answered; it needs a third`;
       const passed = !why && yes > no;
       v.result = { yes, no, voted: counted.length, passed, ...(why ? { why } : {}), at: new Date().toISOString() };
-      if (passed) Object.assign(c, v.change);
+      if (passed) {
+        const { partner, unpartner, ...rules } = v.change;
+        Object.assign(c, rules);
+        if (partner) c.partners = [...(c.partners ?? []).filter((x) => x.webId !== partner.webId), { ...partner, at: Date.now() }];
+        if (unpartner) c.partners = (c.partners ?? []).filter((x) => x.webId !== unpartner);
+      }
       void save();
       for (const m of all) void tell(m.url, { kind: 'circle.voted', id: t.id, vote: v.id, change: v.change, text: describeChange(v.change), ...v.result });
     } catch {
@@ -838,11 +861,13 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       const kind = c.kinds ? String(p.help ?? '') : undefined;
       if (c.kinds && !c.kinds.includes(kind!)) return no(`help: which kind of help, one of ${c.kinds.join(', ')}; the need says the details`);
       if ((c.reports[key]?.length ?? 0) >= REPORTS_TO_BAR) return no(`${REPORTS_TO_BAR} members reported calls from this key: it can't call this circle`);
+      const partner = (c.partners ?? []).find((x) => x.webId === from);
+      if (partner && c.calls.filter((x) => x.caller === from && x.at > Date.now() - 30 * 86_400_000 && x.state !== 'withdrawn' && x.state !== 'unmet').length >= partner.perMonth) return no(`a partner may ask ${partner.perMonth} time${partner.perMonth === 1 ? '' : 's'} a month; the members voted that`);
       const open = c.calls.find((x) => x.caller === from && (x.state === 'asking' || x.state === 'matched'));
       if (open) return no(`your call "${open.need}" is still open: say it happened (circle.kept) or withdraw it (circle.withdraw) first`);
       // A call nobody could take, or withdrawn, doesn't use up one of yours.
       const mine = c.calls.filter((x) => x.caller === from && x.at > year && (x.state === 'asking' || x.state === 'matched' || x.state === 'kept')).length;
-      if (mine >= c.times) return no(`you have called ${mine} time${mine === 1 ? '' : 's'} this year; each member may call ${c.times}`);
+      if (!partner && mine >= c.times) return no(`you have called ${mine} time${mine === 1 ? '' : 's'} this year; each member may call ${c.times}`);
       // Give before you take: owing as many favours as the circle allows, help someone first (a loop may square you).
       const lim = c.limit ?? DEFAULT_LIMIT, owe = lim > 0 ? await standing(from) : 0;
       if (lim > 0 && owe >= lim) return no(`you owe ${owe} favour${owe === 1 ? '' : 's'} across your circles, as many as this circle lets a member owe and still ask: help someone first (say yes to an ask), and you can ask again`);
@@ -852,7 +877,9 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       const beacon = await getBeacon(round).catch(() => null);
       const id = randomBytes(6).toString('hex');
       const rank = (w: string) => createHash('sha256').update(`${beacon?.randomness ?? round}|${id}|${w}`).digest('hex');
-      const order = all.filter((m) => m.webId !== from && keptThisYear(m.webId) < c.times && (!kind || offersOf(m.webId).includes(kind))).map((m) => m.webId).sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
+      // Partners are asked only for the kinds they said they offer.
+      const isPartner = (w: string) => (c.partners ?? []).some((x) => x.webId === w);
+      const order = all.filter((m) => m.webId !== from && keptThisYear(m.webId) < c.times && (!kind || offersOf(m.webId).includes(kind)) && (!isPartner(m.webId) || (!!kind && !!c.offers[m.webId]?.includes(kind)))).map((m) => m.webId).sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
       if (!order.length && !c.sisters) return no(kind ? `nobody else in the circle offers ${kind}, or all who do have kept what they promised this year` : 'nobody in the circle can be asked: every other member has kept what they promised this year');
       const call: CircleCall = { id, need, ...(kind ? { kind } : {}), ...(when ? { when } : {}), caller: from, callerKey: key, callerUrl: me.url || card.supportedInterfaces?.[0]?.url || '', at: Date.now(), round: beacon?.round ?? round, askedAt: Date.now(), order, asked: [], declined: [], state: 'asking' };
       c.calls.push(call);
@@ -1244,7 +1271,7 @@ async function tick(){
   else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">signed, '+v.threshold+' needed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
     if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}
   $('main').innerHTML=h;
-  const c=v.circle;if(c){$('circle').hidden=false;$('circle').innerHTML='<p><b>A promise circle.</b> Each member promised the others '+esc(c.promise)+', '+(c.times_a_year===1?'once':c.times_a_year+' times')+' a year. No money.</p>'+(c.open?'<p class="big">'+c.kept+' <span class="of">promises kept, of '+c.of+' calls</span></p>'+(c.favours?'<p class="of">'+c.favours.signed+' favours signed as owed; <b>'+c.favours.cleared+'</b> cleared in loops across circles, so those members are square. Nobody paid anything.</p>':'')+(c.on_the_log?'<p class="of">Its record is on the transparency log ('+esc(c.on_the_log.origin)+', entry '+c.on_the_log.index+', '+new Date(c.on_the_log.at).toLocaleString()+'): every favour note, by fingerprint, and where it stands.</p>':'')+'<p class="of">'+c.members+' members. When one asks for help, a few others are asked, picked by a public draw, without knowing who asked.</p>':'<p class="of">It opens for calls once it has filled and everyone is known.</p>')}
+  const c=v.circle;if(c){$('circle').hidden=false;$('circle').innerHTML='<p><b>A promise circle.</b> Each member promised the others '+esc(c.promise)+', '+(c.times_a_year===1?'once':c.times_a_year+' times')+' a year. No money.</p>'+(c.open?'<p class="big">'+c.kept+' <span class="of">promises kept, of '+c.of+' calls</span></p>'+(c.favours?'<p class="of">'+c.favours.signed+' favours signed as owed; <b>'+c.favours.cleared+'</b> cleared in loops across circles, so those members are square. Nobody paid anything.</p>':'')+(c.on_the_log?'<p class="of">Its record is on the transparency log ('+esc(c.on_the_log.origin)+', entry '+c.on_the_log.index+', '+new Date(c.on_the_log.at).toLocaleString()+'): every favour note, by fingerprint, and where it stands.</p>':'')+'<p class="of">'+c.members+' members. When one asks for help, a few others are asked, picked by a public draw, without knowing who asked.</p>'+(c.partners?'<p class="of">Partners, voted in by the members: '+c.partners.map((x)=>esc(x.name)+' ('+esc(x.domain)+')').join(', ')+'.</p>':''):'<p class="of">It opens for calls once it has filled and everyone is known.</p>')}
   if(q&&q.result){const r=q.result,max=Math.max(1,...Object.values(r.totals));
     $('quorum').hidden=false;$('quorum').innerHTML='<p><b>The secret count:</b> '+r.counted+' families answered "I\\'m in if at least how many are?"</p>'+q.options.map((o,i)=>{const n=r.totals[o]||0,inq=q.at_least[i]!==null&&q.at_least[i]<=r.size;return '<div class="row"><span>'+esc(o)+'</span><div class="bar"><i class="'+(inq?'in':'')+'" style="width:'+(100*n/max)+'%"></i></div><b>'+n+'</b></div>'}).join('')+'<p class="of">'+(r.size?'<b>'+r.size+'</b> families hold together: each said they\\'d join a group that size or smaller'+(r.binds?', so it binds once '+r.binds+' sign, the most any of them asked for.':'.'):'')+(r.why?' '+esc(r.why):'')+'</p>'}
 }
