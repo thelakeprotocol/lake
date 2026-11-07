@@ -47,8 +47,8 @@ async function tidy() {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 }
-// Four tabs (Inbox, Me, My AI, Settings); everything else is a row under Settings (7 Nov).
-const RENAMED: Record<string, string> = { Home: 'Inbox', 'My agent': 'My AI', Keys: 'Keys you gave', Data: 'Your data', 'Your key': 'Your key and recovery' };
+// Four tabs (Chats, Me, My AI, Settings); everything else is a row under Settings (8 Nov).
+const RENAMED: Record<string, string> = { Home: 'Chats', Inbox: 'Chats', 'My agent': 'My AI', Keys: 'Keys you gave', Data: 'Your data', 'Your key': 'Your key and recovery' };
 const tab = async (name: string) => {
   const label = RENAMED[name] ?? name;
   const main = page.locator('#nav > button', { hasText: label });
@@ -59,7 +59,7 @@ const tab = async (name: string) => {
 
 const lostKey = async (p: Page) => {
   const said = p.getByText(/isn't your house's key any more/);
-  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('#nav > button', { hasText: 'Inbox' }).click(); await said.waitFor({ timeout: 5000 }); });
+  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('#nav > button', { hasText: 'Chats' }).click(); await said.waitFor({ timeout: 5000 }); });
 };
 
 let assistant: Identity;
@@ -166,41 +166,47 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await (await fetch(`${house}/owner/status`)).json()).toMatchObject({ claimed: false, unclaimed: true });
   });
 
-  it('pairs a fresh device: the house name, one button, then the Inbox with one thing to do', async () => {
+  it('pairs a fresh device: the house name, one button, then Chats with one thing to do', async () => {
     await page.goto(`${house}/owner/`);
     // Not claimed yet: what it is, and the one thing to do.
     await page.getByRole('button', { name: 'Use this phone' }).waitFor();
     expect(await page.locator('h1').textContent()).toMatch(/House|A house on the Lake/);
     await page.getByRole('button', { name: 'Use this phone' }).click();
-    // Four tabs, and the Inbox asks for the one setting that makes the house reachable.
+    // Four tabs, and Chats asks for the one setting that makes the house reachable.
     await page.locator('#nav > button').first().waitFor();
-    expect(await page.locator('#nav > button').allTextContents()).toEqual(['Inbox', 'Me', 'My AI', 'Settings']);
+    expect((await page.locator('#nav > button').allTextContents()).map((t) => t.replace(/\d+$/, ''))).toEqual(['Chats', 'Me', 'My AI', 'Settings']);
     await page.getByRole('heading', { name: 'Pick your handle' }).waitFor();
-    await page.getByRole('heading', { name: 'Needs you' }).waitFor();
+    await page.locator('h1', { hasText: 'Chats' }).waitFor();
     await tidy();
   });
 
-  it('opens the door by picking a handle on the Inbox, says it saved, and the door page says how to knock', async () => {
+  it('opens the door by picking a handle on Chats, says it saved, and the door page says how to knock', async () => {
     await page.getByLabel('Your handle').fill('Panel Owner');
     expect(await page.getByLabel('Your handle').inputValue()).toBe('panelowner');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    // Saved: the card goes, and the house is named by its handle.
+    // Saved: the card goes, and the handle heads Me.
     await page.getByRole('heading', { name: 'Pick your handle' }).waitFor({ state: 'detached', timeout: 10_000 });
-    await page.locator('h1', { hasText: 'panelowner' }).waitFor({ timeout: 10_000 });
+    await tab('Me');
+    await page.locator('.profile .handle', { hasText: '@panelowner' }).waitFor({ timeout: 10_000 });
+    await tab('Chats');
     const door = await (await fetch(house, { headers: { accept: 'text/html' } })).text();
     expect(door).toMatch(/Knock, knock[\s\S]*Knock on the door at/);
     await tidy();
   });
 
-  it('shares how to reach you from Me: the line to tell people, the address, Copy, and a QR code a tap away', async () => {
+  it('shares how to reach you from Me: the handle on top, the line to tell people, the address, Copy, and a QR code a tap away', async () => {
     await tab('Me');
+    // The handle is edited in one tap from the top of Me (8 Nov: it was under two folds).
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    expect(await page.getByLabel(/Handle: people ask their AI/).inputValue()).toBe('panelowner');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByText('Ask your AI to "ping panelowner" on the Lake').waitFor();
     const share = page.locator('section.block', { has: page.getByRole('heading', { name: 'How people reach you' }) });
     await share.getByText(house, { exact: true }).waitFor();
     await share.getByRole('button', { name: 'QR code' }).click();
     await share.locator('img.qr').waitFor();
     await tidy();
-    await tab('Inbox');
+    await tab('Chats');
   });
 
   it('lets a person leave a note themselves from the door page, and read the answer later', async () => {
@@ -216,25 +222,25 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await visitor.getByText(/with the owner/i).waitFor();
     expect(await visitor.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await visitor.close();
-    await page.locator('.item', { hasText: 'would love a coffee' }).waitFor({ timeout: 4000 });
+    await page.locator('.chatrow', { hasText: 'would love a coffee' }).waitFor({ timeout: 4000 });
   });
 
   it('opens a note an AI wrote, filled in, for its human to send with one tap (an AI that can\'t open links it writes)', async () => {
     const visitor = await ctx.newPage();
     // ChatGPT opened the door page but never the note link it built: it only opens links it was given. It gives this one.
-    const notesBefore = await page.locator('.item', { hasText: 'help with my garden' }).count();
+    const notesBefore = await page.locator('.chatrow', { hasText: 'help with my garden' }).count();
     await visitor.goto(`${house}/note/new?${new URLSearchParams({ text: 'Hi, Jo here: could you help with my garden on Saturday?', from: 'Jo' })}`);
     await visitor.getByRole('heading', { name: 'Send this note?' }).waitFor();
     expect(await visitor.locator('textarea[name=text]').inputValue()).toBe('Hi, Jo here: could you help with my garden on Saturday?');
     expect(await visitor.locator('input[name=from]').inputValue()).toBe('Jo');
     // Opening it sent nothing.
     await page.waitForTimeout(1000);
-    expect(await page.locator('.item', { hasText: 'help with my garden' }).count()).toBe(notesBefore);
+    expect(await page.locator('.chatrow', { hasText: 'help with my garden' }).count()).toBe(notesBefore);
     await visitor.getByRole('button', { name: 'Send' }).click();
     await visitor.getByRole('heading', { name: 'Note left ✓' }).waitFor();
     expect(await visitor.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await visitor.close();
-    await page.locator('.item', { hasText: 'help with my garden' }).waitFor({ timeout: 4000 });
+    await page.locator('.chatrow', { hasText: 'help with my garden' }).waitFor({ timeout: 4000 });
   });
 
   it('gives the owner\'s AI a key on the first tap, and shows it connected live', async () => {
@@ -293,13 +299,18 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Home');
     const left = await (await fetch(`${house}/note?text=${encodeURIComponent('Hi, Ana here: coffee next week?')}&from=Ana`)).json();
     expect(left.kind).toBe('noted');
-    const note = page.locator('.item', { hasText: 'coffee next week' });
-    await note.waitFor({ timeout: 4000 });
-    await note.getByText('Answer').click();
-    await note.locator('input').fill('Yes: Tuesday 10:00?');
-    await note.getByRole('button', { name: 'Send', exact: true }).click();
-    await page.locator('details.fold', { has: page.locator('summary', { hasText: 'Answered' }) }).evaluate((d) => { (d as HTMLDetailsElement).open = true; });
-    await page.getByText(/You answered: “Yes: Tuesday 10:00\?”/).waitFor({ timeout: 4000 });
+    // A chat row, as messaging apps show it; tapped, the conversation full screen without the tab bar.
+    const row = page.locator('.chatrow', { hasText: 'coffee next week' });
+    await row.waitFor({ timeout: 4000 });
+    await row.click();
+    await page.locator('.bubble.them', { hasText: 'coffee next week' }).waitFor();
+    expect(await page.locator('#nav').isVisible()).toBe(false);
+    await page.getByLabel('Message').fill('Yes: Tuesday 10:00?');
+    await page.locator('.composer').getByRole('button', { name: 'Send', exact: true }).click();
+    await page.locator('.bubble.me', { hasText: 'Yes: Tuesday 10:00?' }).waitFor({ timeout: 4000 });
+    // Back: the list again, saying who wrote last.
+    await page.locator('.chathead .back').click();
+    await page.locator('.chatrow', { hasText: 'You: Yes: Tuesday 10:00?' }).waitFor({ timeout: 4000 });
     expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
     await tidy();
   });
@@ -311,18 +322,28 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     try {
       const left = await alex.ask(`${house}/a2a`, { kind: 'note', text: 'Alex here, from the Claude Code class: free for a call Thursday?' }) as { kind: string; note: string };
       expect(left).toMatchObject({ kind: 'noted' });
-      // A notification about it opens the app at it: the Inbox, that note first and lit.
-      await page.goto(`${house}/owner/#note=${left.note}`);
-      const note = page.locator('.item.lit', { hasText: 'free for a call Thursday' });
-      await note.waitFor({ timeout: 8000 });
-      // Open already, with where it goes: an answer is one line and Send.
-      await note.getByText(/Goes back to their AI, signed by your house\./).waitFor();
-      await note.locator('input').fill('Thursday 4pm works.');
-      await note.getByRole('button', { name: 'Send', exact: true }).click();
-      // Answered: it leaves Needs you for the Answered list below.
-      await page.locator('details.fold', { has: page.locator('summary', { hasText: 'Answered' }) }).evaluate((d) => { (d as HTMLDetailsElement).open = true; });
-      await page.getByText(/✓ You answered: “Thursday 4pm works\.”/).waitFor({ timeout: 6000 });
+      // A notification about it opens the app at that conversation, the message lit, and says what the notification was.
+      await page.goto(`${house}/owner/?n=${encodeURIComponent('Alex left you a note, via their AI.')}#note=${left.note}`);
+      await page.locator('.bubble.them.lit', { hasText: 'free for a call Thursday' }).waitFor({ timeout: 8000 });
+      await page.locator('.notified', { hasText: 'Notification: Alex left you a note, via their AI.' }).waitFor();
+      // Who it is: the agent's name, whose AI it is, and that it's new; who replies, above the message box.
+      await page.locator('.chathead', { hasText: 'Claude agent' }).waitFor();
+      await page.locator('.modebar', { hasText: 'You\'re replying' }).waitFor();
+      await page.getByLabel('Message').fill('Thursday 4pm works.');
+      await page.locator('.composer').getByRole('button', { name: 'Send', exact: true }).click();
+      await page.locator('.bubble.me', { hasText: 'Thursday 4pm works.' }).waitFor({ timeout: 6000 });
       expect(got.find((x) => x.kind === 'note.reply')).toMatchObject({ kind: 'note.reply', text: 'Thursday 4pm works.' });
+      // This chat to your AI, in one tap above the message box; the row in the list says so; take over in one tap.
+      await page.locator('.modebar').getByRole('button', { name: 'Let my AI reply' }).click();
+      await page.locator('.modebar', { hasText: /Your AI (is replying|may reply)/ }).waitFor({ timeout: 6000 });
+      await page.locator('.chatwho').click();
+      await page.getByText('Every message is signed with its key, and your house checked it.', { exact: false }).waitFor();
+      expect(await page.getByLabel('Let my AI reply in this chat').isChecked()).toBe(true);
+      await page.locator('.chathead .back').click();
+      await page.locator('.modebar').getByRole('button', { name: 'Take over' }).click();
+      await page.locator('.modebar', { hasText: 'You\'re replying' }).waitFor({ timeout: 6000 });
+      await page.locator('.chathead .back').click();
+      await page.locator('.notified button').click();
       await tidy();
     } finally { await alex.close(); }
   });
@@ -412,11 +433,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('opens at once with what it showed last time, even when the house is slow', async () => {
     await tab('Home');
-    await page.getByRole('heading', { name: 'Needs you' }).waitFor();
+    await page.locator('.chatrow').first().waitFor();
     await page.route('**/owner/api', async (route) => { await new Promise((r) => setTimeout(r, 2500)); await route.continue().catch(() => {}); });
     const t = Date.now();
     await page.reload();
-    await page.getByRole('heading', { name: 'Needs you' }).waitFor();
+    await page.locator('.chatrow').first().waitFor();
     expect(Date.now() - t).toBeLessThan(2000);
     // What the house holds stays out of the device's lasting storage: the quick start is for this tab only.
     expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => !k.startsWith('lake-owner-key:') && !k.startsWith('lake.start') && k !== 'lake-houses'))).toEqual([]);
@@ -429,7 +450,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('#nav > button', { hasText: 'Me' }).click();
     await page.locator('.dot.down').waitFor({ timeout: 5000 });
     await ctx.setOffline(false);
-    await page.locator('#nav > button', { hasText: 'Inbox' }).click();
+    await page.locator('#nav > button', { hasText: 'Chats' }).click();
     await page.locator('.dot.live').waitFor({ timeout: 10_000 });
     await tidy();
   });
@@ -507,10 +528,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // called the other unverified). Knocking here on its own house only to see the word checked on arrival.
     expect(await one.call('lake_knock', { house_url: house, purpose: 'contact', note: 'Hi, a neighbour here: could you take in a parcel this afternoon?', reveal_house: true })).toMatchObject({ kind: 'noted' });
     await page.goto(`${house}/owner/`);
-    const parcel = page.locator('li.item', { hasText: 'could you take in a parcel' });
-    // Home lists ten at a time (an earlier test left many suggestions): show more until it's there.
-    for (let i = 0; i < 6 && !(await parcel.count()); i++) await page.locator('.more-items').first().click({ timeout: 3000 }).catch(() => {});
-    await page.locator('li.item', { hasText: 'could you take in a parcel' }).locator('.chip', { hasText: 'Speaks for a house' }).waitFor({ timeout: 10_000 });
+    // The chat's info (a tap on its name) says the agent speaks for a house, checked.
+    await page.locator('.chatrow', { hasText: 'could you take in a parcel' }).click();
+    await page.locator('.chatwho').click();
+    await page.locator('.chatinfo dd', { hasText: /\(checked\)$/ }).waitFor({ timeout: 10_000 });
+    await page.locator('.chathead .back').click();
+    await page.locator('.chathead .back').click();
     // It sells for the house: another AI (a script, signed in without a browser) orders and pays, held until it accepts.
     await one.call('lake_sell', { action: 'menu', items: [{ sku: 'summary', label: 'A short summary', price: 4, currency: 'USD' }] });
     const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();
@@ -609,7 +632,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.waitForTimeout(3500);
     await shopper.callTool({ name: 'lake_set_tags', arguments: { tags: ['offering:lift-to-cool-room'] } });
     await tab('Home');
-    const match = page.locator('li.item', { hasText: 'offering:lift-to-cool-room' });
+    // A suggestion, or a chat the house kept for its AI while it was away.
+    const match = page.locator('li.item, .chatrow', { hasText: 'offering:lift-to-cool-room' });
     for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); await page.locator('.more-items').first().click({ timeout: 1000 }).catch(() => {}); }
     expect(await match.count()).toBeGreaterThan(0);
     await one.call('lake_set_tags', { tags: [] });
@@ -743,8 +767,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('puts the owner\'s AI on duty: a signed grant and a code, the morning page with Undo, and off duty in two taps (5 Nov)', async () => {
     await tab('My agent');
     const card = page.locator('section.duty');
-    // Folded until opened: the form isn't the first thing on My AI.
-    await card.locator('summary', { hasText: 'AI on duty' }).click();
+    // Off until set up: the form isn't the first thing on My AI.
+    await card.getByRole('button', { name: 'Set up AI on duty' }).click();
     await card.getByText('Never money. Anything new waits for you.').waitFor({ timeout: 10_000 });
     // Hours around now, so what it does below counts as on duty.
     const [from, to] = await page.evaluate(() => { const hh = (d: number) => String((new Date().getHours() + d + 24) % 24).padStart(2, '0') + ':00'; return [hh(-1), hh(2)]; });
@@ -775,8 +799,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Call on Monday at 10:00', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, on: true });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.', reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
-    // The morning: Home shows what it did, in order, with receipts and Undo; what it was stopped from, folded away.
-    await tab('Home');
+    // The morning: Chats says it in one line, and My AI shows what it did, in order, with receipts and Undo; what it was
+    // stopped from, folded away.
+    await tab('Chats');
+    await page.locator('.pin', { hasText: 'Your AI handled 2 things while you were away' }).click();
     const slept = page.locator('section.slept');
     await slept.waitFor({ timeout: 10_000 });
     expect(await slept.locator('.slept-tiles dd').allTextContents()).toEqual(['2', '0', '0']);
@@ -800,9 +826,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
     await on.getByRole('button', { name: 'Off duty' }).click();
     await on.getByRole('button', { name: /Tap again/ }).click();
-    // Off duty: back to the folded form.
-    await card.locator('summary', { hasText: 'AI on duty' }).waitFor({ timeout: 10_000 });
-    await card.locator('summary', { hasText: 'AI on duty' }).click();
+    // Off duty: back to Set up.
+    await card.getByRole('button', { name: 'Set up AI on duty' }).waitFor({ timeout: 10_000 });
+    await card.getByRole('button', { name: 'Set up AI on duty' }).click();
     await card.getByRole('button', { name: 'Sign and get a code' }).waitFor({ timeout: 10_000 });
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
     await tidy();

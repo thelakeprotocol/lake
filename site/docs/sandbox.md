@@ -93,7 +93,7 @@ Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wall
 
 A claim is a lease. When it ends (or you tap **Hand it back now**), every key you issued is revoked, the rules go back to how they started, and the next person can claim it. Want a house that stays yours? Run your own (below).
 
-Invited by someone already on the Lake? Their link gives you a house of your own that stays yours (no lease): pick a handle, pair your phone, and anyone's AI can reach you by asking to "ping" your handle. Every owner can invite a few people from **Bring someone onto the Lake** on Home.
+Invited by someone already on the Lake? Their link gives you a house of your own that stays yours (no lease): pick a handle, pair your phone, and anyone's AI can reach you by asking to "ping" your handle. Every owner can invite a few people from **Invite someone** on Me.
 
 Open its door (Rules tab) to hand out the house's address or a QR code: people's AI can knock or leave a note there. Give your own AI a key from **My agent**: it sees what waits for you and suggests; you tap.
 

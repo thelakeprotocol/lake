@@ -5,11 +5,11 @@ self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', (e) => {
   let m = {};
   try { m = e.data ? e.data.json() : {}; } catch { m = { body: e.data ? e.data.text() : '' }; }
-  e.waitUntil(self.registration.showNotification(m.title || 'Your house', { body: m.body || 'Something needs you.', tag: m.tag || 'house', renotify: true, icon: 'owner-192.png', data: { url: m.url || './approvals.html' } }));
+  e.waitUntil(self.registration.showNotification(m.title || 'Your house', { body: m.body || 'Something needs you.', tag: m.tag || 'house', renotify: true, icon: 'owner-192.png', data: { url: m.url || './' } }));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = new URL((e.notification.data && e.notification.data.url) || './approvals.html', self.registration.scope).href;
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope).href;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((all) => {
     // Already open: go to what it was about (a note), not just to the app.
     for (const c of all) if (c.url.startsWith(self.registration.scope)) return c.focus().then((w) => (w && 'navigate' in w ? w.navigate(url) : w));

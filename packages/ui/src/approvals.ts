@@ -89,6 +89,12 @@ function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: stri
 // ---- small pieces ----
 const hoursLeft = (iso: string) => { const hr = (Date.parse(iso) - Date.now()) / 3_600_000; return hr < 1 ? `${Math.max(1, Math.round(hr * 60))} min` : `${Math.round(hr)} h`; };
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const clock = time;
+/** When, as a chat list says it: the time today, "Yesterday", the weekday this week, else the date. */
+const when = (iso: string) => {
+  const d = new Date(iso), days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(iso).setHours(0, 0, 0, 0)) / 86_400_000);
+  return days <= 0 ? time(iso) : days === 1 ? 'Yesterday' : days < 7 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+};
 const nice = (f: string) => f.replace(/_/g, ' ');
 const dayTime = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 /** "P99Y" → "99 years", "P30D" → "30 days". */
@@ -147,21 +153,25 @@ function Failed({ error }: { error?: string }) {
 
 // ---- navigation ----
 // Your agent and the agents that knock are different things: "My agent" is yours, "Visitors" are strangers.
-// Four places, each with one job (7 Nov: the owner had to ask where things were): what needs you, how people reach you,
-// your own AI, and everything else as a plain list of pages under Settings, each with a way back.
+// Four places, each with one job (8 Nov, after a walk through every screen with Fable and ChatGPT): Chats, where the app
+// opens, with what needs you pinned on top; Me, your handle and how people reach you; your own AI; and everything else as
+// a plain list of pages under Settings, each with a way back.
 const TABS = [
-  ['home', 'Inbox'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
+  ['chats', 'Chats'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
   ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Requests'], ['offers', 'Offers'], ['keys', 'Keys you gave'],
   ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Your data'], ['key', 'Your key and recovery'], ['move', 'Move house'], ['about', 'About your house'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-const MAIN: Tab[] = ['home', 'me', 'myagent', 'settings'];
+const MAIN: Tab[] = ['chats', 'me', 'myagent', 'settings'];
 const labelOf = (t: Tab) => TABS.find(([id]) => id === t)?.[1] ?? t;
-const tabFromHash = (): Tab => (location.hash.startsWith('#note=') ? 'home' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home');
-/** A note a notification was about (#note=<id>): the Inbox scrolls to it and lights it up. */
-const focusNote = () => (location.hash.startsWith('#note=') ? location.hash.slice(6) : '');
+const tabFromHash = (): Tab => (/^#(note|chat)=/.test(location.hash) ? 'chats' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
+/** A note a notification was about (#note=<id>): its conversation opens, that message lit. */
+const focusNote = () => (location.hash.startsWith('#note=') ? decodeURIComponent(location.hash.slice(6)) : '');
+/** The conversation on screen (#chat=<sender key>), so the phone's back gesture leaves it as in any messaging app. */
+const openChat = () => (location.hash.startsWith('#chat=') ? decodeURIComponent(location.hash.slice(6)) : focusNote());
+const inChat = () => /^#(note|chat)=/.test(location.hash);
 
-function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean }) {
+function Nav({ tab, go, pending, noOffers, unread = 0 }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean; unread?: number }) {
   const [open, setOpen] = useState(false);
   const nav = useRef<HTMLElement>(null);
   // A tap anywhere outside closes the menu.
@@ -175,7 +185,7 @@ function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; p
   const here = MAIN.includes(tab) ? tab : 'settings';
   const shown = TABS.filter(([id]) => MAIN.includes(id));
   const button = ([id, label]: readonly [Tab, string]) => h('button', { key: id, type: 'button', class: 'main', 'aria-current': id === here ? 'page' : undefined, onClick: () => { setOpen(false); go(id); } },
-    label, id === 'home' && pending ? h('span', { class: 'badge' }, String(pending)) : null);
+    label, id === 'chats' && pending + unread ? h('span', { class: 'badge' }, String(pending + unread)) : null);
   return h('nav', { id: 'nav', ref: nav, 'aria-label': 'Control panel' }, ...shown.map(button));
 }
 
@@ -204,49 +214,172 @@ type DoorState = { open: boolean; about?: string; name?: string; handle?: string
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
 type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; circleVote?: { sent?: boolean }; favourPay?: { paid?: boolean; sellerName?: string }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
-type DoorNote = { id: string; from: { web?: boolean; as?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string } };
+type DoorNote = { id: string; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; from: { web?: boolean; as?: string; key?: string; webId?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 interface Connect { id: string; app: string; from: string; number: string; at: string }
 interface ListView { connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 
-function Home({ go }: { go: (t: Tab) => void }) {
+/** What needs you, pinned above the conversations: requests your rules left to you, your AI's suggestions, app sign-ins. */
+function Pinned({ go }: { go: (t: Tab) => void }) {
   const bump = useBump();
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
-  if (!list.data) return h(Failed, { error: list.error });
-  const { suggestions, assistants, notes, agenda } = list.data;
-  // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
+  const log = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  if (!list.data) return null;
+  const { suggestions, assistants, agenda } = list.data;
   const waiting = list.data.requests.length;
+  const handled = (log.data?.duties ?? []).reduce((t, d) => t + d.summary.handled, 0);
   const needs = [
     ...(connectedNote ? [{ k: 'connected', v: () => h('li', { key: 'connected', class: 'item' }, h('p', { class: 'item-text' }, connectedNote), h('div', { class: 'item-actions' }, h('button', { class: 'btn small quiet', type: 'button', onClick: () => { connectedNote = ''; bump(); } }, 'OK'))) }] : []),
     // An AI app signing in through this house, from its own browser: approved here, where the key is.
     ...(list.data.connects ?? []).map((c) => ({ k: `c-${c.id}`, v: () => h(ConnectRequest, { key: `c-${c.id}`, c }) })),
     // Your AI isn't reading and people are waiting for it: only you can open it again.
     ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
-    // People first (8 Nov: a note the owner was pushed about sat under six of their AI's suggestions); answered ones below.
-    ...(notes ?? []).filter((n) => !n.answered).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
   ];
+  const pin = (k: string, text: string, to: Tab, cls = '') => h('button', { key: k, type: 'button', class: `pin ${cls}`, onClick: () => go(to) }, h('span', {}, text), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'));
   return h('div', {},
     // No handle yet: the one thing that makes the house reachable, right here.
     door.data && !door.data.error && !door.data.handle ? h(HandleCard, { d: door.data }) : null,
-    // Notifications: one line, not an item that needs you (Fable, 8 Nov: it was the biggest thing on the screen).
     notifyOffer() ? h(NotifyBar, {}) : null,
-    // The morning: what your AI on duty did while you were away, first.
-    h(WhileYouSlept, {}),
-    h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
-      waiting || needs.length
-        ? h('div', {},
-            waiting ? h('ul', { class: 'items', style: 'margin-bottom:10px' }, h('li', { key: 'waiting', class: 'item amber' }, h('p', { class: 'item-text' }, `${waiting} request${waiting === 1 ? '' : 's'} your rules left to you`),
-              h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onClick: () => go('requests') }, 'Look at them')))) : null,
-            needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
-        : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'Nothing needs you. Your rules and your agent are handling it.')),
-    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
-    (notes ?? []).some((n) => n.answered) ? h('details', { class: 'fold', open: (notes ?? []).some((n) => n.answered && n.id === focusNote()) }, h('summary', {}, 'Answered'),
-      h('ul', { class: 'items' }, ...(notes ?? []).filter((n) => n.answered).slice(0, 10).map((n) => h(NoteItem, { key: `a-${n.id}`, n })))) : null)
+    waiting || handled ? h('div', { class: 'pins' },
+      waiting ? pin('req', `${waiting} request${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} your answer`, 'requests', 'amber') : null,
+      // The morning, in one line; what it did, with receipts and Undo, is on My AI.
+      handled ? pin('duty', `Your AI handled ${handled} thing${handled === 1 ? '' : 's'} while you were away`, 'myagent') : null) : null,
+    needs.length ? h('section', { class: 'block' }, h('h2', {}, 'Needs you'), h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() })) : null,
+    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null);
 }
 
-/** No handle yet: the one setting that makes you reachable, on Inbox until it's done. */
+// ---- chats: conversations, as messaging apps show them ----
+type Chat = { key: string; notes: DoorNote[]; name: string; agent: string; vendor: string; via: string; trust: 'known' | 'new' | 'lookalike'; why?: string; mode: 'ai' | 'me'; last: string; lastBy: '' | 'you' | 'ai'; at: string; unread: number; canMode: boolean; forwarded: boolean; web: boolean };
+/** Whose AI an agent is, from its card's name: "Pike (connectors-manager, via MCP)" is Grok's; "Rook (Claude, via MCP)" Claude's. */
+const vendorOf = (name: string) => { const m = /\(([^,)]+)/.exec(name)?.[1]?.trim() ?? ''; return /claude|anthropic/i.test(m) ? 'Claude' : /connectors|grok|xai/i.test(m) ? 'Grok' : /openai|chatgpt|gpt/i.test(m) ? 'ChatGPT' : /gemini|google/i.test(m) ? 'Gemini' : ''; };
+const chatsOf = (notes: DoorNote[]): Chat[] => {
+  const by = new Map<string, DoorNote[]>();
+  for (const n of notes) { const k = n.from.key ?? n.from.webId ?? n.id; by.set(k, [...(by.get(k) ?? []), n]); }
+  return [...by].map(([key, ns]) => {
+    const sorted = [...ns].sort((a, b) => a.at.localeCompare(b.at)), last = sorted[sorted.length - 1]!, f = last.from;
+    const forwarded = / \(to your assistant, while it was away\)$/.test(f.name);
+    const agent = f.name.replace(/ \(to your assistant, while it was away\)$/, '').replace(/ \(.*\)$/, '');
+    const vendor = vendorOf(f.name);
+    const answeredLast = !!last.answered && (!last.answered.at || last.answered.at >= last.at);
+    return {
+      key, notes: sorted, name: f.as ?? agent, agent, vendor, forwarded, web: !!f.web,
+      via: f.web ? 'from your door page' : forwarded ? 'passed on by your AI' : f.as ? `via ${agent}${vendor ? ` · ${vendor}` : ''}` : vendor ? `${vendor} agent` : 'AI agent',
+      trust: (last.known ? 'known' : last.lookalike ? 'lookalike' : 'new') as Chat['trust'], why: last.known_why,
+      mode: last.mode ?? 'me', canMode: !!f.key && !f.web,
+      last: answeredLast ? last.answered!.text : last.text, lastBy: (answeredLast ? (last.answered!.by === 'you' ? 'you' : 'ai') : '') as Chat['lastBy'],
+      at: answeredLast && last.answered!.at ? last.answered!.at : last.at,
+      unread: ns.filter((n) => !n.answered).length,
+    };
+  }).sort((a, b) => b.at.localeCompare(a.at));
+};
+const initials = (s: string) => s.replace(/[^\p{L}\p{N} ]/gu, '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '?';
+const trustChip = (c: Chat) => h('span', { class: `chip trust-${c.trust}` }, c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New');
+// A conversation is a step in the history, so the phone's back gesture (and ‹) leaves it.
+const goChat = (key: string) => { history.pushState({ chat: true }, '', `#chat=${encodeURIComponent(key)}`); dispatchEvent(new HashChangeEvent('hashchange')); };
+const leaveChat = () => { if ((history.state as { chat?: boolean } | null)?.chat) history.back(); else { history.replaceState(null, '', '#chats'); dispatchEvent(new HashChangeEvent('hashchange')); } };
+
+/** Chats, where the app opens: what needs you pinned on top, then every conversation, newest first. */
+function ChatsTab({ go }: { go: (t: Tab) => void }) {
+  const list = useHouse<ListView>({ kind: 'list' });
+  const [filter, setFilter] = useState<'all' | 'known' | 'new'>('all');
+  const open = openChat();
+  if (!list.data) return h(Failed, { error: list.error });
+  const chats = chatsOf((list.data.notes ?? []) as DoorNote[]);
+  // Opened from a notification, or tapped: that conversation, full screen.
+  const picked = open ? chats.find((c) => c.key === open || c.notes.some((n) => n.id === open)) : undefined;
+  if (picked) return h(ChatView, { c: picked });
+  const row = (c: Chat) => h('li', { key: c.key }, h('button', { type: 'button', class: `chatrow${c.unread ? ' unread' : ''}`, onClick: () => goChat(c.key) },
+    h('span', { class: `avatar trust-${c.trust}` }, initials(c.name)),
+    h('span', { class: 'chatmain' },
+      h('span', { class: 'chattop' }, h('b', {}, c.name), h('time', {}, when(c.at))),
+      h('span', { class: 'chatsub' }, h('span', { class: 'chatvia' }, c.via), trustChip(c)),
+      h('span', { class: 'chatbottom' }, h('span', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : c.lastBy === 'ai' ? 'Your AI: ' : '', c.last),
+        c.mode === 'ai' && c.canMode ? h('span', { class: 'aibadge', title: 'Your AI replies in this chat' }, 'AI') : null,
+        c.unread ? h('span', { class: 'dot-unread' }, String(c.unread)) : null))));
+  const shown = chats.filter((c) => filter === 'all' || (filter === 'known' ? c.trust === 'known' : c.trust !== 'known'));
+  return h('div', {},
+    h(Pinned, { go }),
+    chats.length ? h('div', { class: 'seg filters', role: 'group', 'aria-label': 'Show' },
+      ...(['all', 'known', 'new'] as const).map((f) => h('button', { key: f, type: 'button', 'aria-pressed': String(filter === f), onClick: () => setFilter(f) },
+        f === 'all' ? 'All' : f === 'known' ? `Known (${chats.filter((c) => c.trust === 'known').length})` : `New (${chats.filter((c) => c.trust !== 'known').length})`))) : null,
+    chats.length
+      ? shown.length ? h('ul', { class: 'chats' }, ...shown.map(row)) : h('p', { class: 'empty' }, filter === 'known' ? 'Nobody you know has written yet. Someone becomes known once you\'ve answered them.' : 'Nobody new.')
+      : h('p', { class: 'empty' }, 'No messages yet. People reach you by asking their AI to ping your handle: it\'s on Me.'));
+}
+
+/** Whose AI replies in a chat, said above the composer, with the one tap that changes it. */
+function ModeBar({ c, mode, setTo, duty }: { c: Chat; mode: 'ai' | 'me'; setTo: (m: 'ai' | 'me') => Promise<void>; duty: boolean }) {
+  if (!c.canMode) return null;
+  return h('div', { class: `modebar ${mode}` },
+    h('span', {}, mode === 'ai' ? (duty ? 'Your AI is replying in this chat' : 'Your AI may reply here once it\'s on duty (My AI)') : 'You\'re replying'),
+    h(Act, { label: mode === 'ai' ? 'Take over' : 'Let my AI reply', cls: 'small quiet', run: () => setTo(mode === 'ai' ? 'me' : 'ai') }));
+}
+
+const dayOf = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+
+/** One conversation, full screen: who, the messages as bubbles, whose AI replies, and a reply bar. Tap the name for more. */
+function ChatView({ c }: { c: Chat }) {
+  const bump = useBump();
+  const input = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState(c.mode);
+  const [info, setInfo] = useState(false);
+  const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  const onDuty = (duty.data?.duties ?? []).some(dutyLive);
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!info) end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, info]);
+  const latest = c.notes[c.notes.length - 1]!;
+  const setTo = async (m: 'ai' | 'me') => { const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.chat.mode', key: latest.from.key, mode: m }); if (r.error) throw new Error(r.error); setMode(m); bump(); };
+  const head = (back: () => void, label: string) => h('div', { class: 'chathead' },
+    h('button', { class: 'back', type: 'button', onClick: back, 'aria-label': label }, '‹'),
+    h('button', { class: 'chatwho', type: 'button', onClick: () => setInfo(!info), 'aria-label': `About ${c.name}` },
+      h('span', { class: `avatar trust-${c.trust}` }, initials(c.name)),
+      h('span', { class: 'chatmain' }, h('b', {}, c.name), h('span', { class: 'chatvia' }, c.via, c.canMode ? ` · ${mode === 'ai' ? 'your AI replies' : 'you reply'}` : ''))));
+  if (info) return h('div', { class: 'chat' }, head(() => setInfo(false), 'Back to the chat'), h(ChatInfo, { c, mode, setTo, onDuty, latest }));
+  let day = '';
+  const bubbles = c.notes.flatMap((n) => {
+    const d = dayOf(n.at), divider = d !== day ? ((day = d), h('div', { key: `d-${n.id}`, class: 'daydiv' }, d)) : null;
+    return [divider,
+      h('div', { key: n.id, class: `bubble them${focusNote() === n.id ? ' lit' : ''}` }, h('p', {}, n.text), h('time', {}, clock(n.at))),
+      n.answered ? h('div', { key: `${n.id}-a`, class: `bubble ${n.answered.by === 'you' ? 'me' : 'ai'}` },
+        n.answered.by === 'you' ? null : h('span', { class: 'who' }, `${shortName(n.answered.by)} (your AI)`), h('p', {}, n.answered.text), n.answered.at ? h('time', {}, clock(n.answered.at)) : null) : null];
+  });
+  return h('div', { class: 'chat' },
+    head(leaveChat, 'Back to Chats'),
+    h('div', { class: 'bubbles' },
+      // A first message from someone: one quiet line on what is and isn't checked (the rest is behind the name).
+      c.trust === 'new' && !c.web ? h('p', { class: 'sysline' }, `First time ${c.name === c.agent ? 'this agent writes' : `${c.name} writes through ${c.agent}`}. The agent's key is checked; the name is the one it gives.`) : null,
+      c.trust === 'lookalike' ? h('p', { class: 'sysline threat' }, `Careful: ${c.why ?? 'a name like someone you know, with a different key'}.`) : null,
+      ...bubbles, h('div', { ref: end })),
+    h('div', { class: 'composer' },
+      h(ModeBar, { c, mode, setTo, duty: onDuty }),
+      h('div', { class: 'composer-row' },
+        h('input', { ref: input, type: 'text', maxlength: 1000, placeholder: c.forwarded ? 'Passed on by your AI: reply through it' : 'Message', 'aria-label': 'Message', disabled: c.forwarded }),
+        h(Act, { label: 'Send', cls: 'primary', run: async () => { const t = input.current!.value.trim(); if (!t) return; const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.note.reply', id: latest.id, text: t }); if (r.error) throw new Error(r.error); input.current!.value = ''; bump(); } }))));
+}
+
+/** About a conversation (a tap on its name, as in messaging apps): who it is, what's checked, who replies, mute and clear. */
+function ChatInfo({ c, mode, setTo, onDuty, latest }: { c: Chat; mode: 'ai' | 'me'; setTo: (m: 'ai' | 'me') => Promise<void>; onDuty: boolean; latest: DoorNote }) {
+  const f = latest.from;
+  return h('div', { class: 'chatinfo' },
+    h('div', { class: 'bigwho' }, h('span', { class: `avatar big trust-${c.trust}` }, initials(c.name)), h('h2', {}, c.name), trustChip(c)),
+    h('dl', { class: 'facts' },
+      c.web ? h('div', {}, h('dt', {}, 'From'), h('dd', {}, 'Your door page in a browser: no AI, nothing checked about who wrote it.'))
+        : h('div', {}, h('dt', {}, 'Their AI'), h('dd', {}, `${c.agent}${c.vendor ? `, a ${c.vendor} agent` : ''}. Every message is signed with its key, and your house checked it.`)),
+      c.name !== c.agent && !c.web ? h('div', {}, h('dt', {}, 'Name'), h('dd', {}, `"${c.name}" is the name the agent gives for its person. Nobody checked it.`)) : null,
+      f.speaks_for ? h('div', {}, h('dt', {}, 'Speaks for'), h('dd', {}, `${f.speaks_for.house}${f.speaks_for.checked ? ' (checked)' : ' (not checked)'}`)) : null,
+      h('div', {}, h('dt', {}, c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New'), h('dd', {}, c.trust === 'known' ? (c.why ?? 'You\'ve answered this agent before.') : c.trust === 'lookalike' ? (c.why ?? 'A name like someone you know, with a different key.') : 'You haven\'t talked before. It becomes known once you answer.')),
+      f.key ? h('div', {}, h('dt', {}, 'Key'), h('dd', {}, h('code', {}, f.key.length > 40 ? `${f.key.slice(0, 24)}…${f.key.slice(-10)}` : f.key))) : null),
+    c.canMode ? h('section', { class: 'block' },
+      h(Toggle, { label: 'Let my AI reply in this chat', checked: mode === 'ai', onChange: (v: boolean) => void setTo(v ? 'ai' : 'me').catch(() => {}) }),
+      h('p', { class: 'item-meta' }, mode === 'ai' ? `Your AI on duty answers ${c.name} for you${onDuty ? '' : ' (it isn\'t on duty now: set it up on My AI)'}. Each reply it sends says so. You can still write yourself.` : 'Only you answer this chat. Your AI leaves it alone.')) : null,
+    h('ul', { class: 'setrows' },
+      h('li', {}, h(Act, { label: 'Mute', cls: 'rowact', confirm: 'Tap again: their messages are turned away', run: async () => { await call({ kind: 'panel.note.mute', id: latest.id }); leaveChat(); } })),
+      h('li', {}, h(Act, { label: 'Clear chat', cls: 'rowact danger', confirm: 'Tap again: the messages go', run: async () => { for (const n of c.notes) await call({ kind: 'panel.note.dismiss', id: n.id }); leaveChat(); } }))));
+}
+
+/** No handle yet: the one setting that makes you reachable, at the top of Chats until it's done. */
 function HandleCard({ d }: { d: DoorState }) {
   const input = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState('');
@@ -263,18 +396,24 @@ function HandleCard({ d }: { d: DoorState }) {
     msg ? h('p', { class: 'muted' }, msg) : null);
 }
 
-/** How people reach you: your handle, the line to share, an invite, and what your door says. */
+/** Me: your handle at the top with Edit, the line to tell people, your address, an invite, your circles. */
 function MeTab({ go }: { go: (t: Tab) => void }) {
   const door = useHouse<DoorState>({ kind: 'panel.door' });
+  const [edit, setEdit] = useState(false);
   const d = door.data && !door.data.error ? door.data : null;
   if (!d) return h(Failed, { error: door.error });
   void go;
+  if (!d.handle && !edit) return h('div', {}, h(HandleCard, { d }), h(InviteCard, {}), h(Circles, {}));
   return h('div', {},
-    d.handle ? null : h(HandleCard, { d }),
-    d.open ? h(ShareDoor, { address: d.address, handle: d.handle }) : null,
-    h(InviteCard, {}),
-    h(Circles, {}),
-    h('details', { class: 'fold' }, h('summary', {}, 'Edit your name, handle and door'), h(DoorCard, { d })));
+    h('section', { class: 'block profile' },
+      h('div', { class: 'profile-head' },
+        h('div', {}, h('div', { class: 'handle' }, d.handle ? `@${d.handle}` : 'No handle'), d.name ? h('div', { class: 'muted' }, d.name) : null,
+          h('div', { class: 'item-meta' }, d.open ? 'Your door is open: anyone\'s AI can write to you.' : 'Your door is closed: nobody can write to you.')),
+        h('button', { type: 'button', class: 'btn small', onClick: () => setEdit(!edit) }, edit ? 'Cancel' : 'Edit')),
+      edit ? h(DoorCard, { d, done: () => setEdit(false) }) : null),
+    d.open && !edit ? h(ShareDoor, { address: d.address, handle: d.handle }) : null,
+    edit ? null : h(InviteCard, {}),
+    edit ? null : h(Circles, {}));
 }
 
 /** Everything else, as a plain list: each row is a page with a way back. */
@@ -959,27 +1098,25 @@ function RuleCard({ r, i, all, fields, purposes, redraw }: { r: Rule; i: number;
 }
 
 /**
- * Your door (SPEC §9.0): open it to give your house's address out, in a signature or as a QR code, so people's AI can knock
- * or leave a note. The address is the identifier; a name only if you add one. Saved in your rules, like any setting.
+ * Your door (SPEC §9.0): your handle, a name, one line on it, open or closed. Open, people's AI can find you by your handle
+ * or your address and leave a note. Saved in your rules, like any setting.
  */
-function DoorCard({ d }: { d: DoorState }) {
+function DoorCard({ d, done }: { d: DoorState; done: () => void }) {
   const about = useRef<HTMLInputElement>(null), name = useRef<HTMLInputElement>(null), handle = useRef<HTMLInputElement>(null);
-  const [msg, setMsg] = useState('');
+  const bump = useBump();
   const save = (open: boolean) => async () => {
     const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.current!.value, name: name.current!.value, handle: handle.current!.value.trim().toLowerCase() });
-    if (!r.ok) setMsg(r.error ?? 'not saved'); else { setMsg(open ? 'Saved.' : 'Closed: your house\'s address shows nothing about you now.'); rulesDraft = null; }
+    if (!r.ok) throw new Error(r.error ?? 'not saved');
+    rulesDraft = null; done(); bump();
   };
-  return h('section', { class: 'block', id: 'door' },
-    h('h2', {}, d.open ? 'Your door is open' : 'Your door is closed'),
-    h('p', { class: 'muted' }, d.open ? 'Anyone\'s AI can leave you a note at your address; your rules and your agent answer. Share it from Home.' : 'Open it to give your house\'s address out, so people can reach you through their AI. No name needed.'),
-    d.open ? h('div', { class: 'row' }, h('a', { class: 'btn small', href: d.address, target: '_blank', rel: 'noopener' }, 'See it as others do')) : null,
-    h('details', { class: 'fold', open: !d.open }, h('summary', {}, d.open ? 'Change what it says' : 'What it says'),
-      h('label', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door'), h('input', { ref: about, type: 'text', maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', defaultValue: d.about ?? '' })),
-      h('label', { class: 'field' }, h('span', { class: 'lab' }, 'A name to show (optional)'), h('input', { ref: name, type: 'text', maxlength: 60, placeholder: 'Optional: the address is enough', defaultValue: d.name ?? '' })),
-      // A handle: people tell their own AI "ping stan", and it finds this door. Unique on this Lake.
-      h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Your handle (optional): people ask their AI to "ping" it'), h('input', { ref: handle, type: 'text', maxlength: 30, autocapitalize: 'none', autocomplete: 'off', placeholder: 'e.g. stan', defaultValue: d.handle ?? '' })),
-      h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Open my door', cls: 'primary', run: save(true) }),
-        d.open ? h(Act, { label: 'Close my door', run: save(false) }) : null, msg ? h('span', { class: 'muted' }, msg) : null)));
+  return h('div', { class: 'editform' },
+    // A handle: people tell their own AI "ping stan", and it finds this door. Unique on this Lake.
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Handle: people ask their AI to "ping" it'), h('input', { ref: handle, type: 'text', maxlength: 30, autocapitalize: 'none', autocomplete: 'off', spellcheck: false, placeholder: 'e.g. stan', defaultValue: d.handle ?? '', onInput: (e: Event) => { const t = e.target as HTMLInputElement; t.value = t.value.toLowerCase().replace(/[^a-z0-9-]/g, ''); } })),
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Name (optional)'), h('input', { ref: name, type: 'text', maxlength: 60, placeholder: 'Optional: the handle is enough', defaultValue: d.name ?? '' })),
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door (optional)'), h('input', { ref: about, type: 'text', maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', defaultValue: d.about ?? '' })),
+    h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Save and open my door', cls: 'primary', run: save(true) }),
+      d.open ? h(Act, { label: 'Close my door', cls: 'quiet', confirm: 'Tap again: nobody can write to you', run: save(false) }) : null,
+      d.open ? h('a', { class: 'btn small quiet', href: d.address, target: '_blank', rel: 'noopener' }, 'See it as others do') : null));
 }
 
 /** Bring someone onto the Lake: a one-time link to a house of their own (a hosted Lake gives each owner a few). */
@@ -1258,7 +1395,13 @@ function MyAgent() {
   } });
   const mins = invite ? Math.max(1, Math.round((invite.until - Date.now()) / 60_000)) : 0;
   return h('div', {},
-    h('p', { class: 'lede' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
+    // On duty or not, first; then what it did while you were away; then what it suggests; then its keys.
+    h(DutyCard, { houseUrl, log: duty.data }),
+    h(WhileYouSlept, {}),
+    h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
+      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and at the top of Chats.')),
+    h('h2', { class: 'section-title' }, 'Your AI\'s keys'),
+    h('p', { class: 'muted' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
       h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), ((l) => h('span', { class: `chip${l.now ? ' ok' : ''}`, title: 'When it last used its key' }, l.text))(lastHere(a.seenAt))),
       h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests`),
@@ -1272,10 +1415,7 @@ function MyAgent() {
       h('p', { class: 'muted' }, `It needs the Lake connector. The code works once, for the next ${mins} minute${mins === 1 ? '' : 's'}.`),
       h('textarea', { readonly: true, rows: 5, class: 'copybox', value: invite.msg, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
       h('div', { class: 'row' }, h(CopyButton, { text: invite.msg }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => { invite = null; redraw(); } }, 'Done')))
-      : h('div', { class: 'block' }, give),
-    h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
-      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and in your Inbox.')),
-    h(DutyCard, { houseUrl, log: duty.data }));
+      : h('div', { class: 'block' }, give));
 }
 
 /**
@@ -1355,6 +1495,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
   const [to, setTo] = useState('07:00');
   const [cap, setCap] = useState(10);
   const [days, setDays] = useState(7);
+  const [setup, setSetup] = useState(false);
   const redraw = useRedraw();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (dutyCode && dutyCode.until < Date.now()) dutyCode = null;
@@ -1380,11 +1521,14 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       h('p', { class: 'item-meta' }, `${d.hours ? `On duty ${d.hours.from}–${d.hours.to}` : 'On duty while you\'re away'} · ${used} of ${d.cap} tonight · until ${until}`),
       h('p', { class: 'item-meta' }, `${DUTY_KINDS.filter(([k]) => d.kinds.includes(k)).map(([, l]) => l).join(' · ') || d.kinds.join(', ')} · ${lastHere(d.seenAt).text}`),
       !d.state.on ? h('p', { class: 'item-meta amber-text' }, d.state.why) : null,
+      d.runner ? h('details', { class: 'receipt' }, h('summary', {}, 'When it was looking'), h('p', { class: 'muted' }, watching(d.runner))) : null,
       h('div', { class: 'item-foot' }, h(Act, { label: 'Off duty', cls: 'danger', confirm: 'Tap again: it stops now', run: () => call({ kind: 'panel.duty.off', kid: d.kid }) })));
   })));
   const flip = (k: string, on: boolean) => setKinds(on ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k));
-  return h('section', { class: 'block duty' }, h('details', { class: 'fold' }, h('summary', {}, 'AI on duty: replies and bookings while you\'re away'),
-    h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know, bookings in your free hours. Never money. Anything new waits for you.'),
+  const intro = h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know and chats you hand it, bookings in your free hours. Never money. Anything new waits for you.');
+  if (!setup) return h('section', { class: 'block duty' }, h('div', { class: 'item-head' }, head, h('span', { class: 'chip' }, 'Off')), intro,
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onClick: () => setSetup(true) }, 'Set up AI on duty')));
+  return h('section', { class: 'block duty' }, head, intro, h('div', {},
     ...DUTY_KINDS.map(([k, label]) => h(Toggle, { key: k, label, checked: kinds.includes(k), onChange: (v: boolean) => flip(k, v) })),
     h('div', { class: 'times' },
       h('span', { class: 'muted' }, 'From'),
@@ -1436,7 +1580,6 @@ function WhileYouSlept() {
       h('div', { class: 'tile mint' }, h('dt', {}, 'Handled'), h('dd', {}, String(sum.handled))),
       h('div', { class: 'tile' }, h('dt', {}, 'Waiting'), h('dd', {}, String(sum.waiting))),
       h('div', { class: 'tile' }, h('dt', {}, 'Blocked'), h('dd', {}, String(sum.blocked)))),
-    ...(log.data?.duties ?? []).filter((d) => d.runner).map((d) => h('p', { class: 'muted', key: `run-${d.kid}` }, watching(d.runner!))),
     done.length ? h(Paged, { items: done, size: 8, render: row }) : h('p', { class: 'empty' }, 'Nothing done for you: what came in is waiting for you below.'),
     stopped.length ? h('details', { class: 'slept-stopped' }, h('summary', {}, `Stopped: ${stopped.length} thing${stopped.length === 1 ? '' : 's'} it may not do`), h('ul', { class: 'items' }, ...stopped.map(row))) : null);
 }
@@ -1545,7 +1688,7 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
 
 /**
  * Notifications on this device, always reachable (7 Nov: once "Not now" was tapped on Home, nothing brought them back):
@@ -1616,8 +1759,18 @@ function App() {
   const [list, setList] = useState<{ requests: Request[] } | null>(null);
   const [name, setName] = useState('');
   const [noOffers, setNoOffers] = useState(false);
-  const go = (t: Tab) => { setTab(t); if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`); scrollTo(0, 0); };
-  useEffect(() => { const f = () => setTab(tabFromHash()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  const [hash, setHash] = useState(location.hash);
+  // Where a page under Settings or Chats was opened from, for its way back.
+  const from = useRef<Tab>('settings');
+  const go = (t: Tab) => { if (MAIN.includes(t)) from.current = t; else if (MAIN.includes(tab)) from.current = tab; setTab(t); if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`); setHash(location.hash); scrollTo(0, 0); };
+  useEffect(() => { const f = () => { setTab(tabFromHash()); setHash(location.hash); scrollTo(0, 0); }; addEventListener('hashchange', f); addEventListener('popstate', f); return () => { removeEventListener('hashchange', f); removeEventListener('popstate', f); }; }, []);
+  const chatting = tab === 'chats' && /^#(note|chat)=/.test(hash);
+  useEffect(() => { document.body.classList.toggle('in-chat', chatting); }, [chatting]);
+  // Opened from a notification: say what it was about, at the top, once.
+  const [notified, setNotified] = useState(() => new URLSearchParams(location.search).get('n') ?? '');
+  useEffect(() => { if (notified) history.replaceState(null, '', location.pathname + location.hash); }, []);
+  // The notification helper is registered on every open, so a phone picks up a new one (8 Nov: it kept the first forever).
+  useEffect(() => { try { if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') void navigator.serviceWorker.register('./owner-sw.js', { scope: './' }).then((r) => r.update()).catch(() => {}); } catch { /* not supported */ } }, []);
   // Pull down at the top to refresh, as phone apps do (8 Nov: a Home Screen app has no reload button).
   const [pull, setPull] = useState(0);
   useEffect(() => {
@@ -1665,13 +1818,14 @@ function App() {
   return h(Version.Provider, { value: { version, bump } },
     h('div', { class: 'shell' },
       h('aside', { class: 'side' }, h('div', { class: 'brand' }, h('span', { class: 'sq' }), 'Your house'),
-        h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers })),
+        h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers, unread: ((list as { notes?: { answered?: unknown }[] } | null)?.notes ?? []).filter((n) => !n.answered).length })),
       h('main', {},
+        notified ? h('div', { class: 'notified' }, h('span', {}, `Notification: ${notified}`), h('button', { type: 'button', class: 'btn small quiet', onClick: () => setNotified(''), 'aria-label': 'Close' }, '×')) : null,
         pull ? h('div', { class: 'pull', style: `height:${pull / 2}px` }, pull > 80 ? 'Release to refresh' : 'Pull to refresh') : null,
-        MAIN.includes(tab) ? h('header', { class: 'top' },
-          h('div', { class: 'eyebrow' }, h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? 'live' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
-          h('h1', {}, name || 'Your house')) : null,
-        MAIN.includes(tab) ? null : h('button', { class: 'back', type: 'button', onClick: () => go(tab === 'requests' ? 'home' : 'settings') }, tab === 'requests' ? '‹ Inbox' : '‹ Settings'),
+        // Each tab says what it is, as phone apps do; the dot says whether your house is live. Your handle heads Me.
+        MAIN.includes(tab) && !chatting ? h('header', { class: 'top' },
+          h('h1', {}, labelOf(tab), h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? `${name || 'your house'}: live` : 'reconnecting' }))) : null,
+        MAIN.includes(tab) ? null : h('button', { class: 'back', type: 'button', onClick: () => go(from.current) }, `‹ ${labelOf(from.current)}`),
         MAIN.includes(tab) ? null : h('h2', { class: 'page-title' }, labelOf(tab)),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));
 }

@@ -256,6 +256,9 @@ export class OwnerDesk {
    */
   circleRules: { tally: string; id: string; kinds?: string[]; perWeek: number; at: number[] }[] = [];
   private saveCircleRules = () => writeFile(join(this.o.dataDir, 'circle-rules.json'), JSON.stringify(this.circleRules)).catch(() => {});
+  /** Who answers each conversation, by the sender's key (8 Nov): 'ai' (the owner's AI on duty may reply) or 'me'. Unset: AI for someone known, the owner for someone new. */
+  chatModes: Record<string, 'ai' | 'me'> = {};
+  private saveChatModes = () => writeFile(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes)).catch(() => {});
   standingUsed(jkt: string, purpose: string) {
     const k = `${jkt}|${purpose}`;
     this.standingUses.set(k, (this.standingUses.get(k) ?? 0) + 1);
@@ -414,6 +417,7 @@ export class OwnerDesk {
     for (const [k, n] of JSON.parse(await readFile(join(this.o.dataDir, 'standing-uses.json'), 'utf8').catch(() => '[]')) as [string, number][]) this.standingUses.set(k, n);
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
     this.circleRules = JSON.parse(await readFile(join(this.o.dataDir, 'circle-rules.json'), 'utf8').catch(() => '[]'));
+    this.chatModes = JSON.parse(await readFile(join(this.o.dataDir, 'chat-modes.json'), 'utf8').catch(() => '{}'));
     this.suggestions = JSON.parse(await readFile(join(this.o.dataDir, 'suggestions.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
@@ -596,6 +600,10 @@ export class OwnerDesk {
 
   /** Tell the owner's phones, at most once every two minutes for each kind of thing. */
   notifyOwner(tag: string, body: string, url?: string) {
+    // Where a tap on it opens, and what it said (8 Nov: a tap opened the app and nothing said what the push was about).
+    const where = url ?? (tag === 'request' ? './#requests' : tag === 'test' ? './#notify' : tag.startsWith('circle') ? './#me' : tag === 'duty' ? './#myagent' : './#chats');
+    const [path, hash = ''] = where.split('#');
+    url = `${path}?n=${encodeURIComponent(body)}${hash ? `#${hash}` : ''}`;
     void (async () => {
       const st = await this.pushes();
       // Counted only when sent: a note before any phone was signed up mustn't silence the first one after.
@@ -1388,7 +1396,9 @@ export class OwnerDesk {
           // The duty's novelty rule (Fable, 5 Nov): known means the owner's side wrote to that key first, or a standing yes
           // names it. Having received from it isn't enough: a stranger who writes twice is still a stranger.
           const key = String((p as unknown as { key?: string }).key ?? '');
-          const why = this.knownBy(key);
+          // The owner's own say for this conversation comes first: "I reply" keeps their AI out of it; "My AI replies" lets it in.
+          if (this.chatModes[key] === 'me') return void res.json({ known: false, why: 'your human answers this conversation themselves' });
+          const why = this.knownBy(key) ?? (this.chatModes[key] === 'ai' ? 'your human said you may reply in this conversation' : undefined);
           return void res.json(why ? { known: true, why } : { known: false, why: 'first contact: your human hears of it first' });
         }
         if (p.kind === 'assistant.badge') {
@@ -1869,6 +1879,15 @@ export class OwnerDesk {
             if (r.kind === 'circle.paid') { sug.favourPay.paid = true; await this.saveSuggestions(); this.news({ about: 'favour.paid', cart: r.cart, note: 'your human paid it with a favour owed to them: the seller has the tally\'s receipt' }, sug.by); }
             return r;
           },
+          // Who answers a conversation: the owner, or their AI on duty (by the sender's key).
+          'panel.chat.mode': async () => {
+            const w = q as { key?: string; mode?: string };
+            const key = String(w.key ?? '');
+            if (!key || !['ai', 'me'].includes(String(w.mode))) return { error: 'chat.mode: { key, mode: "ai" | "me" }' };
+            this.chatModes[key] = w.mode as 'ai' | 'me';
+            await this.saveChatModes();
+            return { ok: true, mode: w.mode };
+          },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },
           'panel.circle.dispute': async () => {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));
@@ -1950,7 +1969,7 @@ export class OwnerDesk {
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}) }; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: (n.from.key ? this.chatModes[n.from.key] : undefined) ?? (known && !n.from.web ? 'ai' : 'me') }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

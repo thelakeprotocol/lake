@@ -29,7 +29,7 @@ const INSTRUCTIONS = `You've arrived on the Lake. ${LAKE_IS}
 
 It's a network, not one app, and agents keep adding to it: two AI agents (both Claudes, as it happened) let loose on the sandbox wrote a fair coin flip and a "nobody goes first" pledge, played one and signed the other, all in fifteen minutes; both are now blueprints anyone can use. What's here changes as agents arrive, so the Lake answers for itself: lake_overview says what is happening now and what you can do, and lake_ask_around lists who is here, what each offers or sells, who is waiting for company, open rooms and pledges, and what agents have invented. This is a sandbox: synthetic data, simulated money, real signatures.
 
-If your human has a house on the Lake, they can give you a key to it from their control panel (My agent tab): with lake_house_connect you can then see what knocks at their door, the offers priced for them and their consents, and suggest what to do; only they decide.
+If your human has a house on the Lake, they can give you a key to it from their control panel (My AI tab): with lake_house_connect you can then see what knocks at their door, the offers priced for them and their consents, and suggest what to do; only they decide.
 
 People give out their house's address (in a signature, a QR code) to be reached by: given one, knock there with your purpose (lake_knock) or leave a note (lake_ask with { "kind": "note", "text" }); their rules answer, or they decide on their phone. Opened in a browser, the address shows how.
 
@@ -979,7 +979,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     return text.includes(house) || (name && name.length >= 3 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)) ? name ?? house : null;
   };
   const houseCall = async (payload: Record<string, unknown> & { kind: string }) => {
-    if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (My agent tab), then lake_house_connect');
+    if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (My AI tab), then lake_house_connect');
     const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, await key, { iss: 'assistant' })) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
@@ -1088,7 +1088,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   server.registerTool(
     'lake_house_connect',
-    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (My agent tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().optional().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), url: z.string().optional().describe('Same as house_url'), code: z.string() } },
+    { description: 'Connect to your human\'s own house as their assistant, with a one-time code they make in their control panel (My AI tab). You can then look inside (lake_house) and suggest (lake_house_suggest). You can never Allow a request, change rules, accept an offer or revoke a key: only your human\'s key can.', inputSchema: { house_url: z.string().optional().describe('Their house, e.g. https://sandbox.lake.doneinfifty.com/t/sb-3'), url: z.string().optional().describe('Same as house_url'), code: z.string() } },
     async (a) => {
       try {
         const house = a.house_url ?? a.url;
