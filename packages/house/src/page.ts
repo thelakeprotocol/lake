@@ -24,6 +24,6 @@ ul.list{list-style:none;margin:0;padding:0;display:grid;gap:8px}ul.list li{displ
 
 /** A page in the shared look. `head` adds to <head> (a description for agents, say). */
 export function page(title: string, body: string, head = ''): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070B12"><title>${esc(title)}</title>${head}
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta name="theme-color" content="#070B12"><title>${esc(title)}</title>${head}
 <style>${CSS}</style></head><body><main>${body}</main></body></html>`;
 }

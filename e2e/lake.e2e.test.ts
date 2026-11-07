@@ -3089,8 +3089,10 @@ describe('relay: a house behind a home router', () => {
       /joined the Lake/,
     );
     relayed = procs[procs.length - 1];
-    const found = await (await fetch(`${node}/cards?role=house`)).json() as { card: typeof card & { name: string } }[];
-    card = found.find((f) => f.card.name === 'House homebody')!.card;
+    // Listed once the node has checked its card through the relay: a moment after the house says it joined (CI saw it missing).
+    const listed = async () => ((await (await fetch(`${node}/cards?role=house&idle=1`)).json()) as { card: typeof card & { name: string } }[]).find((f) => f.card.name === 'House homebody');
+    for (let i = 0; i < 30 && !(await listed()); i++) await new Promise((ok) => setTimeout(ok, 500));
+    card = (await listed())!.card;
     expect(card.supportedInterfaces.map((i) => i.url)).toEqual([expect.stringMatching(new RegExp(`^${node}/relay/`)), expect.stringMatching(new RegExp(`^${nodeB}/relay/`))]);
     const { reply } = await knock(card.supportedInterfaces[0]!.url, await visitor('gp.example'), presets().gp!);
     expect(reply).toMatchObject({ kind: 'decision', decision: 'join' });

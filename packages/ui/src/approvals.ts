@@ -147,13 +147,16 @@ function Failed({ error }: { error?: string }) {
 
 // ---- navigation ----
 // Your agent and the agents that knock are different things: "My agent" is yours, "Visitors" are strangers.
+// Four places, each with one job (7 Nov: the owner had to ask where things were): what needs you, how people reach you,
+// your own AI, and everything else as a plain list of pages under Settings, each with a way back.
 const TABS = [
-  ['home', 'Home'], ['requests', 'Requests'], ['offers', 'Offers'], ['myagent', 'My agent'], ['keys', 'Keys'], ['rules', 'Rules'],
-  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Data'], ['move', 'Move house'], ['key', 'Your key'], ['notify', 'Notifications'],
+  ['home', 'Inbox'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
+  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Requests'], ['offers', 'Offers'], ['keys', 'Keys you gave'],
+  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Your data'], ['key', 'Your key and recovery'], ['move', 'Move house'], ['about', 'About your house'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-/** Four tabs for every day; the rest one tap away under More. */
-const MAIN: Tab[] = ['home', 'requests', 'myagent', 'rules'];
+const MAIN: Tab[] = ['home', 'me', 'myagent', 'settings'];
+const labelOf = (t: Tab) => TABS.find(([id]) => id === t)?.[1] ?? t;
 const tabFromHash = (): Tab => TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'home';
 
 function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean }) {
@@ -166,14 +169,12 @@ function Nav({ tab, go, pending, noOffers }: { tab: Tab; go: (t: Tab) => void; p
     addEventListener('click', close);
     return () => removeEventListener('click', close);
   }, [open]);
-  const shown = TABS.filter(([id]) => !(id === 'offers' && noOffers) || id === tab);
-  const button = ([id, label]: readonly [Tab, string]) => h('button', { key: id, type: 'button', class: MAIN.includes(id) ? 'main' : 'extra', 'aria-current': id === tab ? 'page' : undefined, onClick: () => { setOpen(false); go(id); } },
-    label, id === 'requests' && pending ? h('span', { class: 'badge' }, String(pending)) : null);
-  return h('nav', { id: 'nav', ref: nav, class: open ? 'more-open' : '', 'aria-label': 'Control panel' },
-    ...shown.filter(([id]) => MAIN.includes(id)).map(button),
-    h('button', { type: 'button', class: `more-btn${MAIN.includes(tab) ? '' : ' here'}`, 'aria-expanded': String(open), onClick: () => setOpen(!open) }, 'More'),
-    h('div', { class: 'more-menu' }, h('span', { class: 'more-label' }, 'More'), ...shown.filter(([id]) => !MAIN.includes(id)).map(button),
-      h(SignOut, {})));
+  void noOffers;
+  const here = MAIN.includes(tab) ? tab : 'settings';
+  const shown = TABS.filter(([id]) => MAIN.includes(id));
+  const button = ([id, label]: readonly [Tab, string]) => h('button', { key: id, type: 'button', class: 'main', 'aria-current': id === here ? 'page' : undefined, onClick: () => { setOpen(false); go(id); } },
+    label, id === 'home' && pending ? h('span', { class: 'badge' }, String(pending)) : null);
+  return h('nav', { id: 'nav', ref: nav, 'aria-label': 'Control panel' }, ...shown.map(button));
 }
 
 /**
@@ -208,11 +209,8 @@ interface ListView { connects?: Connect[]; webId: string; until?: string; reques
 
 function Home({ go }: { go: (t: Tab) => void }) {
   const bump = useBump();
-  const o = useHouse<any>({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() });
-  const feed = useHouse<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
-  const free = useHouse<FreeState>({ kind: 'panel.free' });
   if (!list.data) return h(Failed, { error: list.error });
   const { suggestions, assistants, notes, agenda } = list.data;
   // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
@@ -228,42 +226,108 @@ function Home({ go }: { go: (t: Tab) => void }) {
     // Below what's waiting (7 Nov: a push brought the owner to a note that sat under this offer).
     ...(notifyOffer() ? [{ k: 'notify', v: () => h(NotifyItem, { key: 'notify' }) }] : []),
   ];
-  const stat = (label: string, value: string | number, to: Tab, cls = '') =>
-    h('button', { class: `stat ${cls}`, type: 'button', onClick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
   return h('div', {},
+    // No handle yet: the one thing that makes the house reachable, right here.
+    door.data && !door.data.error && !door.data.handle ? h(HandleCard, { d: door.data }) : null,
     // The morning: what your AI on duty did while you were away, first.
     h(WhileYouSlept, {}),
-    // What needs you, first: your agent's suggestions, notes at your door, requests your rules left to you.
     h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
       waiting || needs.length
         ? h('div', {},
             waiting ? h('ul', { class: 'items', style: 'margin-bottom:10px' }, h('li', { key: 'waiting', class: 'item amber' }, h('p', { class: 'item-text' }, `${waiting} request${waiting === 1 ? '' : 's'} your rules left to you`),
               h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onClick: () => go('requests') }, 'Look at them')))) : null,
             needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
-        : h('p', { class: 'empty' }, 'Nothing needs you. Your rules and your agent are handling it.')),
-    door.data?.open ? h(ShareDoor, { address: door.data.address, handle: door.data.handle }) : null,
+        : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'Nothing needs you. Your rules and your agent are handling it.')),
+    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null)
+}
+
+/** No handle yet: the one setting that makes you reachable, on Inbox until it's done. */
+function HandleCard({ d }: { d: DoorState }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState('');
+  const bump = useBump();
+  return h('section', { class: 'block start' },
+    h('h2', {}, 'Pick your handle'),
+    h('p', { class: 'muted' }, 'People reach you by asking their AI to "ping" it. Lowercase letters, numbers and dashes.'),
+    h('div', { class: 'row' }, h('input', { ref: input, type: 'text', maxlength: 30, autocapitalize: 'none', autocomplete: 'off', spellcheck: false, placeholder: 'e.g. stan', 'aria-label': 'Your handle', onInput: (e: Event) => { const t = e.target as HTMLInputElement; t.value = t.value.toLowerCase().replace(/[^a-z0-9-]/g, ''); } }),
+      h(Act, { label: 'Save', cls: 'primary', run: async () => {
+        const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open: true, about: d.about ?? '', name: d.name ?? '', handle: input.current!.value.trim() });
+        if (!r.ok) throw new Error(r.error ?? 'not saved');
+        setMsg('Saved.'); bump();
+      } })),
+    msg ? h('p', { class: 'muted' }, msg) : null);
+}
+
+/** How people reach you: your handle, the line to share, an invite, and what your door says. */
+function MeTab({ go }: { go: (t: Tab) => void }) {
+  const door = useHouse<DoorState>({ kind: 'panel.door' });
+  const d = door.data && !door.data.error ? door.data : null;
+  if (!d) return h(Failed, { error: door.error });
+  return h('div', {},
+    d.handle ? h('section', { class: 'block me' },
+      h('p', { class: 'handle' }, d.handle), d.name ? h('p', { class: 'muted' }, d.name) : null) : h(HandleCard, { d }),
+    d.open ? h(ShareDoor, { address: d.address, handle: d.handle }) : null,
     h(InviteCard, {}),
-    h(StartCard, { door: door.data && !door.data.error ? door.data : null, hasAssistant: assistants.length > 0, free: free.data ?? { set: false, slots: [] }, go }),
-    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
     h(Circles, {}),
-    // Everything else, one tap away.
-    !o.data ? null : h('details', { class: 'fold' }, h('summary', {}, 'About your house'),
-    o.data ? h('div', { class: 'stats' },
+    h('details', { class: 'fold' }, h('summary', {}, 'Edit your name, handle and door'), h(DoorCard, { d })),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn small quiet', type: 'button', onClick: () => go('free') }, 'When you can meet ›')));
+}
+
+/** Everything else, as a plain list: each row is a page with a way back. */
+function SettingsTab({ go }: { go: (t: Tab) => void }) {
+  const rows: [Tab, string][] = [
+    ['notify', 'On this phone, when something needs you'],
+    ['free', 'The hours your AI may offer people'],
+    ['rules', 'What your house says yes or no to'],
+    ['requests', 'What agents asked for, and your answers'],
+    ['offers', 'Offers priced inside your house'],
+    ['keys', 'Who you gave a key to, and taking it back'],
+    ['agents', 'Agents that knocked'],
+    ['money', 'What you earned and paid'],
+    ['data', 'What your house holds, and exporting it'],
+    ['key', 'This phone\'s key, recovery code, a new phone'],
+    ['move', 'Take your house elsewhere'],
+    ['about', 'Your record, your identity, recent activity'],
+  ];
+  return h('div', {},
+    h('ul', { class: 'rows' }, ...rows.map(([t, hint]) => h('li', { key: t }, h('button', { type: 'button', class: 'rowlink', onClick: () => go(t) },
+      h('span', {}, h('b', {}, labelOf(t)), h('small', {}, hint)), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'))))),
+    h('div', { style: 'margin-top:18px' }, h(SignOut, { cls: 'btn small danger' })));
+}
+
+/** When you can meet: the hours your AI may offer people, around your agenda. */
+function FreeTab() {
+  const res = useHouse<{ rules: Rules }>({ kind: 'panel.rules' });
+  const free = useHouse<FreeState>({ kind: 'panel.free' });
+  if (!res.data) return h(Failed, { error: res.error });
+  return h(FreeCard, { f: free.data ?? { set: false, slots: [] }, av: res.data.rules.availability });
+}
+
+/** About your house: your record and identity, your person stamp, counts, and what happened at your door. */
+function AboutTab({ go }: { go: (t: Tab) => void }) {
+  const o = useHouse<any>({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() });
+  const feed = useHouse<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
+  const list = useHouse<ListView>({ kind: 'list' });
+  if (!o.data) return h(Failed, { error: o.error });
+  const assistants = list.data?.assistants ?? [];
+  const stat = (label: string, value: string | number, to: Tab, cls = '') =>
+    h('button', { class: `stat ${cls}`, type: 'button', onClick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
+  return h('div', {},
+    h('div', { class: 'stats' },
       stat(o.data.knocksToday === 1 ? 'knock today' : 'knocks today', o.data.knocksToday, 'agents'),
       stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
       stat('earned', `$${o.data.earned}`, 'money'),
-      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null) : null,
-      h('dl', { class: 'facts' },
-        h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.data.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.data.claims} claims (${o.data.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.data.record.why}.`)),
-        h('div', {}, h('dt', {}, 'Your agent'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: looks and suggests; you decide.` : 'None yet.')),
-        h('div', {}, h('dt', {}, 'Reached'), h('dd', {}, o.data.relayed ? 'Through the Lake (your house is behind a router)' : 'Directly, at its own address')),
-        h('div', {}, h('dt', {}, 'Identity'), h('dd', {}, h('code', {}, webId)))),
-      h(PersonCard, { p: o.data.person }),
-      leaseUntil ? h(LeaseCard, {}) : null,
-      h('h3', {}, 'Recent at your door'),
-      feed.data?.length ? h(Paged, { items: feed.data, size: 12, tag: 'ul', cls: 'feed', render: (a: { at: string; kind: string; text: string }) => h('li', { key: `${a.at}-${a.text}` }, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text)) })
-        : h('p', { class: 'muted' }, 'Quiet so far.')),
-  );
+      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null),
+    h('dl', { class: 'facts' },
+      h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.data.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.data.claims} claims (${o.data.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.data.record.why}`)),
+      h('div', {}, h('dt', {}, 'Your AI'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: looks and suggests; you decide.` : 'None yet.')),
+      h('div', {}, h('dt', {}, 'Reached'), h('dd', {}, o.data.relayed ? 'Through the Lake (your house is behind a router)' : 'Directly, at its own address')),
+      h('div', {}, h('dt', {}, 'Identity'), h('dd', {}, h('code', {}, webId)))),
+    h(PersonCard, { p: o.data.person }),
+    leaseUntil ? h(LeaseCard, {}) : null,
+    h('h3', {}, 'Recent at your door'),
+    feed.data?.length ? h(Paged, { items: feed.data, size: 12, tag: 'ul', cls: 'feed', render: (a: { at: string; kind: string; text: string }) => h('li', { key: `${a.at}-${a.text}` }, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text)) })
+      : h('p', { class: 'muted' }, 'Quiet so far.'));
 }
 
 /**
@@ -379,7 +443,7 @@ function NotifyItem() {
     h('div', { class: 'item-actions' },
       !ios && !said ? h(Act, { label: 'Turn on', cls: 'primary', run: async () => setSaid(await turnOnNotifications()) }) : null,
       h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss, title: 'You can turn them on later: More → Notifications' }, said ? 'OK' : 'Not now')),
-    said ? null : h('p', { class: 'item-meta' }, 'Later: More → Notifications.'));
+    said ? null : h('p', { class: 'item-meta' }, 'Later: Settings → Notifications.'));
 }
 
 type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
@@ -776,9 +840,8 @@ function RulesTab() {
     setMessage(res2.ok ? { ok: true, text: 'Saved. Your housekeeper uses these from now on.' } : { ok: false, text: res2.error ?? 'not saved' });
     if (res2.ok) rulesDraft = null;
   };
+  void door; void free;
   return h('div', {},
-    door.data && !door.data.error ? h(DoorCard, { d: door.data }) : null,
-    h(FreeCard, { f: free.data ?? { set: false, slots: [] }, av: res.data.rules.availability }),
     h('h2', { class: 'section' }, 'Who gets what'),
     h('p', { class: 'muted' }, 'Your housekeeper follows these, top to bottom; the first rule that fits decides. Nothing an agent writes can change them.'),
     ...r.rules.map((rule, i) => h(RuleCard, { key: i, r: rule, i, all: r.rules, fields, purposes, redraw })),
@@ -897,7 +960,7 @@ function DoorCard({ d }: { d: DoorState }) {
   const [msg, setMsg] = useState('');
   const save = (open: boolean) => async () => {
     const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.current!.value, name: name.current!.value, handle: handle.current!.value.trim().toLowerCase() });
-    if (!r.ok) setMsg(r.error ?? 'not saved'); else { setMsg(''); rulesDraft = null; }
+    if (!r.ok) setMsg(r.error ?? 'not saved'); else { setMsg(open ? 'Saved.' : 'Closed: your house\'s address shows nothing about you now.'); rulesDraft = null; }
   };
   return h('section', { class: 'block', id: 'door' },
     h('h2', {}, d.open ? 'Your door is open' : 'Your door is closed'),
@@ -1478,7 +1541,7 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { home: Home, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
 
 /**
  * Notifications on this device, always reachable (7 Nov: once "Not now" was tapped on Home, nothing brought them back):
@@ -1581,9 +1644,10 @@ function App() {
     }).catch(() => {});
   }, [version]);
   useEffect(() => {
-    void call<{ name: string; handle?: string }>({ kind: 'panel.overview' }).then((o) => setName(o.handle ?? `House ${o.name}`)).catch(() => {});
     void call<{ packs: unknown[] }>({ kind: 'panel.market' }).then((m) => setNoOffers(!m.packs?.length)).catch(() => {});
   }, []);
+  // The house's name in the header: its handle once there is one, so asked again when something changes.
+  useEffect(() => { void call<DoorState>({ kind: 'panel.door' }).then((d) => { if (d.handle) setName(d.handle); else void call<{ name: string }>({ kind: 'panel.overview' }).then((o) => setName(`House ${o.name}`)).catch(() => {}); }).catch(() => {}); }, [version]);
   return h(Version.Provider, { value: { version, bump } },
     h('div', { class: 'shell' },
       h('aside', { class: 'side' }, h('div', { class: 'brand' }, h('span', { class: 'sq' }), 'Your house'),
@@ -1592,6 +1656,8 @@ function App() {
         h('header', { class: 'top' },
           h('div', { class: 'eyebrow' }, h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? 'live' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
           h('h1', {}, name || 'Your house')),
+        MAIN.includes(tab) ? null : h('button', { class: 'back', type: 'button', onClick: () => go(tab === 'requests' ? 'home' : 'settings') }, tab === 'requests' ? '‹ Inbox' : '‹ Settings'),
+        MAIN.includes(tab) ? null : h('h2', { class: 'page-title' }, labelOf(tab)),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));
 }
 

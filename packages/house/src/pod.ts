@@ -68,7 +68,11 @@ async function startPodServer(o: { dataDir: string; port: number; baseUrl: strin
   // Seeding takes longer with more pods, and much longer on a busy machine.
   const pods = o.seed.reduce((n, a) => n + a.pods.length, 0);
   await Promise.race([waitFor(`${o.baseUrl}.account/`, 90_000 + pods * 2_000), died]);
-  return { proc, stop: () => proc.kill('SIGTERM') };
+  // Later too: a pod server gone leaves houses that read from memory and can't save anything (7 Nov: a door's handle
+  // failed with "fetch failed" for an hour). Say why, and exit, so whatever runs this restarts it whole.
+  let stopping = false;
+  proc.once('exit', (code, signal) => { if (stopping) return; console.error(`pod server exited (${code ?? signal}); restarting the house process:\n${tail.join('')}`); process.exit(1); });
+  return { proc, stop: () => { stopping = true; proc.kill('SIGTERM'); } };
 }
 
 /**

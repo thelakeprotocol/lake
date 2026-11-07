@@ -47,16 +47,19 @@ async function tidy() {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 }
+// Four tabs (Inbox, Me, My AI, Settings); everything else is a row under Settings (7 Nov).
+const RENAMED: Record<string, string> = { Home: 'Inbox', 'My agent': 'My AI', Keys: 'Keys you gave', Data: 'Your data', 'Your key': 'Your key and recovery' };
 const tab = async (name: string) => {
-  const main = page.locator('#nav > button', { hasText: name });
+  const label = RENAMED[name] ?? name;
+  const main = page.locator('#nav > button', { hasText: label });
   if (await main.count()) await main.click();
-  else { await page.locator('#nav .more-btn').click(); await page.locator('#nav .more-menu button', { hasText: name }).click(); }
+  else { await page.locator('#nav > button', { hasText: 'Settings' }).click(); await page.locator('ul.rows .rowlink', { hasText: label }).first().click(); }
   await page.waitForTimeout(300);
 };
 
 const lostKey = async (p: Page) => {
   const said = p.getByText(/isn't your house's key any more/);
-  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('#nav > button', { hasText: 'Home' }).click(); await said.waitFor({ timeout: 5000 }); });
+  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('#nav > button', { hasText: 'Inbox' }).click(); await said.waitFor({ timeout: 5000 }); });
 };
 
 let assistant: Identity;
@@ -163,32 +166,42 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await (await fetch(`${house}/owner/status`)).json()).toMatchObject({ claimed: false, unclaimed: true });
   });
 
-  it('pairs a fresh device: the house name, one button, then Home', async () => {
+  it('pairs a fresh device: the house name, one button, then the Inbox with one thing to do', async () => {
     await page.goto(`${house}/owner/`);
     // Not claimed yet: what it is, and the one thing to do.
     await page.getByRole('button', { name: 'Use this phone' }).waitFor();
     expect(await page.locator('h1').textContent()).toMatch(/House|A house on the Lake/);
     await page.getByRole('button', { name: 'Use this phone' }).click();
-    await page.getByRole('heading', { name: 'Get set up' }).waitFor();
+    // Four tabs, and the Inbox asks for the one setting that makes the house reachable.
+    await page.locator('#nav > button').first().waitFor();
+    expect(await page.locator('#nav > button').allTextContents()).toEqual(['Inbox', 'Me', 'My AI', 'Settings']);
+    await page.getByRole('heading', { name: 'Pick your handle' }).waitFor();
     await page.getByRole('heading', { name: 'Needs you' }).waitFor();
     await tidy();
   });
 
-  it('opens the door from Get set up, and its public page says how to knock', async () => {
-    await page.locator('.steps li', { hasText: 'Open your door' }).getByRole('button', { name: 'Open it' }).click();
-    await page.locator('.steps li.done', { hasText: 'Open your door' }).waitFor();
+  it('opens the door by picking a handle on the Inbox, says it saved, and the door page says how to knock', async () => {
+    await page.getByLabel('Your handle').fill('Panel Owner');
+    expect(await page.getByLabel('Your handle').inputValue()).toBe('panelowner');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    // Saved: the card goes, and the house is named by its handle.
+    await page.getByRole('heading', { name: 'Pick your handle' }).waitFor({ state: 'detached', timeout: 10_000 });
+    await page.locator('h1', { hasText: 'panelowner' }).waitFor({ timeout: 10_000 });
     const door = await (await fetch(house, { headers: { accept: 'text/html' } })).text();
-    expect(door).toMatch(/Knock, knock[\s\S]*Send your AI over[\s\S]*Knock on the door at/);
+    expect(door).toMatch(/Knock, knock[\s\S]*Knock on the door at/);
     await tidy();
   });
 
-  it('shares the door from Home: its address, Copy, and a QR code a tap away', async () => {
-    await tab('Home');
-    const share = page.locator('section.block', { has: page.getByRole('heading', { name: 'Your door', exact: true }) });
+  it('shares how to reach you from Me: the line to tell people, the address, Copy, and a QR code a tap away', async () => {
+    await tab('Me');
+    await page.locator('.block.me .handle', { hasText: 'panelowner' }).waitFor();
+    await page.getByText('Ask your AI to "ping panelowner" on the Lake').waitFor();
+    const share = page.locator('section.block', { has: page.getByRole('heading', { name: 'You\'re reachable' }) });
     await share.getByText(house, { exact: true }).waitFor();
     await share.getByRole('button', { name: 'QR code' }).click();
     await share.locator('img.qr').waitFor();
     await tidy();
+    await tab('Inbox');
   });
 
   it('lets a person leave a note themselves from the door page, and read the answer later', async () => {
@@ -355,7 +368,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('picks free hours with day chips and times, in the owner\'s time zone', async () => {
-    await tab('Rules');
+    await tab('When you can meet');
     await page.getByRole('button', { name: 'Add a time' }).click();
     const w = page.locator('#free .window').first();
     // Mon–Fri is the start; take Friday off, add Saturday.
@@ -372,7 +385,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('#free .act-err').waitFor();
     await w.getByLabel('To').fill('20:00');
     await page.reload();
-    await tab('Rules');
+    await tab('When you can meet');
     const again = page.locator('#free .window').first();
     expect(await again.getByRole('button', { name: 'Sa', exact: true }).getAttribute('aria-pressed')).toBe('true');
     expect(await again.getByRole('button', { name: 'Fr', exact: true }).getAttribute('aria-pressed')).toBe('false');
@@ -380,13 +393,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
-  it('opens every tab under More without an error or a page wider than the phone', async () => {
-    for (const name of ['Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house']) {
+  it('opens every page under Settings, each with a way back, without an error or a page wider than the phone', async () => {
+    for (const name of ['Notifications', 'When you can meet', 'Rules', 'Requests', 'Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house', 'About your house']) {
       await tab(name);
       await page.waitForTimeout(600);
       expect(await page.locator('#view').textContent()).not.toMatch(/Couldn't reach your house/);
+      expect(await page.locator('button.back').count()).toBe(1);
       await tidy();
     }
+    await page.locator('button.back').click();
+    await page.locator('ul.rows').waitFor();
   });
 
   it('opens at once with what it showed last time, even when the house is slow', async () => {
@@ -405,10 +421,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('says when the house can\'t be reached, and recovers when it can', async () => {
     await ctx.setOffline(true);
-    await page.locator('#nav > button', { hasText: 'Requests' }).click();
+    await page.locator('#nav > button', { hasText: 'Me' }).click();
     await page.locator('.dot.down').waitFor({ timeout: 5000 });
     await ctx.setOffline(false);
-    await page.locator('#nav > button', { hasText: 'Home' }).click();
+    await page.locator('#nav > button', { hasText: 'Inbox' }).click();
     await page.locator('.dot.live').waitFor({ timeout: 10_000 });
     await tidy();
   });
@@ -635,8 +651,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const again = await (await fetch(`${house}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: (await generateIdentity('x')).publicJwk, recovery: code }) })).json();
     expect(again.error).toMatch(/doesn't match/);
     // And moves to a third device with a one-use link.
-    await phone2.locator('#nav .more-btn').click();
-    await phone2.locator('#nav .more-menu button', { hasText: 'Your key' }).click();
+    await phone2.locator('#nav > button', { hasText: 'Settings' }).click();
+    await phone2.locator('ul.rows .rowlink', { hasText: 'Your key and recovery' }).click();
     await phone2.getByRole('button', { name: 'Make a pairing link' }).click();
     const link = (await phone2.locator('.address code').textContent())!;
     const ctx3 = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -800,8 +816,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // A circle of two on the street. Signing before having a person stamp says plainly what to do.
     const organiser = await makeVisitor(await generateIdentity(), 'street.example');
     expect((await ask(`${specialists}/tally/a2a`, organiser, { kind: 'tally.open', id: 'street-circle', text: 'Our street helps out.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a lift or a meal', times: 3, kinds: ['a lift', 'a meal'] } })).reply).toMatchObject({ kind: 'tally.opened' });
-    await tab('Home');
-    await page.locator('details.fold > summary', { hasText: 'About your house' }).click();
+    await tab('About your house');
     await page.locator('summary', { hasText: 'Sign a pledge from your house' }).click();
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
     await page.getByPlaceholder('pledge id').fill('street-circle');
@@ -816,8 +831,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('button', { name: 'Sign this pledge' }).click();
     await page.getByText(/Signed: 1 of 2/).waitFor({ timeout: 15_000 });
     expect(await asNb({ kind: 'panel.pledge.sign', tally: `${specialists}/tally`, id: 'street-circle' })).toMatchObject({ kind: 'tally.triggered' });
-    // Your promise circles: ask it for a lift.
+    // Your promise circles, on Me: ask it for a lift.
     await page.reload();
+    await tab('Me');
     const circles = page.locator('.card', { hasText: 'Your promise circles' });
     await circles.getByText('You promised: a lift or a meal, 3 times a year, to 1 others.').waitFor({ timeout: 15_000 });
     await circles.getByLabel('Kind of help').selectOption('a lift');
@@ -828,6 +844,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // The neighbour says yes; the owner sees it live, and taps Thanks.
     const nbAsk = async (call?: string) => { for (let i = 0; i < 30; i++) { const n = ((await asNb({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string } }[]).find((x) => x.circle?.role === 'ask' && x.circle.state === 'open' && (!call || x.circle.call === call)); if (n) return n; await page.waitForTimeout(500); } throw new Error('no ask'); };
     expect(await asNb({ kind: 'panel.circle.answer', note: (await nbAsk()).id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+    await tab('Inbox');
     await page.getByText('Someone said yes. Reach them at their house:').waitFor({ timeout: 15_000 });
     await page.getByRole('button', { name: 'Thanks' }).click();
     await page.getByText(/Thanked: their promise counts as kept, and you owe one favour/).waitFor({ timeout: 10_000 });
@@ -842,7 +859,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asNb({ kind: 'panel.circle.kept', note: (await callerNote()).id })).toMatchObject({ kind: 'circle.kept' });
     await page.getByText(/You're square: a loop of 2 favours across 1 circle cancelled out\. Nobody paid anything\./).waitFor({ timeout: 20_000 });
     await tidy();
-    // Changing a rule is put to a vote; a circle of two can't hold one, and the panel says why.
+    // Changing a rule is put to a vote (on Me, with the circle); a circle of two can't hold one, and the panel says why.
+    await tab('Me');
     await circles.locator('summary', { hasText: 'Change a rule, by vote' }).click();
     await circles.getByLabel('Favours a member may owe').selectOption('1');
     await circles.getByRole('button', { name: 'Put it to a vote' }).click();
@@ -862,10 +880,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('signs out on this device: back to the pairing screen', async () => {
     const keyNow = () => page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))?.[1] ?? null);
     const before = await keyNow();
-    await page.locator('#nav .more-btn').click();
+    await tab('Settings');
     // Asked on the button itself: the first tap arms it, the second signs out.
-    await page.locator('#nav').getByRole('button', { name: 'Sign out on this device' }).click();
-    await page.locator('#nav').getByRole('button', { name: /Tap again/ }).click();
+    await page.getByRole('button', { name: 'Sign out on this device' }).click();
+    await page.getByRole('button', { name: /Tap again/ }).click();
     // The house still holds the key this device had: getting back in takes a link or the recovery code.
     await page.getByText(/This house already has a key/).waitFor({ timeout: 5000 });
     // The owner's key is gone from this device (a fresh one, not yet paired, is ready for pairing again).
