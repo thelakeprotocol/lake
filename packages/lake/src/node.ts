@@ -293,6 +293,13 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   });
 
   const IDLE_MS = 15 * 60_000, ASLEEP_MS = 30 * 86_400_000;
+  // A handle (SPEC §9.0): the house whose owner opened its door under that name, here or on a Lake this one follows.
+  app.get('/handles/:h', (req, res) => {
+    const e = registry.byHandle(String(req.params.h).toLowerCase());
+    if (!e) return void res.status(404).json({ error: `nobody here goes by "${req.params.h}"`, note: 'a handle is what a house\'s owner chose when they opened its door; ask them for theirs, or for their house\'s address' });
+    res.json({ handle: e.profile.handle, name: e.card.name, url: e.card.supportedInterfaces[0]?.url, domain: e.profile.ownerDomain, ...(e.via !== 'direct' ? { lake: e.via } : {}), ...(e.asleep ? { asleep: true } : {}) });
+  });
+
   app.get('/cards', (req, res) => {
     const q = { skill: str(req.query.skill), tag: str(req.query.tag), role: str(req.query.role), q: str(req.query.q) };
     // An agent whose driver hasn't acted for a quarter of an hour is left out unless asked for (idle=1): run 29's host

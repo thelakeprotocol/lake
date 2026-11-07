@@ -53,9 +53,9 @@ export interface PanelProvider {
   rules(): Promise<{ text: string; rules: unknown }>;
   setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
   /** The house's door (SPEC §9.0): open or not, its line, the address to give out, and its A2A address. */
-  door?(): { open: boolean; about?: string; name?: string; address: string; a2a: string };
+  door?(): { open: boolean; about?: string; name?: string; handle?: string; address: string; a2a: string };
   /** Opens or closes it, written into the owner's rules like any other setting. */
-  setDoor?(d: { open: boolean; about?: string; name?: string }): Promise<{ ok: true } | { ok: false; error: string }>;
+  setDoor?(d: { open: boolean; about?: string; name?: string; handle?: string }): Promise<{ ok: true } | { ok: false; error: string }>;
   availability?(): Availability | null;
   setAvailability?(a: Availability | null): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Newest first; with `since` (a seq from an earlier look, or a time), only what came after it. */
@@ -92,6 +92,8 @@ export interface PanelProvider {
   fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
   /** A message from this house to a tally (a promise circle's call, accept, decline, kept), and its verified reply. */
   circleSend?(tally: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
+  /** A signed message from this house to another agent (the owner's answer to a note its AI left). */
+  replyAgent?(url: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
   /** What the owner's record says for one coded field (its first value), for a count answered from it. */
   recordCode?(field: string): Promise<string | undefined>;
   /** A secret count answered from the owner's own record: the house finds the answer and sends it as two shares. */
@@ -872,7 +874,7 @@ export class OwnerDesk {
   }
 
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string }[] = [];
+  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string }): string | null {
     this.touch();
@@ -1639,6 +1641,19 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.note.reply') {
         const q = p as unknown as { id?: string; text?: string };
+        // A note an agent left ("ping stan"): the owner's answer goes back to it, signed by this house, from their phone.
+        const lakeNote = this.notes.find((x) => x.id === String(q.id ?? '') && !x.from.web);
+        if (lakeNote) {
+          const text = String(q.text ?? '').trim().slice(0, 1000);
+          if (!text) return void res.status(400).json({ error: 'text: the answer, up to 1000 characters' });
+          if (!lakeNote.from.url) return void res.status(400).json({ error: 'that note came with no address to answer' });
+          const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'note.reply', note: lakeNote.id, text, re: lakeNote.text.slice(0, 200) }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
+          if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their agent didn't take it: ${JSON.stringify(sent?.problems ?? sent?.why ?? 'no answer')}` });
+          lakeNote.answered = { text, by: 'you', at: new Date().toISOString() };
+          void this.saveNotes();
+          this.touch();
+          return void res.json({ ok: true });
+        }
         const r = this.answerWebNote(String(q.id ?? ''), String(q.text ?? ''), 'you');
         return void res.status('error' in r ? 400 : 200).json(r);
       }
@@ -1700,7 +1715,7 @@ export class OwnerDesk {
             const problems = availabilityProblems(av);
             return problems.length ? { error: problems.join('; ') } : panel.setAvailability?.(av as Availability) ?? { error: 'this house has no availability' };
           },
-          'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}) }) ?? { error: 'this house has no door' },
+          'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}), ...(typeof (q as { handle?: unknown }).handle === 'string' ? { handle: String((q as { handle: string }).handle) } : {}) }) ?? { error: 'this house has no door' },
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity((q as { since?: number | string }).since),
           'panel.agents': async () => panel.agents(),

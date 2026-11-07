@@ -197,7 +197,7 @@ function signOut() {
 }
 
 // ---- Home ----
-type DoorState = { open: boolean; about?: string; name?: string; address: string; error?: string };
+type DoorState = { open: boolean; about?: string; name?: string; handle?: string; address: string; error?: string };
 type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
 type Note = { id: string; from: string; text: string; at: string; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; circleVote?: { sent?: boolean }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
@@ -242,7 +242,7 @@ function Home({ go }: { go: (t: Tab) => void }) {
             needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
         : h('p', { class: 'empty' }, 'Nothing needs you. Your rules and your agent are handling it.')),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
-    door.data?.open ? h(ShareDoor, { address: door.data.address }) : null,
+    door.data?.open ? h(ShareDoor, { address: door.data.address, handle: door.data.handle }) : null,
     o.data ? h('div', { class: 'stats' },
       stat(o.data.knocksToday === 1 ? 'knock today' : 'knocks today', o.data.knocksToday, 'agents'),
       stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
@@ -324,7 +324,10 @@ function NoteItem({ n }: { n: DoorNote }) {
     h('p', { class: 'item-text' }, `“${n.text}”`),
     h('p', { class: 'item-meta' }, `${n.from.web ? 'left over the web; nobody checked who' : n.from.domain} · ${time(n.at)}`),
     n.from.web ? (n.answered ? h('p', { class: 'item-meta' }, `${n.answered.by === 'you' ? 'You' : shortName(n.answered.by)} answered: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Your answer', send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })) : null,
-    h('div', { class: 'item-actions' },
+    n.from.web ? null : h('div', {},
+      // Their AI left it ("ping you"): your answer goes back to it, signed by your house.
+      n.answered ? h('p', { class: 'item-meta' }, `You answered: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Your answer: it goes back to their AI', send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })),
+    n.from.web ? null : h('div', { class: 'item-actions' },
       h(Act, { label: 'Done', run: () => call({ kind: 'panel.note.dismiss', id: n.id }) }),
       h(Act, { label: 'Mute sender', cls: 'quiet', run: () => call({ kind: 'panel.note.mute', id: n.id }) })));
 }
@@ -878,10 +881,10 @@ function RuleCard({ r, i, all, fields, purposes, redraw }: { r: Rule; i: number;
  * or leave a note. The address is the identifier; a name only if you add one. Saved in your rules, like any setting.
  */
 function DoorCard({ d }: { d: DoorState }) {
-  const about = useRef<HTMLInputElement>(null), name = useRef<HTMLInputElement>(null);
+  const about = useRef<HTMLInputElement>(null), name = useRef<HTMLInputElement>(null), handle = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState('');
   const save = (open: boolean) => async () => {
-    const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.current!.value, name: name.current!.value });
+    const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.door.set', open, about: about.current!.value, name: name.current!.value, handle: handle.current!.value.trim().toLowerCase() });
     if (!r.ok) setMsg(r.error ?? 'not saved'); else { setMsg(''); rulesDraft = null; }
   };
   return h('section', { class: 'block', id: 'door' },
@@ -891,6 +894,8 @@ function DoorCard({ d }: { d: DoorState }) {
     h('details', { class: 'fold', open: !d.open }, h('summary', {}, d.open ? 'Change what it says' : 'What it says'),
       h('label', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door'), h('input', { ref: about, type: 'text', maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', defaultValue: d.about ?? '' })),
       h('label', { class: 'field' }, h('span', { class: 'lab' }, 'A name to show (optional)'), h('input', { ref: name, type: 'text', maxlength: 60, placeholder: 'Optional: the address is enough', defaultValue: d.name ?? '' })),
+      // A handle: people tell their own AI "ping stan", and it finds this door. Unique on this Lake.
+      h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Your handle (optional): people ask their AI to "ping" it'), h('input', { ref: handle, type: 'text', maxlength: 30, autocapitalize: 'none', autocomplete: 'off', placeholder: 'e.g. stan', defaultValue: d.handle ?? '' })),
       h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Open my door', cls: 'primary', run: save(true) }),
         d.open ? h(Act, { label: 'Close my door', run: save(false) }) : null, msg ? h('span', { class: 'muted' }, msg) : null)));
 }
@@ -899,10 +904,13 @@ function DoorCard({ d }: { d: DoorState }) {
  * Your door's address to hand out: your phone's own share sheet (Web Share), Copy, and a QR code a tap away, for a slide
  * or a sign on the wall.
  */
-function ShareDoor({ address }: { address: string }) {
+function ShareDoor({ address, handle }: { address: string; handle?: string }) {
   const [qr, setQr] = useState<string | null>(null);
   const share = 'share' in navigator;
+  // What to tell people: their AI needs the Lake's connector, then just the handle.
+  const say = handle ? `Ask your AI to "ping ${handle}" on the Lake` : '';
   return h('section', { class: 'block' }, h('h2', {}, 'Your door'),
+    handle ? h('div', { class: 'address' }, h('div', {}, h('p', { class: 'item-meta' }, 'Tell people:'), h('code', {}, say), h('div', { class: 'row' }, h(CopyButton, { text: say })))) : null,
     h('div', { class: 'address' },
       h('div', {}, h('code', {}, address),
         h('div', { class: 'row' },

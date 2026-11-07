@@ -4,6 +4,9 @@ import { offerPrice, type Offer } from './offer.js';
 import { isPurpose, PURPOSES, purposeWithin } from './purpose.js';
 import { availabilityProblems, type Availability } from './availability.js';
 
+/** A door's handle (SPEC §9.0): what people's AIs ask for ("ping stan"). */
+export const HANDLE = /^[a-z][a-z0-9-]{1,29}$/;
+
 /**
  * rules.yaml — the owner's standing rules, the note on the fridge.
  * Rules are checked top to bottom; the first rule whose `match` fits decides.
@@ -30,7 +33,7 @@ export interface Rules {
    * reach them by. The address is the identifier; a name is only there if the owner adds one. Its page says how to reach
    * the owner through an agent. Without it, a house says nothing at its address.
    */
-  door?: { name?: string; about?: string };
+  door?: { name?: string; about?: string; handle?: string };
   /** When the owner is free to meet (SPEC §9.0): their assistant offers these times, around their agenda. */
   availability?: Availability;
 }
@@ -100,11 +103,12 @@ export function parseRules(text: string): Rules {
   if (raw.privacy?.show_packs !== undefined && typeof raw.privacy.show_packs !== 'boolean') throw new RulesError('privacy.show_packs must be true or false');
   if ((raw.door as unknown) === true) raw.door = {};
   if (raw.door !== undefined) {
-    const d = raw.door as { name?: unknown; about?: unknown };
-    if (!d || typeof d !== 'object') throw new RulesError('door: true, or { about?, name? }');
+    const d = raw.door as { name?: unknown; about?: unknown; handle?: unknown };
+    if (!d || typeof d !== 'object') throw new RulesError('door: true, or { about?, name?, handle? }');
+    if (d.handle !== undefined && (typeof d.handle !== 'string' || !HANDLE.test(d.handle))) throw new RulesError('door.handle: 2 to 30 lowercase letters, digits or dashes, starting with a letter (people\'s AIs reach you by it: "ping stan")');
     if (d.name !== undefined && (typeof d.name !== 'string' || !d.name.trim() || d.name.length > 60)) throw new RulesError('door.name: a name to show, 1 to 60 characters (or leave it out: the address is enough)');
     if (d.about !== undefined && (typeof d.about !== 'string' || d.about.length > 200)) throw new RulesError('door.about: one line, up to 200 characters');
-    for (const k of Object.keys(d)) if (k !== 'name' && k !== 'about') throw new RulesError(`door: unknown setting "${k}" (allowed: name, about)`);
+    for (const k of Object.keys(d)) if (k !== 'name' && k !== 'about' && k !== 'handle') throw new RulesError(`door: unknown setting "${k}" (allowed: name, about, handle)`);
   }
   if (raw.availability !== undefined) {
     const problems = availabilityProblems(raw.availability);

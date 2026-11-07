@@ -55,6 +55,8 @@ export class Registry {
     if (badgeProblems(profile.badges).length) return { ok: false, refusal: { code: 'not-lake', why: badgeProblems(profile.badges).join('; ') } };
     const claimed = via === 'direct' ? this.claims(card, profile) : undefined;
     if (claimed) return { ok: false, refusal: { code: 'reserved', why: claimed } };
+    // A handle is one house's on the node that lists it directly (SPEC §9.0): the first to take it keeps it.
+    if (via === 'direct' && profile.handle && [...this.entries.values()].some((e) => e.via === 'direct' && e.profile.handle === profile.handle && e.profile.webId !== profile.webId)) return { ok: false, refusal: { code: 'reserved', why: `the handle "${profile.handle}" is taken on this Lake; choose another` } };
     const proof = await proveDomain(profile, { sandbox: this.o.sandbox });
     if (!proof.ok) return { ok: false, refusal: { code: 'domain', why: proof.reason } };
 
@@ -125,6 +127,12 @@ export class Registry {
       if (id) return `"${id}" is reserved: it is the skill of this Lake's specialist "${e.card.name}" (${e.profile.ownerDomain}); use a skill id or tag of your own`;
     }
     return undefined;
+  }
+
+  /** The house listed here directly under a handle, else one learned from a peer: what "ping stan" reaches. */
+  byHandle(h: string): Entry | undefined {
+    const all = [...this.entries.values()].filter((e) => e.profile.handle === h);
+    return all.find((e) => e.via === 'direct') ?? all[0];
   }
 
   remove(id: string) {

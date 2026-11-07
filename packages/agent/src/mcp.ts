@@ -1632,6 +1632,38 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   );
 
   server.registerTool(
+    'lake_ping',
+    {
+      description: 'Reach a person on the Lake by their handle ("ping stan about dinner on Tuesday"): finds the house whose owner opened its door under that name, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
+      inputSchema: {
+        who: z.string().max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
+        about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words, with who they are if the person may not know'),
+        purpose: z.string().default('contact').describe('Default contact. Another of the Lake\'s purposes if it fits better'),
+      },
+    },
+    async (a) => {
+      try {
+        if (!(a.purpose in PURPOSES)) throw new Error(`purpose "${a.purpose}" isn't one of the Lake's purposes: ${Object.keys(PURPOSES).join(', ')}`);
+        const [handle, host] = a.who.trim().replace(/^@/, '').toLowerCase().split('@') as [string, string | undefined];
+        const bases = host ? [/^https?:\/\//.test(host) ? host : `https://${host}`] : o.node.split(',').map((n) => n.trim().replace(/\/$/, '')).filter(Boolean);
+        type Found = { handle: string; name: string; url: string; domain: string; lake?: string; asleep?: boolean };
+        let found = null as Found | null;
+        for (const b of bases) {
+          const r = await fetch(`${b.replace(/\/$/, '')}/handles/${encodeURIComponent(handle)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+          if (r?.ok) { found = (await r.json()) as Found; break; }
+        }
+        if (!found?.url) throw new Error(`nobody goes by "${handle}" ${host ? `on ${host}` : 'on this Lake or the Lakes it follows'}. Ask them for their handle (they choose it when they open their house's door), or for their house's address and use lake_knock`);
+        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose })) as Record<string, any>;
+        if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
+        return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,
+          next: `Tell your human it's with ${found.name.replace(/ \(house\)$/, '')}: they answer from their phone, or their own AI may answer first. Their answer comes to lake_inbox (kind note.reply, naming note ${r.note}), even in a later conversation; to ask where it stands, lake_ask the house { kind: "status", note: "${r.note}" }.` });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
     'lake_ask',
     {
       description:

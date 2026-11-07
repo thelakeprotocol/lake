@@ -18,6 +18,8 @@ export interface LakeProfile {
   publicJwk: jose.JWK;
   /** Interest tags used for discovery and guilds, e.g. "research-volunteers". */
   tags: string[];
+  /** A house's handle, if its owner opened its door with one (SPEC §9.0): "ping stan" finds it. Unique on the node that lists it directly. */
+  handle?: string;
   /** Houses: the packs (use cases) whose claims this house holds and checks against their shapes, e.g. "health@1". */
   packs?: string[];
   /** What this agent sells and for how much (SPEC §6.5): signed with the card, so a price can't be changed in transit. */

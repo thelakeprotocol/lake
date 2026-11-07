@@ -12,6 +12,7 @@ import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotoc
 import { generateIdentity, importIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
 import { createECDH, createPrivateKey, randomBytes } from 'node:crypto';
 import { ask, knock, makeVisitor } from '../packages/visitor/src/knock.js';
+import { joinLake } from '../packages/agent/src/index.js';
 
 // The owner's panel as a person uses it, on a phone, against a real house: pairing, the door, the owner's own AI and its
 // spending money, notes arriving live, rules, More, signing out, long lists, a slow or dropped connection. Every step
@@ -288,6 +289,23 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await note.getByText(/You answered: “Yes: Tuesday 10:00\?”/).waitFor({ timeout: 4000 });
     expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
     await tidy();
+  });
+
+  it('answers a note someone\'s AI left ("ping"), from the phone: it goes back to that AI, signed by the house (7 Nov)', async () => {
+    await tab('Home');
+    const got: Record<string, unknown>[] = [];
+    const alex = await joinLake({ name: 'Alex (Claude)', domain: 'alex.example', node: nodeUrl, port: await freePort(), onMessage: async (m) => { got.push(m.payload as Record<string, unknown>); return { kind: 'received' }; } });
+    try {
+      expect(await alex.ask(`${house}/a2a`, { kind: 'note', text: 'Alex here, from the Claude Code class: free for a call Thursday?' })).toMatchObject({ kind: 'noted' });
+      const note = page.locator('.item', { hasText: 'free for a call Thursday' });
+      await note.waitFor({ timeout: 6000 });
+      await note.locator('summary', { hasText: 'Answer' }).click();
+      await note.locator('input').fill('Thursday 4pm works.');
+      await note.getByRole('button', { name: 'Send', exact: true }).click();
+      await note.getByText(/You answered: “Thursday 4pm works\.”/).waitFor({ timeout: 6000 });
+      expect(got.find((x) => x.kind === 'note.reply')).toMatchObject({ kind: 'note.reply', text: 'Thursday 4pm works.' });
+      await tidy();
+    } finally { await alex.close(); }
   });
 
   it('says when people wait for the owner\'s AI and it isn\'t reading, and stops saying it once it reads', async () => {

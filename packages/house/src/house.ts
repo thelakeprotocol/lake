@@ -183,7 +183,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
           skills: show
             ? o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: r.tags ?? [] }))
             : [{ id: 'offers', name: 'Offers', description: 'Considers offers by its owner\'s rules', tags: r.tags ?? [] }],
-          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [] },
+          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [], ...(r.door?.handle ? { handle: r.door.handle } : {}) },
         },
         id,
       ),
@@ -600,7 +600,7 @@ function panelFor(x: {
     },
     door() {
       const d = x.keeper().rules.door;
-      return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
+      return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), ...(d?.handle ? { handle: d.handle } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
     },
     // Written into the owner's rules (comments and all kept): the door is one of their settings, saved in their pod.
     // When the owner is free to meet, in their rules like the door (null takes it out).
@@ -655,8 +655,16 @@ function panelFor(x: {
     async setDoor(d) {
       const doc = parseDocument(x.keeper().rulesText);
       if (!d.open) doc.delete('door');
-      else doc.set('door', { ...(d.about?.trim() ? { about: d.about.trim() } : {}), ...(d.name?.trim() ? { name: d.name.trim() } : {}) });
-      if (d.open && !d.about?.trim() && !d.name?.trim()) doc.set('door', true);
+      else doc.set('door', { ...(d.about?.trim() ? { about: d.about.trim() } : {}), ...(d.name?.trim() ? { name: d.name.trim() } : {}), ...(d.handle?.trim() ? { handle: d.handle.trim().toLowerCase() } : {}) });
+      if (d.open && !d.about?.trim() && !d.name?.trim() && !d.handle?.trim()) doc.set('door', true);
+      // A handle is one house's on its Lake: ask the node first, so the owner hears now that it's taken, not never.
+      if (d.open && d.handle?.trim()) {
+        const h = d.handle.trim().toLowerCase();
+        for (const n of x.nodes) {
+          const r = await fetch(`${n.replace(/\/$/, '')}/handles/${encodeURIComponent(h)}`, { signal: AbortSignal.timeout(5000) }).then((x) => (x.ok ? x.json() as Promise<{ url?: string; lake?: string }> : null)).catch(() => null);
+          if (r && !r.lake && r.url !== x.card.supportedInterfaces?.[0]?.url) return { ok: false as const, error: `the handle "${h}" is taken on this Lake; choose another` };
+        }
+      }
       return this.setRules(String(doc));
     },
     async setRules(text: string) {
@@ -821,6 +829,9 @@ function panelFor(x: {
       return { kind: 'circle.vote.answered', id, vote };
     },
     async fileFavour(jws, side) { await put(owner, `wallet/favours/${side}-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {}); },
+    async replyAgent(url, payload) {
+      return (await send(url, payload)).payload as Record<string, any>;
+    },
     async circleSend(tally, payload) {
       return (await send(tally, payload)).payload as Record<string, any>;
     },

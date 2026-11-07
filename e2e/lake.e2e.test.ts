@@ -465,6 +465,35 @@ describe('the owner', () => {
     expect((await (await fetch(`${houses.strict}/.well-known/agent-card.json`)).json()).name).toBe('House strict');
   });
 
+  it('"ping sam": a person opens their door under a handle; anyone\'s AI reaches them by it, and their answer from the phone comes back to that AI (SPEC §9.0)', async () => {
+    expect(await ownerCall({ kind: 'panel.door.set', open: true, name: 'Sam', handle: 'Sam Example' })).toMatchObject({ ok: false, error: expect.stringMatching(/door.handle: 2 to 30 lowercase letters/) });
+    expect(await ownerCall({ kind: 'panel.door.set', open: true, name: 'Sam', handle: 'sam' })).toEqual({ ok: true });
+    expect(await ownerCall({ kind: 'panel.door' })).toMatchObject({ open: true, handle: 'sam' });
+    // The node finds the house by it (after the house's new card reaches it); a handle nobody took is a plain 404.
+    for (let i = 0; i < 20 && (await fetch(`${node}/handles/sam`)).status !== 200; i++) await new Promise((ok) => setTimeout(ok, 300));
+    expect(await (await fetch(`${node}/handles/sam`)).json()).toMatchObject({ handle: 'sam', name: 'Sam (house)', url: expect.stringContaining(houses.strict!.replace(/^http:\/\//, '')) });
+    expect((await fetch(`${node}/handles/nobody-here`)).status).toBe(404);
+    // A stranger with the Lake connector and no house: "ping sam about dinner on Tuesday".
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-ping') });
+    const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+    const c = new Client({ name: 'ping', version: '0' });
+    await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+    const tool = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const t = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: t } : JSON.parse(t); };
+    expect(await tool('lake_ping', { who: 'nobody-here', about: 'hi' })).toMatchObject({ error: expect.stringMatching(/nobody goes by "nobody-here"/) });
+    const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? This is Alex from the Claude Code class.' });
+    expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they answer from their phone/) });
+    // Sam sees it on the phone and answers there; it goes back to Alex's AI, signed by Sam's house.
+    const note = ((await ownerCall({ kind: 'list' })).notes as { id: string; text: string }[]).find((x) => x.text.startsWith('Dinner on Tuesday?'))!;
+    expect(await ownerCall({ kind: 'panel.note.reply', id: note.id, text: 'Yes! 7pm at mine?' })).toEqual({ ok: true });
+    expect(((await ownerCall({ kind: 'list' })).notes as { id: string; answered?: { text: string } }[]).find((x) => x.id === note.id)?.answered).toMatchObject({ text: 'Yes! 7pm at mine?' });
+    const inbox = await tool('lake_inbox', { wait_seconds: 5 });
+    expect(JSON.stringify(inbox)).toContain('Yes! 7pm at mine?');
+    expect(inbox.messages.find((m: { message: { kind: string } }) => m.message.kind === 'note.reply')).toMatchObject({ message: { kind: 'note.reply', note: pinged.note, text: 'Yes! 7pm at mine?' } });
+    await c.close();
+    expect(await ownerCall({ kind: 'panel.door.set', open: false })).toEqual({ ok: true });
+  });
+
   it("gives the owner's own AI agent a key that can look and suggest, never decide", async () => {
     const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'my assistant' });
     const helper = await generateIdentity('helper');
@@ -1071,7 +1100,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_circle', 'lake_commit', 'lake_count', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_circle', 'lake_commit', 'lake_count', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_ping', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
