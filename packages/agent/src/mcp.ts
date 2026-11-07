@@ -1648,7 +1648,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const bases = host ? [/^https?:\/\//.test(host) ? host : `https://${host}`] : o.node.split(',').map((n) => n.trim().replace(/\/$/, '')).filter(Boolean);
         type Found = { handle: string; name: string; url: string; domain: string; lake?: string; asleep?: boolean };
         let found = null as Found | null;
-        for (const b of bases) {
+        // Another Lake: WebFinger, as for any user@host (RFC 7033); then that node's own handle lookup.
+        if (host) {
+          const wf = await fetch(`${bases[0]!.replace(/\/$/, '')}/.well-known/webfinger?resource=${encodeURIComponent(`acct:${handle}@${host.replace(/^https?:\/\//, '').replace(/\/.*$/, '')}`)}`, { signal: AbortSignal.timeout(8000) }).then((r) => (r.ok ? r.json() as Promise<{ links?: { rel: string; href: string }[]; properties?: Record<string, string> }> : null)).catch(() => null);
+          const a2a = wf?.links?.find((l) => l.rel === 'https://lake.doneinfifty.com/ns#a2a')?.href;
+          if (a2a) found = { handle, name: wf?.properties?.['https://lake.doneinfifty.com/ns#name'] ?? handle, url: a2a, domain: host, lake: bases[0] };
+        }
+        for (const b of found ? [] : bases) {
           const r = await fetch(`${b.replace(/\/$/, '')}/handles/${encodeURIComponent(handle)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null);
           if (r?.ok) { found = (await r.json()) as Found; break; }
         }

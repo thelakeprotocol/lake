@@ -491,6 +491,21 @@ describe('the owner', () => {
     expect(JSON.stringify(inbox)).toContain('Yes! 7pm at mine?');
     expect(inbox.messages.find((m: { message: { kind: string } }) => m.message.kind === 'note.reply')).toMatchObject({ message: { kind: 'note.reply', note: pinged.note, text: 'Yes! 7pm at mine?' } });
     await c.close();
+    // WebFinger (RFC 7033), as the fediverse finds @name@host: acct:sam@<this Lake> names the house; and from another
+    // Lake, "ping sam@<this Lake>" finds it that way.
+    const host = new URL(node).host;
+    const wf = await fetch(`${node}/.well-known/webfinger?resource=${encodeURIComponent(`acct:sam@${host}`)}`);
+    expect(wf.headers.get('content-type')).toMatch(/application\/jrd\+json/);
+    expect(await wf.json()).toMatchObject({ subject: `acct:sam@${host}`, links: expect.arrayContaining([expect.objectContaining({ rel: 'https://lake.doneinfifty.com/ns#a2a', href: expect.stringContaining('/a2a') })]) });
+    expect((await fetch(`${node}/.well-known/webfinger?resource=${encodeURIComponent(`acct:nobody@${host}`)}`)).status).toBe(404);
+    const portB = String(await freePort()), urlB = `http://localhost:${portB}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', portB], /Lake MCP over HTTP/, { LAKE_NODE_URL: nodeB, LAKE_MCP_DATA: join(dir, 'mcp-ping-b') });
+    const tokB = await (await fetch(`${urlB}/oauth/anonymous`, { method: 'POST' })).json();
+    const cb = new Client({ name: 'ping-b', version: '0' });
+    await cb.connect(new StreamableHTTPClientTransport(new URL(urlB), { requestInit: { headers: { authorization: `Bearer ${tokB.access_token}` } } }));
+    const far = JSON.parse(((await cb.callTool({ name: 'lake_ping', arguments: { who: `sam@${node}`, about: 'Hello from Lake B.' } })).content as { text: string }[])[0]!.text);
+    expect(far).toMatchObject({ kind: 'pinged', to: 'Sam (house)' });
+    await cb.close();
     expect(await ownerCall({ kind: 'panel.door.set', open: false })).toEqual({ ok: true });
   });
 

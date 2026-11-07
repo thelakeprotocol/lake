@@ -293,6 +293,27 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
   });
 
   const IDLE_MS = 15 * 60_000, ASLEEP_MS = 30 * 86_400_000;
+  // WebFinger (RFC 7033), as the fediverse resolves @name@host: acct:stan@<this Lake> names the house listed here under
+  // that handle, so any WebFinger client finds it, and "ping stan@<lake>" works from another Lake.
+  app.get('/.well-known/webfinger', (req, res) => {
+    const m = /^acct:([a-z][a-z0-9-]{1,29})@(.+)$/i.exec(String(req.query.resource ?? ''));
+    const host = new URL(o.url).host;
+    if (!m) return void res.status(400).json({ error: 'resource: acct:<handle>@<this Lake\'s host>' });
+    const e = m[2]!.toLowerCase() === host.toLowerCase() ? registry.byHandle(m[1]!.toLowerCase()) : undefined;
+    if (!e || e.via !== 'direct') return void res.status(404).json({ error: `nobody here goes by "${m[1]}"` });
+    const a2a = e.card.supportedInterfaces[0]?.url ?? '';
+    res.set('access-control-allow-origin', '*').type('application/jrd+json').json({
+      subject: `acct:${e.profile.handle}@${host}`,
+      aliases: [e.profile.webId, a2a.replace(/\/a2a$/, '')],
+      links: [
+        { rel: 'self', type: 'application/json', href: `${a2a.replace(/\/a2a$/, '')}/.well-known/agent-card.json` },
+        { rel: 'https://lake.doneinfifty.com/ns#a2a', type: 'application/json', href: a2a },
+        { rel: 'http://webfinger.net/rel/profile-page', type: 'text/html', href: a2a.replace(/\/a2a$/, '') },
+      ],
+      properties: { 'https://lake.doneinfifty.com/ns#name': e.card.name },
+    });
+  });
+
   // A handle (SPEC §9.0): the house whose owner opened its door under that name, here or on a Lake this one follows.
   app.get('/handles/:h', (req, res) => {
     const e = registry.byHandle(String(req.params.h).toLowerCase());
