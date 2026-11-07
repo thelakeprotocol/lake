@@ -446,7 +446,7 @@ function NotifyItem() {
     h('p', { class: 'item-text' }, said || (ios ? 'Get a notification when something needs you: on iPhone, tap Share, then Add to Home Screen, and open your house from there.' : 'Get a notification on this device when something needs you: a request, a note at your door, a question from your AI.')),
     h('div', { class: 'item-actions' },
       !ios && !said ? h(Act, { label: 'Turn on', cls: 'primary', run: async () => setSaid(await turnOnNotifications()) }) : null,
-      h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss, title: 'You can turn them on later: More → Notifications' }, said ? 'OK' : 'Not now')),
+      h('button', { class: 'btn small quiet', type: 'button', onClick: dismiss, title: 'You can turn them on later: Settings → Notifications' }, said ? 'OK' : 'Not now')),
     said ? null : h('p', { class: 'item-meta' }, 'Later: Settings → Notifications.'));
 }
 
@@ -1690,8 +1690,8 @@ function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) {
     h('section', { id: 'pair' },
       h('p', { class: 'big' }, handle && !owned ? 'Make this phone its key' : 'Make this phone its key'),
       owned
-        ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (More → Your key), or type your recovery code.')
-        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it. Lose this phone? A recovery code (More → Your key) brings your house back.'),
+        ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (Settings → Your key and recovery), or type your recovery code.')
+        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it. Lose this phone? A recovery code (Settings → Your key and recovery) brings your house back.'),
       owned ? null : h('button', { class: 'btn primary', type: 'button', disabled: open === null, onClick: () => void pair() }, 'Use this phone'),
       msg ? h('p', { class: 'muted' }, msg) : null,
       h('details', { class: 'fold', style: 'margin-top:24px', open: owned }, h('summary', {}, 'Have a recovery code?'),
