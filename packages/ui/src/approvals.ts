@@ -1431,7 +1431,7 @@ function WhileYouSlept() {
     h('h2', {}, 'While you slept'),
     h('dl', { class: 'tiles slept-tiles' },
       h('div', { class: 'tile mint' }, h('dt', {}, 'Handled'), h('dd', {}, String(sum.handled))),
-      h('div', { class: 'tile' }, h('dt', {}, 'Waiting for you'), h('dd', {}, String(sum.waiting))),
+      h('div', { class: 'tile' }, h('dt', {}, 'Waiting'), h('dd', {}, String(sum.waiting))),
       h('div', { class: 'tile' }, h('dt', {}, 'Blocked'), h('dd', {}, String(sum.blocked)))),
     ...(log.data?.duties ?? []).filter((d) => d.runner).map((d) => h('p', { class: 'muted', key: `run-${d.kid}` }, watching(d.runner!))),
     done.length ? h(Paged, { items: done, size: 8, render: row }) : h('p', { class: 'empty' }, 'Nothing done for you: what came in is waiting for you below.'),
