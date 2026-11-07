@@ -60,6 +60,7 @@ const lostKey = async (p: Page) => {
 
 let assistant: Identity;
 let nodeUrl = '';
+let specialists = '';
 const asAssistant = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, assistant, { iss: 'assistant' })) })).json();
 
 beforeAll(async () => {
@@ -67,6 +68,7 @@ beforeAll(async () => {
   const [np, sp, pp, hp, mp, xp] = [await freePort(), await freePort(), await freePort(), await freePort(), await freePort(), await freePort()];
   const node = `http://localhost:${np}`;
   nodeUrl = node;
+  specialists = `http://localhost:${sp}`;
   // One site for the house and the connector, as on the sandbox (the panel hands its code only to its own Lake's sign-in).
   const site = `http://localhost:${xp}`;
   proxy = httpServer((req, res) => {
@@ -80,7 +82,7 @@ beforeAll(async () => {
   house = site;
   // A sandbox house: the first device to open its panel becomes its owner, as on the public sandbox.
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
-    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
+    '--auditor-url', `http://localhost:${sp}/auditor`, '--person-url', `http://localhost:${sp}/person`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
   // The connector, with sign-in on.
   await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500', LAKE_MCP_SLEEP_MS: '3000' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
@@ -759,6 +761,67 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await card.getByRole('button', { name: 'Sign and get a code' }).waitFor({ timeout: 10_000 });
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
     await tidy();
+  });
+
+  it('a promise circle on the phone: a person stamp, Sign this pledge, Ask my circle, Thanks, Yes I\'ll do it, and "You\'re square" (7 Nov)', async () => {
+    const saved = JSON.parse(await page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))![1]));
+    const seed = Buffer.from(saved.secret, 'hex');
+    const jwk = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' }).export({ format: 'jwk' });
+    const owner = await importIdentity({ kid: saved.kid, privateJwk: { ...jwk, kid: saved.kid }, publicJwk: { kty: 'OKP', crv: 'Ed25519', x: jwk.x, kid: saved.kid } } as never);
+    const asOwner = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: 'owner' })) })).json();
+    // A neighbour's house, its phone a key in this test.
+    const [pp, hp] = [await freePort(), await freePort()];
+    await start(['packages/house/dist/main.js', '--name', 'neighbour', '--rules', 'personas/stan.yaml', '--data', join(dir, 'neighbour'), '--issuer-url', `${specialists}/issuer`, '--auditor-url', `${specialists}/auditor`,
+      '--person-url', `${specialists}/person`, '--pod-port', String(pp), '--port', String(hp), '--lake', nodeUrl, '--seed', '8', '--open-pairing'], /joined the Lake/);
+    const nb = `http://localhost:${hp}`, phone = await generateIdentity('neighbour-phone');
+    await fetch(`${nb}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk }) });
+    const nbWebId = (await (await fetch(`${nb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.overview' }, phone, { iss: 'owner' })) })).json()).webId;
+    const asNb = async (payload: Record<string, unknown>) => (await fetch(`${nb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: nbWebId })) })).json();
+    expect(await asNb({ kind: 'panel.person.request', consent: await signMessage({ kind: 'personhood.consent', house: nbWebId }, phone, { iss: nbWebId }) })).toMatchObject({ stamped: true });
+    // The owner gets a person stamp from About your house.
+    await tab('Home');
+    await page.locator('details.fold > summary', { hasText: 'About your house' }).click();
+    await page.getByRole('button', { name: 'Get a person stamp' }).click();
+    await page.getByText('One person, one house: stamped').waitFor({ timeout: 15_000 });
+    await tidy();
+    // A circle of two, its AI suggests it, the owner signs on the phone; the neighbour signs too, and it opens.
+    const organiser = await makeVisitor(await generateIdentity(), 'street.example');
+    expect((await ask(`${specialists}/tally/a2a`, organiser, { kind: 'tally.open', id: 'street-circle', text: 'Our street helps out.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a lift or a meal', times: 3, kinds: ['a lift', 'a meal'] } })).reply).toMatchObject({ kind: 'tally.opened' });
+    // (Its AI would suggest it; this owner's AI was removed above, so they sign it from About your house.)
+    await page.locator('summary', { hasText: 'Sign a pledge from your house' }).click();
+    await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
+    await page.getByPlaceholder('pledge id').fill('street-circle');
+    await page.getByRole('button', { name: 'Sign this pledge' }).click();
+    await page.getByText(/Signed: 1 of 2/).waitFor({ timeout: 15_000 });
+    expect(await asNb({ kind: 'panel.pledge.sign', tally: `${specialists}/tally`, id: 'street-circle' })).toMatchObject({ kind: 'tally.triggered' });
+    // Your promise circles: ask it for a lift.
+    await page.reload();
+    const circles = page.locator('.card', { hasText: 'Your promise circles' });
+    await circles.getByText('You promised: a lift or a meal, 3 times a year, to 1 others.').waitFor({ timeout: 15_000 });
+    await circles.locator('select').selectOption('a lift');
+    await circles.getByPlaceholder(/What do you need/).fill('A lift to the station on Friday');
+    await circles.getByRole('button', { name: 'Ask my circle' }).click();
+    await circles.getByText('Asked 1 member, without your name.').waitFor({ timeout: 10_000 });
+    await tidy();
+    // The neighbour says yes; the owner sees it live, and taps Thanks.
+    const nbAsk = async (call?: string) => { for (let i = 0; i < 30; i++) { const n = ((await asNb({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string } }[]).find((x) => x.circle?.role === 'ask' && x.circle.state === 'open' && (!call || x.circle.call === call)); if (n) return n; await page.waitForTimeout(500); } throw new Error('no ask'); };
+    expect(await asNb({ kind: 'panel.circle.answer', note: (await nbAsk()).id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+    await page.getByText('Someone said yes. Reach them at their house:').waitFor({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Thanks' }).click();
+    await page.getByText(/Thanked: their promise counts as kept, and you owe one favour/).waitFor({ timeout: 10_000 });
+    await tidy();
+    // Then the neighbour needs a meal: the owner is asked without their name, and says yes.
+    expect(await asNb({ kind: 'panel.circle.call', tally: `${specialists}/tally`, id: 'street-circle', need: 'Soup, I have the flu', help: 'a meal' })).toMatchObject({ kind: 'circle.called' });
+    await page.getByText(/Someone in your circle needs help with a meal: Soup, I have the flu/).waitFor({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Yes, I\'ll do it' }).click();
+    await page.getByText('You said yes. Reach them at their house:').waitFor({ timeout: 10_000 });
+    // The neighbour thanks them: two favours owed in a loop, and both are square.
+    const callerNote = async () => { for (let i = 0; i < 30; i++) { const n = ((await asNb({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string } }[]).find((x) => x.circle?.role === 'caller' && x.circle.state === 'matched'); if (n) return n; await page.waitForTimeout(500); } throw new Error('not matched'); };
+    expect(await asNb({ kind: 'panel.circle.kept', note: (await callerNote()).id })).toMatchObject({ kind: 'circle.kept' });
+    await page.getByText(/You're square: a loop of 2 favours across 1 circle cancelled out\. Nobody paid anything\./).waitFor({ timeout: 20_000 });
+    await tidy();
+    expect(await asOwner({ kind: 'panel.circles' })).toEqual([expect.objectContaining({ id: 'street-circle', view: expect.objectContaining({ kept: 2, you: expect.objectContaining({ you_owe: 0, owed_to_you: 0 }) }) })]);
+    procs.pop()!.kill('SIGTERM');
   });
 
   it('signs out on this device: back to the pairing screen', async () => {
