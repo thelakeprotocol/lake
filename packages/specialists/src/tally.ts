@@ -88,8 +88,15 @@ interface Circle {
    * favour"), countersigned by the helper's house. Cleared once a loop of them, across circles, cancels out.
    */
   notes?: FavourNote[];
+  passes?: Pass[];
 }
-interface FavourNote { call: string; from: string; to: string; help?: string; at: number; digest: string; acked?: boolean; cleared?: string; disputed?: boolean }
+interface FavourNote {
+  call: string; from: string; to: string; help?: string; at: number; digest: string; acked?: boolean; cleared?: string; disputed?: boolean;
+  /** Passed on (SPEC §11.4c): who held it before, in order, and the house of whoever holds it now, when not a member. */
+  passed?: string[]; toUrl?: string;
+}
+/** A favour owed to a member, offered by them to someone they owe, to settle that: accepted, the debtor owes the new holder. */
+interface Pass { id: string; note: string; from: string; to: string; toUrl: string; settles: { tally: string; url: string; circle: string; digest: string }; endorsement: string; card: AgentCard; at: number; state: 'offered' | 'accepted' | 'declined' }
 /** A loop of favours owed across circles, offered to every house in it; it clears once each consents. */
 interface Clearing {
   id: string;
@@ -342,7 +349,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     const out: Edge[] = [];
     for (const t of tallies.values()) {
       const ms = t.circle ? members(t) : [];
-      for (const n of t.circle?.notes ?? []) if (n.acked && !n.cleared && !n.disputed && !busy.has(n.digest)) out.push({ tally: s.webId, url: s.card.supportedInterfaces?.[0]?.url ?? '', circle: t.id, text: t.text, digest: n.digest, from: n.from, to: n.to, fromUrl: ms.find((m) => m.webId === n.from)?.url ?? t.circle!.calls.find((x) => x.id === n.call)?.callerUrl ?? '', toUrl: ms.find((m) => m.webId === n.to)?.url ?? '', ...(n.help ? { help: n.help } : {}) });
+      for (const n of t.circle?.notes ?? []) if (n.acked && !n.cleared && !n.disputed && !busy.has(n.digest)) out.push({ tally: s.webId, url: s.card.supportedInterfaces?.[0]?.url ?? '', circle: t.id, text: t.text, digest: n.digest, from: n.from, to: n.to, fromUrl: ms.find((m) => m.webId === n.from)?.url ?? t.circle!.calls.find((x) => x.id === n.call)?.callerUrl ?? '', toUrl: n.toUrl ?? ms.find((m) => m.webId === n.to)?.url ?? '', ...(n.help ? { help: n.help } : {}) });
     }
     return out;
   };
@@ -564,6 +571,86 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     return no(`it is ${call.state}`);
   };
 
+  // A favour passed on (SPEC §11.4c): B, owed one by A, offers it to C, whom B owes one, to settle that. C agrees on their
+  // phone; then A owes C, and B is square with C. Like a bill of exchange endorsed by hand: each holder is named, at most
+  // three, and only to settle a favour already owed, so it never becomes paper anyone can hold.
+  const noteOn = async (where: { tally?: string; url: string; circle: string; digest: string }) => {
+    if (where.url === myUrl()) { const n = tallies.get(where.circle)?.circle?.notes?.find((x) => x.digest === where.digest); const t = tallies.get(where.circle); return n && t ? { tally: s.webId, from: n.from, to: n.to, acked: !!n.acked, live: !n.cleared && !n.disputed, toUrl: n.toUrl ?? members(t).find((m) => m.webId === n.to)?.url ?? '' } : undefined; }
+    const r = await ask(where.url, { kind: 'tally.note', circle: where.circle, digest: where.digest }, 8000).catch(() => null);
+    return r?.kind === 'tally.note' ? (r as { tally: string; from: string; to: string; acked: boolean; live: boolean; toUrl: string }) : undefined;
+  };
+  const offerPass = async (t: Tally, p: Record<string, unknown>, from: string, card: AgentCard) => {
+    const no = (why: string) => ({ kind: 'refused', problems: [why] });
+    const c = t.circle!;
+    const jws = String(p.note ?? ''), digest = createHash('sha256').update(jws).digest('hex');
+    const n = (c.notes ?? []).find((x) => x.digest === digest);
+    if (!n || n.to !== from || !n.acked || n.cleared || n.disputed) return no('no favour owed to you with that note here, countersigned and not yet cleared');
+    if ((n.passed?.length ?? 0) >= 2) return no('this favour has been passed on as often as it can be (three holders)');
+    const st = (p.settles ?? {}) as { url?: string; circle?: string; digest?: string };
+    if (!st.url || !st.circle || !st.digest) return no('settles: { url, circle, digest }: the favour you owe, that this one settles');
+    const owed = await noteOn({ url: st.url, circle: st.circle, digest: st.digest });
+    if (!owed || owed.from !== from || !owed.acked || !owed.live) return no('settles: no favour you owe with that note, countersigned and not yet cleared');
+    if (owed.to === n.from) return no('they owe you one and you owe them one: that clears by itself');
+    let sub: { id?: string; note?: string; settles?: string };
+    try {
+      const vc = await verifyCredential(String(p.endorsement ?? ''), (await verifyLakeCard(card)).publicJwk);
+      sub = vc.credentialSubject as typeof sub;
+      if (!vc.type.includes('LakeFavourEndorsement') || vc.issuer !== from || sub.id !== owed.to || sub.note !== digest || sub.settles !== st.digest) throw new Error('it does not pass this note to whom you owe, to settle that one');
+    } catch (e) { return no(`endorsement: ${(e as Error).message}`); }
+    const x: Pass = { id: randomBytes(6).toString('hex'), note: digest, from, to: owed.to, toUrl: owed.toUrl, settles: { tally: owed.tally, url: st.url, circle: st.circle, digest: st.digest }, endorsement: String(p.endorsement), card, at: Date.now(), state: 'offered' };
+    (c.passes ??= []).push(x);
+    c.passes = c.passes.slice(-200);
+    void save();
+    void tell(owed.toUrl, { kind: 'circle.pass.offer', id: t.id, pass: x.id, where: [{ tally: owed.tally, id: st.circle }], note: jws, settles: st.digest, ...(n.help ? { help: n.help } : {}) });
+    return { kind: 'circle.pass.offered', id: t.id, pass: x.id, note: 'offered: once they agree, the one who owes you owes them, and you are square with them' };
+  };
+  const answerPass = async (t: Tally, p: Record<string, unknown>, from: string, card: AgentCard, envelope: LakeData['envelope']) => {
+    const no = (why: string) => ({ kind: 'refused', problems: [why] });
+    const c = t.circle!;
+    const x = (c.passes ?? []).find((y) => y.id === String(p.pass ?? '') && y.to === from);
+    if (!x || x.state !== 'offered') return no('no favour offered to you with that id');
+    if (p.kind === 'circle.pass.decline') { x.state = 'declined'; void save(); void tell(members(t).find((m) => m.webId === x.from)?.url ?? '', { kind: 'circle.pass.declined', id: t.id, pass: x.id }); return { kind: 'circle.pass.declined', id: t.id, pass: x.id }; }
+    if (p.settles !== x.settles.digest) return no('settles: the digest of the favour it settles, as offered');
+    const n = (c.notes ?? []).find((y) => y.digest === x.note);
+    if (!n || n.to !== x.from || n.cleared || n.disputed) return no('that favour is no longer theirs to pass on');
+    // The favour it settles is cleared where it is kept, on the holder's endorsement and the new holder's own yes.
+    const evidence = { endorsement: x.endorsement, card: x.card, acceptance: { card, envelope } };
+    const done = x.settles.url === myUrl() ? await settle({ circle: x.settles.circle, digest: x.settles.digest, pass: x.id, ...evidence }) : await ask(x.settles.url, { kind: 'tally.passed', circle: x.settles.circle, digest: x.settles.digest, pass: x.id, ...evidence }, 15_000).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
+    if (done.kind !== 'tally.passed') return no(`the favour it settles couldn't be cleared: ${JSON.stringify(done.problems ?? done.kind)}`);
+    x.state = 'accepted';
+    (n.passed ??= []).push(n.to);
+    n.to = from; n.toUrl = x.toUrl;
+    void save();
+    const urlOf = (w: string) => members(t).find((m) => m.webId === w)?.url ?? '';
+    void tell(urlOf(n.from), { kind: 'circle.passed', id: t.id, call: n.call, note: n.digest });
+    void tell(urlOf(x.from), { kind: 'circle.pass.accepted', id: t.id, pass: x.id });
+    void findLoops();
+    return { kind: 'circle.pass.accepted', id: t.id, pass: x.id, note: 'the favour is yours now: the one who owed it owes you, and whoever passed it to you is square with you' };
+  };
+  // Here, the favour a pass settles: cleared once its debtor endorsed the pass to its creditor and the creditor said yes.
+  const settle = async (p: Record<string, unknown>): Promise<{ kind: string } & Record<string, any>> => {
+    const no = (why: string) => ({ kind: 'refused', problems: [why] });
+    const m = tallies.get(String(p.circle ?? ''))?.circle?.notes?.find((y) => y.digest === String(p.digest ?? ''));
+    if (!m || !m.acked || m.cleared || m.disputed) return no('no such favour owed here, live');
+    try {
+      const prof = await verifyLakeCard(p.card as AgentCard);
+      const vc = await verifyCredential(String(p.endorsement ?? ''), prof.publicJwk);
+      const sub = vc.credentialSubject as { id?: string; settles?: string };
+      if (prof.webId !== m.from || vc.issuer !== m.from || !vc.type.includes('LakeFavourEndorsement') || sub.id !== m.to || sub.settles !== m.digest) throw new Error('the endorsement is not its debtor\'s, to its creditor, for it');
+      const acc = p.acceptance as { card: AgentCard; envelope: LakeData['envelope'] };
+      const v = await verifyLakeData<Record<string, unknown>>({ lake: '0.1', card: acc?.card, envelope: acc?.envelope } as LakeData<Record<string, unknown>>, { sandbox: o.sandbox, now: (acc?.envelope as { payload?: { iat?: number } })?.payload?.iat });
+      if (!v.ok || v.profile.webId !== m.to || v.payload.kind !== 'circle.pass.accept' || v.payload.pass !== p.pass || v.payload.settles !== m.digest) throw new Error('its creditor did not accept this pass');
+    } catch (e) { return no((e as Error).message); }
+    m.cleared = `pass:${String(p.pass)}`;
+    void save();
+    return { kind: 'tally.passed', circle: p.circle, digest: m.digest };
+  };
+  const notes = async (p: Record<string, unknown>) => {
+    if (p.kind === 'tally.passed') return settle(p);
+    const r = await noteOn({ url: myUrl(), circle: String(p.circle ?? ''), digest: String(p.digest ?? '') });
+    return r ? { kind: 'tally.note', ...r } : { kind: 'refused', problems: ['no such favour here'] };
+  };
+
   // Agents whose cards say offering:<tag> or seeking:<tag> for one of the circle's tags, on this tally's node: each hears of
   // it once (circle.invite), and its AI brings it to its human, who decides. At most 500 a circle.
   const inviteMatches = async (t: Tally) => {
@@ -612,13 +699,14 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       void save();
     }
   };
-  const circle = async (t: Tally, p: Record<string, unknown>, from: string, card: AgentCard, key: string): Promise<{ kind: string } & Record<string, unknown>> => {
+  const circle = async (t: Tally, p: Record<string, unknown>, from: string, card: AgentCard, key: string, envelope: LakeData['envelope']): Promise<{ kind: string } & Record<string, unknown>> => {
     const c = t.circle;
     const no = (why: string) => ({ kind: 'refused', problems: [why] });
     if (!c) return no('this pledge is not a promise circle');
     if (!circleOpen(t)) return no(`the circle opens for calls once the pledge has filled and everyone is known (it is ${t.state}${t.blind?.unveil && !t.blind.unveiled ? ', not yet unveiled' : ''})`);
     const all = members(t);
     const me = all.find((m) => m.webId === from);
+    if (p.kind === 'circle.pass.accept' || p.kind === 'circle.pass.decline') return answerPass(t, p, from, card, envelope);
     if (!me) return no('only the circle\'s members call it or answer its calls');
     const year = Date.now() - 365 * 86_400_000;
     const keptThisYear = (w: string) => c.calls.filter((x) => x.helper === w && x.state === 'kept' && x.at > year).length;
@@ -630,6 +718,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       const open = (c.notes ?? []).filter((n) => !n.cleared);
       return { kind: 'circle.record', id: t.id, ...circleView(t, c), you: { kept: c.kept[from] ?? 0, asked: c.asked[from] ?? 0, owed_to_you: open.filter((n) => n.to === from && !n.disputed).length, you_owe: open.filter((n) => n.from === from && !n.disputed).length, owe_everywhere: owedBy(from), can_ask: !(c.limit ?? DEFAULT_LIMIT) || owedBy(from) < (c.limit ?? DEFAULT_LIMIT), ...(c.kinds ? { offers: offersOf(from) } : {}), calls: c.calls.filter((x) => x.caller === from).map(({ id, need, state, at }) => ({ id, need, state, at: new Date(at).toISOString() })) } };
     }
+    if (p.kind === 'circle.pass') return offerPass(t, p, from, card);
     if (p.kind === 'circle.offer') {
       // What this member will help with, of the circle's kinds: calls for anything else never reach them.
       const kinds = Array.isArray(p.kinds) ? p.kinds.map(String) : [];
@@ -906,14 +995,15 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         sisters: sisterCircles(),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.note', 'tally.passed', 'circle.pass', 'circle.pass.accept', 'circle.pass.decline', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
     if (p.kind === 'circle.clear.consent') return consent(String(p.clearing ?? ''), from, String(p.owe ?? ''), String(p.owed ?? ''), card, envelope);
     // Between tallies across the Ocean: favours owed (to tallies only), and a loop another tally cleared.
-    if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look' || p.kind === 'tally.standing' || String(p.kind).startsWith('tally.overflow')) {
+    if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look' || p.kind === 'tally.standing' || p.kind === 'tally.note' || p.kind === 'tally.passed' || String(p.kind).startsWith('tally.overflow')) {
       if (profile.role !== 'specialist' || !profile.tags.includes('tally')) return { kind: 'refused', problems: ['for tallies only'] };
       if (String(p.kind).startsWith('tally.overflow')) return between(p, from, card.supportedInterfaces?.[0]?.url ?? '');
       if (p.kind === 'tally.look') { void findLoops(); return { kind: 'tally.looking' }; }
       if (p.kind === 'tally.standing') return { kind: 'tally.standing', owes: owedBy(String(p.webId ?? '')) };
+      if (p.kind === 'tally.note' || p.kind === 'tally.passed') return notes(p);
       return p.kind === 'tally.edges' ? { kind: 'tally.edges', edges: localEdges() } : clearRemote(p);
     }
     const t = tallies.get(id);
@@ -932,7 +1022,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       void save();
       return { kind: 'tally.joined', id: t.id, answered: q.joined.length, closes: new Date(q.closes).toISOString(), count: q.count, tellers: q.tellers, note: 'now send your answer to the count: one option, as two unreadable shares, one to each of these tellers. Only the totals come out, to this tally alone, when the quorum closes.' };
     }
-    if (String(p.kind).startsWith('circle.')) return circle(t, p, from, card, String(profile.publicJwk.kid ?? from));
+    if (String(p.kind).startsWith('circle.')) return circle(t, p, from, card, String(profile.publicJwk.kid ?? from), envelope);
     if (t.state === 'gathering' && p.kind !== 'tally.count') return { kind: 'refused', problems: [`it is still finding its quorum: it opens for signing at ${new Date(t.quorum!.closes).toISOString()} only if enough people privately said they'd join`] };
     if (t.blind) {
       await unveil(t);

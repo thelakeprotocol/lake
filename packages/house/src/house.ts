@@ -788,6 +788,27 @@ function panelFor(x: {
       await put(owner, `wallet/favours/owe-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {});
       return jws;
     },
+    // A favour owed to the owner, passed on to settle one they owe (SPEC §11.4c): the house finds a pair in the owner's
+    // wallet, endorses the one to whom the other is owed, and offers it; they agree on their phone.
+    async passFavour() {
+      const dir = `${owner.podRoot}wallet/favours/`;
+      const listing = await owner.fetch(dir, { headers: { accept: 'text/turtle' } }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+      const names = [...new Set([...listing.matchAll(/owed?-[0-9a-f]{16}\.jwt/g)].map((m) => m[0]))].slice(0, 100);
+      const notes = (await Promise.all(names.map(async (name) => {
+        const jws = await owner.fetch(`${dir}${name}`).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+        try { const vc = JSON.parse(Buffer.from(jws.split('.')[1] ?? '', 'base64url').toString()) as { issuer?: string; credentialSubject?: { id?: string; circle?: { id?: string; tally?: string } } }; return { name, jws, digest: createHash('sha256').update(jws).digest('hex'), issuer: vc.issuer ?? '', sub: vc.credentialSubject ?? {} }; } catch { return null; }
+      }))).filter((n): n is NonNullable<typeof n> => !!n?.sub.circle?.id && !!n.sub.circle.tally);
+      const owed = notes.filter((n) => n.name.startsWith('owed-') && n.sub.id === owner.webId), owe = notes.filter((n) => n.name.startsWith('owe-') && n.issuer === owner.webId);
+      let last: Record<string, any> = { kind: 'refused', problems: ['nothing to pass on: you need a favour owed to you and one you owe, to someone else'] };
+      for (const n of owed) for (const m of owe) {
+        if (m.sub.id === n.issuer) continue;
+        const endorsement = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeFavourEndorsement'], issuer: owner.webId, validFrom: new Date().toISOString(), credentialSubject: { id: m.sub.id, note: n.digest, settles: m.digest } } as never, x.id);
+        last = (await send(n.sub.circle!.tally!, { kind: 'circle.pass', id: n.sub.circle!.id, note: n.jws, endorsement, settles: { url: m.sub.circle!.tally, circle: m.sub.circle!.id, digest: m.digest } }).catch((e: Error) => ({ payload: { kind: 'refused', problems: [e.message] } }))).payload as Record<string, any>;
+        if (last.kind === 'circle.pass.offered') return last;
+      }
+      return last;
+    },
+    async fileFavour(jws, side) { await put(owner, `wallet/favours/${side}-${createHash('sha256').update(jws).digest('hex').slice(0, 16)}.jwt`, jws, 'text/plain').catch(() => {}); },
     async circleSend(tally, payload) {
       return (await send(tally, payload)).payload as Record<string, any>;
     },

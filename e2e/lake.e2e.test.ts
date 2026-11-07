@@ -2732,6 +2732,45 @@ describe('the weekly shop, priced inside the house', () => {
     expect(await fav(bAt, 'street-b')).toMatchObject({ signed: 1, owed: 0, cleared: 1 });
     expect((await waitFor(async () => (await notes(b2)).find((x) => x.circle?.role === 'cleared' && /2 favours across 2 circles on 2 Lakes/.test(x.text))))!.text).toMatch(/Nobody paid anything/);
   }, 240_000);
+
+  it('a favour passed on (SPEC §11.4c): owed one and owing one, a member offers the favour owed to them to the one they owe; that person agrees on their phone; the debtor owes them now, and it clears like any other', async () => {
+    const rows = (await (await fetch(`${nodeB}/cards?skill=tally&idle=1`)).json()) as { card: { supportedInterfaces: { url: string }[] } }[];
+    const bAt = rows.map((r) => r.card.supportedInterfaces[0]!.url.replace(/\/a2a$/, '')).find((u) => u !== `${specialistsUrl}/tally`)!;
+    const a = `${specialistsUrl}/tally`;
+    const at = (id: string) => (id === 'ocean-x' ? (`${a}/#tally` < `${bAt}/#tally` ? a : bAt) : (`${a}/#tally` < `${bAt}/#tally` ? bAt : a));
+    const [b0, b1, b2] = buyers as [(typeof buyers)[number], (typeof buyers)[number], (typeof buyers)[number]];
+    const notes = async (m: (typeof buyers)[number]) => (await m.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; call: string } }[];
+    const waitFor = async <T,>(f: () => Promise<T | undefined>) => { for (let i = 0; i < 40; i++) { const v = await f(); if (v) return v; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('timed out'); };
+    const fav = async (id: string) => (await (await fetch(`${at(id)}/p/${id}.json`)).json()).circle.favours;
+    const favour = async (id: string, caller: (typeof buyers)[number], helper: (typeof buyers)[number]) => {
+      const before = (await fav(id)).signed;
+      const c = await caller.call({ kind: 'panel.circle.call', tally: at(id), id, need: 'help carrying a fridge' });
+      expect(c).toMatchObject({ kind: 'circle.called' });
+      const asked = await waitFor(async () => (await notes(helper)).find((x) => x.circle?.role === 'ask' && x.circle.call === c.call));
+      expect(await helper.call({ kind: 'panel.circle.answer', note: asked.id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+      const mine = await waitFor(async () => (await notes(caller)).find((x) => x.circle?.role === 'caller' && x.circle.call === c.call && x.circle.state === 'matched'));
+      expect(await caller.call({ kind: 'panel.circle.kept', note: mine.id })).toMatchObject({ kind: 'circle.kept' });
+      await waitFor(async () => ((await fav(id)).signed === before + 1 && (await fav(id)).owed >= 1 ? true : undefined));
+    };
+    // b0 owes b1 (on one Lake's tally); b1 owes b2 (on the other's).
+    await favour('ocean-x', b0, b1);
+    await favour('ocean-y', b1, b2);
+    // b1 passes on the favour b0 owes them, to settle the one they owe b2; b2 is asked on their phone.
+    expect(await b1.call({ kind: 'panel.favour.pass' })).toMatchObject({ kind: 'circle.pass.offered' });
+    const offer = await waitFor(async () => (await notes(b2)).find((x) => x.circle?.role === 'pass' && x.circle.state === 'open'));
+    expect(offer.text).toMatch(/offers to settle it with one owed to them/);
+    expect(await b2.call({ kind: 'panel.circle.answer', note: offer.id, accept: true })).toMatchObject({ kind: 'circle.pass.accepted' });
+    // b1 is square: what they owed is cleared; the favour b0 owes is b2's now, and b0 is told.
+    expect(await fav('ocean-y')).toMatchObject({ owed: 0 });
+    expect(await fav('ocean-x')).toMatchObject({ owed: 1 });
+    await waitFor(async () => (await notes(b0)).find((x) => x.circle?.role === 'passed' && /passed on/.test(x.text)));
+    await waitFor(async () => (await notes(b1)).find((x) => x.circle?.role === 'passed' && /square with them/.test(x.text)));
+    // It can't be passed twice by the same holder.
+    expect(await b1.call({ kind: 'panel.favour.pass' })).toMatchObject({ kind: 'refused' });
+    // Then b2 owes b0 one: with the favour passed to b2, that's a loop of two, and it clears.
+    await favour('ocean-z', b2, b0);
+    await waitFor(async () => ((await fav('ocean-x')).owed === 0 && (await fav('ocean-z')).owed === 0 ? true : undefined));
+  }, 240_000);
 });
 
 describe('relay: a house behind a home router', () => {

@@ -201,11 +201,11 @@ export class Housekeeper {
     const pairs = (x: Record<string, unknown>) => (Array.isArray(x.where) ? (x.where as { tally?: unknown; id?: unknown }[]).slice(0, 12).map((c) => [String(c?.tally ?? ''), String(c?.id ?? '')] as const) : []);
     const ours = async (x: Record<string, unknown>) => {
       for (const id of circleIds(x)) if (id && (await this.o.inCircle?.(v.profile.webId, id))) return true;
-      if (x.kind === 'circle.clear' || x.kind === 'circle.cleared') for (const [t, id] of pairs(x)) if (t && id && (await this.o.inCircle?.(t, id))) return true;
+      if (x.kind === 'circle.clear' || x.kind === 'circle.cleared' || x.kind === 'circle.pass.offer') for (const [t, id] of pairs(x)) if (t && id && (await this.o.inCircle?.(t, id))) return true;
       return false;
     };
     if (String(v.payload.kind).startsWith('circle.') && (await ours(v.payload as unknown as Record<string, unknown>))) {
-      const q = v.payload as unknown as { kind: string; id: string; ids?: string[]; call: string; need?: string; help?: string; when?: string; promise?: string; helper?: { url?: string; webId?: string }; kept?: number; guest?: string; sister?: string; note?: string; digest?: string; clearing?: string; length?: number; circles?: number; lakes?: number; you_owe?: { digest?: string }; owed_to_you?: { digest?: string } };
+      const q = v.payload as unknown as { kind: string; id: string; ids?: string[]; call: string; need?: string; help?: string; when?: string; promise?: string; helper?: { url?: string; webId?: string }; kept?: number; guest?: string; sister?: string; note?: string; digest?: string; clearing?: string; length?: number; circles?: number; lakes?: number; pass?: string; settles?: string; you_owe?: { digest?: string }; owed_to_you?: { digest?: string } };
       const tally = ((data as LakeData).card?.supportedInterfaces?.[0]?.url ?? '').replace(/\/a2a$/, '');
       const base = { tally, id: q.id, call: q.call, need: String(q.need ?? ''), ...(q.help ? { help: String(q.help).slice(0, 40) } : {}), ...(q.when ? { when: String(q.when).slice(0, 80) } : {}) };
       const desk = this.o.desk;
@@ -215,6 +215,11 @@ export class Housekeeper {
       else if (q.kind === 'circle.matched') { await desk.circleUpdate(q.id, q.call, 'caller', { state: 'matched', contact: String(q.helper?.url ?? ''), ...(q.helper?.webId ? { contactWebId: String(q.helper.webId) } : {}) }); desk.notifyOwner('circle-matched', q.sister ? `Nobody in your circle could, so someone from a sister circle ("${String(q.sister).slice(0, 80)}") will help with: ${base.need}` : `Someone from your circle will help with: ${base.need}`); }
       else if (q.kind === 'circle.filled') await desk.circleUpdate(q.id, q.call, 'ask', { state: 'taken' });
       else if (q.kind === 'circle.withdrawn') await desk.circleUpdate(q.id, q.call, 'ask', { state: 'withdrawn' });
+      // A favour passed on (SPEC §11.4c): offered to the owner to settle one owed to them; theirs passed on; or taken.
+      else if (q.kind === 'circle.pass.offer' && q.pass && q.note && q.settles) await desk.circleNote({ ...base, call: String(q.pass), role: 'pass', state: 'open', pass: { id: String(q.pass), note: String(q.note).slice(0, 8000), settles: String(q.settles) } }, `Someone who owes you a favour offers to settle it with one owed to them${base.help ? ` (for ${base.help})` : ''}: the person who owes it would owe you instead. Nothing else changes.`);
+      else if (q.kind === 'circle.passed') await desk.circleNote({ ...base, call: String(q.note ?? q.call), need: '', role: 'passed', state: 'done' }, 'The favour you owe was passed on by the person you owe it to: you now owe it to someone they owed. Nothing else changes.');
+      else if (q.kind === 'circle.pass.accepted') await desk.circleNote({ ...base, call: String(q.pass), need: '', role: 'passed', state: 'done' }, 'They took the favour you passed on: you\'re square with them, and the person who owed you owes them now.');
+      else if (q.kind === 'circle.pass.declined') await desk.circleNote({ ...base, call: String(q.pass), need: '', role: 'passed', state: 'done' }, 'They\'d rather keep the favour you owe them as it is. Nothing changed.');
       else if (q.kind === 'circle.disputed') { (await desk.circleUpdate(q.id, q.call, 'caller', { state: 'disputed' })) || (await desk.circleUpdate(q.id, q.call, 'ask', { state: 'disputed' })); desk.notifyOwner('circle-disputed', `A call in your circle was marked disputed: "${base.need}". No favour is owed for it.`); }
       else if (q.kind === 'circle.unmet') { await desk.circleUpdate(q.id, q.call, 'caller', { state: 'withdrawn' }); await desk.circleNote({ ...base, role: 'unmet', state: 'done' }, `Nobody in your circle could take "${base.need}" this time.`); }
       else if (q.kind === 'circle.kept') {

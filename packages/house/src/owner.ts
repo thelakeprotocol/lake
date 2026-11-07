@@ -85,6 +85,9 @@ export interface PanelProvider {
   circles?(): Promise<unknown[]>;
   /** A favour note (SPEC §11.4c): this house's signed "I received this from that member: one favour", kept in its wallet. */
   favourNote?(c: { tally: string; id: string; call: string; helper: string; need: string; help?: string }): Promise<string>;
+  /** Pass a favour owed to the owner on, to settle one they owe (SPEC §11.4c). */
+  passFavour?(): Promise<Record<string, any>>;
+  fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
   /** A message from this house to a tally (a promise circle's call, accept, decline, kept), and its verified reply. */
   circleSend?(tally: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
   /** What the owner's record says for one coded field (its first value), for a count answered from it. */
@@ -113,10 +116,12 @@ export interface PledgeMoney { amount: number; currency: string; payee: string; 
  */
 export interface CircleItem {
   tally: string; id: string; call: string; need: string; when?: string; promise?: string; /** The kind of help asked for. */ help?: string;
-  role: 'ask' | 'caller' | 'kept' | 'unmet' | 'cleared';
+  role: 'ask' | 'caller' | 'kept' | 'unmet' | 'cleared' | 'pass' | 'passed';
   state: 'open' | 'accepted' | 'declined' | 'reported' | 'taken' | 'asking' | 'matched' | 'done' | 'withdrawn' | 'disputed';
   /** Whom to reach, once matched: the other member's house (and its WebID, which a favour note names). */
   contact?: string; contactWebId?: string;
+  /** A favour offered to the owner to settle one owed to them: the note, and the digest of the one it settles. */
+  pass?: { id: string; note: string; settles: string };
 }
 
 export interface RecordCount { id: string; options: string[]; leader: string; helper: string; field: string; label: string; mine?: string; answered?: boolean }
@@ -1768,10 +1773,18 @@ export class OwnerDesk {
           },
           'panel.circle.answer': async () => {
             const w = q as { note?: string; accept?: boolean; report?: boolean };
-            const sug = this.suggestions.find((x) => x.id === String(w.note ?? '') && x.circle?.role === 'ask');
+            const sug = this.suggestions.find((x) => x.id === String(w.note ?? '') && (x.circle?.role === 'ask' || x.circle?.role === 'pass'));
             if (!sug?.circle) return { error: 'no ask from your circle with that note' };
             if (sug.circle.state !== 'open') return { error: `it is ${sug.circle.state}` };
             const c = sug.circle;
+            if (c.role === 'pass' && c.pass) {
+              // A favour passed to the owner to settle one owed to them: yes, and the house keeps the note as owed to them.
+              const r = await panel.circleSend?.(c.tally, { kind: w.accept ? 'circle.pass.accept' : 'circle.pass.decline', id: c.id, pass: c.pass.id, settles: c.pass.settles }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
+              if (r.kind === 'circle.pass.accepted') { await panel.fileFavour?.(c.pass.note, 'owed'); c.state = 'accepted'; }
+              else if (r.kind === 'circle.pass.declined') c.state = 'declined';
+              await this.saveSuggestions();
+              return r;
+            }
             const r = await panel.circleSend?.(c.tally, { kind: w.report ? 'circle.report' : w.accept ? 'circle.accept' : 'circle.decline', id: c.id, call: c.call }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
             if (r.kind === 'circle.matched') Object.assign(c, { state: 'accepted', contact: String(r.caller?.url ?? '') });
             else if (r.kind === 'circle.declined') c.state = 'declined';
@@ -1781,6 +1794,7 @@ export class OwnerDesk {
             return r;
           },
           // It didn't go as it should: either side marks the call disputed; no favour is owed, and it counts against neither.
+          'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },
           'panel.circle.dispute': async () => {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));
             if (!sug?.circle) return { error: 'no call of yours, or one you took, with that note' };
