@@ -412,3 +412,4 @@ h1 .dot { display: inline-block; margin-left: 10px; vertical-align: middle; }
 .section-title { margin-top: 26px; }
 .seg.filters { border: 0; padding: 0; background: none; border-radius: 0; }
 .chatinfo .block { margin-top: 18px; }
+body.in-chat header.top { display: none; }

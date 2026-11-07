@@ -329,6 +329,8 @@ function ChatView({ c }: { c: Chat }) {
   const onDuty = (duty.data?.duties ?? []).some(dutyLive);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!info) end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, info]);
+  // Full screen while it's on screen, and only then (a link to a chat that's gone shows the list, with the tab bar).
+  useEffect(() => { document.body.classList.add('in-chat'); return () => document.body.classList.remove('in-chat'); }, []);
   const latest = c.notes[c.notes.length - 1]!;
   const setTo = async (m: 'ai' | 'me') => { const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.chat.mode', key: latest.from.key, mode: m }); if (r.error) throw new Error(r.error); setMode(m); bump(); };
   const head = (back: () => void, label: string) => h('div', { class: 'chathead' },
@@ -1764,8 +1766,7 @@ function App() {
   const from = useRef<Tab>('settings');
   const go = (t: Tab) => { if (MAIN.includes(t)) from.current = t; else if (MAIN.includes(tab)) from.current = tab; setTab(t); if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`); setHash(location.hash); scrollTo(0, 0); };
   useEffect(() => { const f = () => { setTab(tabFromHash()); setHash(location.hash); scrollTo(0, 0); }; addEventListener('hashchange', f); addEventListener('popstate', f); return () => { removeEventListener('hashchange', f); removeEventListener('popstate', f); }; }, []);
-  const chatting = tab === 'chats' && /^#(note|chat)=/.test(hash);
-  useEffect(() => { document.body.classList.toggle('in-chat', chatting); }, [chatting]);
+  void hash;
   // Opened from a notification: say what it was about, at the top, once.
   const [notified, setNotified] = useState(() => new URLSearchParams(location.search).get('n') ?? '');
   useEffect(() => { if (notified) history.replaceState(null, '', location.pathname + location.hash); }, []);
@@ -1823,7 +1824,7 @@ function App() {
         notified ? h('div', { class: 'notified' }, h('span', {}, `Notification: ${notified}`), h('button', { type: 'button', class: 'btn small quiet', onClick: () => setNotified(''), 'aria-label': 'Close' }, '×')) : null,
         pull ? h('div', { class: 'pull', style: `height:${pull / 2}px` }, pull > 80 ? 'Release to refresh' : 'Pull to refresh') : null,
         // Each tab says what it is, as phone apps do; the dot says whether your house is live. Your handle heads Me.
-        MAIN.includes(tab) && !chatting ? h('header', { class: 'top' },
+        MAIN.includes(tab) ? h('header', { class: 'top' },
           h('h1', {}, labelOf(tab), h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? `${name || 'your house'}: live` : 'reconnecting' }))) : null,
         MAIN.includes(tab) ? null : h('button', { class: 'back', type: 'button', onClick: () => go(from.current) }, `‹ ${labelOf(from.current)}`),
         MAIN.includes(tab) ? null : h('h2', { class: 'page-title' }, labelOf(tab)),

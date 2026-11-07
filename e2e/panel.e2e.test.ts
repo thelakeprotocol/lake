@@ -344,6 +344,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.locator('.modebar', { hasText: 'You\'re replying' }).waitFor({ timeout: 6000 });
       await page.locator('.chathead .back').click();
       await page.locator('.notified button').click();
+      // A link to a chat that's gone (cleared, say) shows the list, with the tab bar to go anywhere.
+      await page.goto(`${house}/owner/#note=gone-for-good`);
+      await page.locator('#nav').waitFor();
+      expect(await page.locator('#nav').isVisible()).toBe(true);
       await tidy();
     } finally { await alex.close(); }
   });
