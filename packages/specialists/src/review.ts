@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   auditProgram, auditStudy, checkCredentialStatus, verifyOwnerKey, purposeWithin, buildCard, digestSRI, identifyingFields, packs, programId, type QuoteProgram, makeEvent, type LakeEvent, verifyCredential, verifyLakeCard, issueCredential, lakeAgentApp, ReplayGuard, sendLake, deliverWithRetries, signCard, signMessage, studyFields, studyId, verifyLakeData,
-  packId, pledgeAgreement, checkCart, checkSplitConsent, cardUrlFor, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
+  packId, pledgeAgreement, checkCart, cartTerms, checkDeed, issueDeed, deedAnswerPasses, DEED_ASSET, checkSplitConsent, cardUrlFor, checkBadges, isParty, keyThumbprint, ASSISTANT_KEY_TYPE, DISPUTE_CODES, EMPTY_SHA256, type DisputeCode, type SettledHow, type CartMandate, type CartParty, type CheckedCart, type AgentCard, type Identity, type LakeData, type LakePack, type LakeProfile, type Study,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 
@@ -131,10 +131,17 @@ export async function createAuditor(o: SpecialistOptions): Promise<{ app: expres
  * A demo authority for a pack (for mortgages: a stand-in for a register of authorised firms, like the FCA's).
  * It authorises the agents on its register to quote for that pack, as a signed credential houses check.
  */
-export async function createAuthority(o: SpecialistOptions & { pack: LakePack }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
+export async function createAuthority(o: SpecialistOptions & { pack: LakePack; dataDir?: string }): Promise<{ app: express.Express; card: AgentCard; webId: string }> {
   const a = o.pack.authority!;
   const id = packId(o.pack);
+  // Deeds it certified and redeemed (SPEC §6.7): each spent once, for one cart, kept on disk before it says so.
+  const deedFile = o.dataDir ? `${o.dataDir}/deeds-${o.pack.id}.json` : undefined;
+  const deeds: { earned: Record<string, number>; spent: Record<string, { cart: string; hash: string; seller: string; receipt: string; at: number }>; lastBy: Record<string, number> } =
+    deedFile ? await readFile(deedFile, 'utf8').then((t) => JSON.parse(t)).catch(() => ({ earned: {}, spent: {}, lastBy: {} })) : { earned: {}, spent: {}, lastBy: {} };
+  const saveDeeds = async () => { if (!deedFile) return; await mkdir(o.dataDir!, { recursive: true }); await writeFile(`${deedFile}.tmp`, JSON.stringify(deeds)); await rename(`${deedFile}.tmp`, deedFile); };
+  const DEED_EVERY_MS = Number(process.env.LAKE_DEED_EVERY_MS ?? 10 * 60_000);
   const s: Specialist = await specialist<Reply>(o, a.name, `${a.description} Anyone may check an agent: { kind: "registered", domain }.`, 'authorise', async (p, from, profile) => {
+    if (a.deeds && String(p.kind).startsWith('deed.')) return (await deedReply(p, from, profile)) as unknown as Reply;
     // Anyone may ask whether an agent is on the register (run 26's agents couldn't check a grocer before talking to it).
     if (p.kind === 'registered') {
       const domain = String(p.domain ?? '').toLowerCase().replace(/^https?:\/\//, '').replace(/[/#].*$/, '');
@@ -148,6 +155,62 @@ export async function createAuthority(o: SpecialistOptions & { pack: LakePack })
     const credential = await s.vc('LakeAuthorisation', { id: from, domain: profile.ownerDomain, pack: id, scope: 'quote', cnf: { jkt: await keyThumbprint(profile.publicJwk) } }, 365);
     return { kind: 'approved', credential, notes: [`authorised to quote for ${id}`] };
   });
+  // Good turns (SPEC §6.7): tasks it certifies, a deed for each one done (once per person and task), and redeeming deeds
+  // for a cart priced in them, each once, anywhere.
+  const deedReply = async (p: Record<string, unknown>, from: string, profile: LakeProfile): Promise<Record<string, unknown>> => {
+    const no = (why: string) => ({ kind: 'refused', problems: [why] });
+    const tasks = a.deeds!.tasks;
+    if (p.kind === 'deed.tasks') return { kind: 'deed.tasks', tasks: tasks.map((t) => ({ id: t.id, title: t.title, ask: t.ask, ...(t.answer_shape ? { answer_shape: t.answer_shape } : {}) })), earns: 'one deed for each task done: an Open Badges 3.0 credential for an hour of community service, bound to your key', pays_for: 'menu items priced in HUR that name this organisation' };
+    if (p.kind === 'deed.status') { const d = String(p.digest ?? ''); return { kind: 'deed.status', digest: d, spent: !!deeds.spent[d] }; }
+    const jkt = await keyThumbprint(profile.publicJwk);
+    if (p.kind === 'deed.submit') {
+      const t = tasks.find((x) => x.id === p.task);
+      if (!t) return no(`task: one of ${tasks.map((x) => x.id).join(', ')}`);
+      if (deeds.earned[`${jkt}|${t.id}`]) return no('you have done this task already: each earns one deed per person');
+      if (Date.now() - (deeds.lastBy[jkt] ?? 0) < DEED_EVERY_MS) return no(`one deed every ${Math.round(DEED_EVERY_MS / 60_000)} minutes from one key: try again later`);
+      if (!deedAnswerPasses(t, p.answer)) return no('not quite: check the answer against the task and its answer_shape');
+      deeds.earned[`${jkt}|${t.id}`] = Date.now(); deeds.lastBy[jkt] = Date.now();
+      await saveDeeds();
+      const credential = await issueDeed({ issuer: o.id, issuerWebId: s.webId, issuerName: a.name, subject: from, jkt, task: t, achievementBase: `${o.url}/achievements` });
+      return { kind: 'deed.issued', task: t.id, credential, note: `thank you: one hour of community service, certified by ${a.name}. Keep it: anyone who prices their time in HUR naming this organisation takes it, once` };
+    }
+    if (p.kind === 'deed.redeem') {
+      // The cart, as its seller signed it, priced in deeds and naming this organisation as the one whose word it was paid counts.
+      let seller: LakeProfile, c: CheckedCart;
+      try {
+        seller = await verifyLakeCard(p.seller_card as AgentCard);
+        c = await checkCart(p.cart as CartMandate, seller.publicJwk);
+      } catch (e) { return no(`cart: ${(e as Error).message}`); }
+      if (c.seller !== seller.webId) return no('the cart was not signed by that seller');
+      if (c.buyer !== from) return no('pay only a cart made out to you');
+      if (c.total.currency !== DEED_ASSET || !Number.isInteger(c.total.value)) return no(`the cart is in ${c.total.currency}, not ${DEED_ASSET}`);
+      const accept = cartTerms((p.cart as CartMandate).contents).assets?.[DEED_ASSET]?.accept ?? [];
+      if (!(await isParty({ webId: s.webId, publicJwk: o.id.publicJwk }, accept))) return no('the cart doesn\'t name this organisation as the one whose deeds it takes');
+      // Paid already: the same receipt again (a retry), never a second payment.
+      const again = Object.values(deeds.spent).find((x) => x.cart === c.id && x.hash === c.hash);
+      if (again) return { kind: 'deed.redeemed', cart: c.id, receipt: again.receipt, again: true };
+      const creds = (Array.isArray(p.credentials) ? p.credentials : []).map(String).slice(0, 100);
+      if (creds.length !== c.total.value) return no(`send exactly ${c.total.value} deed${c.total.value === 1 ? '' : 's'}: the cart's total`);
+      const digests: string[] = [];
+      for (const jws of creds) {
+        try {
+          const d = await checkDeed(jws, o.id.publicJwk);
+          if (d.issuer !== s.webId) throw new Error('not certified here');
+          // Only its holder pays with it: the one it names, with the key it was bound to.
+          if (d.subject !== from || d.jkt !== jkt) throw new Error('certified to someone else');
+          if (deeds.spent[d.digest]) throw new Error('spent already');
+          if (digests.includes(d.digest)) throw new Error('the same deed twice');
+          digests.push(d.digest);
+        } catch (e) { return no(`a deed: ${(e as Error).message}`); }
+      }
+      const receipt = await issueCredential({ '@context': ['https://www.w3.org/ns/credentials/v2'], type: ['VerifiableCredential', 'LakeReceipt', 'LakeDeedReceipt'], issuer: s.webId, validFrom: new Date().toISOString(),
+        credentialSubject: { id: c.seller, payer: from, amount: { value: c.total.value, currency: DEED_ASSET }, cart: { id: c.id, hash: c.hash }, agreement: `urn:ap2:cart:${c.id}`, settlement: 'deed', spent: digests } } as never, o.id);
+      for (const d of digests) deeds.spent[d] = { cart: c.id, hash: c.hash, seller: c.seller, receipt, at: Date.now() };
+      await saveDeeds();
+      return { kind: 'deed.redeemed', cart: c.id, receipt, spent: digests, note: `paid: ${c.total.value} hour${c.total.value === 1 ? '' : 's'} of community service, now spent. Send the seller this receipt ({ kind: "receipt", receipt: { credential, card }, cart })` };
+    }
+    return no('send deed.tasks, deed.submit { task, answer }, deed.redeem { credentials, cart, seller_card } or deed.status { digest }');
+  };
   return { app: s.app, card: s.card, webId: s.webId };
 }
 

@@ -53,7 +53,7 @@ services:
     <<: *small
     image: lake-local/lake-specialists:${LAKE_TAG:-dev}
     hostname: specialists
-    command: ["all", "--port", "4300", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s", "--public-node", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--spar-every", "1800", "--packs", "health,shopping"]
+    command: ["all", "--port", "4300", "--url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s", "--public-node", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--spar-every", "1800", "--packs", "health,shopping,goodturn"]
     environment: { NODE_OPTIONS: "--max-old-space-size=160", LAKE_NODE_URL: "http://lake-node:7000", LAKE_DEMO_DOMAIN: "lake-${LAKE_ID}.localhost,lake-${PEER_ID}.localhost" }
     volumes: [specialists:/data]
     depends_on: [caddy, lake-node]

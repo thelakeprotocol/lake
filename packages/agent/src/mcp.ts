@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
-import { followCheckpoint, menuHash, sumRecords, type LogRecord, type SeenCheckpoint } from '@thelakeprotocol/core';
+import { followCheckpoint, menuHash, sumRecords, cartParty, deedDigest, DEED_ASSET, FAVOUR_ASSET, type LogRecord, type SeenCheckpoint, type MenuPrice } from '@thelakeprotocol/core';
 import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, checkSplitConsent, splitHash, keyThumbprint, type CartShare, type DeliveryTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
 // The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
@@ -176,7 +176,12 @@ export interface AgentSnapshot {
   duty?: { kinds: string[] };
   /** What it did besides trade, for its passport: draws, votes and counts, pledges. */
   doings?: Doing[];
+  /** Deeds it earned for its human (SPEC §6.7): certified hours of community service, each paying once. */
+  deeds?: Deed[];
 }
+
+/** A deed this agent holds: the credential, who certified it (to redeem it there), and whether it has paid for something. */
+export interface Deed { credential: string; issuer: string; issuerUrl: string; task: string; title?: string; digest: string; at: string; spent?: { cart: string; at: string } }
 
 /** One thing an agent did on the Lake besides trading, as its passport lists it (never a vote's choice). */
 /** An errand its human's house holds (SPEC §6.1): who it waits on, by key (a name is only a name), and the cart or tag. */
@@ -423,6 +428,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // otherwise, or for a cart that names none, the payments agent this agent uses.
   const trustedPayments = async (cart?: string): Promise<CartParty[] | null> => {
     const x = cart ? orders.get(cart.trim().toLowerCase()) : undefined;
+    // A cart in deeds or favours (SPEC §6.7): only the parties it names for that unit say it was paid.
+    const inKind = x ? cartTerms(x.mandate.contents).assets?.[x.total.currency]?.accept : undefined;
+    if (inKind?.length) return inKind;
     const named = x ? cartTerms(x.mandate.contents).payments : [];
     if (named.length) return named;
     const own = await (await agent()).paymentsAgent();
@@ -469,6 +477,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     ruling?: string;
   };
   const orders = new Map<string, Order>((x.saved?.orders as [string, Order][] | undefined) ?? []);
+  const deeds: Deed[] = (x.saved?.deeds as Deed[] | undefined) ?? [];
   const range = z.object({ min: z.number().int().optional(), max: z.number().int().optional() });
   // The payments agent and core check the bounds (deliveryProblems); this only shapes the input.
   const DELIVERY = z.object({ within_hours: z.number().int().optional(), review_hours: z.number().int().optional(), revisions: z.number().int().optional(), words: range.optional(), lines: range.optional() })
@@ -536,6 +545,15 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (item.confirm) {
         return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), note: `the seller confirms each order of "${item.label}" first: a cart comes to your inbox when they say yes` },
           checked: { note: `an order for "${item.label}" (${qty}) that waits for your yes (your menu says confirm): ask your human if you need to, then send the cart with lake_sell { action: "cart", to: "${peer.url}", items: [{ label: "${qty} × ${item.label}", price: ${Math.round(item.price.value * qty * 100) / 100}, currency: "${item.price.currency}" }] }, or tell them no` } };
+      }
+      // Paid another way the menu lists (SPEC §6.7): deeds or favours, the cart naming whose word that it was paid counts.
+      const alt = typeof p.pays_in === 'string' ? item.prices?.find((x) => x.assetCode === p.pays_in) : undefined;
+      if (alt) {
+        const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
+        const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: alt.assetCode, value: alt.value * qty } }], undefined, note, item.sku, undefined, undefined, { [alt.assetCode]: { accept: alt.accept } });
+        const c = await checkCart(cart, (await key).publicJwk);
+        orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+        return { reply: { kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${c.id}" }` }, checked: { note: `from your menu, paid in ${alt.assetCode}: you sent cart ${c.id} (${c.total.currency} ${c.total.value}); it counts as paid when ${alt.accept.map((x) => x.url).join(' or ')} signs that it was; deliver then` } };
       }
       // The buyer says which currency it can pay in; nothing converts, so a menu price in another one would sign a cart
       // nobody can pay (runs 34b, 41: a dead AUD cart, a manual reissue). The order waits for the seller to answer.
@@ -1245,7 +1263,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       inputSchema: {
         action: z.enum(['menu', 'cart', 'team', 'consent', 'withdraw', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
         members: z.array(z.object({ url: z.string(), amount: z.number() })).min(2).max(5).optional().describe('team: each member\'s A2A address (yours too) and its share; the shares add up to the total'),
-        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
+        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), prices: z.array(z.object({ asset: z.string().regex(/^[A-Z]{3}$/).describe('HUR: certified hours of community service (deeds); FAV: favours'), value: z.number().int().min(1).max(100).default(1), accept_url: z.string().describe('the A2A address of the agent whose word that it was paid you take: the organisation that certifies the deeds') })).max(3).optional().describe('menu: other ways to pay for it, besides money ("an hour of my time for an hour volunteered at Open Hands")'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
         delivery: DELIVERY.optional().describe('cart: what you promise about the delivery, signed into the cart (an order from your menu gets the item\'s)'),
         to: z.string().optional().describe('cart: the buyer\'s A2A endpoint'),
         minutes: z.number().min(1).max(1440).default(30).describe('cart: how long the price holds'),
@@ -1261,7 +1279,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       try {
         const me = await agent();
         if (a.action === 'menu') {
-          const items = (a.items ?? []).map((x) => ({ sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}) }));
+          // Other ways to pay (SPEC §6.7): each names, pinned by key from its own card, whose word that it was paid counts.
+          const alts = new Map<number, MenuPrice[]>();
+          for (const [i, x] of (a.items ?? []).entries()) if (x.prices?.length) alts.set(i, await Promise.all(x.prices.map(async (q) => ({ value: q.value, assetCode: q.asset, assetScale: 0, accept: [await cartParty((await (await fetch(cardUrlFor(q.accept_url))).json()) as AgentCard)] }))));
+          const items = (a.items ?? []).map((x, i) => ({ ...(alts.get(i) ? { prices: alts.get(i) } : {}), sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}) }));
           await me.setMenu(items);
           menu = items;
           return json({ ok: true, menu: items, note: items.length ? 'on your signed card now: lake_search finds it, and an order for an item on it gets a signed cart back at once' : 'menu cleared' });
@@ -1415,6 +1436,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         code: z.enum(['not_received', 'not_as_described']).default('not_as_described').describe('dispute: nothing arrived (the Arbiter can rule on that from signatures), or it is not what you ordered (no ruling settles that: it stays held until a revision you accept or a refund)'),
         reason: z.string().max(500).optional().describe('changes / dispute: what is wrong, in words (data for the seller; it decides nothing)'),
         evidence: z.boolean().default(false).describe('orders: include every signed message, to show an arbiter'),
+        pays_in: z.string().regex(/^[A-Z]{3}$/).optional().describe('order: pay another way the menu lists: HUR (deeds: certified hours of community service you hold, from lake_deed) or FAV (a favour). Leave it out to pay in money'),
       },
     },
     async (a) => {
@@ -1422,6 +1444,19 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const me = await agent();
         if (a.action === 'order') {
           if (!a.seller_url || !a.sku) throw new Error('order needs seller_url and sku');
+          if (a.pays_in) {
+            const reply = await me.ask(a.seller_url, { kind: 'trade.order', sku: a.sku, qty: a.qty, ...(a.note ? { note: a.note } : {}), pays_in: a.pays_in });
+            if (reply.kind !== 'trade.cart') return json({ reply, note: 'no cart yet: the seller may answer with one in your inbox' });
+            const sellerCard = (await (await fetch(cardUrlFor(a.seller_url))).json()) as AgentCard;
+            const seller = await verifyLakeCard(sellerCard);
+            const c = await checkCart(reply.cart as CartMandate, seller.publicJwk);
+            if (c.seller !== seller.webId || c.buyer !== me.webId) throw new Error('the cart is not from this seller to you');
+            orders.set(c.id, { cart: c.id, role: 'buyer', with: { name: sellerCard.name, url: a.seller_url, webId: seller.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: reply.cart as CartMandate, sellerCard, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: reply.cart }] });
+            const accept = cartTerms((reply.cart as CartMandate).contents).assets?.[c.total.currency]?.accept ?? [];
+            const held = deeds.filter((d) => !d.spent && accept.some((x) => x.webId === d.issuer)).length;
+            return json({ cart: c.id, total: c.total, items: c.items, expires: c.expires, paid_with: accept.map((x) => x.url),
+              ...(c.total.currency === DEED_ASSET ? { you_hold: held, next: held >= c.total.value ? `lake_buy { action: "pay", cart: "${c.id.slice(0, 8)}" }` : `you hold ${held} deed${held === 1 ? '' : 's'} from there; earn ${c.total.value - held} more: lake_deed { action: "tasks" }` } : { next: `lake_buy { action: "pay", cart: "${c.id.slice(0, 8)}" }` }) });
+          }
           // The currency this agent can pay in, so the seller doesn't sign a cart in another.
           const playIn = Object.keys(o.playMoney ?? (o.allowanceUsd ? { USD: o.allowanceUsd } : {}));
           const paysIn = (house ? ((await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { currency?: string } | null)?.currency : undefined) ?? (playIn.length === 1 ? playIn[0] : undefined);
@@ -1446,6 +1481,32 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (!url) throw new Error('no address for the seller');
           // Run 64: only an assistant's judgement (and, once, an empty allowance) stood between a stranger's "redelivery fee"
           // and the money. A cart nobody asked for is paid only on its human's word.
+          // A cart priced in favours (SPEC §6.7): paid with a favour owed to the human, from their house, on their tap (an
+          // AI never spends what is theirs). The seller has the tally's receipt once they do.
+          if (x.total.currency === FAVOUR_ASSET) {
+            if (!house) throw new Error('paying with a favour needs your human\'s house: favours owed to them are kept there (lake_house_connect)');
+            const made = (await houseCall({ kind: 'assistant.suggest', text: `${x.with.name} takes a favour for "${x.items.map((i) => i.label).join(', ')}". Pay with one owed to you? Whoever owed it to you would owe it to them.`, favour_pay: { cart: x.mandate, seller_url: url } })) as { id?: string; error?: string };
+            if (made.error) throw new Error(made.error);
+            x.evidence.push({ step: 'put to your human to pay with a favour', at: new Date().toISOString(), signed: null });
+            return json({ kind: 'suggested', note: made.id, cart: x.cart, next: 'your human taps "Pay with a favour you\'re owed" in their control panel; the seller gets the tally\'s receipt and counts it paid' });
+          }
+          // A cart priced in deeds (SPEC §6.7): the deeds it asks for are redeemed at the organisation it names, which records them
+          // spent and signs the receipt; the seller counts that receipt as paid. Nothing else moves.
+          if (x.total.currency === DEED_ASSET) {
+            const accept = cartTerms(x.mandate.contents).assets?.[DEED_ASSET]?.accept ?? [];
+            const usable = deeds.filter((d) => !d.spent && accept.some((p) => p.webId === d.issuer)).slice(0, x.total.value);
+            if (usable.length < x.total.value) throw new Error(`cart ${x.cart} asks for ${x.total.value} deed${x.total.value === 1 ? '' : 's'} certified by ${accept.map((p) => p.url).join(' or ')}; you hold ${usable.length}. Earn one there: lake_deed { action: "tasks" }`);
+            const issuerUrl = usable[0]!.issuerUrl;
+            const r = await me.ask(issuerUrl, { kind: 'deed.redeem', credentials: usable.map((d) => d.credential), cart: x.mandate, seller_card: x.sellerCard });
+            if (r.kind !== 'deed.redeemed') throw new Error(`the organisation didn't take them: ${((r.problems as string[] | undefined) ?? [String(r.kind)]).join('; ')}`);
+            const issuerCard = (await (await fetch(cardUrlFor(issuerUrl))).json()) as AgentCard;
+            for (const d of usable) d.spent = { cart: x.cart, at: new Date().toISOString() };
+            x.status = 'paid'; x.payment = 'paid';
+            x.receipt = { credential: String(r.receipt), card: issuerCard };
+            x.evidence.push({ step: 'paid in deeds', at: new Date().toISOString(), signed: r.receipt });
+            const told = await me.ask(url, { kind: 'receipt', receipt: { credential: String(r.receipt), card: issuerCard }, cart: x.cart }).catch((e: Error) => ({ error: e.message }));
+            return json({ paid: x.cart, with: `${x.total.value} deed${x.total.value === 1 ? '' : 's'} (certified hours of community service), now spent`, seller_said: told, note: 'the organisation recorded them spent and signed the receipt; the seller counts it as paid' });
+          }
           if (x.unsolicited && !a.human_asked && !expected.has(x.with.webId)) throw new Error(`cart ${x.cart} came unasked from ${x.with.name || 'an agent you never wrote to'}: anyone can sign a cart and send it. Pay it only if your human asked you to pay exactly this, then send again with human_asked: true. A "fee" for something nobody ordered is a classic scam: tell your human, don't pay`);
           const r = await me.payCart(url, x.mandate, a.hold, a.release_after_hours);
           const filed = await reportSpend(r);
@@ -1625,6 +1686,41 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         if ((a.note?.length ?? 0) > 280) throw new Error('note: up to 280 characters with a data request (with no fields, up to 1000)');
         return json(await (await agent()).knock(house, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, ...(a.currency && a.currency.toUpperCase() !== 'USD' ? { price: { amount: a.price_usd, currency: a.currency.toUpperCase() } } : {}), retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'lake_deed',
+    {
+      description: 'Good turns (SPEC §6.7): do a small volunteer task for a organisation on the Lake and earn a deed, an Open Badges 3.0 credential for one hour of community service, kept here for your human. Some people price their time in deeds ("an hour with me for an hour of help at Open Hands"): lake_buy { action: "order", pays_in: "HUR" }, then pay, and the organisation redeems the deed once. tasks: what the organisation asks for; do: send your answer to one task; list: the deeds you hold.',
+      inputSchema: {
+        action: z.enum(['tasks', 'do', 'list']),
+        organisation: z.string().optional().describe('The organisation\'s A2A address (default: the one on this Lake that certifies deeds)'),
+        task: z.string().optional().describe('do: the task id, from tasks'),
+        answer: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe('do: your answer, in the shape the task gives'),
+      },
+    },
+    async (a) => {
+      try {
+        const me = await agent();
+        if (a.action === 'list') return json({ deeds: deeds.map((d) => ({ task: d.title ?? d.task, by: d.issuerUrl, at: d.at, ...(d.spent ? { spent: d.spent } : { unspent: true }) })), unspent: deeds.filter((d) => !d.spent).length });
+        let url = a.organisation;
+        if (!url) {
+          const found = (await me.find({ skill: 'authorise' })).filter((x) => x.role === 'specialist' && !x.lake);
+          url = (await Promise.all(found.map(async (x) => ((await (await fetch(cardUrlFor(x.url))).json()) as AgentCard).description?.includes('deed.tasks') ? x.url : null))).find(Boolean) ?? undefined;
+          if (!url) throw new Error('no organisation on this Lake certifies deeds');
+        }
+        if (a.action === 'tasks') return json({ organisation: url, ...(await me.ask(url, { kind: 'deed.tasks' })), next: 'lake_deed { action: "do", task, answer }' });
+        if (!a.task || !a.answer) throw new Error('do: task and answer');
+        const r = await me.ask(url, { kind: 'deed.submit', task: a.task, answer: a.answer });
+        if (r.kind !== 'deed.issued') return json(r);
+        const card = (await (await fetch(cardUrlFor(url))).json()) as AgentCard;
+        const issuer = (await verifyLakeCard(card)).webId;
+        deeds.push({ credential: String(r.credential), issuer, issuerUrl: url, task: String(r.task), title: (r.task as string), digest: deedDigest(String(r.credential)), at: new Date().toISOString() });
+        return json({ kind: 'deed.issued', task: r.task, by: card.name, unspent: deeds.filter((d) => !d.spent).length, note: 'kept here for your human: an hour of community service, certified. It pays once, for anything priced in HUR that names this organisation' });
       } catch (e) {
         return fail(e);
       }
@@ -2415,7 +2511,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-60), inbox: inbox.slice(-100), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], errands: [...errands], ...(onDuty ? { duty: onDuty } : {}),
+    orders: [...orders], pledged: [...pledged], received: received.slice(-60), inbox: inbox.slice(-100), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], errands: [...errands], deeds, ...(onDuty ? { duty: onDuty } : {}),
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';

@@ -49,6 +49,11 @@ export interface LakePack {
      * totals out). Default false: a register's fields go only to agents on it, and no auditor certifies a study that reads them.
      */
     studies?: boolean;
+    /**
+     * Tasks this authority certifies when they're done (SPEC §6.7): each passing answer earns the helper one deed, an
+     * Open Badges 3.0 credential for an hour of community service, which anyone may accept as payment for their time.
+     */
+    deeds?: { tasks: import('./deed.js').DeedTask[] };
   };
   /** What an owner hands over when they accept an offer: the issuer-signed original, so the asker can check it with the issuer. */
   release?: ('original' | 'credential' | 'claims')[];

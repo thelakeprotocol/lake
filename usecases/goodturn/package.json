@@ -1,0 +1,16 @@
+{
+  "name": "@thelakeprotocol/usecase-goodturn",
+  "version": "0.1.0",
+  "description": "Good turns on the Lake: a demo charity (Open Hands) that certifies small volunteer tasks as Open Badges 3.0 credentials, one hour each, which anyone may accept as payment for their time.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@thelakeprotocol/core": "workspace:^" },
+  "repository": { "type": "git", "url": "git+https://github.com/thelakeprotocol/lake.git", "directory": "usecases/goodturn" },
+  "homepage": "https://lake.doneinfifty.com",
+  "keywords": ["lake", "volunteering", "open-badges", "agents"]
+}

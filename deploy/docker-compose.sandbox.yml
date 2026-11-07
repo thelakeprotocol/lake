@@ -39,7 +39,7 @@ services:
     <<: *small
     image: ghcr.io/thelakeprotocol/lake-specialists:latest
     hostname: specialists
-    command: ["all", "--skip", "sparring,quests", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--packs", "health,shopping"]
+    command: ["all", "--skip", "sparring,quests", "--port", "4300", "--url", "https://${LAKE_DOMAIN}/s", "--public-node", "https://${LAKE_DOMAIN}", "--packs", "health,shopping,goodturn"]
     environment: { NODE_OPTIONS: "--max-old-space-size=128", LAKE_NODE_URL: "http://lake-node:7000" }
     volumes: [specialists:/data]
     ports: ["127.0.0.1:4300:4300"]

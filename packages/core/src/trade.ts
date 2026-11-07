@@ -15,7 +15,13 @@ import type { Identity } from './crypto.js';
  */
 
 /** One thing an agent sells, on its card (signed with it). Prices are per unit. */
-export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; unit?: string; /** The seller says yes to each order first (a booking): no cart is signed until it does. */ confirm?: boolean; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
+/**
+ * Another way to pay for a menu item (SPEC §6.7): an amount as Open Payments writes one, in a unit that isn't money (HUR:
+ * a certified hour of community service; FAV: a favour owed), and the agents whose word that it was paid the seller
+ * takes (pinned by key, as for payments agents): the organisation that redeems the deed, the tally that passes the favour.
+ */
+export interface MenuPrice { value: number; assetCode: string; assetScale: number; accept: CartParty[] }
+export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; /** Up to three other ways to pay for it. */ prices?: MenuPrice[]; unit?: string; /** The seller says yes to each order first (a booking): no cart is signed until it does. */ confirm?: boolean; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
 
 /** W3C Payment Request API, as AP2 uses it (only what a Lake cart needs). */
 export interface PaymentCurrencyAmount { currency: string; value: number }
@@ -52,7 +58,7 @@ export interface CartParty { url: string; webId: string; jkt: string }
  * whose receipts the seller counts as this cart paid, and the arbiters whose rulings it accepts on it. Inside the signed
  * contents, so the buyer pays (and its payment mandate names the hash of) these very terms.
  */
-export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; split_hash?: string }
+export interface LakeMethodData { payments?: CartParty[]; arbiters?: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; split_hash?: string; /** A cart in a unit that isn't money: whose word that it was paid counts, by unit (SPEC §6.7). */ assets?: Record<string, { accept: CartParty[] }> }
 
 /**
  * A team's cart (SPEC §6.5, run 77: three freelancers did one job for one client, and a cart pays one seller): the seller
@@ -180,10 +186,10 @@ const partyProblems = (xs: unknown, what: string): string[] => {
 };
 
 /** The payments agents and arbiters a cart names, from its Lake payment method (empty when it names none). */
-export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; splitHash?: string } {
+export function cartTerms(contents: CartContents): { payments: CartParty[]; arbiters: CartParty[]; delivery?: DeliveryTerms; payee?: CartPayee; split?: CartShare[]; splitHash?: string; assets?: Record<string, { accept: CartParty[] }> } {
   const data = (contents?.payment_request?.method_data ?? []).find((m) => m?.supported_methods === LAKE_PAYMENT_METHOD)?.data as LakeMethodData | undefined;
   const total = contents?.payment_request?.details?.total?.amount;
-  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}), ...(payeeOk(data?.payee) ? { payee: data!.payee } : {}), ...(data?.split && total && !splitProblems(data.split, total, data.split_hash).length ? { split: data.split, splitHash: data.split_hash } : {}) };
+  return { payments: Array.isArray(data?.payments) ? data.payments : [], arbiters: Array.isArray(data?.arbiters) ? data.arbiters : [], ...(data?.delivery && !deliveryProblems(data.delivery).length ? { delivery: data.delivery } : {}), ...(payeeOk(data?.payee) ? { payee: data!.payee } : {}), ...(data?.split && total && !splitProblems(data.split, total, data.split_hash).length ? { split: data.split, splitHash: data.split_hash } : {}), ...(assetsOk(data?.assets) ? { assets: data!.assets } : {}) };
 }
 const MAX_CART_MINUTES = 24 * 60;
 
@@ -211,6 +217,11 @@ export type SettledHow = (typeof SETTLED_HOW)[number];
 export const menuHash = (menu: MenuItem[]) => createHash('sha256').update(canonicalize(menu)).digest('hex');
 
 /** Checks a menu an agent wants on its card: what's wrong with it, if anything. */
+/** A cart's non-money units, each with the parties whose word it was paid counts: well formed, or left out. */
+function assetsOk(a: unknown): a is Record<string, { accept: CartParty[] }> {
+  return !!a && typeof a === 'object' && Object.entries(a as Record<string, { accept?: unknown }>).every(([k, v]) => /^[A-Z]{3}$/.test(k) && !partyProblems(v?.accept as CartParty[], 'accept').length && Array.isArray(v?.accept) && v.accept.length > 0);
+}
+
 export function menuProblems(menu: unknown): string[] {
   if (!Array.isArray(menu)) return ['menu: a list of { sku, label, price: { currency, value }, unit? }'];
   if (menu.length > MAX_ITEMS) return [`menu: at most ${MAX_ITEMS} items`];
@@ -223,6 +234,8 @@ export function menuProblems(menu: unknown): string[] {
     if (typeof m?.label !== 'string' || !m.label.trim() || m.label.length > 120) problems.push(`menu[${i}].label: what it is, 1 to 120 characters`);
     if (!/^[A-Z]{3}$/.test(String(m?.price?.currency)) || !(Number(m?.price?.value) >= 0.01) || Math.abs(Number(m?.price?.value) * 100 - Math.round(Number(m?.price?.value) * 100)) > 1e-6) problems.push(`menu[${i}].price: { currency: "USD", value: at least 0.01, in whole cents }`);
     if (m?.unit !== undefined && (typeof m.unit !== 'string' || m.unit.length > 30)) problems.push(`menu[${i}].unit: a short word, like "poem" or "hour"`);
+    // Other ways to pay (SPEC §6.7): a whole number of a unit that isn't money, and who says it was paid.
+    if (m?.prices !== undefined && (!Array.isArray(m.prices) || m.prices.length > 3 || m.prices.some((x) => !/^[A-Z]{3}$/.test(String(x?.assetCode)) || x.assetScale !== 0 || !Number.isInteger(x.value) || x.value < 1 || x.value > 100 || !Array.isArray(x.accept) || !x.accept.length || partyProblems(x.accept, 'accept').length > 0))) problems.push(`menu[${i}].prices: up to 3 of { value (whole), assetCode (e.g. HUR), assetScale: 0, accept: [the agent whose word it was paid counts] }`);
     problems.push(...deliveryProblems(m?.delivery).map((x) => `menu[${i}].${x}`));
   });
   return problems;
@@ -246,6 +259,8 @@ export async function signCart(o: {
   payee?: CartPayee;
   /** A team's shares, each with its member's consent (made against this cart's id, so pass id too). */
   split?: CartShare[];
+  /** A cart in a unit that isn't money (SPEC §6.7): whose word that it was paid counts. */
+  assets?: Record<string, { accept: CartParty[] }>;
 }): Promise<CartMandate> {
   if (o.payee && !payeeOk(o.payee)) throw new Error('payee: { webId, url, vouch: { credential, issuer } }');
   if (o.payee && o.split) throw new Error('a cart pays a payee or a team, not both');
@@ -257,7 +272,7 @@ export async function signCart(o: {
   if (cents < 1) throw new Error('a cart costs at least 0.01');
   const minutes = Math.min(Math.max(o.minutes ?? 30, 1), MAX_CART_MINUTES);
   const id = o.id ?? randomUUID();
-  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}), ...(o.payee ? { payee: o.payee } : {}), ...(o.split ? { split: o.split, split_hash: splitHash(o.split, currency, cents / 100) } : {}) };
+  const terms: LakeMethodData = { ...(o.payments?.length ? { payments: o.payments } : {}), ...(o.arbiters?.length ? { arbiters: o.arbiters } : {}), ...(o.delivery && Object.keys(o.delivery).length ? { delivery: o.delivery } : {}), ...(o.payee ? { payee: o.payee } : {}), ...(o.split ? { split: o.split, split_hash: splitHash(o.split, currency, cents / 100) } : {}), ...(o.assets && Object.keys(o.assets).length ? { assets: o.assets } : {}) };
   const problems = [...partyProblems(terms.payments, 'payments'), ...partyProblems(terms.arbiters, 'arbiters'), ...deliveryProblems(terms.delivery), ...splitProblems(terms.split, { currency, value: cents / 100 }, terms.split_hash)];
   if (problems.length) throw new Error(problems.join('; '));
   const contents: CartContents = {

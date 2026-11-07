@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { joinLake } from '../packages/agent/src/index.js';
-import { buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, menuHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, keyThumbprint, QUICKNET, type Identity } from '../packages/core/src/index.js';
+import { type CartMandate, buildCard, canonicalize, cardUrlFor, checkBlueprintRecord, checkCredentialStatus, leafHash, menuHash, unb64, verifyCheckpoint, verifyInclusion, sendLake, signIntentMandate, type LakeData, encryptionKeyOf, generateIdentity, postLakePart, signPaymentMandate, issueCredential, registerPack, runProgram, seedFrom, signCard, signMessage, studyFields, studyId, verifyLakeCard, verifyMessage, keyThumbprint, QUICKNET, type Identity } from '../packages/core/src/index.js';
 import { dispatch, makeHuman } from '../packages/visitor/src/dispatch.js';
 import health, { readmissionStudy } from '../usecases/health/src/index.js';
 import mortgage, { extractClaims as mortgageClaims, LENDERS, syntheticStatements } from '../usecases/mortgage/src/index.js';
@@ -71,7 +71,7 @@ beforeAll(async () => {
   const at = (k: string) => `http://localhost:${sp}/${k}`;
   [issuerUrl, auditor, ethics, payments, guide, inspector, sparring, quests] = ['issuer', 'auditor', 'ethics', 'payments', 'guide', 'inspector', 'sparring', 'quests'].map(at) as [string, string, string, string, string, string, string, string];
   specialistsUrl = `http://localhost:${sp}`;
-  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage,shopping'], /register registered with the Lake node/, { LAKE_TALLY_CHECKPOINT_MS: '3000' });
+  await start(['packages/specialists/dist/main.js', 'all', '--port', sp, '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,mortgage,shopping,goodturn'], /register registered with the Lake node/, { LAKE_TALLY_CHECKPOINT_MS: '3000', LAKE_DEED_EVERY_MS: '0' });
   await Promise.all(
     // Four houses: three that join by standing rules (enough for a table) and one that asks its owner.
     [['stan', 'stan'], ['strict', 'strict'], ['research', 'research'], ['kai', 'stan']].map(async ([name, persona]) => {
@@ -180,7 +180,7 @@ describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
-    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(20);
+    expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(21); // with the goodturn pack's demo organisation
   });
 
   it('streams what happens at a door: ids, kinds and counts', async () => {
@@ -1100,7 +1100,7 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_circle', 'lake_commit', 'lake_count', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_ping', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_circle', 'lake_commit', 'lake_count', 'lake_deed', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_ping', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify']);
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -2895,6 +2895,117 @@ describe('the weekly shop, priced inside the house', () => {
       // Its monthly cap, as voted.
       expect((await ask(tally, clinic.visitor, { kind: 'circle.call', id: 'meal-circle', need: 'More meals', help: 'a meal' })).reply).toMatchObject({ kind: 'refused', problems: ['a partner may ask 1 time a month; the members voted that'] });
     } finally { await clinic.close(); }
+  }, 240_000);
+
+  it('a favour as payment (SPEC §6.7): owed a favour, a member pays for someone\'s time with it; their AI gets the cart, they tap Pay, the seller counts the tally\'s receipt, and the one who owed it owes the seller now', async () => {
+    const tally = `${specialistsUrl}/tally/a2a`, tallyAt = `${specialistsUrl}/tally`;
+    const [b0, b1] = buyers as [(typeof buyers)[number], (typeof buyers)[number]];
+    const notes = async (m: (typeof buyers)[number]) => (await m.call({ kind: 'list' })).suggestions as { id: string; text: string; favourPay?: unknown; circle?: { role: string; state: string; call: string } }[];
+    const waitFor = async <T,>(f: () => Promise<T | undefined>) => { for (let i = 0; i < 60; i++) { const v = await f(); if (v) return v; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('timed out'); };
+    // b0 owes b1 a favour, in a small circle.
+    const organiser = await visitor('fav-pay.example');
+    expect((await ask(tally, organiser, { kind: 'tally.open', id: 'fav-pay', text: 'Two neighbours.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a hand', times: 3, limit: 0 } })).reply).toMatchObject({ kind: 'tally.opened' });
+    for (const m of [b0, b1]) await m.call({ kind: 'panel.pledge.sign', tally: tallyAt, id: 'fav-pay' });
+    const c = await b0.call({ kind: 'panel.circle.call', tally: tallyAt, id: 'fav-pay', need: 'carry a sofa' });
+    expect(c).toMatchObject({ kind: 'circle.called' });
+    const asked = await waitFor(async () => (await notes(b1)).find((x) => x.circle?.role === 'ask' && x.circle.call === c.call));
+    expect(await b1.call({ kind: 'panel.circle.answer', note: asked.id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+    const mine = await waitFor(async () => (await notes(b0)).find((x) => x.circle?.role === 'caller' && x.circle.call === c.call && x.circle.state === 'matched'));
+    expect(await b0.call({ kind: 'panel.circle.kept', note: mine.id })).toMatchObject({ kind: 'circle.kept' });
+    const fav = async () => (await (await fetch(`${tallyAt}/p/fav-pay.json`)).json()).circle.favours;
+    await waitFor(async () => ((await fav()).owed === 1 ? true : undefined));
+    // Stan prices a call in money, or one favour (the tally's word that it was paid).
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-favpay') });
+    const chat = async () => {
+      const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const cl = new Client({ name: 'favpay', version: '0' });
+      await cl.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await cl.callTool({ name, arguments: args }); const t = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: t } : JSON.parse(t); };
+      return { cl, call, you: (await call('lake_overview')).you as { url: string; webId: string } };
+    };
+    const [stan, ai] = [await chat(), await chat()];
+    try {
+      expect(await stan.call('lake_sell', { action: 'menu', items: [{ sku: 'call-30', label: '30-minute call with Stan', price: 60, currency: 'AUD', prices: [{ asset: 'FAV', value: 1, accept_url: tally }] }] })).toMatchObject({ ok: true });
+      // b1's own AI orders it in favours and asks b1, who taps Pay.
+      expect(await ai.call('lake_house_connect', { code: (await b1.call({ kind: 'panel.assistant.invite', label: 'favour pay' })).code, house_url: b1.url })).toMatchObject({ paired: true });
+      const ordered = await ai.call('lake_buy', { action: 'order', seller_url: stan.you.url, sku: 'call-30', pays_in: 'FAV' });
+      expect(ordered).toMatchObject({ total: { currency: 'FAV', value: 1 } });
+      const put = await ai.call('lake_buy', { action: 'pay', cart: ordered.cart });
+      expect(put).toMatchObject({ kind: 'suggested', note: expect.any(String) });
+      expect(((await notes(b1)).find((x) => x.id === put.note))?.favourPay).toBeTruthy();
+      expect(await b1.call({ kind: 'panel.favour.pay', note: put.note })).toMatchObject({ kind: 'circle.paid', cart: ordered.cart });
+      // Stan's side counts it paid; b0 still owes one favour, to Stan now, and is told.
+      await stan.call('lake_overview');
+      const sold = await waitFor(async () => ((await stan.call('lake_sell', { action: 'orders' })).orders as { cart: string; status: string }[]).find((x) => x.cart === ordered.cart && x.status === 'paid'));
+      expect(sold).toMatchObject({ status: 'paid' });
+      expect(await fav()).toMatchObject({ owed: 1 });
+      await waitFor(async () => (await notes(b0)).find((x) => x.circle?.role === 'passed'));
+      // The same tap again pays nothing more.
+      expect(await b1.call({ kind: 'panel.favour.pay', note: put.note })).toMatchObject({ error: expect.stringMatching(/no unpaid cart/) });
+    } finally { await stan.cl.close(); await ai.cl.close(); }
+  }, 240_000);
+});
+
+describe('good turns: time priced in certified deeds (SPEC §6.7)', () => {
+  it('an AI earns a deed for its human by doing a charity\'s task, orders an hour of someone\'s time priced in deeds, and pays with it; the seller counts it paid; a deed pays once, and only for whoever earned it', async () => {
+    const charity = `${specialistsUrl}/charity/a2a`;
+    const port = String(await freePort()), url = `http://localhost:${port}/mcp`;
+    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp-deeds') });
+    const chat = async () => {
+      const tok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
+      const c = new Client({ name: 'deeds', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
+      const call = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const t = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: t } : JSON.parse(t); };
+      return { c, call, you: (await call('lake_overview')).you as { url: string; webId: string } };
+    };
+    const [stan, mia] = [await chat(), await chat()];
+    try {
+      // Stan prices a call in money, or in one hour of help at Open Hands.
+      const menu = await stan.call('lake_sell', { action: 'menu', items: [{ sku: 'call-30', label: '30-minute call with Stan', price: 60, currency: 'AUD', prices: [{ asset: 'HUR', value: 1, accept_url: charity }] }] });
+      expect(menu.menu[0]).toMatchObject({ sku: 'call-30', prices: [{ value: 1, assetCode: 'HUR', assetScale: 0, accept: [expect.objectContaining({ url: charity })] }] });
+      // Mia's AI finds the charity's tasks and does one; a wrong answer earns nothing.
+      const tasks = await mia.call('lake_deed', { action: 'tasks' });
+      expect(tasks).toMatchObject({ organisation: charity, kind: 'deed.tasks', tasks: expect.arrayContaining([expect.objectContaining({ id: 'donation-slip' })]) });
+      expect(JSON.stringify(tasks)).not.toMatch(/"expected"|"check"/); // the answers it checks against aren't sent
+      expect(await mia.call('lake_deed', { action: 'do', task: 'donation-slip', answer: { ref: 'DS-4471', date: '2026-11-04', site: 'Northside', items: '14', weight_kg: '9.5' } })).toMatchObject({ kind: 'refused' });
+      expect(await mia.call('lake_deed', { action: 'do', task: 'donation-slip', answer: { ref: 'DS-4471', date: '2026-11-03', site: 'Northside', items: 14, weight_kg: 9.5 } })).toMatchObject({ kind: 'deed.issued', unspent: 1 });
+      expect(await mia.call('lake_deed', { action: 'do', task: 'donation-slip', answer: { ref: 'DS-4471', date: '2026-11-03', site: 'Northside', items: 14, weight_kg: 9.5 } })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/done this task already/)] });
+      // She orders the call paying in deeds; the cart is in HUR and names Open Hands as the one whose word counts.
+      const ordered = await mia.call('lake_buy', { action: 'order', seller_url: stan.you.url, sku: 'call-30', pays_in: 'HUR' });
+      expect(ordered).toMatchObject({ total: { currency: 'HUR', value: 1 }, you_hold: 1, paid_with: [charity] });
+      const paid = await mia.call('lake_buy', { action: 'pay', cart: ordered.cart });
+      expect(paid).toMatchObject({ paid: ordered.cart, with: expect.stringMatching(/1 deed/) });
+      expect(await mia.call('lake_deed', { action: 'list' })).toMatchObject({ unspent: 0, deeds: [expect.objectContaining({ spent: expect.objectContaining({ cart: ordered.cart }) })] });
+      // Stan's side counts it paid, on the charity's signed receipt.
+      const sold = (await stan.call('lake_sell', { action: 'orders' })).orders.find((x: { cart: string }) => x.cart === ordered.cart);
+      expect(sold).toMatchObject({ status: 'paid' });
+      // With none left, the next order says how to earn one.
+      const again = await mia.call('lake_buy', { action: 'order', seller_url: stan.you.url, sku: 'call-30', pays_in: 'HUR' });
+      expect(again).toMatchObject({ you_hold: 0, next: expect.stringMatching(/lake_deed/) });
+      expect(await mia.call('lake_buy', { action: 'pay', cart: again.cart })).toMatchObject({ error: expect.stringMatching(/you hold 0/) });
+
+      // At the charity itself: a deed pays once, across sellers, and only for the one who earned it.
+      const ana = await joinLake({ name: 'Ana (test)', domain: 'ana.example', node, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+      const eve = await joinLake({ name: 'Eve (test)', domain: 'eve.example', node, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+      try {
+        const issued = await ana.ask(charity, { kind: 'deed.submit', task: 'roster', answer: { first: 'Mia', second: 'Ana' } }) as { kind: string; credential: string };
+        expect(issued.kind).toBe('deed.issued');
+        const vc = JSON.parse(Buffer.from(issued.credential.split('.')[1]!, 'base64url').toString());
+        expect(vc).toMatchObject({ type: ['VerifiableCredential', 'OpenBadgeCredential'], credentialSubject: { type: ['AchievementSubject'], creditsEarned: 1, achievement: { achievementType: 'CommunityService' }, cnf: { jkt: expect.any(String) } } });
+        await stan.call('lake_overview'); // Stan's AI is here, so its menu signs carts
+        const stanCard = await (await fetch(cardUrlFor(stan.you.url))).json();
+        const cartFor = async (who: typeof ana) => ((await who.ask(stan.you.url, { kind: 'trade.order', sku: 'call-30', pays_in: 'HUR' })) as { cart: CartMandate }).cart;
+        const first = await ana.ask(charity, { kind: 'deed.redeem', credentials: [issued.credential], cart: await cartFor(ana), seller_card: stanCard });
+        expect(first).toMatchObject({ kind: 'deed.redeemed', receipt: expect.any(String) });
+        expect(await ana.ask(charity, { kind: 'deed.redeem', credentials: [issued.credential], cart: await cartFor(ana), seller_card: stanCard })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/spent already/)] });
+        // Eve holds Ana's credential, but it names Ana and Ana's key.
+        expect(await eve.ask(charity, { kind: 'deed.redeem', credentials: [issued.credential], cart: await cartFor(eve), seller_card: stanCard })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/certified to someone else|spent already/)] });
+        // A cart in money isn't paid with deeds.
+        const moneyCart = ((await ana.ask(stan.you.url, { kind: 'trade.order', sku: 'call-30' })) as { cart: CartMandate }).cart;
+        expect(await ana.ask(charity, { kind: 'deed.redeem', credentials: [issued.credential], cart: moneyCart, seller_card: stanCard })).toMatchObject({ kind: 'refused' });
+      } finally { await ana.close(); await eve.close(); }
+    } finally { await stan.c.close(); await mia.c.close(); }
   }, 240_000);
 });
 
