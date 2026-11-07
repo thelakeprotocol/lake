@@ -166,9 +166,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('pairs a fresh device: the house name, one button, then Home', async () => {
     await page.goto(`${house}/owner/`);
     // Not claimed yet: what it is, and the one thing to do.
-    await page.getByRole('button', { name: 'Pair this device' }).waitFor();
+    await page.getByRole('button', { name: 'Use this phone' }).waitFor();
     expect(await page.locator('h1').textContent()).toMatch(/House|A house on the Lake/);
-    await page.getByRole('button', { name: 'Pair this device' }).click();
+    await page.getByRole('button', { name: 'Use this phone' }).click();
     await page.getByRole('heading', { name: 'Get set up' }).waitFor();
     await page.getByRole('heading', { name: 'Needs you' }).waitFor();
     await tidy();
@@ -299,10 +299,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(await alex.ask(`${house}/a2a`, { kind: 'note', text: 'Alex here, from the Claude Code class: free for a call Thursday?' })).toMatchObject({ kind: 'noted' });
       const note = page.locator('.item', { hasText: 'free for a call Thursday' });
       await note.waitFor({ timeout: 6000 });
-      await note.locator('summary', { hasText: 'Answer' }).click();
+      // Open already, with where it goes: an answer is one line and Send.
+      await note.getByText(/Goes back to their AI, signed by your house\./).waitFor();
       await note.locator('input').fill('Thursday 4pm works.');
       await note.getByRole('button', { name: 'Send', exact: true }).click();
-      await note.getByText(/You answered: “Thursday 4pm works\.”/).waitFor({ timeout: 6000 });
+      await note.getByText(/✓ You answered: “Thursday 4pm works\.”/).waitFor({ timeout: 6000 });
       expect(got.find((x) => x.kind === 'note.reply')).toMatchObject({ kind: 'note.reply', text: 'Thursday 4pm works.' });
       await tidy();
     } finally { await alex.close(); }
@@ -623,7 +624,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await phone2.goto(`${house}/owner/`);
     // The house has a key: no tap-to-pair button that can't work; the recovery code is offered open.
     await phone2.getByText(/This house already has a key/).waitFor();
-    expect(await phone2.getByRole('button', { name: 'Pair this device' }).count()).toBe(0);
+    expect(await phone2.getByRole('button', { name: 'Use this phone' }).count()).toBe(0);
     await phone2.locator('input.recovery-input').fill(code.toLowerCase());
     await phone2.getByRole('button', { name: 'Use it' }).click();
     await phone2.getByRole('heading', { name: 'Needs you' }).waitFor();

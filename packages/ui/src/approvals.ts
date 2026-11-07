@@ -218,7 +218,6 @@ function Home({ go }: { go: (t: Tab) => void }) {
   // Each part shows as soon as its own answer is in: the overview (the slowest) only fills the numbers and the details.
   const waiting = list.data.requests.length;
   const needs = [
-    ...(notifyOffer() ? [{ k: 'notify', v: () => h(NotifyItem, { key: 'notify' }) }] : []),
     ...(connectedNote ? [{ k: 'connected', v: () => h('li', { key: 'connected', class: 'item' }, h('p', { class: 'item-text' }, connectedNote), h('div', { class: 'item-actions' }, h('button', { class: 'btn small quiet', type: 'button', onClick: () => { connectedNote = ''; bump(); } }, 'OK'))) }] : []),
     // An AI app signing in through this house, from its own browser: approved here, where the key is.
     ...(list.data.connects ?? []).map((c) => ({ k: `c-${c.id}`, v: () => h(ConnectRequest, { key: `c-${c.id}`, c }) })),
@@ -226,14 +225,15 @@ function Home({ go }: { go: (t: Tab) => void }) {
     ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
     ...(notes ?? []).map((n) => ({ k: `n-${n.id}`, v: () => h(NoteItem, { key: `n-${n.id}`, n }) })),
+    // Below what's waiting (7 Nov: a push brought the owner to a note that sat under this offer).
+    ...(notifyOffer() ? [{ k: 'notify', v: () => h(NotifyItem, { key: 'notify' }) }] : []),
   ];
   const stat = (label: string, value: string | number, to: Tab, cls = '') =>
     h('button', { class: `stat ${cls}`, type: 'button', onClick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
   return h('div', {},
-    h(StartCard, { door: door.data && !door.data.error ? door.data : null, hasAssistant: assistants.length > 0, free: free.data ?? { set: false, slots: [] }, go }),
     // The morning: what your AI on duty did while you were away, first.
     h(WhileYouSlept, {}),
-    // What needs you, first and only: your agent's suggestions, notes at your door, requests your rules left to you.
+    // What needs you, first: your agent's suggestions, notes at your door, requests your rules left to you.
     h('section', { class: 'block' }, h('h2', {}, 'Needs you'),
       waiting || needs.length
         ? h('div', {},
@@ -241,17 +241,18 @@ function Home({ go }: { go: (t: Tab) => void }) {
               h('div', { class: 'item-actions' }, h('button', { class: 'btn primary small', type: 'button', onClick: () => go('requests') }, 'Look at them')))) : null,
             needs.length ? h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() }) : null)
         : h('p', { class: 'empty' }, 'Nothing needs you. Your rules and your agent are handling it.')),
-    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
     door.data?.open ? h(ShareDoor, { address: door.data.address, handle: door.data.handle }) : null,
     h(InviteCard, {}),
+    h(StartCard, { door: door.data && !door.data.error ? door.data : null, hasAssistant: assistants.length > 0, free: free.data ?? { set: false, slots: [] }, go }),
+    agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null,
+    h(Circles, {}),
+    // Everything else, one tap away.
+    !o.data ? null : h('details', { class: 'fold' }, h('summary', {}, 'About your house'),
     o.data ? h('div', { class: 'stats' },
       stat(o.data.knocksToday === 1 ? 'knock today' : 'knocks today', o.data.knocksToday, 'agents'),
       stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
       stat('earned', `$${o.data.earned}`, 'money'),
-      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null) : h('div', { class: 'stats' }, h('span', { class: 'stat skeleton' }, '…')),
-    h(Circles, {}),
-    // Everything else, one tap away.
-    !o.data ? null : h('details', { class: 'fold' }, h('summary', {}, 'About your house'),
+      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null) : null,
       h('dl', { class: 'facts' },
         h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.data.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.data.claims} claims (${o.data.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.data.record.why}.`)),
         h('div', {}, h('dt', {}, 'Your agent'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: looks and suggests; you decide.` : 'None yet.')),
@@ -275,9 +276,9 @@ function StartCard({ door, hasAssistant, free, go }: { door: DoorState | null; h
   if (hidden || !door) return null;
   const steps: [boolean, string, Child][] = [
     [door.open, 'Open your door', h(Act, { label: 'Open it', cls: 'primary', run: () => call({ kind: 'panel.door.set', open: true }) })],
-    [hasAssistant, 'Let your own AI look after it', h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'Give it a key')],
-    [free.set, 'Say when you\'re free to meet', h('button', { class: 'btn small', type: 'button', onClick: () => { go('rules'); setTimeout(() => document.getElementById('free')?.scrollIntoView({ behavior: 'smooth' }), 400); } }, 'Set your hours')],
-    [calendar, 'Put your agenda in your calendar', h(FeedLine, { onShown: () => { store('lake.start.calendar', '1'); setCalendar(true); } })],
+    [hasAssistant, 'Let your AI check your house for you', h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'Give it a key')],
+    [free.set, 'Say when you can meet', h('button', { class: 'btn small', type: 'button', onClick: () => { go('rules'); setTimeout(() => document.getElementById('free')?.scrollIntoView({ behavior: 'smooth' }), 400); } }, 'Set your hours')],
+    [calendar, 'Put your Lake agenda in your calendar', h(FeedLine, { onShown: () => { store('lake.start.calendar', '1'); setCalendar(true); } })],
   ];
   const done = steps.filter(([d]) => d).length;
   if (done === steps.length) return null;
@@ -286,7 +287,7 @@ function StartCard({ door, hasAssistant, free, go }: { door: DoorState | null; h
       h('button', { class: 'link', type: 'button', onClick: () => { store('lake.start.done', '1'); setHidden(true); } }, 'Hide'))),
     h('ol', { class: 'steps' }, ...steps.map(([ok, title, action], i) => h('li', { key: i, class: ok ? 'done' : '' },
       h('span', { class: 'tick', 'aria-hidden': 'true' }, ok ? '✓' : String(i + 1)), h('span', { class: 'step-title' }, title), ok ? null : h('span', { class: 'step-action' }, action)))),
-    door.open ? h('p', { class: 'hint' }, 'Try it: tell any AI, ', h('em', {}, `“Knock on the door at ${door.address} and say hello.”`)) : null);
+    door.open && !door.handle ? h('p', { class: 'hint' }, 'Try it: tell any AI, ', h('em', {}, `“Knock on the door at ${door.address} and say hello.”`)) : null);
 }
 
 /** Your agenda's private calendar address, shown on a tap, with Copy and New address. */
@@ -321,25 +322,30 @@ function AgendaList({ agenda }: { agenda: AgendaItem[] }) {
 function NoteItem({ n }: { n: DoorNote }) {
   return h('li', { class: 'item' },
     h('div', { class: 'item-head' }, h('span', { class: 'item-from' }, n.from.as ? `Note from ${n.from.as}, via ${shortName(n.from.name)}` : `Note from ${shortName(n.from.name)}`),
-      h('span', { class: `chip ${n.from.checked || n.from.speaks_for?.checked ? 'ok' : ''}`, title: n.from.checked ? 'its domain is proved' : 'anyone could send this' }, n.from.web ? 'From the web' : n.from.speaks_for?.checked ? 'Speaks for a house' : n.from.checked ? 'Verified' : 'Unverified')),
+      h('span', { class: `chip ${n.from.checked || n.from.speaks_for?.checked ? 'ok' : ''}`, title: n.from.checked ? 'its domain is proved' : 'its name and words are its own: nobody checked who it is' }, n.from.web ? 'From the web' : n.from.speaks_for?.checked ? 'Speaks for a house' : n.from.checked ? 'Verified' : 'New sender')),
     h('p', { class: 'item-text' }, `“${n.text}”`),
-    h('p', { class: 'item-meta' }, `${n.from.web ? 'left over the web; nobody checked who' : n.from.domain} · ${time(n.at)}`),
+    h('p', { class: 'item-meta' }, n.from.web ? `${time(n.at)} · left over the web; nobody checked who` : `${time(n.at)} · from ${n.from.as ? `${n.from.as}'s ` : ''}${aiOf(n.from.name)}${n.from.checked ? ` (${n.from.domain})` : ''}`),
     n.from.web ? (n.answered ? h('p', { class: 'item-meta' }, `${n.answered.by === 'you' ? 'You' : shortName(n.answered.by)} answered: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Your answer', send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })) : null,
     n.from.web ? null : h('div', {},
       // Their AI left it ("ping you"): your answer goes back to it, signed by your house.
-      n.answered ? h('p', { class: 'item-meta' }, `You answered: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Your answer: it goes back to their AI', send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })),
+      n.answered ? h('p', { class: 'item-meta sent' }, `✓ You answered${n.from.as ? ` ${n.from.as}` : ''}: “${n.answered.text}”`) : h(Reply, { label: 'Answer', placeholder: 'Reply', open: true, help: `Goes back to ${n.from.as ? `${n.from.as}'s` : 'their'} AI, signed by your house.`, send: (text: string) => call({ kind: 'panel.note.reply', id: n.id, text }) })),
     n.from.web ? null : h('div', { class: 'item-actions' },
-      h(Act, { label: 'Done', run: () => call({ kind: 'panel.note.dismiss', id: n.id }) }),
+      h(Act, { label: 'Dismiss', cls: 'quiet', run: () => call({ kind: 'panel.note.dismiss', id: n.id }) }),
       h(Act, { label: 'Mute sender', cls: 'quiet', run: () => call({ kind: 'panel.note.mute', id: n.id }) })));
 }
 
 /** Your own words back: folded until you want it. */
-function Reply({ label, placeholder, send }: { label: string; placeholder: string; send: (text: string) => Promise<unknown> }) {
+function Reply({ label, placeholder, send, open = false, help }: { label: string; placeholder: string; send: (text: string) => Promise<unknown>; open?: boolean; help?: string }) {
   const input = useRef<HTMLInputElement>(null);
-  return h('details', { class: 'reply' }, h('summary', {}, label),
+  const bump = useBump();
+  return h('details', { class: 'reply', open }, h('summary', {}, label),
     h('div', { class: 'row' }, h('input', { ref: input, type: 'text', maxlength: 1000, placeholder }),
-      h(Act, { label: 'Send', cls: 'primary', run: async () => { const t = input.current!.value.trim(); if (t) { await send(t); input.current!.value = ''; } } })));
+      // Sent: the list is asked again, so the note shows what you answered (7 Nov: the box just emptied, and nothing said it went).
+      h(Act, { label: 'Send', cls: 'primary', run: async () => { const t = input.current!.value.trim(); if (t) { const r = await send(t) as { error?: string } | undefined; if (r?.error) throw new Error(r.error); input.current!.value = ''; bump(); } } })),
+    help ? h('p', { class: 'item-meta' }, help) : null);
 }
+/** An agent's card name, as a person says it: "Rook (Claude, via MCP)" is their Claude. */
+const aiOf = (name: string) => { const m = /\((\w+)[,)]/.exec(name); return m ? `${m[1]}` : shortName(name); };
 
 /** Your agent's suggestions: what it says, what it advises, and your tap. */
 // ---- notifications (Web Push) ----
@@ -906,11 +912,11 @@ function DoorCard({ d }: { d: DoorState }) {
 function InviteCard() {
   const [inv, setInv] = useState<{ link: string; left: number } | null>(null);
   const share = 'share' in navigator;
-  return h('section', { class: 'block' }, h('h2', {}, 'Bring someone onto the Lake'),
-    h('p', { class: 'muted' }, 'A one-time link: they pick a handle, and their own house starts, with their phone as its key. Then anyone\'s AI can ping them too.'),
+  return h('section', { class: 'block' }, h('h2', {}, 'Invite someone'),
+    h('p', { class: 'muted' }, 'They open it on their phone, pick a handle and get a house of their own. Then anyone\'s AI can ping them too. Works once.'),
     inv ? h('div', { class: 'address' }, h('div', {}, h('code', {}, inv.link),
       h('div', { class: 'row' },
-        share ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Your house on the Lake', text: 'Here\'s a house of your own on the Lake:', url: inv.link }).catch(() => {}) }, 'Share') : null,
+        share ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Your invite to the Lake', text: 'Here\'s your invite to the Lake: open it on your phone, pick a handle, and your AI can reach mine (and anyone\'s can reach you).', url: inv.link }).catch(() => {}) }, 'Share') : null,
         h(CopyButton, { text: inv.link })),
       h('p', { class: 'item-meta' }, `Works once. ${inv.left} invite${inv.left === 1 ? '' : 's'} left.`)))
       : h('div', { class: 'row' }, h(Act, { label: 'Make an invite link', run: async () => { const r = await call<{ link?: string; left?: number; error?: string }>({ kind: 'panel.invite' }); if (r.error || !r.link) throw new Error(r.error ?? 'no link'); setInv({ link: r.link, left: r.left ?? 0 }); } })));
@@ -925,8 +931,11 @@ function ShareDoor({ address, handle }: { address: string; handle?: string }) {
   const share = 'share' in navigator;
   // What to tell people: their AI needs the Lake's connector, then just the handle.
   const say = handle ? `Ask your AI to "ping ${handle}" on the Lake` : '';
-  return h('section', { class: 'block' }, h('h2', {}, 'Your door'),
-    handle ? h('div', { class: 'address' }, h('div', {}, h('p', { class: 'item-meta' }, 'Tell people:'), h('code', {}, say), h('div', { class: 'row' }, h(CopyButton, { text: say })))) : null,
+  const shareable = 'share' in navigator;
+  return h('section', { class: 'block' }, h('h2', {}, handle ? 'You\'re reachable' : 'Your door'),
+    handle ? h('div', { class: 'address' }, h('div', {}, h('p', { class: 'item-meta' }, 'Tell people:'), h('code', {}, say), h('div', { class: 'row' },
+      shareable ? h('button', { class: 'btn small primary', type: 'button', onClick: () => void navigator.share({ title: 'Reach me on the Lake', text: `${say}: my phone gets it, or my AI answers.` }).catch(() => {}) }, 'Share') : null,
+      h(CopyButton, { text: say })))) : null,
     h('div', { class: 'address' },
       h('div', {}, h('code', {}, address),
         h('div', { class: 'row' },
@@ -1545,7 +1554,7 @@ function App() {
     }).catch(() => {});
   }, [version]);
   useEffect(() => {
-    void call<{ name: string }>({ kind: 'panel.overview' }).then((o) => setName(o.name)).catch(() => {});
+    void call<{ name: string; handle?: string }>({ kind: 'panel.overview' }).then((o) => setName(o.handle ?? `House ${o.name}`)).catch(() => {});
     void call<{ packs: unknown[] }>({ kind: 'panel.market' }).then((m) => setNoOffers(!m.packs?.length)).catch(() => {});
   }, []);
   return h(Version.Provider, { value: { version, bump } },
@@ -1555,7 +1564,7 @@ function App() {
       h('main', {},
         h('header', { class: 'top' },
           h('div', { class: 'eyebrow' }, h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? 'live' : 'reconnecting' }), h('span', {}, 'Your house on the Lake')),
-          h('h1', {}, name ? `House ${name}` : 'Your house')),
+          h('h1', {}, name || 'Your house')),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));
 }
 
@@ -1576,19 +1585,20 @@ function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) {
   };
   // A link that carries a token pairs at once. Without one, only a house nobody holds can be paired with a tap.
   const [open, setOpen] = useState<boolean | null>(null);
+  const [handle, setHandle] = useState('');
   useEffect(() => {
     if (location.hash.includes('pair=')) void pair();
-    else void fetch(`${api}pair`).then((r) => r.json()).then((b: { open?: boolean }) => setOpen(!!b.open), () => setOpen(true));
+    else void fetch(`${api}pair`).then((r) => r.json()).then((b: { open?: boolean; handle?: string }) => { setOpen(!!b.open); setHandle(b.handle ?? ''); }, () => setOpen(true));
   }, []);
   const owned = open === false;
   return h('div', { class: 'shell unpaired' }, h('main', {},
-    h('header', { class: 'top' }, h('div', { class: 'eyebrow' }, h('span', { class: 'dot' }), h('span', {}, 'A house on the Lake')), h('h1', {}, name ? `House ${name}` : 'A house on the Lake')),
+    h('header', { class: 'top' }, h('div', { class: 'eyebrow' }, h('span', { class: 'dot' }), h('span', {}, handle && !owned ? 'Your house, almost ready' : 'A house on the Lake')), h('h1', {}, handle || (name ? `House ${name}` : 'A house on the Lake'))),
     h('section', { id: 'pair' },
-      h('p', { class: 'big' }, 'Make this phone its key'),
+      h('p', { class: 'big' }, handle && !owned ? 'Make this phone its key' : 'Make this phone its key'),
       owned
         ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (More → Your key), or type your recovery code.')
-        : h('p', { class: 'muted' }, 'A key is made here, on this phone, and never leaves it. From then on, only this phone can say yes for your house.'),
-      owned ? null : h('button', { class: 'btn primary', type: 'button', disabled: open === null, onClick: () => void pair() }, 'Pair this device'),
+        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it.'),
+      owned ? null : h('button', { class: 'btn primary', type: 'button', disabled: open === null, onClick: () => void pair() }, 'Use this phone'),
       msg ? h('p', { class: 'muted' }, msg) : null,
       h('details', { class: 'fold', style: 'margin-top:24px', open: owned }, h('summary', {}, 'Have a recovery code?'),
         h('div', { class: 'row' }, h('input', { ref: recovery, type: 'text', placeholder: 'XXXXX-XXXXX-XXXXX', autocomplete: 'off', class: 'recovery-input' }),

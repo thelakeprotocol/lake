@@ -218,22 +218,25 @@ async function hosted(n: number) {
   await pool(names, at, async (name) => { await startOne(name); });
   app.get('/health', (_req, res) => void res.json({ ok: true, houses: houses.length }));
   // An invite's link: pick a handle, and a house of your own starts for you (yours to pair, kept, no lease).
-  const invitePage = (code: string, why = '') => page('Your house on the Lake', `<p class="eyebrow"><i></i>The Lake</p><h1>You're invited</h1>
-<p class="lead">A house of your own on the Lake: your data stays in it, your rules answer at its door, and anyone's AI can reach you by your handle.</p>
+  // Who sent it, as they're known on the Lake: their door's name, else their handle.
+  const inviterOf = (by: string) => { const d = houses.find((x) => x.name === by)?.keeper.rules.door; return d?.name ?? d?.handle ?? ''; };
+  const invitePage = (code: string, why = '', by = '') => page('Your invite to the Lake', `<p class="eyebrow"><i></i>The Lake</p><h1>${by ? `${by.replace(/[<>&"]/g, '')} invited you to the Lake` : 'You\'re invited to the Lake'}</h1>
+<p class="lead">Pick a handle. From then on anyone can ask their AI to ping it, and the message lands on your phone.</p>
 ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
-<form method="post" action="${code}"><label>Your handle (people ask their AI to "ping" it)<input name="handle" required pattern="[a-z][a-z0-9-]{1,29}" autocapitalize="none" autocomplete="off" placeholder="e.g. alex"></label>
-<label>A name to show (optional)<input name="name" maxlength="60" placeholder="e.g. Alex"></label>
-<button class="btn primary" type="submit">Create my house</button></form>
-<p class="small">Synthetic data, play money, real signatures. Next, your phone becomes your house's key.</p>`);
+<form method="post" action="${code}" style="display:grid;gap:14px;margin-top:18px">
+<label style="display:grid;gap:6px"><b>Handle</b><input name="handle" required maxlength="30" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="e.g. alex" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'')" style="width:100%;font-size:17px;padding:10px"><span class="small">Lowercase letters, numbers and dashes, starting with a letter.</span></label>
+<label style="display:grid;gap:6px"><b>Your name</b> <span class="small">(optional)</span><input name="name" maxlength="60" placeholder="e.g. Alex" style="width:100%;font-size:17px;padding:10px"><span class="small">Shown to people who ping you.</span></label>
+<button class="btn primary" type="submit" style="font-size:17px;padding:12px">Continue</button></form>
+<p class="small" style="margin-top:18px">Next, this phone becomes the only key to your house. Sandbox: synthetic data, play money, real signatures.</p>`);
   app.get('/t/join/:code', (req, res) => {
     const inv = invites.find((x) => x.code === req.params.code);
     if (!inv || inv.used) return void res.status(404).type('html').send(page('Invite', '<h1>This invite has been used, or never was</h1><p class="lead">Ask whoever sent it for a new one.</p>'));
-    res.type('html').send(invitePage(inv.code));
+    res.type('html').send(invitePage(inv.code, '', inviterOf(inv.by)));
   });
   app.post('/t/join/:code', express.urlencoded({ extended: false }), express.json(), async (req, res) => {
     const inv = invites.find((x) => x.code === req.params.code);
     const wantsJson = req.is('application/json');
-    const fail = (status: number, why: string) => void (wantsJson ? res.status(status).json({ error: why }) : res.status(status).type('html').send(invitePage(String(req.params.code), why)));
+    const fail = (status: number, why: string) => void (wantsJson ? res.status(status).json({ error: why }) : res.status(status).type('html').send(invitePage(String(req.params.code), why, inv ? inviterOf(inv.by) : '')));
     if (!inv || inv.used) return fail(404, 'this invite has been used, or never was');
     const handle = String(req.body?.handle ?? '').trim().toLowerCase(), shown = String(req.body?.name ?? '').trim().slice(0, 60);
     if (!HANDLE.test(handle)) return fail(400, 'a handle: 2 to 30 lowercase letters, digits or dashes, starting with a letter');

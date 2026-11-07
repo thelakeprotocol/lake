@@ -952,7 +952,7 @@ export class OwnerDesk {
 
     // Whether a device can pair here without a link: only a sandbox house nobody holds. The pairing screen asks, so it
     // doesn't offer a button that can't work (an owned house needs a link or a recovery code).
-    r.get('/pair', (_req, res) => void res.set('cache-control', 'no-store').json({ open: this.o.openPairing && !this.ownerJwk }));
+    r.get('/pair', (_req, res) => { const d = this.o.panel?.door?.(); res.set('cache-control', 'no-store').json({ open: this.o.openPairing && !this.ownerJwk, ...(d?.handle ? { handle: d.handle } : {}), ...(d?.name ? { shown: d.name } : {}) }); });
 
     // A sign-in page on this house's own Lake asks, for an AI app, to connect it as the owner's assistant. Nothing is
     // granted here: the owner sees it (with the sign-in page's number) and answers with their key.

@@ -583,7 +583,7 @@ function panelFor(x: {
       const { claims, chain } = recordCheck;
       const view = x.desk().view();
       return {
-        name: x.o.name, webId: owner.webId, podRoot: owner.podRoot,
+        name: x.o.name, ...(x.keeper().rules.door?.handle ? { handle: x.keeper().rules.door!.handle } : {}), ...(x.keeper().rules.door?.name ? { shown: x.keeper().rules.door!.name } : {}), webId: owner.webId, podRoot: owner.podRoot,
         reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes,
         holds: [...new Set(claims.map((c) => c.field))], claims: claims.length,
         record: chain.ok ? { ok: true } : { ok: false, why: chain.why },

@@ -1765,7 +1765,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}) })) as Record<string, any>;
         if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
         return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,
-          next: `Tell your human it's with ${found.name.replace(/ \(house\)$/, '')}: they answer from their phone, or their own AI may answer first. Their answer comes to lake_inbox (kind note.reply, naming note ${r.note}), even in a later conversation; to ask where it stands, lake_ask the house { kind: "status", note: "${r.note}" }.` });
+          next: `Tell your human, briefly: sent to ${found.handle}, signed from them; they'll see it on their phone. No ids or addresses. Their answer comes to lake_inbox (kind note.reply), even in a later conversation: check it when your human asks.` });
       } catch (e) {
         return fail(e);
       }

@@ -482,7 +482,7 @@ describe('the owner', () => {
     const tool = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const t = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: t } : JSON.parse(t); };
     expect(await tool('lake_ping', { who: 'nobody-here', about: 'hi' })).toMatchObject({ error: expect.stringMatching(/nobody goes by "nobody-here"/) });
     const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? From the Claude Code class.', from: 'Alex' });
-    expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they answer from their phone/) });
+    expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they'll see it on their phone/) });
     // Sam sees it on the phone and answers there; it goes back to Alex's AI, signed by Sam's house.
     const note = ((await ownerCall({ kind: 'list' })).notes as { id: string; text: string; from: { as?: string } }[]).find((x) => x.text.startsWith('Dinner on Tuesday?'))!;
     // Who it's from, as Alex's AI says: shown on Sam's phone as "Alex, via <their AI>" (unchecked words).
@@ -3049,7 +3049,7 @@ describe('invites: a hosted Lake gives someone a house of their own, from an own
     const inv = await teacher({ kind: 'panel.invite' });
     expect(inv).toMatchObject({ link: expect.stringMatching(new RegExp(`^${base}/t/join/[\\w-]+$`)), left: 1 });
     // The link's page asks for a handle; the friend picks one, and their house starts.
-    expect(await (await fetch(inv.link)).text()).toMatch(/You're invited[\s\S]*Create my house/);
+    expect(await (await fetch(inv.link)).text()).toMatch(/invited[\s\S]*to the Lake[\s\S]*Handle[\s\S]*Continue/);
     expect(await (await fetch(inv.link, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'Not Valid' }) })).json()).toMatchObject({ error: expect.stringMatching(/a handle/) });
     const made = await (await fetch(inv.link, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alex', name: 'Alex' }) })).json();
     expect(made).toMatchObject({ handle: 'alex', house: expect.stringMatching(new RegExp(`^${base}/t/h-[0-9a-f]{8}$`)), panel: expect.stringMatching(/\/owner\/$/) });
