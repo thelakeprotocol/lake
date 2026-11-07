@@ -395,8 +395,9 @@ ul.chats li + li .chatrow { border-top: 1px solid var(--line); }
 .sysline.threat { color: var(--threat); }
 .modebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13.5px; color: var(--muted); padding: 0 2px; }
 .modebar.ai span:first-child::before { content: 'AI'; font-size: 10.5px; font-weight: 700; padding: 1px 6px; margin-right: 6px; border-radius: 6px; background: #1f3b56; color: var(--fg); }
-body.in-chat .side { display: none; }
-body.in-chat main { padding-top: 0; padding-bottom: 0; }
+/* Full screen exactly while a chat is on the page (no script: CI's slower machine caught an effect running late). */
+.shell:has(.chat) .side { display: none; }
+.shell:has(.chat) main { padding-top: 0; padding-bottom: 0; }
 .chat { min-height: 100vh; min-height: 100dvh; }
 .chatinfo { padding-top: 14px; }
 .bigwho { display: grid; justify-items: center; gap: 6px; margin: 8px 0 18px; }
@@ -412,4 +413,4 @@ h1 .dot { display: inline-block; margin-left: 10px; vertical-align: middle; }
 .section-title { margin-top: 26px; }
 .seg.filters { border: 0; padding: 0; background: none; border-radius: 0; }
 .chatinfo .block { margin-top: 18px; }
-body.in-chat header.top { display: none; }
+.shell:has(.chat) header.top { display: none; }

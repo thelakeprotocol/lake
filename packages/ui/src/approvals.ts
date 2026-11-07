@@ -329,8 +329,6 @@ function ChatView({ c }: { c: Chat }) {
   const onDuty = (duty.data?.duties ?? []).some(dutyLive);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!info) end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, info]);
-  // Full screen while it's on screen, and only then (a link to a chat that's gone shows the list, with the tab bar).
-  useEffect(() => { document.body.classList.add('in-chat'); return () => document.body.classList.remove('in-chat'); }, []);
   const latest = c.notes[c.notes.length - 1]!;
   const setTo = async (m: 'ai' | 'me') => { const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.chat.mode', key: latest.from.key, mode: m }); if (r.error) throw new Error(r.error); setMode(m); bump(); };
   const head = (back: () => void, label: string) => h('div', { class: 'chathead' },
