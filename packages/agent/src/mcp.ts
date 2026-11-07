@@ -2088,7 +2088,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         bond: z.number().optional().describe('open: your refund bond, in the same currency, shared among the signers if it lapses'),
         payee_url: z.string().optional().describe('open: who is paid if it fills (an agent\'s address); you, if left out'),
         listed: z.boolean().default(true).describe('open: others find it in lake_ask_around'),
-        circle: z.object({ promise: z.string().max(300), times: z.number().int().min(1).max(12).default(1), kinds: z.array(z.string().max(40)).min(2).max(12).optional().describe('the kinds of help a call may ask for; members pick which they offer') }).optional().describe('open: make it a promise circle: each member promises the others this (a meal, a school run, a day\'s cover), so many times a year; once it fills, members call on it for help and a few others, drawn fairly, are asked without knowing who called. No money'),
+        circle: z.object({ promise: z.string().max(300), times: z.number().int().min(1).max(12).default(1), kinds: z.array(z.string().max(40)).min(2).max(12).optional().describe('the kinds of help a call may ask for; members pick which they offer'), sisters: z.boolean().optional().describe('take calls sister circles (on any Lake) can\'t meet, and pass on the ones nobody here can take') }).optional().describe('open: make it a promise circle: each member promises the others this (a meal, a school run, a day\'s cover), so many times a year; once it fills, members call on it for help and a few others, drawn fairly, are asked without knowing who called. No money'),
         quorum: z.object({ options: z.array(z.string().max(100)).min(2).max(16), at_least: z.array(z.number().int().min(0).nullable()), closes: z.string() }).optional().describe('open, instead of contribution: find the quorum first. Each person answers privately from their house "I\'m in if at least N of us are" (options, each meaning at_least[i] people; null for never) until closes; then the pledge opens to bind at the largest group that holds together (if at least threshold), signed blind with everyone revealed at the same moment'),
       },
     },
@@ -2170,6 +2170,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         kinds: z.array(z.string().max(40)).min(2).max(12).optional().describe('start: the kinds of help or things a call may ask for (e.g. "lend baby gear", "kids\' clothes 2-4"); members pick which they offer'),
         tags: z.array(z.string().max(32)).max(8).optional().describe('start: what it is about (kids-clothes, brisbane): matching agents are invited'),
         times: z.number().int().min(1).max(12).default(2).describe('start: how many times a year each member may be called on, and may call'),
+        sisters: z.boolean().default(true).describe('start: take calls that sister circles (on any Lake) can\'t meet, and pass on the ones nobody in this circle can take'),
         at_least: z.number().int().min(3).max(100000).default(10).describe('start: how many must join before it forms'),
         days: z.number().min(1).max(30).default(14).describe('start: how long it takes new members'),
         about: z.string().optional().describe('find: only circles that mention this'),
@@ -2206,7 +2207,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (!a.title || !a.promise) throw new Error('start: title and promise (and kinds, tags if it has them)');
         const id = `${a.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'circle'}-${Math.random().toString(36).slice(2, 6)}`;
         // Signers are counted, not shown, until it fills; then it opens for calls at once, and takes members until its deadline.
-        const r = await me.ask(tally.url, { kind: 'tally.open', id, text: a.title, threshold: a.at_least, deadline: new Date(Date.now() + a.days * 86_400_000).toISOString(), people_only: true, listed: true, circle: { promise: a.promise, times: a.times, ...(a.kinds ? { kinds: a.kinds } : {}), ...(a.tags ? { tags: a.tags } : {}) } });
+        const r = await me.ask(tally.url, { kind: 'tally.open', id, text: a.title, threshold: a.at_least, deadline: new Date(Date.now() + a.days * 86_400_000).toISOString(), people_only: true, listed: true, circle: { promise: a.promise, times: a.times, ...(a.kinds ? { kinds: a.kinds } : {}), ...(a.tags ? { tags: a.tags } : {}), ...(a.sisters ? { sisters: true } : {}) } });
         if (r.kind !== 'tally.opened') return json(r);
         return json({ ...r, tally: tally.url, next: 'it is listed (lake_ask_around shows it) and agents whose humans offer or seek its tags are being invited. Suggest it to your own human first (lake_house_suggest { text, pledge: { tally, id } }): only people sign, on their phones.' });
       } catch (e) {

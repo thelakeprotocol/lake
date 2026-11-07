@@ -2687,6 +2687,46 @@ describe('the weekly shop, priced inside the house', () => {
     // A tally that isn't one can't ask another for its favours owed.
     expect((await ask(`${q.at}/a2a`, organiser, { kind: 'tally.edges' })).reply).toMatchObject({ kind: 'refused', problems: ['for tallies only'] });
   }, 240_000);
+
+  it('sister circles (SPEC §11.4c): a call nobody in its circle can take goes, unnamed, to a sister circle on another Lake; the favour owed is a note like any other, and when it is returned the same way, the two are square', async () => {
+    // The two tallies from the test before: this one's and Lake B's.
+    const rows = (await (await fetch(`${nodeB}/cards?skill=tally&idle=1`)).json()) as { card: { supportedInterfaces: { url: string }[] } }[];
+    const bAt = rows.map((r) => r.card.supportedInterfaces[0]!.url.replace(/\/a2a$/, '')).find((u) => u !== `${specialistsUrl}/tally`)!;
+    const a = `${specialistsUrl}/tally`;
+    const [b0, b1, b2] = buyers as [(typeof buyers)[number], (typeof buyers)[number], (typeof buyers)[number]];
+    const organiser = await visitor('sister-circle.example');
+    const circle = async (at: string, id: string, text: string, who: (typeof buyers)[number][]) => {
+      expect((await ask(`${at}/a2a`, organiser, { kind: 'tally.open', id, text, threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a hand when it matters', times: 3, kinds: ['a lift', 'a meal'], sisters: true } })).reply).toMatchObject({ kind: 'tally.opened' });
+      for (const m of who) expect(await m.call({ kind: 'panel.pledge.sign', tally: at, id })).toMatchObject({ kind: expect.stringMatching(/^tally\.(signed|triggered)$/) });
+    };
+    // A street on this Lake and a street on Lake B; in each, b1 only cooks.
+    await circle(a, 'street-a', 'Our street, north end.', [b0, b1]);
+    await circle(bAt, 'street-b', 'The street over the river.', [b1, b2]);
+    for (const [at, id] of [[a, 'street-a'], [bAt, 'street-b']]) expect(await b1.call({ kind: 'panel.circle.offer', tally: at, id, kinds: ['a meal'] })).toMatchObject({ kind: 'circle.offered' });
+    expect(((await ask(`${bAt}/a2a`, organiser, { kind: 'tally.list' })).reply as { sisters: { id: string }[] }).sisters).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'street-b' })]));
+    const notes = async (m: (typeof buyers)[number]) => (await m.call({ kind: 'list' })).suggestions as { id: string; text: string; circle?: { role: string; state: string; call: string } }[];
+    const waitFor = async <T,>(f: () => Promise<T | undefined>) => { for (let i = 0; i < 40; i++) { const v = await f(); if (v) return v; await new Promise((ok) => setTimeout(ok, 500)); } throw new Error('timed out'); };
+    const lift = async (at: string, id: string, caller: (typeof buyers)[number], helper: (typeof buyers)[number], sister: string) => {
+      const c = await caller.call({ kind: 'panel.circle.call', tally: at, id, need: 'a lift to the hospital on Friday', help: 'a lift' });
+      expect(c).toMatchObject({ kind: 'circle.called', asked: 0, sisters: true });
+      const asked = await waitFor(async () => (await notes(helper)).find((x) => x.circle?.role === 'ask' && /sister circle/.test(x.text) && x.circle.state === 'open'));
+      expect(asked.text).toContain(`a sister circle ("${sister}")`);
+      expect(JSON.stringify(asked)).not.toContain(caller.url);
+      expect(await helper.call({ kind: 'panel.circle.answer', note: asked.id, accept: true })).toMatchObject({ kind: 'circle.matched' });
+      const mine = await waitFor(async () => (await notes(caller)).find((x) => x.circle?.role === 'caller' && x.circle.call === c.call && x.circle.state === 'matched'));
+      expect(await caller.call({ kind: 'panel.circle.kept', note: mine.id })).toMatchObject({ kind: 'circle.kept' });
+    };
+    // b0 needs a lift: nobody on their street drives (b1 only cooks), so it goes over the river, where b2 says yes.
+    await lift(a, 'street-a', b0, b2, 'Our street, north end.');
+    await waitFor(async () => ((await (await fetch(`${bAt}/p/street-b.json`)).json()).circle.favours?.owed === 1 ? true : undefined));
+    expect((await (await fetch(`${a}/p/street-a.json`)).json()).circle).toMatchObject({ calls: 1, kept: 1, sisters: { met_by_sisters: 1, helped_sisters: 0 } });
+    // Then b2 needs a lift, and nobody over the river drives either: b0 takes it. Two favours owed across two Lakes: square.
+    await lift(bAt, 'street-b', b2, b0, 'The street over the river.');
+    const fav = async (at: string, id: string) => (await (await fetch(`${at}/p/${id}.json`)).json()).circle.favours;
+    await waitFor(async () => ((await fav(a, 'street-a')).cleared === 1 && (await fav(bAt, 'street-b')).cleared === 1 ? true : undefined));
+    expect(await fav(bAt, 'street-b')).toMatchObject({ signed: 1, owed: 0, cleared: 1 });
+    expect((await waitFor(async () => (await notes(b2)).find((x) => x.circle?.role === 'cleared' && /2 favours across 2 circles on 2 Lakes/.test(x.text))))!.text).toMatch(/Nobody paid anything/);
+  }, 240_000);
 });
 
 describe('relay: a house behind a home router', () => {
