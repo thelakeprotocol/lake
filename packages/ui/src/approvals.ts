@@ -159,7 +159,7 @@ function Failed({ error }: { error?: string }) {
 const TABS = [
   ['chats', 'Chats'], ['needs', 'Requests'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
   ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Data requests'], ['offers', 'Offers for you'], ['keys', 'Who can see your data'],
-  ['agents', 'Who asked lately'], ['money', 'Money'], ['data', 'Your data'], ['key', 'New or lost phone'], ['move', 'Download everything'], ['about', 'Activity'],
+  ['agents', 'Who asked lately'], ['money', 'Money'], ['data', 'Your data'], ['key', 'New or lost phone'], ['move', 'Download everything'], ['about', 'Activity'], ['ais', 'Your AIs'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 const MAIN: Tab[] = ['chats', 'needs', 'me', 'myagent', 'settings'];
@@ -241,7 +241,7 @@ function NeedsTab({ go }: { go: (t: Tab) => void }) {
     // An AI app signing in through this house, from its own browser: approved here, where the key is.
     ...(list.data.connects ?? []).map((c) => ({ k: `c-${c.id}`, v: () => h(ConnectRequest, { key: `c-${c.id}`, c }) })),
     // Your AI isn't reading and people are waiting for it: only you can open it again.
-    ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('myagent') }, 'See it'))) })),
+    ...assistants.filter((a) => a.waiting).map((a) => ({ k: `w-${a.kid}`, v: () => h('li', { key: `w-${a.kid}`, class: 'item amber' }, h('p', { class: 'item-text' }, waitingLine(a)), h('div', { class: 'item-actions' }, h('button', { class: 'btn small', type: 'button', onClick: () => go('ais') }, 'See it'))) })),
     ...suggestions.map((x) => ({ k: `s-${x.id}`, v: () => h(SuggestionItem, { key: `s-${x.id}`, x }) })),
   ];
   const pin = (k: string, text: string, to: Tab, cls = '') => h('button', { key: k, type: 'button', class: `pin ${cls}`, onClick: () => go(to) }, h('span', {}, text), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'));
@@ -1511,7 +1511,30 @@ function lastHere(at?: string): { text: string; now: boolean } {
 }
 
 /** Your own AI agent, inside your house: a key that may look and suggest, never decide. */
-function MyAgent() {
+function MyAgent({ go }: { go: (t: Tab) => void }) {
+  const v = useHouse<ListView>({ kind: 'list' });
+  const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  if (!v.data) return h(Failed, { error: v.error });
+  const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
+  const onDuty = new Set((duty.data?.duties ?? []).filter(dutyLive).map((d) => d.kid));
+  const ais = v.data.assistants;
+  // What doesn't grow first, what grows last (8 Nov: the owner's AIs and their settings sat under a list of suggestions that
+  // only gets longer): your AIs in a line each, AI on duty, the night, then its suggestions, a few at a time.
+  return h('div', {},
+    ais.length ? h('section', { class: 'block' },
+      h('ul', { class: 'setrows' }, ...ais.map((a) => h('li', { key: a.kid }, h('button', { type: 'button', class: 'rowlink', onClick: () => go('ais') },
+        h('span', {}, h('b', {}, shortName(a.label)), h('small', {}, [onDuty.has(a.kid) ? 'On duty' : 'Can suggest', lastHere(a.seenAt).text, a.waiting ? `${a.waiting.count} waiting for it` : ''].filter(Boolean).join(' · '))),
+        h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')))),
+        h('li', {}, h('button', { type: 'button', class: 'rowlink', onClick: () => go('ais') }, h('span', {}, h('b', {}, 'Manage your AIs'), h('small', {}, 'Spending money, connect another, remove')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')))))
+      : h(YourAIs, { houseUrl }),
+    h(DutyCard, { houseUrl, log: duty.data }),
+    h(WhileYouSlept, {}),
+    h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
+      v.data.suggestions.length ? h(Paged, { items: v.data.suggestions, size: 5, render: (x: Note) => h(SuggestionItem, { key: x.id, x }) }) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and under Requests.')));
+}
+
+/** Your AIs, each with its key: when it was last here, its spending money, removing it; and connecting another. */
+function YourAIs({ houseUrl }: { houseUrl: string }) {
   const v = useHouse<ListView>({ kind: 'list' });
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const onDuty = new Set((duty.data?.duties ?? []).map((d) => d.kid));
@@ -1519,7 +1542,6 @@ function MyAgent() {
   // The code's minutes count down on screen; when it runs out, the button is back.
   useEffect(() => { const t = setInterval(redraw, 30_000); return () => clearInterval(t); }, []);
   if (!v.data) return h(Failed, { error: v.error });
-  const houseUrl = location.origin + location.pathname.replace(/\/owner\/.*$/, '');
   if (invite && invite.until < Date.now()) invite = null;
   // Its AI has used the code: the box has done its job.
   if (invite && v.data.assistants.some((a) => Date.parse(a.addedAt) >= invite!.made - 1000)) invite = null;
@@ -1529,13 +1551,7 @@ function MyAgent() {
   } });
   const mins = invite ? Math.max(1, Math.round((invite.until - Date.now()) / 60_000)) : 0;
   return h('div', {},
-    // On duty or not, first; then what it did while you were away; then what it suggests; then its keys.
-    h(DutyCard, { houseUrl, log: duty.data }),
-    h(WhileYouSlept, {}),
-    h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
-      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and under Requests.')),
-    h('h2', { class: 'section-title' }, 'Your AI\'s keys'),
-    h('p', { class: 'muted' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
+    h('p', { class: 'muted' }, 'Your own AI, with a key to your house: it sees who writes to you and what agents ask, and suggests. Only you decide.'),
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
       h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), ((l) => h('span', { class: `chip${l.now ? ' ok' : ''}`, title: 'When it last used its key' }, l.text))(lastHere(a.seenAt))),
       h('p', { class: 'item-meta' }, `Connected since ${time(a.addedAt)} · can suggest, not decide`),
@@ -1550,6 +1566,10 @@ function MyAgent() {
       h('textarea', { readonly: true, rows: 5, class: 'copybox', value: invite.msg, onFocus: (e: Event) => (e.currentTarget as HTMLTextAreaElement).select() }),
       h('div', { class: 'row' }, h(CopyButton, { text: invite.msg }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => { invite = null; redraw(); } }, 'Done')))
       : h('div', { class: 'block' }, give));
+}
+
+function AisPage() {
+  return h(YourAIs, { houseUrl: location.origin + location.pathname.replace(/\/owner\/.*$/, '') });
 }
 
 /**
@@ -1823,7 +1843,7 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, needs: NeedsTab, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, needs: NeedsTab, ais: AisPage, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
 
 /**
  * Notifications on this device, always reachable (7 Nov: once "Not now" was tapped on Home, nothing brought them back):

@@ -52,6 +52,8 @@ async function tidy() {
 // Five tabs (Chats, Requests, Me, My AI, Settings); everything else is a row under Settings (8 Nov).
 const RENAMED: Record<string, string> = { Home: 'Requests', Inbox: 'Requests', 'Needs you': 'Requests', Requests: 'Requests', 'Data requests': 'Requests', 'My agent': 'My AI', Keys: 'Who can see your data', Data: 'Your data', 'Your key': 'New or lost phone', Visitors: 'Who asked lately', 'Move house': 'Download everything', 'About your house': 'Activity', Offers: 'Offers for you' };
 const tab = async (name: string) => {
+  // Your AIs: a page under My AI (8 Nov: their settings had sat under a growing list of suggestions).
+  if (name === 'Your AIs') { await page.locator('#nav > button', { hasText: 'My AI' }).click(); await page.waitForTimeout(300); const m = page.locator('.rowlink', { hasText: 'Manage your AIs' }); if (await m.count()) await m.click(); await page.waitForTimeout(300); return; }
   const label = RENAMED[name] ?? name;
   const main = page.locator('#nav > button', { hasText: label });
   if (await main.count()) await main.click();
@@ -255,12 +257,14 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const paired = await (await fetch(`${house}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: assistant.publicJwk, code, label: 'Nova (Claude, via MCP)', webId: 'https://panel-assistant.example/#agent' }) })).json();
     expect(paired).toMatchObject({ paired: true });
     // No reload: the house says something changed, and the panel shows it; the code's box has done its job and goes.
-    await page.locator('.item', { hasText: 'Nova' }).locator('.chip', { hasText: 'Here now' }).waitFor({ timeout: 5000 });
+    // My AI now lists it in a line, first on the page.
+    await page.locator('.rowlink', { hasText: 'Nova' }).getByText(/Here now/).waitFor({ timeout: 5000 });
     await box.waitFor({ state: 'detached', timeout: 3000 });
     await tidy();
   });
 
   it('signs spending money for it, and the AI sees it', async () => {
+    await tab('Your AIs');
     const spend = page.locator('.spend');
     await spend.getByRole('button', { name: 'Allow spending…' }).click();
     // Two plain fields: the total, and for how many days; the sentence says what will be signed.
@@ -291,7 +295,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asAssistant({ kind: 'assistant.suggest', text: 'The sitter costs more than I may spend: may I have $60 for 3 days?', allowance: { amount: 60, currency: 'USD', days: 3 } })).toMatchObject({ ok: true });
     await tab('Home');
     await page.getByRole('button', { name: 'Give $60 for 3 days' }).click();
-    await tab('My agent');
+    await tab('Your AIs');
     await page.locator('.item', { hasText: 'Nova' }).locator('.spend-amount', { hasText: 'Up to $60' }).waitFor({ timeout: 5000 });
     expect(await asAssistant({ kind: 'assistant.allowance' })).toMatchObject({ amount: 60, currency: 'USD' });
     await tidy();
@@ -514,7 +518,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('removes the owner\'s AI with two taps, and its key stops working', async () => {
-    await tab('My agent');
+    await tab('Your AIs');
     // The agent's own card (its suggestions name it too).
     const card = page.locator('.item', { has: page.getByRole('button', { name: /Remove this AI|Tap again/ }) });
     await card.getByRole('button', { name: 'Remove this AI' }).click();
@@ -607,7 +611,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await two.c.close();
     // And the owner sees it on My agent, here now.
     await page.goto(`${house}/owner/`);
-    await tab('My agent');
+    await tab('Your AIs');
     await page.locator('.item', { hasText: me.name.split(' (')[0] }).locator('.chip', { hasText: 'Here now' }).waitFor({ timeout: 5000 });
     // Its chats are closed and the buyer's messages sit unread: its connector tells the house, and the owner is told.
     await page.locator('.item', { hasText: me.name.split(' (')[0] }).getByText(/waiting since .*open your AI app/).waitFor({ timeout: 15_000 });
@@ -892,8 +896,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const on = card.locator('li.item', { hasText: 'Night AI' });
     await on.locator('.chip', { hasText: 'On duty' }).waitFor({ timeout: 10_000 });
     expect(await on.textContent()).toMatch(new RegExp(`On duty ${from}–${to} · 2 of 10 tonight`));
+    await tab('Your AIs');
     await page.locator('li.item', { hasText: 'Night AI' }).getByText('On duty: replies and bookings only, never money.').waitFor();
     await tidy();
+    await tab('My agent');
     await on.getByRole('button', { name: 'Off duty' }).click();
     await on.getByRole('button', { name: /Tap again/ }).click();
     // Off duty: back to Set up.
