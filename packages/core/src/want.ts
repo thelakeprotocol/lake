@@ -78,7 +78,19 @@ export function makeWant(o: { name: string; description?: string; properties?: R
 }
 
 const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9/.½ ]+/g, ' ').split(/\s+/).filter((t) => (t.length > 1 || /\d/.test(t)) && !STOP.has(t));
-const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'of', 'for', 'to', 'in', 'with', 'one', 'new', 'old', 'my', 'it', 'is']);
+const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'of', 'for', 'to', 'in', 'with', 'one', 'new', 'old', 'my', 'it', 'is', 'approx', 'approx.', 'about', 'around', 'roughly', 'standard', 'typical', 'usual']);
+/** A value as a shop would list it: what's in brackets is an aside ("1 (single)", "1/2 inch BSP (standard AU hose)"). */
+const core = (v: string) => words(v.replace(/\([^)]*\)/g, ' '));
+
+/**
+ * Whether a seller in these regions delivers to a want's area: by the codes in it ("Brisbane, AU-QLD" has AU-QLD, which
+ * "AU" takes). An area with no code in it (just a city) is left to the seller: true.
+ */
+export function deliversTo(area: string | undefined, regions: string[] | undefined): boolean {
+  if (!area || !regions?.length) return true;
+  const codes = area.toUpperCase().match(/\b[A-Z]{2}(-[A-Z0-9]{1,3})?\b/g) ?? [];
+  return !codes.length || codes.some((c) => regions.some((r) => c.startsWith(r.toUpperCase())));
+}
 
 /**
  * How well something a seller has fits a want, from 0 to 1, by the words they share: its name first, then each property
@@ -94,7 +106,7 @@ export function wantFit(w: Want, item: { label: string; props?: Record<string, s
   // A property matches when the item says the same, under that name or anywhere (one AI's "Thread" is a shop's "Connection").
   for (const p of w.itemOffered.additionalProperty) {
     const theirs = own[p.name.toLowerCase()] ?? [...have];
-    const want = words(p.value);
+    const want = core(p.value);
     if (want.length && want.every((t) => theirs.includes(t))) matched.push(p.name);
   }
   const props = w.itemOffered.additionalProperty.length;

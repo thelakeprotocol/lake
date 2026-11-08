@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import {
-  buildCard, cartParty, cardUrlFor, generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signCart, signMessage, verifyLakeData, wantFit,
+  buildCard, cartParty, cardUrlFor, deliversTo, generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signCart, signMessage, verifyLakeData, wantFit,
   type AgentCard, type CartParty, type LakeData, type ShopExample, type Want,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
@@ -59,14 +59,14 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   /** Our closest item for a want, if it fits: by its words and properties, in our currency, where we deliver. */
   const bestFor = (w: Want) => {
     if (w.priceCurrency && w.priceCurrency !== ex.currency) return null;
-    if (w.areaServed && ex.regions?.length && !ex.regions.some((r) => w.areaServed!.toUpperCase().startsWith(r.toUpperCase()))) return null;
+    if (!deliversTo(w.areaServed, ex.regions)) return null;
     const scored = ex.items.map((item) => ({ item, ...wantFit(w, item) })).filter((x) => x.score >= MIN_FIT).sort((a, b) => b.score - a.score || a.item.price - b.item.price);
     return scored[0] ?? null;
   };
 
   async function offer(w: Want, house: { url: string; webId: string }) {
     const best = bestFor(w);
-    if (!best) return false;
+    if (!best) { log(`${ex.name}: nothing of ours fits "${w.name}"${deliversTo(w.areaServed, ex.regions) ? '' : ` (we don't deliver to ${w.areaServed})`}`); return false; }
     const qty = w.eligibleQuantity?.value ?? 1;
     const label = `${qty} × ${best.item.label}`;
     const items = [{ label, amount: { currency: ex.currency, value: Math.round(best.item.price * qty * 100) / 100 } }, ...(ex.delivery.fee > 0 ? [{ label: `Delivery, ${ex.delivery.days} day${ex.delivery.days === 1 ? '' : 's'}`, amount: { currency: ex.currency, value: ex.delivery.fee } }] : [])];
@@ -123,7 +123,9 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   else server = app.listen(o.port ?? 0);
   const link = new LakeLinks({ nodeUrls: o.node.split(',').map((u) => u.trim()), card, identity: id, webId, log });
   await link.register(20);
+  // Checked in every 15 s, as every agent that stays: a node drops a card it hasn't heard from (the shops vanished from searches).
+  link.keepAlive(15_000);
   const timer = setInterval(() => void look().catch(() => {}), o.everyMs ?? 20_000);
   timer.unref();
-  return { card, webId, offered: () => count, look, close: async () => { clearInterval(timer); await new Promise<void>((ok) => (server ? server.close(() => ok()) : ok())); } };
+  return { card, webId, offered: () => count, look, close: async () => { clearInterval(timer); link.stop(); await new Promise<void>((ok) => (server ? server.close(() => ok()) : ok())); } };
 }

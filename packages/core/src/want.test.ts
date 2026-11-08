@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeWant, purchaseDraft, wantFit, wantProblems } from './want.js';
+import { deliversTo, makeWant, purchaseDraft, wantFit, wantProblems } from './want.js';
 
 describe('wants (SPEC §6.8)', () => {
   const want = () => makeWant({ name: 'Handheld shower head', properties: { Type: 'Handheld', 'Spray modes': 3, Finish: 'Chrome' }, area: 'AU-QLD', currency: 'AUD', days: 7 });
@@ -27,6 +27,15 @@ describe('wants (SPEC §6.8)', () => {
     // A different number is not a match; a different thing scores nothing.
     expect(wantFit(w, { label: 'Handheld shower head', props: { Type: 'Handheld', 'Spray modes': '5', Finish: 'Chrome' } }).matched).toEqual(['Type', 'Finish']);
     expect(wantFit(w, { label: 'LED light bulb, E27' }).score).toBe(0);
+  });
+
+  it('reads values and areas as people write them (a real Claude, 8 Nov: "approx. 100 mm", "1 (single)", "Brisbane, AU-QLD")', () => {
+    const w = makeWant({ name: 'Handheld shower head', properties: { 'Face diameter': 'approx. 100 mm', 'Spray modes': '1 (single)', Connection: '1/2 inch BSP (standard AU hose)' } });
+    expect(wantFit(w, { label: 'Handheld shower head, single spray, chrome', props: { 'Spray modes': '1', Connection: '1/2 inch BSP', 'Face diameter': '100 mm' } }).matched).toEqual(['Face diameter', 'Spray modes', 'Connection']);
+    expect(deliversTo('Brisbane, AU-QLD', ['AU'])).toBe(true);
+    expect(deliversTo('Auckland, NZ', ['AU'])).toBe(false);
+    expect(deliversTo('Brisbane', ['AU'])).toBe(true);
+    expect(deliversTo(undefined, ['AU'])).toBe(true);
   });
 
   it('drafts a purchase for exactly one cart, its total, for the owner to sign', () => {
