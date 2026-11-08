@@ -144,7 +144,7 @@ function Paged<T>({ items, render, size = 10, tag = 'ul', cls = 'items' }: { ite
   const [shown, setShown] = useState(size);
   const left = items.length - shown;
   return h('div', {}, h(tag, { class: cls }, ...items.slice(0, shown).map(render)),
-    left > 0 ? h('button', { class: 'btn small more-items', type: 'button', onClick: () => setShown(shown + size) }, `Show ${Math.min(size, left)} more`, h('span', { class: 'muted' }, ` of ${left}`)) : null);
+    left > 0 ? h('button', { class: 'btn small more-items', type: 'button', onClick: () => setShown(shown + size) }, `Show ${Math.min(size, left)} more`) : null);
 }
 
 function Failed({ error }: { error?: string }) {
@@ -158,13 +158,15 @@ function Failed({ error }: { error?: string }) {
 // AI; and everything else as a plain list of pages under Settings, each with a way back.
 const TABS = [
   ['chats', 'Chats'], ['needs', 'Requests'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
-  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Data requests'], ['offers', 'Offers'], ['keys', 'Keys you gave'],
-  ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Your data'], ['key', 'Your key and recovery'], ['move', 'Move house'], ['about', 'About your house'],
+  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Data requests'], ['offers', 'Offers for you'], ['keys', 'Who can see your data'],
+  ['agents', 'Who asked lately'], ['money', 'Money'], ['data', 'Your data'], ['key', 'New or lost phone'], ['move', 'Download everything'], ['about', 'Activity'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 const MAIN: Tab[] = ['chats', 'needs', 'me', 'myagent', 'settings'];
+/** The pages listed under Settings: their way back is always Settings (Fable: opened from elsewhere, it said "‹ Me"). */
+const SETTINGS_PAGES = new Set<string>(['notify', 'free', 'rules', 'offers', 'keys', 'agents', 'money', 'data', 'key', 'move', 'about']);
 const labelOf = (t: Tab) => TABS.find(([id]) => id === t)?.[1] ?? t;
-const tabFromHash = (): Tab => (/^#(note|chat|want)=/.test(location.hash) ? 'chats' : location.hash === '#home' ? 'needs' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
+const tabFromHash = (): Tab => (/^#(note|chat|want)=/.test(location.hash) ? 'chats' : location.hash === '#home' || location.hash === '#requests' ? 'needs' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
 /** A note a notification was about (#note=<id>): its conversation opens, that message lit. */
 const focusNote = () => (location.hash.startsWith('#note=') ? decodeURIComponent(location.hash.slice(6)) : '');
 /** The conversation on screen (#chat=<sender key>), so the phone's back gesture leaves it as in any messaging app. */
@@ -173,7 +175,7 @@ const inChat = () => /^#(note|chat|want)=/.test(location.hash);
 /** A want on screen (#want=<id>): what the owner is looking for, and the offers. */
 const openWantId = () => (location.hash.startsWith('#want=') ? decodeURIComponent(location.hash.slice(6)) : '');
 
-function Nav({ tab, go, pending, noOffers, unread = 0 }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean; unread?: number }) {
+function Nav({ tab, go, pending, noOffers, unread = 0, from = 'settings' }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean; unread?: number; from?: Tab }) {
   const [open, setOpen] = useState(false);
   const nav = useRef<HTMLElement>(null);
   // A tap anywhere outside closes the menu.
@@ -184,7 +186,8 @@ function Nav({ tab, go, pending, noOffers, unread = 0 }: { tab: Tab; go: (t: Tab
     return () => removeEventListener('click', close);
   }, [open]);
   void noOffers;
-  const here = MAIN.includes(tab) ? tab : 'settings';
+  // A page opened from a tab keeps that tab lit (8 Nov: Data requests, opened from Requests, lit Settings).
+  const here = MAIN.includes(tab) ? tab : from;
   const shown = TABS.filter(([id]) => MAIN.includes(id));
   const button = ([id, label]: readonly [Tab, string]) => h('button', { key: id, type: 'button', class: 'main', 'aria-current': id === here ? 'page' : undefined, onClick: () => { setOpen(false); go(id); } },
     label, id === 'needs' && pending ? h('span', { class: 'badge' }, String(pending)) : id === 'chats' && unread ? h('span', { class: 'badge' }, String(unread)) : null);
@@ -221,7 +224,7 @@ interface Assistant { kid: string; label: string; addedAt: string; seenAt?: stri
 interface Connect { id: string; app: string; from: string; number: string; at: string }
 type WantOfferV = { id: string; at: string; seller: { name: string; domain: string }; total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string; matched?: string[]; delivery?: string; note?: string; over?: boolean; state: 'open' | 'paid' | 'shipped' | 'arrived'; shipped?: { note: string; at: string } };
 type WantV = { want: { id: string; name: string; description?: string; areaServed?: string; availabilityEnds: string; eligibleQuantity?: { value: number }; itemOffered: { additionalProperty: { name: string; value: string }[] } }; limit?: { amount: number; currency: string }; closed?: string; bought?: string; at: string; offers: WantOfferV[] };
-interface ListView { wants?: WantV[]; connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
+interface ListView { seen?: Record<string, string>; wants?: WantV[]; connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 
 /** Requests: what waits for a tap. Requests your rules left to you, your AI's questions and suggestions, app sign-ins. */
 function NeedsTab({ go }: { go: (t: Tab) => void }) {
@@ -246,12 +249,13 @@ function NeedsTab({ go }: { go: (t: Tab) => void }) {
     // No handle yet: the one thing that makes the house reachable, right here.
     door.data && !door.data.error && !door.data.handle ? h(HandleCard, { d: door.data }) : null,
     notifyOffer() ? h(NotifyBar, {}) : null,
-    waiting || handled ? h('div', { class: 'pins' },
-      waiting ? pin('req', `${waiting} data request${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} your answer`, 'requests', 'amber') : null,
+    // Agents asking for your data, the ones your rules left to you: the cards themselves, here (8 Nov: they were a page under Settings).
+    waiting || answeredNow.length ? h('section', { class: 'block' }, h('h2', {}, 'Asking for your data'), h(Requests, {})) : null,
+    handled ? h('div', { class: 'pins' },
       // The morning, in one line; what it did, with receipts and Undo, is on My AI.
       handled ? pin('duty', `Your AI handled ${handled} thing${handled === 1 ? '' : 's'} while you were away`, 'myagent') : null) : null,
     needs.length ? h('section', { class: 'block' }, h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() })) : null,
-    waiting || handled || needs.length ? null : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'All clear.'),
+    waiting || answeredNow.length || handled || needs.length ? null : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'All clear.'),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null);
 }
 
@@ -275,10 +279,20 @@ const chatsOf = (notes: DoorNote[]): Chat[] => {
       mode: last.mode ?? 'me', canMode: !!f.key && !f.web,
       last: answeredLast ? last.answered!.text : last.text, lastBy: (answeredLast ? (last.answered!.by === 'you' ? 'you' : 'ai') : '') as Chat['lastBy'],
       at: answeredLast && last.answered!.at ? last.answered!.at : last.at,
-      unread: ns.filter((n) => !n.answered).length,
+      unread: unseen(ns),
     };
   }).sort((a, b) => b.at.localeCompare(a.at));
 };
+/**
+ * How far the owner has read each conversation (kept by the house, so every device agrees), so a badge counts what is new,
+ * as messaging apps do (8 Nov: it counted every message never answered, 16 on the owner's phone).
+ */
+let seenAt: Record<string, string> = {};
+const chatKeyOf = (n: { id: string; from: { key?: string; webId?: string } }) => n.from.key ?? n.from.webId ?? n.id;
+/** Messages not seen yet: newer than the conversation's last look, and not answered. */
+const unseen = (notes: { id: string; at: string; answered?: unknown; from: { key?: string; webId?: string } }[], seen = seenAt) => notes.filter((n) => !n.answered && n.at > (seen[chatKeyOf(n)] ?? '')).length;
+/** What needs a decision: a question, a pledge, an offer, a circle's call, a payment… not a plain note from your AI. */
+const needsDecision = (x: Note) => !!(x.ask && !x.ask.answered) || !!x.offer || !!x.pledge || !!x.circle || !!x.count || !!x.favourPay || !!x.allowance || !!x.rules || !!x.door || !!x.sender || !!x.note;
 const initials = (s: string) => s.replace(/[^\p{L}\p{N} ]/gu, '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '?';
 const trustChip = (c: Chat) => h('span', { class: `chip trust-${c.trust}` }, c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New');
 // A conversation is a step in the history, so the phone's back gesture (and ‹) leaves it.
@@ -292,6 +306,7 @@ function ChatsTab({ go }: { go: (t: Tab) => void }) {
   const [filter, setFilter] = useState<'all' | 'known' | 'new'>('all');
   const open = openChat();
   if (!list.data) return h(Failed, { error: list.error });
+  seenAt = { ...(list.data.seen ?? {}), ...seenAt };
   const chats = chatsOf((list.data.notes ?? []) as DoorNote[]);
   // Opened from a notification, or tapped: that conversation, full screen.
   const picked = open ? chats.find((c) => c.key === open || c.notes.some((n) => n.id === open)) : undefined;
@@ -342,6 +357,8 @@ function ChatView({ c }: { c: Chat }) {
   const onDuty = (duty.data?.duties ?? []).some(dutyLive);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!info) end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, info]);
+  // Open is seen: its badge goes.
+  useEffect(() => { const at = c.notes[c.notes.length - 1]!.at; if ((seenAt[c.key] ?? '') < at) { seenAt = { ...seenAt, [c.key]: at }; void call({ kind: 'panel.chat.seen', key: c.key, at }).then(bump); } }, [c.notes.length]);
   const latest = c.notes[c.notes.length - 1]!;
   const setTo = async (m: 'ai' | 'me') => { const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.chat.mode', key: latest.from.key, mode: m }); if (r.error) throw new Error(r.error); setMode(m); bump(); };
   const head = (back: () => void, label: string) => h('div', { class: 'chathead' },
@@ -409,8 +426,10 @@ function WantView({ w }: { w: WantV }) {
   };
   const card = (o: WantOfferV, canBuy: boolean) => h('li', { key: o.id, class: `item offer${o.id === w.bought ? ' bought' : ''}` },
     h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortShop(o.seller.name)), h('b', { class: 'offer-total' }, money(o.total))),
-    ...o.items.map((i) => h('p', { class: 'item-meta', key: i.label }, `${i.label} · ${money(i.amount)}`)),
-    h('p', { class: 'item-meta' }, [o.delivery ? `Delivery: ${o.delivery}` : '', o.matched?.length ? `Matches: ${o.matched.join(', ')}` : ''].filter(Boolean).join(' · ')),
+    ...o.items.filter((i) => !/^Delivery\b/.test(i.label)).map((i) => h('p', { class: 'item-meta', key: i.label }, i.label.replace(/^1 × /, ''))),
+    h('p', { class: 'item-meta' }, `Delivery: ${o.delivery ?? 'not said'}${(() => { const d = o.items.find((i) => /^Delivery\b/.test(i.label)); return d ? `, ${money(d.amount)}` : ''; })()}`),
+    o.matched ? h('p', { class: 'item-meta' }, `Matches: ${o.matched.join(', ') || 'none of your details'}`) : null,
+    o.matched ? ((miss) => miss.length ? h('p', { class: 'item-meta amber-text' }, `Not confirmed: ${miss.join(', ')}`) : null)(w.want.itemOffered.additionalProperty.map((p) => p.name).filter((n) => !o.matched!.includes(n))) : null,
     o.note ? h('p', { class: 'item-meta' }, `Their words: “${o.note}”`) : null,
     canBuy ? h('div', { class: 'item-actions' }, h(Act, { label: `Buy for ${money(o.total)}`, cls: 'primary', confirm: `Tap again: pay ${money(o.total)}, held until it arrives`, run: buy(o) })) : null);
   return h('div', { class: 'chat want-view' },
@@ -437,6 +456,9 @@ function WantView({ w }: { w: WantV }) {
 /** About a conversation (a tap on its name, as in messaging apps): who it is, what's checked, who replies, mute and clear. */
 function ChatInfo({ c, mode, setTo, onDuty, latest }: { c: Chat; mode: 'ai' | 'me'; setTo: (m: 'ai' | 'me') => Promise<void>; onDuty: boolean; latest: DoorNote }) {
   const f = latest.from;
+  const list = useHouse<ListView>({ kind: 'list' });
+  // Others writing under the same name, through other AIs (Fable: "are these three Alexes the same person?").
+  const namesakes = chatsOf((list.data?.notes ?? []) as DoorNote[]).filter((x) => x.key !== c.key && x.name.toLowerCase() === c.name.toLowerCase());
   return h('div', { class: 'chatinfo' },
     h('div', { class: 'bigwho' }, h('span', { class: `avatar big trust-${c.trust}` }, initials(c.name)), h('h2', {}, c.name), trustChip(c)),
     h('dl', { class: 'facts' },
@@ -445,7 +467,8 @@ function ChatInfo({ c, mode, setTo, onDuty, latest }: { c: Chat; mode: 'ai' | 'm
       c.name !== c.agent && !c.web ? h('div', {}, h('dt', {}, 'Name'), h('dd', {}, `"${c.name}" is the name the agent gives for its person. Nobody checked it.`)) : null,
       f.speaks_for ? h('div', {}, h('dt', {}, 'Speaks for'), h('dd', {}, `${f.speaks_for.house}${f.speaks_for.checked ? ' (checked)' : ' (not checked)'}`)) : null,
       h('div', {}, h('dt', {}, c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New'), h('dd', {}, c.trust === 'known' ? (c.why ?? 'You\'ve answered this agent before.') : c.trust === 'lookalike' ? (c.why ?? 'A name like someone you know, with a different key.') : 'You haven\'t talked before. It becomes known once you answer.')),
-      f.key ? h('div', {}, h('dt', {}, 'Key'), h('dd', {}, h('code', {}, f.key.length > 40 ? `${f.key.slice(0, 24)}…${f.key.slice(-10)}` : f.key))) : null),
+      namesakes.length ? h('div', {}, h('dt', {}, `Also called ${c.name}`), h('dd', {}, `${namesakes.length} other chat${namesakes.length === 1 ? '' : 's'} use this name, through ${namesakes.map((x) => x.agent).join(', ')}. Each AI has its own key, so they may or may not be the same person.`)) : null),
+    f.key ? h('details', { class: 'fold' }, h('summary', {}, 'Show its key'), h('p', {}, h('code', {}, f.key))) : null,
     c.canMode ? h('section', { class: 'block' },
       h(Toggle, { label: 'Let my AI reply in this chat', checked: mode === 'ai', onChange: (v: boolean) => void setTo(v ? 'ai' : 'me').catch(() => {}) }),
       h('p', { class: 'item-meta' }, mode === 'ai' ? `Your AI on duty answers ${c.name} for you${onDuty ? '' : ' (it isn\'t on duty now: set it up on My AI)'}. Each reply it sends says so. You can still write yourself.` : 'Only you answer this chat. Your AI leaves it alone.')) : null,
@@ -483,7 +506,7 @@ function MeTab({ go }: { go: (t: Tab) => void }) {
     h('section', { class: 'block profile' },
       h('div', { class: 'profile-head' },
         h('div', {}, h('div', { class: 'handle' }, d.handle ? `@${d.handle}` : 'No handle'), d.name ? h('div', { class: 'muted' }, d.name) : null,
-          h('div', { class: 'item-meta' }, d.open ? 'Your door is open: anyone\'s AI can write to you.' : 'Your door is closed: nobody can write to you.')),
+          h('div', { class: 'item-meta' }, d.open ? 'Anyone\'s AI can write to you.' : 'Nobody can write to you now: tap Edit to change that.')),
         h('button', { type: 'button', class: 'btn small', onClick: () => setEdit(!edit) }, edit ? 'Cancel' : 'Edit')),
       edit ? h(DoorCard, { d, done: () => setEdit(false) }) : null),
     d.open && !edit ? h(ShareDoor, { address: d.address, handle: d.handle }) : null,
@@ -491,12 +514,15 @@ function MeTab({ go }: { go: (t: Tab) => void }) {
     edit ? null : h(Circles, {}));
 }
 
+/** A feed line without the house's internal names: "house:demo-house told agent:gp.example: join" → "gp.example: yes". */
+const plainFeed = (t: string) => t.replace(/^house:\S+ told agent:(\S+?):? (join|decline|ask)\b/, (_, who: string, d: string) => `${who}: ${d === 'join' ? 'your house said yes' : d === 'decline' ? 'your house said no' : 'it asks you'}`).replace(/\b(house|agent):(?=\S)/g, '');
+
 /** Everything else, as a plain list: each row is a page with a way back. */
 function SettingsTab({ go }: { go: (t: Tab) => void }) {
   const groups: [string, [Tab, string][]][] = [
     ['Reaching you', [['notify', 'On this phone, when something needs you'], ['free', 'The hours your AI may offer people']]],
-    ['Your house', [['rules', 'What it says yes or no to'], ['requests', 'What agents asked for, and your answers'], ['offers', 'Offers priced inside it'], ['keys', 'Who you gave a key to'], ['agents', 'Agents that knocked'], ['money', 'What you earned and paid'], ['data', 'What it holds, and exporting it']]],
-    ['This phone', [['key', 'Your key, recovery code, a new phone'], ['move', 'Take your house elsewhere'], ['about', 'Your record, identity, recent activity']]],
+    ['Your data', [['rules', 'What your rules say yes or no to'], ['keys', 'Everyone you said yes to, and taking it back'], ['agents', 'Agents that asked, and what your rules told them'], ['offers', 'Shops pricing what you need, from your data'], ['money', 'What you earned and paid'], ['data', 'What your house holds']]],
+    ['This phone', [['key', 'A recovery code, or a link for a new phone'], ['move', 'All your data in one file, to take anywhere'], ['about', 'What happened lately, in numbers']]],
   ];
   return h('div', {},
     ...groups.map(([title, rows]) => h('div', { key: title, class: 'rowgroup' }, h('h3', {}, title),
@@ -536,7 +562,7 @@ function AboutTab({ go }: { go: (t: Tab) => void }) {
     h(PersonCard, { p: o.data.person }),
     leaseUntil ? h(LeaseCard, {}) : null,
     h('h3', {}, 'Recent at your door'),
-    feed.data?.length ? h(Paged, { items: feed.data, size: 12, tag: 'ul', cls: 'feed', render: (a: { at: string; kind: string; text: string }) => h('li', { key: `${a.at}-${a.text}` }, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, a.text)) })
+    feed.data?.length ? h(Paged, { items: feed.data, size: 12, tag: 'ul', cls: 'feed', render: (a: { at: string; kind: string; text: string }) => h('li', { key: `${a.at}-${a.text}` }, h('time', {}, time(a.at)), h('span', { class: a.kind === 'attack.blocked' ? 'k-threat' : a.kind === 'grant.issued' || a.kind === 'compute.done' ? 'k-mint' : a.kind === 'approval.requested' ? 'k-amber' : '' }, plainFeed(a.text))) })
       : h('p', { class: 'muted' }, 'Quiet so far.'));
 }
 
@@ -945,6 +971,17 @@ function sameAsks(list: Request[]): Request[][] {
   return [...groups.values()];
 }
 
+/**
+ * The house's recommendation in sentences: the verdict first, then each reason on its own line, capitalised; the sandbox's
+ * own caveat left to the terms (Fable: lower-case log fragments run together, and "in red" pointing at a box further down).
+ */
+function adviceOf(rec: string, warned: boolean): { verdict: string; why: string[] } {
+  const parts = rec.split(/(?<=\.)\s+|;\s+/).map((x) => x.trim().replace(/\.$/, '')).filter((x) => x && !/^sandbox lake/i.test(x));
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  const verdict = cap((parts[0] ?? rec).replace(/, for the reasons in red/i, warned ? ', for the reasons below' : '')) + '.';
+  return { verdict, why: parts.slice(1).map((x) => `${cap(x)}.`) };
+}
+
 function RequestCard({ all }: { all: Request[] }) {
   // The house folds repeats into one request (asked); older houses may still send several identical ones.
   const r = all[0]!, n = all.length, times = all.reduce((t, x) => t + (x.asked ?? 1), 0);
@@ -966,18 +1003,25 @@ function RequestCard({ all }: { all: Request[] }) {
     for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {});
     answeredNow = [{ id: r.id, domain: r.visitor.domain, purpose: r.purpose, allowed: false }, ...answeredNow.filter((x) => x.id !== r.id)].slice(0, 3);
   };
+  const advice = adviceOf(r.recommendation, !!r.warnings?.length);
+  const suggest = /^i'?d (deny|decline)|^deny/i.test(r.recommendation) ? 'deny' : /^i'?d (allow|join|say yes)|^allow/i.test(r.recommendation) ? 'allow' : '';
+  // What it wants and what your rules suggest first, then the buttons; the full terms a tap below (Fable: Allow and Deny
+  // were below the fold, under a block of terms).
   return h('article', { class: risky ? 'req risky' : 'req' },
     h('div', { class: 'who' }, r.visitor.domain, times > 1 ? h('span', { class: 'count' }, `asked ${times} times`) : null),
     r.question ? h('p', { class: 'q' }, `“${r.question}”`) : null,
+    h('p', { class: 'wants-line' }, 'Wants ', ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))), ` for ${r.purpose}, pays ${r.price ? money$(r.price.amount, r.price.currency) : `$${r.priceUsd}`}`),
+    h('div', { class: 'advice' }, h('b', {}, 'Your rules suggest'), h('p', {}, advice.verdict), advice.why.length ? h('ul', {}, ...advice.why.map((w) => h('li', {}, w))) : null),
     r.warnings?.length ? h('ul', { class: 'warn' }, ...r.warnings.map((w) => h('li', {}, `It ${w}`))) : null,
-    r.note ? h('p', { class: 'note' }, h('b', {}, 'Their note, in their words (not checked): '), `“${r.note}”`) : null,
-    h('dl', { class: 'facts' },
-      ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : `yes, for ${duration(r.retention)}`], ['Pays', r.price ? money$(r.price.amount, r.price.currency) : `$${r.priceUsd}`], ['Key for', '48 hours, revocable']] as [string, Child][])
-        .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))),
-    h('p', { class: 'advice' }, h('b', {}, 'Your housekeeper says'), r.recommendation),
-    h('div', { class: 'actions' },
-      h(Act, { label: n > 1 ? `Allow all ${n}` : 'Allow', cls: risky ? 'deny' : 'allow', run: allow }),
-      h(Act, { label: n > 1 ? `Deny all ${n}` : 'Deny', cls: risky ? 'danger-fill' : 'deny', run: deny })));
+    // The suggested answer first, filled and named; the other beside it, plain (Fable: Deny was suggested but sat second, in red).
+    h('div', { class: 'actions' }, ...(suggest === 'deny'
+      ? [h(Act, { label: `${n > 1 ? `Deny all ${n}` : 'Deny'} (suggested)`, cls: 'primary', run: deny }), h(Act, { label: n > 1 ? `Allow all ${n}` : 'Allow', cls: 'quiet', run: allow })]
+      : [h(Act, { label: `${n > 1 ? `Allow all ${n}` : 'Allow'}${suggest === 'allow' ? ' (suggested)' : ''}`, cls: risky ? 'deny' : 'allow', run: allow }), h(Act, { label: n > 1 ? `Deny all ${n}` : 'Deny', cls: risky ? 'danger-fill' : 'deny', run: deny })])),
+    h('details', { class: 'fold' }, h('summary', {}, 'All the terms'),
+      r.note ? h('p', { class: 'note' }, h('b', {}, 'Their note, in their words (not checked): '), `“${r.note}”`) : null,
+      h('dl', { class: 'facts' },
+        ...([['Purpose', r.purpose], ['Fields', h('span', {}, ...r.fields.map((f) => h('span', { class: 'chip' }, nice(f))))], ['Keeps it', r.retention === 'none' ? 'no, deleted after the study' : `yes, for ${duration(r.retention)}`], ['Pays', r.price ? money$(r.price.amount, r.price.currency) : `$${r.priceUsd}`], ['Access', 'for 48 hours; you can take it back']] as [string, Child][])
+          .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v))))));
 }
 
 // ---- Keys: who you've said yes to ----
@@ -1019,6 +1063,20 @@ function Keys() {
         { active: `until ${dayTime(x.until)} (${hoursLeft(x.until)} left)`, withdrawn: x.withdrawnAt ? `you took it back on ${dayTime(x.withdrawnAt)}` : 'you took it back', used: 'used once, can’t be used again', ended: `ended ${dayTime(x.until)}` }[x.status],
       ].join(' · '))),
     x.status === 'active' ? takeBack(x.id) : h('span', { class: `chip ${x.status === 'withdrawn' ? '' : 'neutral'}` }, { withdrawn: 'taken back', used: 'used', ended: 'ended' }[x.status]));
+  // The same agent, for the same thing, many times: one row, with each one a tap away (Fable: 134 near-identical cards).
+  const groupsOf = (xs: Consent[]) => { const m = new Map<string, Consent[]>(); for (const x of xs) { const k = `${x.visitor}|${x.purposeLabel}|${x.fields.map((f) => f.name).join(',')}`; m.set(k, [...(m.get(k) ?? []), x]); } return [...m.values()]; };
+  const groupRow = (g: Consent[]) => {
+    const x = g[0]!, active = g.filter((y) => y.status === 'active');
+    return h('li', { key: `g-${x.id}` },
+      h('div', {},
+        h('div', { class: 'r-title' }, `${x.visitor}, for ${x.purposeLabel}`),
+        h('div', { style: 'margin-top:6px' }, ...x.fields.map((f) => h('span', { class: 'chip' }, f.label))),
+        h('div', { class: 'r-meta' }, `${g.length} yeses · ${active.length === g.length ? 'all still open' : active.length ? `${active.length} still open` : 'none open now'}`),
+        h('details', { class: 'fold' }, h('summary', {}, 'Each one'), h(Paged, { items: g, cls: 'rows compact', render: (y: Consent) => h('li', { key: y.id },
+          h('span', { class: 'r-meta' }, `${dayTime(y.given)} · ${{ active: `until ${dayTime(y.until)}`, withdrawn: 'taken back', used: 'used', ended: 'ended' }[y.status]}`),
+          y.status === 'active' ? takeBack(y.id) : null) }))),
+      active.length ? h(Act, { label: active.length > 1 ? `Take all ${active.length} back` : 'Take it back', cls: 'danger', run: async () => { for (const y of active) await call({ kind: 'revoke', revoke: y.id }); } }) : h('span', { class: 'chip neutral' }, 'none open'));
+  };
   // Keys with no consent record beside them (cut before records were kept): still yours to revoke.
   const recorded = new Set(consents.map((x) => x.id));
   const loose = v.data.keys.filter((k) => !recorded.has(k.id));
@@ -1026,7 +1084,7 @@ function Keys() {
   return h('div', {},
     h(StandingYeses, {}),
     h('p', { class: 'lede' }, 'Everyone you’ve said yes to. Take one back any time: they’re cut off on their next request.'),
-    consents.length ? h(Paged, { items: consents, render: row, cls: 'rows' }) : h('p', { class: 'empty' }, 'You haven’t said yes to anyone yet.'),
+    consents.length ? h(Paged, { items: groupsOf(consents), size: 10, cls: 'rows', render: (g: Consent[]) => g.length === 1 ? row(g[0]!) : groupRow(g) }) : h('p', { class: 'empty' }, 'You haven’t said yes to anyone yet.'),
     loose.length ? h('div', {}, h('h2', {}, 'Other keys'), h('ul', { class: 'rows' }, ...loose.map((k) => h('li', { key: k.id },
       h('div', {}, h('div', { class: 'r-title' }, `${k.visitor} · ${k.purpose}`), h('div', { class: 'r-meta' }, `${k.fields.map(nice).join(', ')} · ${hoursLeft(k.until)} left · ${k.authorizedBy}`)),
       takeBack(k.id, 'Revoke'))))) : null,
@@ -1156,7 +1214,7 @@ function RuleCard({ r, i, all, fields, purposes, redraw }: { r: Rule; i: number;
       h('div', { class: 'field' }, h('label', {}, 'When the purpose is'), h('select', { value: String(r.match.purpose ?? ''), onChange: (e: Event) => set('purpose', val(e)) },
         h('option', { value: '' }, 'any purpose'), ...purposes.map((p) => h('option', { value: p.name }, p.within ? `  ${p.label} (part of ${p.within})` : p.label)))),
       h('div', { class: 'field' }, h('label', {}, 'From'), h('input', { type: 'text', value: String(r.match.requester ?? ''), placeholder: 'any agent, or e.g. gp.example', onChange: (e: Event) => set('requester', val(e).trim()) })),
-      h('div', { class: 'field' }, h('label', {}, 'Paying less than ($)'), h('input', { type: 'number', min: 0.5, step: 0.5, value: r.match.price_below ?? '', placeholder: 'any price', onChange: (e: Event) => set('price_below', val(e) === '' ? undefined : Number(val(e))) })),
+      h('div', { class: 'field' }, h('label', {}, 'When it pays less than ($)'), h('input', { type: 'number', min: 0.5, step: 0.5, value: r.match.price_below ?? '', placeholder: 'any amount', onChange: (e: Event) => set('price_below', val(e) === '' ? undefined : Number(val(e))) })),
       h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Only if'),
         h(Toggle, { label: 'an ethics body I trust approved it', checked: !!r.match.ethics_approved, onChange: (v: boolean) => set('ethics_approved', v || undefined) }),
         h(Toggle, { label: 'an auditor I trust certified the study', checked: !!r.match.audit_certified, onChange: (v: boolean) => set('audit_certified', v || undefined) }),
@@ -1188,10 +1246,10 @@ function DoorCard({ d, done }: { d: DoorState; done: () => void }) {
     // A handle: people tell their own AI "ping stan", and it finds this door. Unique on this Lake.
     h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Handle: people ask their AI to "ping" it'), h('input', { ref: handle, type: 'text', maxlength: 30, autocapitalize: 'none', autocomplete: 'off', spellcheck: false, placeholder: 'e.g. stan', defaultValue: d.handle ?? '', onInput: (e: Event) => { const t = e.target as HTMLInputElement; t.value = t.value.toLowerCase().replace(/[^a-z0-9-]/g, ''); } })),
     h('label', { class: 'field' }, h('span', { class: 'lab' }, 'Name (optional)'), h('input', { ref: name, type: 'text', maxlength: 60, placeholder: 'Optional: the handle is enough', defaultValue: d.name ?? '' })),
-    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'One line on your door (optional)'), h('input', { ref: about, type: 'text', maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', defaultValue: d.about ?? '' })),
-    h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Save and open my door', cls: 'primary', run: save(true) }),
-      d.open ? h(Act, { label: 'Close my door', cls: 'quiet', confirm: 'Tap again: nobody can write to you', run: save(false) }) : null,
-      d.open ? h('a', { class: 'btn small quiet', href: d.address, target: '_blank', rel: 'noopener' }, 'See it as others do') : null));
+    h('label', { class: 'field' }, h('span', { class: 'lab' }, 'A line people see when they write to you (optional)'), h('input', { ref: about, type: 'text', maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', defaultValue: d.about ?? '' })),
+    h('div', { class: 'row' }, h(Act, { label: d.open ? 'Save' : 'Save, and let people write to me', cls: 'primary', run: save(true) }),
+      d.open ? h('a', { class: 'btn small quiet', href: d.address, target: '_blank', rel: 'noopener' }, 'Open my public page ↗') : null),
+    d.open ? h('div', { class: 'row danger-row' }, h(Act, { label: 'Stop people writing to me', cls: 'danger quiet', confirm: 'Tap again: nobody can write to you', run: save(false) })) : null);
 }
 
 /** Bring someone onto the Lake: a one-time link to a house of their own (a hosted Lake gives each owner a few). */
@@ -1276,7 +1334,6 @@ function FreeCard({ f, av }: { f: FreeState; av?: { tz: string; free: string[]; 
   };
   const zones = ZONES.includes(tz) ? ZONES : [tz, ...ZONES];
   return h('section', { class: 'block', id: 'free' },
-    h('h2', {}, 'When you\'re free to meet'),
     h('p', { class: 'muted' }, f.set ? `Your agent offers these times to people who want to meet you, around your agenda: ${f.slots.length} free in the next two weeks.` : 'Say when you\'re usually free, and your agent can offer people a time without asking you first.'),
     ...wins.map((w, i) => h('div', { class: 'window', key: i },
       h('div', { class: 'days', role: 'group', 'aria-label': 'Days' }, ...WEEK.map((d) => h('button', {
@@ -1422,7 +1479,7 @@ function Visitors() {
   const junk = v.data.filter((a) => a.agent.startsWith('key:') && a.blocked && !a.knocks);
   const row = (a: (typeof v.data)[number]) => h('li', { key: a.agent },
     h('div', {}, h('div', { class: 'r-title' }, a.agent.replace(/^agent:/, '').replace(/^key:/, 'unverified key ')),
-      h('div', { class: 'r-meta' }, `${a.knocks} knock${a.knocks === 1 ? '' : 's'} · last ${time(a.last)}${a.lastDecision ? ` · you said ${a.lastDecision}` : ''}${a.blocked ? ` · ${a.blocked} blocked` : ''}`)),
+      h('div', { class: 'r-meta' }, `${a.knocks} knock${a.knocks === 1 ? '' : 's'} · last ${time(a.last)}${a.lastDecision ? ` · your house said ${a.lastDecision === 'join' ? 'yes' : a.lastDecision === 'decline' ? 'no' : a.lastDecision === 'ask' ? '"ask me"' : a.lastDecision}` : ''}${a.blocked ? ` · ${a.blocked} blocked` : ''}`)),
     h('div', { class: 'r-meta' }, a.reputation === null ? (a.blocked ? 'blocked' : '') : h('span', {}, `reputation ${a.reputation}`, h('span', { class: 'rep' }, h('i', { style: `width:${Math.round(a.reputation * 100)}%` })))));
   const real = v.data.filter((a) => !junk.includes(a));
   return h('div', {},
@@ -1600,7 +1657,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       h('div', { class: 'item-foot' }, h(Act, { label: 'Off duty', cls: 'danger', confirm: 'Tap again: it stops now', run: () => call({ kind: 'panel.duty.off', kid: d.kid }) })));
   })));
   const flip = (k: string, on: boolean) => setKinds(on ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k));
-  const intro = h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know and chats you hand it, bookings in your free hours. Never money. Anything new waits for you.');
+  const intro = h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know and chats you hand it, bookings in your free hours. Never money. Anything new waits for you. It runs on your computer, with your own AI app: choose what it may do, then copy the command and paste it there.');
   if (!setup) return h('section', { class: 'block duty' }, h('div', { class: 'item-head' }, head, h('span', { class: 'chip' }, 'Off')), intro,
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onClick: () => setSetup(true) }, 'Set up AI on duty')));
   return h('section', { class: 'block duty' }, head, intro, h('div', {},
@@ -1615,7 +1672,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       h('label', { class: 'inline' }, 'At most ', h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 50, value: cap, class: 'days-input', 'aria-label': 'Most things a night', onInput: (e: Event) => setCap(Number((e.target as HTMLInputElement).value)) }), ' things a night')),
     h('div', { class: 'row' },
       h('label', { class: 'inline' }, 'For ', h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 31, value: days, class: 'days-input', 'aria-label': 'Days on duty', onInput: (e: Event) => setDays(Number((e.target as HTMLInputElement).value)) }), ' days')),
-    h('div', { class: 'row' }, h(Act, { label: 'Sign and get a code', cls: 'primary', run: async () => {
+    h('div', { class: 'row' }, h(Act, { label: 'Get the command for my computer', cls: 'primary', run: async () => {
       if (!kinds.length) throw new Error('Pick at least one thing it may do.');
       if (!(cap >= 1 && cap <= 50)) throw new Error('From 1 to 50 things a night.');
       if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
@@ -1640,8 +1697,9 @@ function dutyLine(e: DutyEntry): string {
 function WhileYouSlept() {
   const log = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const all = log.data?.entries ?? [];
-  if (!all.length) return null;
-  // In the order it happened, like a night told in the morning. Its notes to you are under Needs you, so not again here.
+  // Always a line on the night, even an empty one (Fable: "did it run last night?" had no answer).
+  if (!all.length) return log.data ? h('section', { class: 'block slept' }, h('h2', {}, 'While you were away'), h('p', { class: 'empty' }, (log.data.duties ?? []).some(dutyLive) ? 'Nothing came in for it to handle.' : 'Your AI wasn\'t on duty, so nothing was handled for you.')) : null;
+  // In the order it happened, like a night told in the morning. Its notes to you are under Requests, so not again here.
   const done = all.filter((e) => !e.refused && e.action !== 'note'), stopped = all.filter((e) => e.refused);
   const sum = (log.data?.duties ?? []).reduce((t, d) => ({ handled: t.handled + d.summary.handled, waiting: t.waiting + d.summary.waiting, blocked: t.blocked + d.summary.blocked }), { handled: 0, waiting: 0, blocked: 0 });
   const row = (e: DutyEntry) => h('li', { key: e.id, class: `item${e.refused ? ' amber' : ''}` },
@@ -1650,7 +1708,7 @@ function WhileYouSlept() {
         e.reply !== undefined || e.receipt ? h('details', { class: 'receipt' }, h('summary', {}, 'Receipt'), h('p', { class: 'muted' }, receiptWords(e)), h('pre', { class: 'json' }, typeof (e.reply ?? e.receipt) === 'string' ? String(e.reply ?? e.receipt) : JSON.stringify(e.reply, null, 1))) : h('span', {}),
         e.undo ? (e.undone ? h('span', { class: 'chip' }, 'Undone') : h(Act, { label: 'Undo', cls: 'quiet', run: () => call({ kind: 'panel.duty.undo', entry: e.id }) })) : null) : null);
   return h('section', { class: 'block slept' },
-    h('h2', {}, 'While you slept'),
+    h('h2', {}, 'While you were away'),
     h('dl', { class: 'tiles slept-tiles' },
       h('div', { class: 'tile mint' }, h('dt', {}, 'Handled'), h('dd', {}, String(sum.handled))),
       h('div', { class: 'tile' }, h('dt', {}, 'Waiting'), h('dd', {}, String(sum.waiting))),
@@ -1740,7 +1798,7 @@ function DataTab() {
           .map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, v)))))))),
     h('h2', {}, 'What it says about you'),
     h('ul', { class: 'items' }, ...[...by].map(([label, cs]) => h('li', { key: label, class: 'item' }, h('div', { class: 'item-title' }, label),
-      h('div', { class: 'row' }, ...cs.map((c) => h('span', { class: 'chip' }, c.value, c.observedAt ? ` · ${new Date(c.observedAt).toLocaleDateString()}` : '')))))),
+      h('div', { class: 'row' }, ...cs.map((c) => h('span', { class: 'chip' }, c.value, c.observedAt ? ` · ${new Date(c.observedAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}` : '')))))),
     h('details', { class: 'fold' }, h('summary', {}, 'Folders in your pod'),
       h('ul', { class: 'rows' }, ...Object.entries(d.data.folders).map(([f, n]) => h('li', { key: f }, h('div', { class: 'r-title' }, `/${f}`), h('span', { class: 'count' }, `${n} item${n === 1 ? '' : 's'}`))))));
 }
@@ -1805,7 +1863,7 @@ function YourKey() {
         h('p', {}, h('code', { class: 'recovery' }, code)),
         h('div', { class: 'row' }, h(CopyButton, { text: code }), h('button', { class: 'btn small quiet', type: 'button', onClick: () => setCode(null) }, 'I\'ve written it down')))
         : h('div', {},
-          h('p', { class: 'muted' }, k.data?.recovery ? `You made one on ${new Date(k.data.recovery.at).toLocaleDateString()}. Lost it? Make a new one: the old one stops working.` : 'If you lose this device, a recovery code makes another one your key.'),
+          h('p', { class: 'muted' }, k.data?.recovery ? `You made one on ${new Date(k.data.recovery.at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}. Lost it? Make a new one: the old one stops working.` : 'If you lose this device, a recovery code makes another one your key.'),
           h(Act, { label: k.data?.recovery ? 'Make a new recovery code' : 'Make a recovery code', cls: k.data?.recovery ? '' : 'primary', run: async () => setCode((await call<{ code: string }>({ kind: 'panel.recovery.make' })).code) }))),
     h('section', { class: 'block' }, h('h2', {}, 'Move to another device'),
       link ? h('div', { class: 'address' },
@@ -1817,9 +1875,7 @@ function YourKey() {
           const url = `${location.origin}${location.pathname}${r.hash}`;
           setLink({ url, until: r.until, qr: await QRCode.toDataURL(url, { margin: 1, width: 480 }) });
         } })),
-    h('section', { class: 'block' }, h('h2', {}, 'This device'),
-      h('p', { class: 'muted' }, 'On the sandbox, whoever runs it can also give you a new pairing link.'),
-      h(SignOut, { cls: 'btn small danger' })));
+    h('p', { class: 'muted' }, 'On the sandbox, whoever runs it can also give you a new pairing link.'));
 }
 
 function App() {
@@ -1837,12 +1893,15 @@ function App() {
   const [hash, setHash] = useState(location.hash);
   // Where a page under Settings or Chats was opened from, for its way back.
   const from = useRef<Tab>('settings');
-  const go = (t: Tab) => { if (MAIN.includes(t)) from.current = t; else if (MAIN.includes(tab)) from.current = tab; setTab(t); if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`); setHash(location.hash); scrollTo(0, 0); };
+  const go = (t: Tab) => { if (MAIN.includes(t)) from.current = t; else if (MAIN.includes(tab)) from.current = SETTINGS_PAGES.has(t) ? 'settings' : tab; setTab(t); if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`); setHash(location.hash); scrollTo(0, 0); };
   useEffect(() => { const f = () => { setTab(tabFromHash()); setHash(location.hash); scrollTo(0, 0); }; addEventListener('hashchange', f); addEventListener('popstate', f); return () => { removeEventListener('hashchange', f); removeEventListener('popstate', f); }; }, []);
   void hash;
   // Opened from a notification: say what it was about, at the top, once.
   const [notified, setNotified] = useState(() => new URLSearchParams(location.search).get('n') ?? '');
   useEffect(() => { if (notified) history.replaceState(null, '', location.pathname + location.hash); }, []);
+  // It said what the notification was about; once you move on, it goes (Fable: it followed to every screen).
+  const firstHash = useRef(location.hash);
+  useEffect(() => { if (notified && hash !== firstHash.current) setNotified(''); }, [hash, tab]);
   // The notification helper is registered on every open, so a phone picks up a new one (8 Nov: it kept the first forever).
   useEffect(() => { try { if ('serviceWorker' in navigator && 'Notification' in window && Notification.permission === 'granted') void navigator.serviceWorker.register('./owner-sw.js', { scope: './' }).then((r) => r.update()).catch(() => {}); } catch { /* not supported */ } }, []);
   // Pull down at the top to refresh, as phone apps do (8 Nov: a Home Screen app has no reload button).
@@ -1892,13 +1951,13 @@ function App() {
   return h(Version.Provider, { value: { version, bump } },
     h('div', { class: 'shell' },
       h('aside', { class: 'side' }, h('div', { class: 'brand' }, h('span', { class: 'sq' }), 'Your house'),
-        h(Nav, { tab, go, pending: (list?.requests.length ?? 0) + ((list as { suggestions?: unknown[]; connects?: unknown[] } | null)?.suggestions?.length ?? 0) + ((list as { connects?: unknown[] } | null)?.connects?.length ?? 0), noOffers, unread: ((list as { notes?: { answered?: unknown }[] } | null)?.notes ?? []).filter((n) => !n.answered).length })),
+        h(Nav, { tab, go, from: from.current, pending: (list?.requests.length ?? 0) + ((list as { suggestions?: Note[] } | null)?.suggestions ?? []).filter(needsDecision).length + ((list as { connects?: unknown[] } | null)?.connects?.length ?? 0), noOffers, unread: unseen((list as { notes?: DoorNote[] } | null)?.notes ?? [], (list as { seen?: Record<string, string> } | null)?.seen ?? seenAt) })),
       h('main', {},
         notified ? h('div', { class: 'notified' }, h('span', {}, `Notification: ${notified}`), h('button', { type: 'button', class: 'btn small quiet', onClick: () => setNotified(''), 'aria-label': 'Close' }, '×')) : null,
         pull ? h('div', { class: 'pull', style: `height:${pull / 2}px` }, pull > 80 ? 'Release to refresh' : 'Pull to refresh') : null,
         // Each tab says what it is, as phone apps do; the dot says whether your house is live. Your handle heads Me.
         MAIN.includes(tab) ? h('header', { class: 'top' },
-          h('h1', {}, labelOf(tab), h('span', { class: `dot ${!ok ? 'down' : live === true ? 'live' : ''}`, title: !ok ? 'can\'t reach your house' : live === true ? `${name || 'your house'}: live` : 'reconnecting' }))) : null,
+          h('h1', {}, labelOf(tab), ok && live === true ? null : h('span', { class: `status-note ${!ok ? 'down' : ''}` }, !ok ? 'Can\'t reach your house' : 'Reconnecting…'))) : null,
         MAIN.includes(tab) ? null : h('button', { class: 'back', type: 'button', onClick: () => go(from.current) }, `‹ ${labelOf(from.current)}`),
         MAIN.includes(tab) ? null : h('h2', { class: 'page-title' }, labelOf(tab)),
         h('section', { id: 'view' }, h(VIEWS[tab], { key: tab, go })))));

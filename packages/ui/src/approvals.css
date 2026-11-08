@@ -421,3 +421,7 @@ ul.chats.wants { margin-bottom: 8px; border-bottom: 1px solid var(--line); }
 .item.offer .offer-total { font-size: 18px; }
 .item.offer.bought { border-color: var(--mint); }
 .want-view .block { margin-top: 14px; }
+/* The house's connection, said only when something is wrong. */
+.status-note { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 10px; vertical-align: middle; }
+.status-note.down { color: var(--threat); }
+.danger-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }

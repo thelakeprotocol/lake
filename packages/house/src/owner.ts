@@ -268,6 +268,9 @@ export class OwnerDesk {
   chatModes: Record<string, 'ai' | 'me'> = {};
   private buyDrafts = new Map<string, { want: string; offer: string; draft: ReturnType<typeof purchaseDraft> }>();
   private saveChatModes = () => writeFile(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes)).catch(() => {});
+  /** How far the owner has read each conversation (the newest message's time when they last opened it), on every device. */
+  chatSeen: Record<string, string> = {};
+  private saveChatSeen = () => writeFile(join(this.o.dataDir, 'chat-seen.json'), JSON.stringify(this.chatSeen)).catch(() => {});
   standingUsed(jkt: string, purpose: string) {
     const k = `${jkt}|${purpose}`;
     this.standingUses.set(k, (this.standingUses.get(k) ?? 0) + 1);
@@ -427,6 +430,7 @@ export class OwnerDesk {
     this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
     this.circleRules = JSON.parse(await readFile(join(this.o.dataDir, 'circle-rules.json'), 'utf8').catch(() => '[]'));
     this.chatModes = JSON.parse(await readFile(join(this.o.dataDir, 'chat-modes.json'), 'utf8').catch(() => '{}'));
+    this.chatSeen = JSON.parse(await readFile(join(this.o.dataDir, 'chat-seen.json'), 'utf8').catch(() => '{}'));
     this.suggestions = JSON.parse(await readFile(join(this.o.dataDir, 'suggestions.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
@@ -610,7 +614,7 @@ export class OwnerDesk {
   /** Tell the owner's phones, at most once every two minutes for each kind of thing. */
   notifyOwner(tag: string, body: string, url?: string) {
     // Where a tap on it opens, and what it said (8 Nov: a tap opened the app and nothing said what the push was about).
-    const where = url ?? (tag === 'request' ? './#requests' : tag === 'test' ? './#notify' : tag.startsWith('circle') ? './#me' : tag === 'duty' ? './#myagent' : './#needs');
+    const where = url ?? (tag === 'request' ? './#needs' : tag === 'test' ? './#notify' : tag.startsWith('circle') ? './#me' : tag === 'duty' ? './#myagent' : './#needs');
     const [path, hash = ''] = where.split('#');
     url = `${path}?n=${encodeURIComponent(body)}${hash ? `#${hash}` : ''}`;
     void (async () => {
@@ -1710,6 +1714,7 @@ export class OwnerDesk {
           const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'note.reply', note: lakeNote.id, text, re: lakeNote.text.slice(0, 200) }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
           if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their agent didn't take it: ${JSON.stringify(sent?.problems ?? sent?.why ?? 'no answer')}` });
           lakeNote.answered = { text, by: 'you', at: new Date().toISOString() };
+          if (lakeNote.from.key && !this.contacts.has(lakeNote.from.key)) { this.contacts.set(lakeNote.from.key, { name: lakeNote.from.name.slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
           void this.saveNotes();
           this.touch();
           return void res.json({ ok: true });
@@ -1756,7 +1761,7 @@ export class OwnerDesk {
         return void res.json({ released: true });
       }
       const panel = this.o.panel;
-      if (panel && p.kind.startsWith('panel.')) {
+      if (panel && typeof p.kind === 'string' && p.kind.startsWith('panel.')) {
         const q = p as unknown as { text?: string; pack?: string; terms?: Record<string, string | number>; offer?: string };
         // A panel action that can't be done says why, instead of failing the request.
         const answer = await ({
@@ -1907,6 +1912,14 @@ export class OwnerDesk {
             return r;
           },
           // Who answers a conversation: the owner, or their AI on duty (by the sender's key).
+          // Read up to here: a badge counts only what came after (8 Nov: it counted every message never answered).
+          'panel.chat.seen': async () => {
+            const w = q as { key?: string; at?: string };
+            const key = String(w.key ?? '').slice(0, 300), at = String(w.at ?? '');
+            if (!key || !Number.isFinite(Date.parse(at))) return { error: 'chat.seen: { key, at }' };
+            if ((this.chatSeen[key] ?? '') < at) { this.chatSeen[key] = at; const keys = Object.keys(this.chatSeen); if (keys.length > 2000) delete this.chatSeen[keys[0]!]; await this.saveChatSeen(); }
+            return { ok: true };
+          },
           'panel.chat.mode': async () => {
             const w = q as { key?: string; mode?: string };
             const key = String(w.key ?? '');
@@ -2026,6 +2039,7 @@ export class OwnerDesk {
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
       wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
+      seen: forAssistant ? undefined : this.chatSeen,
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: (n.from.key ? this.chatModes[n.from.key] : undefined) ?? (known && !n.from.web ? 'ai' : 'me') }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),

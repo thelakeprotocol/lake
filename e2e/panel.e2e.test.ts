@@ -50,7 +50,7 @@ async function tidy() {
   expect(errors).toEqual([]);
 }
 // Five tabs (Chats, Requests, Me, My AI, Settings); everything else is a row under Settings (8 Nov).
-const RENAMED: Record<string, string> = { Home: 'Requests', Inbox: 'Requests', 'Needs you': 'Requests', Requests: 'Requests', 'Data requests': 'Data requests', 'My agent': 'My AI', Keys: 'Keys you gave', Data: 'Your data', 'Your key': 'Your key and recovery' };
+const RENAMED: Record<string, string> = { Home: 'Requests', Inbox: 'Requests', 'Needs you': 'Requests', Requests: 'Requests', 'Data requests': 'Requests', 'My agent': 'My AI', Keys: 'Who can see your data', Data: 'Your data', 'Your key': 'New or lost phone', Visitors: 'Who asked lately', 'Move house': 'Download everything', 'About your house': 'Activity', Offers: 'Offers for you' };
 const tab = async (name: string) => {
   const label = RENAMED[name] ?? name;
   const main = page.locator('#nav > button', { hasText: label });
@@ -395,8 +395,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.locator('.chathead .back').click();
       await page.locator('.modebar').getByRole('button', { name: 'Take over' }).click();
       await page.locator('.modebar', { hasText: 'You\'re replying' }).waitFor({ timeout: 6000 });
+      // Moving on, the notification's line goes by itself.
       await page.locator('.chathead .back').click();
-      await page.locator('.notified button').click();
+      await page.locator('.notified').waitFor({ state: 'detached', timeout: 5000 });
       // A link to a chat that's gone (cleared, say) shows the list, with the tab bar to go anywhere.
       await page.goto(`${house}/owner/#note=gone-for-good`);
       await page.locator('#nav').waitFor();
@@ -424,7 +425,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     for (let i = 0; i < 23; i++) await asAssistant({ kind: 'assistant.suggest', text: `Suggestion number ${i + 1}` });
     await page.getByText('Suggestion number 23').waitFor({ timeout: 5000 });
     const more = page.locator('.more-items').first();
-    await expect(more.textContent()).resolves.toMatch(/Show 10 more of 1\d/);
+    await expect(more.textContent()).resolves.toMatch(/^Show 10 more$/);
     await more.click();
     await expect(page.locator('.more-items').first().textContent()).resolves.toMatch(/Show \d+ more/);
     await tidy();
@@ -477,7 +478,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('opens every page under Settings, each with a way back, without an error or a page wider than the phone', async () => {
-    for (const name of ['Notifications', 'When you can meet', 'Rules', 'Data requests', 'Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house', 'About your house']) {
+    for (const name of ['Notifications', 'When you can meet', 'Rules', 'Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house', 'About your house']) {
       await tab(name);
       await page.waitForTimeout(600);
       expect(await page.locator('#view').textContent()).not.toMatch(/Couldn't reach your house/);
@@ -505,10 +506,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('says when the house can\'t be reached, and recovers when it can', async () => {
     await ctx.setOffline(true);
     await page.locator('#nav > button', { hasText: 'Me' }).click();
-    await page.locator('.dot.down').waitFor({ timeout: 5000 });
+    await page.locator('.status-note.down', { hasText: 'Can\'t reach your house' }).waitFor({ timeout: 5000 });
     await ctx.setOffline(false);
     await page.locator('#nav > button', { hasText: 'Chats' }).click();
-    await page.locator('.dot.live').waitFor({ timeout: 10_000 });
+    await page.locator('.status-note').waitFor({ state: 'detached', timeout: 10_000 });
     await tidy();
   });
 
@@ -750,7 +751,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(again.error).toMatch(/doesn't match/);
     // And moves to a third device with a one-use link.
     await phone2.locator('#nav > button', { hasText: 'Settings' }).click();
-    await phone2.locator('ul.setrows .rowlink', { hasText: 'Your key and recovery' }).click();
+    await phone2.locator('ul.setrows .rowlink', { hasText: 'New or lost phone' }).click();
     await phone2.getByRole('button', { name: 'Make a pairing link' }).click();
     const link = (await phone2.locator('.address code').textContent())!;
     const ctx3 = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -845,7 +846,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await card.getByLabel('On duty until').fill(to);
     expect(await card.getByLabel('Reply to people you already know').isChecked()).toBe(true);
     expect(await card.getByLabel('Book times in your free hours').isChecked()).toBe(true);
-    await card.getByRole('button', { name: 'Sign and get a code' }).click();
+    await card.getByRole('button', { name: 'Get the command for my computer' }).click();
     const box = card.locator('textarea.copybox');
     await box.waitFor({ timeout: 10_000 });
     const cmd = await box.inputValue();
@@ -873,7 +874,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Needs you');
     await page.locator('.pin', { hasText: 'Your AI handled 2 things while you were away' }).click();
     const slept = page.locator('section.slept');
-    await slept.waitFor({ timeout: 10_000 });
+    await slept.locator('.slept-tiles').waitFor({ timeout: 10_000 });
     expect(await slept.locator('.slept-tiles dd').allTextContents()).toEqual(['2', '0', '0']);
     await slept.getByText('Replied to Sam\'s AI: Yes, Monday works.').waitFor();
     await slept.locator('.slept-stopped summary', { hasText: 'Stopped: 1 thing it may not do' }).click();
@@ -898,7 +899,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Off duty: back to Set up.
     await card.getByRole('button', { name: 'Set up AI on duty' }).waitFor({ timeout: 10_000 });
     await card.getByRole('button', { name: 'Set up AI on duty' }).click();
-    await card.getByRole('button', { name: 'Sign and get a code' }).waitFor({ timeout: 10_000 });
+    await card.getByRole('button', { name: 'Get the command for my computer' }).waitFor({ timeout: 10_000 });
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
     await tidy();
   });
