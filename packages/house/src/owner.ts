@@ -693,6 +693,8 @@ export class OwnerDesk {
     if (!key) return undefined;
     const c = this.contacts.get(key);
     if (c) return `your human's side has written to ${c.name || 'it'} before`;
+    // Answered by the owner themselves, from their phone (before such answers were kept as contacts too).
+    if (this.notes.some((n) => n.from.key === key && n.answered?.by === 'you')) return 'your human has answered it before';
     const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
     return st ? `a standing yes names it (${st.domain})` : undefined;
   }

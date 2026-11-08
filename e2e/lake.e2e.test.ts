@@ -2788,7 +2788,8 @@ describe('the weekly shop, priced inside the house', () => {
     expect(await b0.call({ kind: 'panel.circle.call', tally: a, id: 'tight-a', need: 'a hand with boxes' })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/you owe 1 favour across your circles/)] });
     // Then b2 needs a lift, and nobody over the river drives either: b0 takes it. Two favours owed across two Lakes: square.
     await lift(bAt, 'street-b', b2, b0, 'The street over the river.');
-    const fav = async (at: string, id: string) => (await (await fetch(`${at}/p/${id}.json`)).json()).circle.favours;
+    // Read again until it has its favours (CI under load: the page answered before its circle had any, and the read threw).
+    const fav = async (at: string, id: string) => ((await (await fetch(`${at}/p/${id}.json`)).json())?.circle?.favours ?? {}) as { cleared?: number; signed?: number; [k: string]: unknown };
     await waitFor(async () => ((await fav(a, 'street-a')).cleared === 1 && (await fav(bAt, 'street-b')).cleared === 1 ? true : undefined));
     expect(await fav(bAt, 'street-b')).toMatchObject({ signed: 1, owed: 0, cleared: 1 });
     expect((await waitFor(async () => (await notes(b2)).find((x) => x.circle?.role === 'cleared' && /2 favours across 2 circles on 2 Lakes/.test(x.text))))!.text).toMatch(/Nobody paid anything/);

@@ -339,7 +339,7 @@ ul.chats li + li .chatrow { border-top: 1px solid var(--line); }
 .avatar.trust-lookalike { border-color: var(--threat); }
 .chatmain { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .chattop { display: flex; justify-content: space-between; gap: 8px; }
-.chattop b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chattop b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chattop time { color: var(--muted); font-size: 12.5px; flex: none; }
 .chatvia { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .chatlast { color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

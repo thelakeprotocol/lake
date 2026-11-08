@@ -262,7 +262,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('signs spending money for it, and the AI sees it', async () => {
     const spend = page.locator('.spend');
-    await spend.getByRole('button', { name: 'Give some' }).click();
+    await spend.getByRole('button', { name: 'Allow spending…' }).click();
     // Two plain fields: the total, and for how many days; the sentence says what will be signed.
     await spend.getByLabel('Amount').fill('100');
     await spend.getByLabel('Days it lasts').fill('7');
@@ -279,8 +279,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Stopped with two taps, and given back.
     await spend.getByRole('button', { name: 'Stop' }).click();
     await spend.getByRole('button', { name: /Tap again/ }).click();
-    await spend.getByText(/None\. It asks you/).waitFor({ timeout: 5000 });
-    await spend.getByRole('button', { name: 'Give some' }).click();
+    await spend.getByText(/Can spend: nothing\. It asks you/).waitFor({ timeout: 5000 });
+    await spend.getByRole('button', { name: 'Allow spending…' }).click();
     await spend.getByLabel('Amount').fill('500');
     await spend.getByRole('button', { name: 'Sign and give' }).click();
     await spend.locator('.spend-amount', { hasText: 'Up to $500' }).waitFor({ timeout: 5000 });
@@ -447,7 +447,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const now = await first.locator('.seg button[aria-pressed="true"]').textContent();
     await first.locator('.seg button', { hasText: now === 'Ask me' ? 'Join' : 'Ask me' }).click();
     await page.getByRole('button', { name: 'Save my rules' }).click();
-    await page.getByText('Saved. Your housekeeper uses these from now on.').waitFor();
+    await page.getByText('Saved. Your house answers by these from now on.').waitFor();
     await tidy();
   });
 

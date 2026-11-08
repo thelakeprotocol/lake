@@ -255,7 +255,7 @@ function NeedsTab({ go }: { go: (t: Tab) => void }) {
       // The morning, in one line; what it did, with receipts and Undo, is on My AI.
       handled ? pin('duty', `Your AI handled ${handled} thing${handled === 1 ? '' : 's'} while you were away`, 'myagent') : null) : null,
     needs.length ? h('section', { class: 'block' }, h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() })) : null,
-    waiting || answeredNow.length || handled || needs.length ? null : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'All clear.'),
+    waiting || answeredNow.length || handled || needs.length ? null : h('p', { class: 'empty' }, 'Nothing needs you. Your rules answered everything.'),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null);
 }
 
@@ -275,7 +275,7 @@ const chatsOf = (notes: DoorNote[]): Chat[] => {
     return {
       key, notes: sorted, name: f.as ?? agent, agent, vendor, forwarded, web: !!f.web,
       via: f.web ? 'from your door page' : forwarded ? 'passed on by your AI' : f.as ? `via ${agent}${vendor ? ` · ${vendor}` : ''}` : vendor ? `${vendor} agent` : 'AI agent',
-      trust: (last.known ? 'known' : last.lookalike ? 'lookalike' : 'new') as Chat['trust'], why: last.known_why,
+      trust: (last.known || ns.some((n) => n.answered?.by === 'you') ? 'known' : last.lookalike ? 'lookalike' : 'new') as Chat['trust'], why: last.known_why ?? (ns.some((n) => n.answered?.by === 'you') ? 'You\'ve answered them before.' : undefined),
       mode: last.mode ?? 'me', canMode: !!f.key && !f.web,
       last: answeredLast ? last.answered!.text : last.text, lastBy: (answeredLast ? (last.answered!.by === 'you' ? 'you' : 'ai') : '') as Chat['lastBy'],
       at: answeredLast && last.answered!.at ? last.answered!.at : last.at,
@@ -436,7 +436,8 @@ function WantView({ w }: { w: WantV }) {
     h('div', { class: 'chathead' },
       h('button', { class: 'back', type: 'button', onClick: leaveChat, 'aria-label': 'Back to Chats' }, '‹'),
       h('div', { class: 'chatwho' }, h('span', { class: 'avatar want' }, lens()), h('span', { class: 'chatmain' }, h('b', {}, w.want.name), h('span', { class: 'chatvia' }, 'What you\'re looking for')))),
-    h('section', { class: 'block wantspec' },
+    h(bought ? 'details' : 'section', { class: `block wantspec${bought ? ' fold' : ''}` },
+      bought ? h('summary', {}, 'What you asked for') : null,
       w.want.description ? h('p', { class: 'muted' }, w.want.description) : null,
       h('div', { class: 'chips' }, ...w.want.itemOffered.additionalProperty.map((p) => h('span', { class: 'chip', key: p.name }, `${p.name}: ${p.value}`))),
       h('p', { class: 'item-meta' }, [w.want.eligibleQuantity ? `${w.want.eligibleQuantity.value} wanted` : '', w.want.areaServed ? `To ${w.want.areaServed}` : '', bought ? '' : `Shops can offer until ${new Date(w.want.availabilityEnds).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`].filter(Boolean).join(' · ')),
@@ -471,7 +472,8 @@ function ChatInfo({ c, mode, setTo, onDuty, latest }: { c: Chat; mode: 'ai' | 'm
     f.key ? h('details', { class: 'fold' }, h('summary', {}, 'Show its key'), h('p', {}, h('code', {}, f.key))) : null,
     c.canMode ? h('section', { class: 'block' },
       h(Toggle, { label: 'Let my AI reply in this chat', checked: mode === 'ai', onChange: (v: boolean) => void setTo(v ? 'ai' : 'me').catch(() => {}) }),
-      h('p', { class: 'item-meta' }, mode === 'ai' ? `Your AI on duty answers ${c.name} for you${onDuty ? '' : ' (it isn\'t on duty now: set it up on My AI)'}. Each reply it sends says so. You can still write yourself.` : 'Only you answer this chat. Your AI leaves it alone.')) : null,
+      h('p', { class: 'item-meta' }, mode === 'ai' ? `Your AI on duty answers ${c.name} for you. Each reply it sends says so. You can still write yourself.` : 'Only you answer this chat. Your AI leaves it alone.'),
+      onDuty ? null : h('p', { class: 'item-meta amber-text' }, 'This needs AI on duty, which is off now: set it up on My AI.')) : null,
     h('ul', { class: 'setrows' },
       h('li', {}, h(Act, { label: 'Mute', cls: 'rowact', confirm: 'Tap again: their messages are turned away', run: async () => { await call({ kind: 'panel.note.mute', id: latest.id }); leaveChat(); } })),
       h('li', {}, h(Act, { label: 'Clear chat', cls: 'rowact danger', confirm: 'Tap again: the messages go', run: async () => { for (const n of c.notes) await call({ kind: 'panel.note.dismiss', id: n.id }); leaveChat(); } }))));
@@ -556,7 +558,7 @@ function AboutTab({ go }: { go: (t: Tab) => void }) {
       o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null),
     h('dl', { class: 'facts' },
       h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.data.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.data.claims} claims (${o.data.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.data.record.why}`)),
-      h('div', {}, h('dt', {}, 'Your AI'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: looks and suggests; you decide.` : 'None yet.')),
+      h('div', {}, h('dt', {}, 'Your AI'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: can suggest; you decide.` : 'None yet.')),
       h('div', {}, h('dt', {}, 'Reached'), h('dd', {}, o.data.relayed ? 'Through the Lake (your house is behind a router)' : 'Directly, at its own address')),
       h('div', {}, h('dt', {}, 'Identity'), h('dd', {}, h('code', {}, webId)))),
     h(PersonCard, { p: o.data.person }),
@@ -1004,7 +1006,7 @@ function RequestCard({ all }: { all: Request[] }) {
     answeredNow = [{ id: r.id, domain: r.visitor.domain, purpose: r.purpose, allowed: false }, ...answeredNow.filter((x) => x.id !== r.id)].slice(0, 3);
   };
   const advice = adviceOf(r.recommendation, !!r.warnings?.length);
-  const suggest = /^i'?d (deny|decline)|^deny/i.test(r.recommendation) ? 'deny' : /^i'?d (allow|join|say yes)|^allow/i.test(r.recommendation) ? 'allow' : '';
+  const suggest = /^i['’]?d (deny|decline)|^deny/i.test(r.recommendation) ? 'deny' : /^i['’]?d (allow|join|say yes)|^allow/i.test(r.recommendation) ? 'allow' : risky ? 'deny' : '';
   // What it wants and what your rules suggest first, then the buttons; the full terms a tap below (Fable: Allow and Deny
   // were below the fold, under a block of terms).
   return h('article', { class: risky ? 'req risky' : 'req' },
@@ -1116,7 +1118,7 @@ function RulesTab() {
   const changed = stringify(normalRules(r)) !== saved;
   const save = async () => {
     const res2 = await call<{ ok: boolean; error?: string }>({ kind: 'panel.rules.set', text: stringify(normalRules(r)) });
-    setMessage(res2.ok ? { ok: true, text: 'Saved. Your housekeeper uses these from now on.' } : { ok: false, text: res2.error ?? 'not saved' });
+    setMessage(res2.ok ? { ok: true, text: 'Saved. Your house answers by these from now on.' } : { ok: false, text: res2.error ?? 'not saved' });
     if (res2.ok) rulesDraft = null;
   };
   void door; void free;
@@ -1130,15 +1132,15 @@ function RulesTab() {
       h('div', { class: 'card' },
         h('div', { class: 'grid2' },
           h('div', { class: 'field' }, h('span', { class: 'lab' }, 'When no rule fits'), h(Seg, { value: r.default, onPick: (d: Decision) => { r.default = d; redraw(); } })),
-          h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Bargaining'), h(Toggle, { label: 'bargain together with neighbours (a bloc gets better terms)', checked: !!r.negotiation?.join_collectives, onChange: (v: boolean) => { r.negotiation = { ...(r.negotiation ?? {}), join_collectives: v }; redraw(); } })),
+          h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Bargaining'), h(Toggle, { label: 'bargain together with neighbours for better terms', checked: !!r.negotiation?.join_collectives, onChange: (v: boolean) => { r.negotiation = { ...(r.negotiation ?? {}), join_collectives: v }; redraw(); } })),
           h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Your house in public'), h(Toggle, { label: 'say what kinds of data my house holds (so agents with matching offers can find it)', checked: r.privacy?.show_packs !== false, onChange: (v: boolean) => { if (v) delete r.privacy; else r.privacy = { show_packs: false }; redraw(); } })),
-          h('div', { class: 'field' }, h('span', { class: 'lab' }, 'My interests (for guilds)'), h(Chips, { values: r.tags ?? [], placeholder: 'add, then Enter', onChange: (v: string[]) => { r.tags = v; redraw(); } })))),
-      h('h3', {}, 'Whose word counts'),
+          h('div', { class: 'field' }, h('span', { class: 'lab' }, 'Groups you\'d bargain with (your interests)'), h(Chips, { values: r.tags ?? [], placeholder: 'add, then Enter', onChange: (v: string[]) => { r.tags = v; redraw(); } })))),
+      h('details', { class: 'fold' }, h('summary', {}, 'Advanced: whose word counts'),
       h('div', { class: 'card' },
         h('p', { class: 'muted', style: 'margin-top:0' }, 'Approvals and signatures count only from these domains. Anyone else’s counts as none.'),
         h('div', { class: 'grid2' }, ...(['ethics', 'auditors', 'issuers', 'payments'] as const).map((k) =>
           h('div', { class: 'field' }, h('span', { class: 'lab' }, { ethics: 'Ethics bodies', auditors: 'Auditors', issuers: 'Record issuers', payments: 'Payments' }[k]),
-            h(Chips, { values: trust[k] ?? [], placeholder: 'domain, then Enter', onChange: (v: string[]) => { trust[k] = v; redraw(); } }))))),
+            h(Chips, { values: trust[k] ?? [], placeholder: 'domain, then Enter', onChange: (v: string[]) => { trust[k] = v; redraw(); } })))))),
       h('details', { style: 'margin-top:16px' }, h('summary', {}, 'See it as rules.yaml'), h('pre', {}, stringify(r)))),
     changed || message ? h('div', { class: 'savebar' },
       changed ? h(Act, { label: 'Save my rules', cls: 'primary', run: save }) : null,
@@ -1334,7 +1336,7 @@ function FreeCard({ f, av }: { f: FreeState; av?: { tz: string; free: string[]; 
   };
   const zones = ZONES.includes(tz) ? ZONES : [tz, ...ZONES];
   return h('section', { class: 'block', id: 'free' },
-    h('p', { class: 'muted' }, f.set ? `Your agent offers these times to people who want to meet you, around your agenda: ${f.slots.length} free in the next two weeks.` : 'Say when you\'re usually free, and your agent can offer people a time without asking you first.'),
+    h('p', { class: 'muted' }, f.set ? `Your AI offers these times to people who want to meet you, around your agenda: ${f.slots.length} free in the next two weeks.` : 'Say when you\'re usually free, and your AI can offer people a time without asking you first.'),
     ...wins.map((w, i) => h('div', { class: 'window', key: i },
       h('div', { class: 'days', role: 'group', 'aria-label': 'Days' }, ...WEEK.map((d) => h('button', {
         type: 'button', class: `day${w.days.includes(d) ? ' on' : ''}`, 'aria-pressed': w.days.includes(d),
@@ -1536,7 +1538,7 @@ function MyAgent() {
     h('p', { class: 'muted' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
       h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortName(a.label)), ((l) => h('span', { class: `chip${l.now ? ' ok' : ''}`, title: 'When it last used its key' }, l.text))(lastHere(a.seenAt))),
-      h('p', { class: 'item-meta' }, `Since ${time(a.addedAt)} · looks and suggests`),
+      h('p', { class: 'item-meta' }, `Connected since ${time(a.addedAt)} · can suggest, not decide`),
       a.waiting ? h('p', { class: 'item-text amber-text' }, waitingLine(a)) : null,
       // Its money in a box of its own, the agent's removal below a line: side by side, "Revoke" read as taking the money back.
       // An AI on duty never spends: no money box for it.
@@ -1567,7 +1569,7 @@ function Allowance({ a }: { a: Assistant }) {
         h('div', { class: 'spend-acts' },
           h('button', { class: 'btn small', type: 'button', onClick: () => setEditing(true) }, 'Change'),
           h(Act, { label: 'Stop', cls: 'quiet', confirm: 'Tap again: it can\'t spend', run: () => call({ kind: 'panel.allowance.revoke', kid: a.kid }) })))
-      : h('div', { class: 'spend-row' }, h('span', { class: 'r-meta' }, 'None. It asks you before paying for anything.'), h('button', { class: 'btn small', type: 'button', onClick: () => setEditing(true) }, 'Give some')));
+      : h('div', { class: 'spend-row' }, h('span', { class: 'r-meta' }, 'Can spend: nothing. It asks you before paying for anything.'), h('button', { class: 'btn small', type: 'button', onClick: () => setEditing(true) }, 'Allow spending…')));
 }
 
 /** Amount and how long, in taps: a few amounts and periods as chips, any other amount typed. Signed on this device. */
@@ -1660,7 +1662,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
   const intro = h('p', { class: 'muted' }, 'Your own AI handles things while you\'re away: replies to people you already know and chats you hand it, bookings in your free hours. Never money. Anything new waits for you. It runs on your computer, with your own AI app: choose what it may do, then copy the command and paste it there.');
   if (!setup) return h('section', { class: 'block duty' }, h('div', { class: 'item-head' }, head, h('span', { class: 'chip' }, 'Off')), intro,
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onClick: () => setSetup(true) }, 'Set up AI on duty')));
-  return h('section', { class: 'block duty' }, head, intro, h('div', {},
+  return h('section', { class: 'block duty' }, h('div', { class: 'item-head' }, head, h('span', { class: 'chip' }, 'Off')), intro, h('div', {},
     ...DUTY_KINDS.map(([k, label]) => h(Toggle, { key: k, label, checked: kinds.includes(k), onChange: (v: boolean) => flip(k, v) })),
     h('div', { class: 'times' },
       h('span', { class: 'muted' }, 'From'),
@@ -1680,7 +1682,7 @@ function DutyCard({ houseUrl, log }: { houseUrl: string; log?: DutyLog }) {
       const d = await call<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
       const r = await call<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: signCredential({ ...d.draft, validFrom: new Date().toISOString() }, loadKey()) });
       dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
-    } }))));
+    } }), h('button', { type: 'button', class: 'btn small quiet', onClick: () => setSetup(false) }, 'Not now'))));
 }
 
 /** One thing it did, said plainly: "Replied to Sam's AI: Yes, Monday works." */
@@ -1755,7 +1757,7 @@ function Money() {
       // Tap for the whole receipt: what, who, and where the money stands.
       h('details', {},
         h('summary', {},
-          h('div', {}, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} · ${forWhat(r)}`),
+          h('div', {}, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} · ${forWhat(r).replace(/^Study: /, '')}`),
             h('div', { class: 'r-meta' }, `from ${named(r.payerName, r.payer)}${r.via ? ` · sold by ${named(r.viaName, r.via)}` : ''} · ${when(r.at)}`)),
           h('span', { class: `chip ${status(r) === 'held' ? '' : 'share'}` }, status(r))),
         h('dl', { class: 'pay-detail' },
@@ -1772,7 +1774,7 @@ function Money() {
           h('dt', {}, 'Order'), h('dd', { class: 'r-meta' }, r.agreement),
           h('dt', {}, 'Receipt signed by'), h('dd', {}, who(r.from))))) })) : h('p', { class: 'empty' }, 'No payments yet.'),
     // What your own agent paid for you, under the allowance you signed: its receipts, handed back to your house.
-    m.data.spent?.length ? h('div', {}, h('h2', {}, 'Spent by your agent'), h('ul', { class: 'rows' }, ...m.data.spent.map((r, i) => h('li', { key: i },
+    m.data.spent?.length ? h('div', {}, h('h2', { class: 'section-title' }, 'What you spent'), h('ul', { class: 'rows' }, ...m.data.spent.map((r, i) => h('li', { key: i },
       pledgeOf(r.agreement)
         // What you put into a pledge: held until its deadline, then paid on if it filled, or back to you.
         ? h('div', { title: r.agreement }, h('div', { class: 'r-title' }, `${money$(r.amount, r.currency)} for the pledge "${pledgeOf(r.agreement)!.id}"`), h('div', { class: 'r-meta' }, `${when(r.at)} · ${r.settlement === 'held' ? 'held until its deadline: paid on only if it fills' : r.settlement === 'voided' ? (r.how === 'pledge_withdrawn' ? 'back to you: you took it back' : 'back to you: it didn\'t fill') : `paid to ${who(r.to)}: it filled`}`))
