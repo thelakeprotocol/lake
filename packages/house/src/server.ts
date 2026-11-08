@@ -5,7 +5,7 @@ import type { Housekeeper } from './housekeeper.js';
 import type { OwnerDesk } from './owner.js';
 
 /** The page a person sees at a house's address: its public door, if its owner opened one, and how to reach them. */
-export interface DoorPage { door: () => { name?: string; about?: string } | undefined; a2a: () => string; connector?: string; joinUrl?: string }
+export interface DoorPage { door: () => { name?: string; about?: string; handle?: string } | undefined; a2a: () => string; connector?: string; joinUrl?: string }
 
 /**
  * A house is reached by agents; a person or an AI who opens its address learns how (SPEC §9.0). What you need first comes
@@ -19,16 +19,17 @@ function doorPage(p: DoorPage): string {
   const title = d?.name ? `${d.name}` : 'A house on the Lake';
   const own = `<details><summary>A house of your own</summary><p class="small">Your data in your own house, your own rules at its door, your AI doing the chores.${p.joinUrl ? ` <a href="${esc(p.joinUrl)}">Build yours</a>.` : ''}</p></details>`;
   if (!d) return page(title, `<p class="eyebrow"><i></i>A house on the Lake</p><h1>${esc(title)}</h1><p class="lead">Its owner hasn't opened its door, so it says nothing about who lives here.</p>${own}`);
-  const say = `Knock on the door at ${base} and `;
+  // With a handle, the line to say is the handle (8 Nov: the page led with a long address even for a house people ping).
+  const say = d.handle ? `Ping ${d.handle} on the Lake and ` : `Knock on the door at ${base} and `;
   const note = `${base}/note?text=…&from=…`;
   return page(d.name ? `${title} · on the Lake` : title, `<p class="eyebrow"><i></i>A house on the Lake</p>
 <h1>${d.name ? esc(d.name) : 'Knock, knock'}</h1>
 <p class="lead">${d.about ? esc(d.about) : 'Whoever lives here has an AI at the door. Send yours over: it answers in seconds, and can offer you a time.'}</p>
 <section class="card"><h2>Send your AI over</h2>
 <p class="small" style="margin:0 0 10px">Paste this into any AI chat, and finish the sentence:</p>
-<div class="say" id="say">Knock on the door at <code>${esc(base)}</code> and <span class="ghost">ask if they're up for a coffee next week</span></div>
+<div class="say" id="say">${d.handle ? `Ping <code>${esc(d.handle)}</code> on the Lake` : `Knock on the door at <code>${esc(base)}</code>`} and <span class="ghost">ask if they're up for a coffee next week</span></div>
 <div class="row"><button class="btn primary" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(say))}).then(()=>{this.textContent='Copied ✓'})">Copy</button></div>
-<p class="small" style="margin:12px 0 0">Or: say thanks for the talk · ask them to look at your project · find a time to catch up.</p></section>
+<p class="small" style="margin:12px 0 0">Or: say thanks for the talk · ask them to look at your project · find a time to catch up.${d.handle ? ` Your AI needs the Lake connector${p.connector ? ` (<code>${esc(p.connector)}</code>)` : ''}; without it, give it this address instead: <code>${esc(base)}</code>.` : ''}</p></section>
 <p class="small">An AI reading this? Open <code>${esc(note)}</code>, or <code>lake_knock</code> this address with the Lake connector. Can't open a link you write yourself (ChatGPT can't)? Give your human <code>${esc(base)}/note/new?text=…&amp;from=…</code> to tap: it opens your note filled in, and they send it. Details under <a href="#for-ai-agents">For AI agents</a>.</p>
 <details id="yourself"><summary>Leave a note yourself</summary><form method="post" action="${esc(base)}/note">
 <p class="small" style="margin:8px 0">For when your AI can't send it: say who you are and what you'd like. Their answer appears at the link you get next.</p>

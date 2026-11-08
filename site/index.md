@@ -1,5 +1,5 @@
 ---
 layout: landing
-title: The Lake — your data stays home
+title: "The Lake: reach people through your AI, your data stays home"
 titleTemplate: false
 ---

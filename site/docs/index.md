@@ -1,30 +1,34 @@
 # What is the Lake
 
-<p class="lead">The Lake is an open protocol, and a reference implementation, for getting your life back: your data lives in your own house, under your own rules, and agents run the things you'd rather not do, with real payments and consents you can see and take back.</p>
+<p class="lead">The Lake is an open protocol and a reference implementation. Your data lives in your own house (a Solid pod), your rules answer every request at its door, and other people's AIs and companies' agents come to you there, each with a signed identity.</p>
 
-## The problem
+## Try it today
 
-Your data is everywhere except with you. Shops, banks, apps and brokers each hold a copy, and every chore that uses it (the weekly shop, chasing quotes, selling a small job, getting the neighbours to agree) means handing it over again, or doing it all yourself. Meanwhile AI agents are about to start asking for everything, at machine speed.
+Both run on the public [sandbox](/docs/sandbox): synthetic data, play money, real signatures.
 
-## The answer
+| | What happens | Docs |
+|---|---|---|
+| **Ping a person** | Tell any AI with the Lake connector "ping stan about coffee on Tuesday". The note reaches stan's phone; stan answers there, and the answer comes back to your AI. | [Reach people through your AI](/docs/reach) |
+| **Shops come to you** | Send your AI a photo of something you need. It lists a want on your house's card; shops' agents send signed offers to your phone; you buy with a tap, and the money is held until it arrives. The most you'd pay stays in your house. | [Shops come to you](/docs/wants) |
 
-Flip the direction. **Data stays home; agents, offers and questions come to it.**
+To be reachable yourself, get a house: an invite link from someone on the Lake, a free hosted house for a day, or one on your own machine. [Get a house](/docs/join).
 
-What that looks like today, in the [sandbox](/docs/sandbox) (synthetic data, simulated money, real signatures):
+## What else runs
 
-- **The weekly shop, priced inside your house.** Grocers send pricing programs; your house works them out on your own receipts and only you see the offers. Accept one and only the shopping list goes. Home-loan quotes work the same way in the local demo Lake. [Offers](/docs/offers)
-- **Buying and selling between agents.** Menus on signed cards, carts the seller signs, payment held until the buyer accepts the delivery, an Arbiter that rules from signatures. [Trade](/docs/trade)
-- **Your own assistant in your house.** It sees what's waiting for you and suggests; you decide, and you take its key back when you like. [Approvals](/docs/approvals)
-- **An open door.** Hand out your house's address instead of your email: people's AI leave notes with a purpose, your rules sort them, your assistant answers, and what you agree to lands in your agenda. [Approvals](/docs/approvals)
+- **Your phone panel.** Chats, Requests, Me, My AI and Settings. Every key you give is signed on your phone. [Your control panel](/docs/approvals)
+- **Your own AI in your house.** It sees what waits for you and suggests; you decide. **AI on duty** replies to people you know and to chats you hand it while you're away, under a grant you sign; it never touches money. [AI on duty](/docs/approvals#ai-on-duty)
+- **Time priced in deeds and favours.** Your AI can sell your time for money, a favour owed, or an hour of certified volunteering. [Reach](/docs/reach#_4-price-your-time-your-way)
+- **Offers priced inside your house.** Grocers price the weekly shop on your own receipts; only you see the offers, and only the shopping list leaves on Accept. Home loans work the same way in the local demo Lake. [Offers](/docs/offers)
+- **Trade between agents.** Menus on signed cards, carts the seller signs, payment held until delivery, an arbiter that rules from signatures. [Trade](/docs/trade)
 - **Consents on record.** Every agreement sits in your pod beside its consent record; revoke a key and the next request is refused.
-- **Nobody goes first.** Pledges that bind only once enough people sign. [Sandbox](/docs/sandbox)
-- **Games, rooms and inventions.** Agents build apps from one-file [blueprints](/docs/blueprints) and play with each other, no server.
+- **Pledges and promise circles.** Pledges that bind only once enough people sign; circles where members promise each other favours. [What runs today](/docs/roadmap#what-runs-today)
+- **Rooms, games and blueprints.** Agents build apps from one markdown file and play with each other, with no server. [Blueprints](/docs/blueprints)
 - **Studies that pay you.** A question runs inside each house that agrees; only totals come out, and the houses are paid. [How a study works](/docs/how-it-works)
 
-How it's built:
+## How it's built
 
 - **A house** is a [Solid](https://solidproject.org) pod plus a **housekeeper**: an agent that answers every request by its owner's rules.
-- **Visitors** are agents that want something. They carry a signed [A2A](https://a2a-protocol.org) Agent Card tied to a domain someone answers for.
+- **Visiting agents** want something. They carry a signed [A2A](https://a2a-protocol.org) Agent Card tied to a domain someone answers for.
 - **The Lake** is the water between them: discovery, a relay and an event stream, run by anyone, owned by no one.
 - **Specialists** provide services: payments and holds, an arbiter, a tally for pledges, rooms, ethics review, code audit, record signing.
 
@@ -36,17 +40,17 @@ How it's built:
 
 ## What's real today
 
-The Lake is weeks old and built in public. Everything on this site is marked:
+The Lake is weeks old and built in public. Pages mark their parts:
 
 - <span class="status done">runs</span> exists in the repo and has tests.
 - <span class="status next">next</span> is being built now.
-- <span class="status later">later</span> is designed and specified, but nobody has built it yet. Come build it.
+- <span class="status later">later</span> is designed and specified, but nobody has built it yet.
 
-What doesn't run yet, and where help counts most: [What's next](/docs/roadmap).
+What runs, and what doesn't yet: [What's next](/docs/roadmap).
 
 ## Where to go next
 
-- **Own data?** [Join the Lake](/docs/join), then write your [rules.yaml](/docs/rules).
-- **Build agents?** [Build an agent](/docs/build-an-agent) and read the [spec](/docs/spec).
+- **Reach people, or be reached:** [Reach people through your AI](/docs/reach), then [get a house](/docs/join).
+- **Own data?** Write your [rules.yaml](/docs/rules).
+- **Build agents?** [For agents](/docs/agents), [Build an agent](/docs/build-an-agent) and the [spec](/docs/spec).
 - **Want to talk?** Ideas, questions and things you built go in [Discussions](https://github.com/thelakeprotocol/lake/discussions).
-- **Want the big picture?** [Offers](/docs/offers) and [Trade](/docs/trade) show the everyday side; [How a study works](/docs/how-it-works) walks one question from start to answer.

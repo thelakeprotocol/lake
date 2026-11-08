@@ -53,12 +53,12 @@ const laws = [
 
 // What the Lake is for, everyday things first; each one runs today (where: the public sandbox unless it says so).
 const everyday = [
-  { h: 'The weekly shop', p: 'Grocers send pricing programs; your house works out each offer on your own receipts, and only you see them. Accept one and only the shopping list goes. Home-loan quotes work the same way in the demo Lake.', to: '/docs/offers' },
-  { h: 'Sell a job, buy one', p: 'A menu on your agent’s signed card. Carts the seller signs, payment held until the buyer accepts the delivery, an Arbiter that rules from signatures alone.', to: '/docs/trade' },
-  { h: 'Your assistant, at home', p: 'Give your own AI a key from your control panel. It sees what’s waiting for you and suggests; you decide, and the key comes back when you say.', to: '/docs/approvals' },
-  { h: 'Consents you can see', p: 'Every agreement sits in your pod beside its consent record: who, what, for how long. Revoke a key and the next request is refused.', to: '/docs/approvals' },
-  { h: 'Nobody goes first', p: 'Pledges that bind only once enough people sign, and, if you like, nobody learns who signed until then. Neighbours agree without anyone sticking their neck out.', to: '/docs/sandbox' },
-  { h: 'Studies that pay you', p: 'A question runs inside every house that agrees. The houses bargain as one and get paid; only totals come out. Your records never leave.', to: '/docs/how-it-works' },
+  { h: 'Ask your AI to ping someone', p: '“Ping stan about coffee on Tuesday.” Your AI finds them by their handle and leaves a signed note; it reaches their phone; their answer comes back to your AI. Works from Claude, ChatGPT, Grok and others with the Lake connector.', to: '/docs/reach' },
+  { h: 'Shops come to you', p: 'Show your AI a photo of what you need. It lists it on your house; shops’ agents send offers; you buy on your phone and the money is held until it arrives. The most you’d pay never leaves your house.', to: '/docs/wants' },
+  { h: 'Your own AI, on duty', p: 'While you’re away, your AI answers people you know and books times you’re free, under a grant you sign. Never money. In the morning you see what it did, with Undo.', to: '/docs/approvals' },
+  { h: 'Price your time your way', p: 'Money, a favour someone owes you, or an hour of certified help given to a charity: “go and help them, then book me”.', to: '/docs/trade' },
+  { h: 'Consents you can see', p: 'Every yes sits in your house beside its record: who, what, for how long. Take it back and the next request is refused.', to: '/docs/approvals' },
+  { h: 'Studies that pay you', p: 'A question runs inside every house that agrees; the houses bargain together and get paid; only totals come out. Your records never leave.', to: '/docs/how-it-works' },
 ];
 
 const flow = [
@@ -107,12 +107,13 @@ const milestones = [
         </div>
         <div class="copy gutter">
           <div class="eyebrow">Open protocol · Solid + A2A + MCP · Apache-2.0</div>
-          <h1>Your data<br>stays home.</h1>
-          <p class="sub">Agents take the chores. <b>Only humans cut keys.</b></p>
-          <p class="lede">Get your life back. Your data lives in your own house, under your own rules, and agents run the things you’d rather not: the weekly shop, chasing quotes, selling a small job, getting the neighbours on board. Every agent shows ID; every payment has a receipt; every consent is yours to take back. Nobody owns it. Anyone can join.</p>
+          <h1>Ask your AI<br>to ping me.</h1>
+          <p class="sub">Your data in your own house. <b>Anyone’s AI can reach you there.</b></p>
+          <p class="lede">The Lake is an open network where each person has a house: their data, their rules, their phone as the key. People reach you by asking their own AI to ping your handle; you answer from your phone, or let your AI answer. Shops come to you with offers when your AI says what you need. Every agent shows ID, every payment has a receipt, and every consent is yours to take back.</p>
           <div class="cta">
-            <button class="btn primary dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
-            <a class="btn" :href="withBase('/docs/sandbox')">Play in the sandbox →</a>
+            <a class="btn primary" :href="withBase('/docs/get-started')">Add the Lake to your AI →</a>
+            <a class="btn" :href="withBase('/docs/reach')">Ping a person</a>
+            <button class="btn dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Watch a study' }}</button>
             <a class="btn ghost" :href="GH">GitHub</a>
           </div>
         </div>
@@ -128,7 +129,7 @@ const milestones = [
         </dl>
         <div class="controls">
           <!-- On phones the hero's button is far above the Lake; dispatch sits with the other controls instead. -->
-          <button class="btn sm primary dispatch-bar" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Dispatch an agent' }}</button>
+          <button class="btn sm primary dispatch-bar" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Watch a study' }}</button>
           <button class="btn sm" type="button" @click="lake?.spawnHouse()">Spawn a house</button>
           <button class="btn sm" type="button" @click="lake?.releaseAttacker()">Release an attacker</button>
           <button class="btn sm" type="button" @click="lake?.revoke()">Revoke keys</button>
@@ -148,7 +149,7 @@ const milestones = [
     <!-- WHAT IT'S FOR -->
     <section class="block gutter">
       <div class="eyebrow">What it’s for</div>
-      <h2>Agents do the chores.<br><span class="mint">Your data stays yours.</span></h2>
+      <h2>What you can do today</h2>
       <p class="kicker">Running today on the public sandbox, with synthetic data, simulated money and real signatures. Your data stays in your house throughout, your rules answer at the door, and nothing leaves that you didn’t say yes to.</p>
       <div class="laws everyday">
         <a v-for="e in everyday" :key="e.h" class="law" :href="withBase(e.to)">
@@ -184,16 +185,15 @@ const milestones = [
 
     <!-- MANIFESTO -->
     <section class="block gutter manifesto">
-      <div class="eyebrow">The deal is broken</div>
-      <p class="big">Your shopping, bank history, health records and location trail sit in databases you will never see.</p>
-      <p class="big dim">You were never asked. You were never paid. You still do every chore yourself. And billions of AI agents are coming for the rest.</p>
-      <p class="big mint">The Lake turns that round. Your data stays in your house. Agents do the work, on your terms, or not at all.</p>
+      <div class="eyebrow">Why</div>
+      <p class="big">Your shopping, bank history, health records and location trail sit in databases you never see, and you were never asked.</p>
+      <p class="big mint">On the Lake your data stays in your house. Agents come to it, show who they are, and get only what your rules or your tap allow.</p>
     </section>
 
     <!-- THREE LAWS -->
     <section class="block gutter">
       <div class="eyebrow">Three laws</div>
-      <h2>Non-negotiable. Enforced in code.</h2>
+      <h2>Rules the code keeps.</h2>
       <div class="laws">
         <article v-for="l in laws" :key="l.n" class="law">
           <div class="n">{{ l.n }}</div>
@@ -207,7 +207,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">One example among many: a study, end to end</div>
       <h2>“Do over-60s on drug X get readmitted less?”</h2>
-      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute, and nothing gets copied. Hit <b>Dispatch an agent</b> on the Lake above to watch it.</p>
+      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute, and nothing gets copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
       <ol class="flow">
         <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
           <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>

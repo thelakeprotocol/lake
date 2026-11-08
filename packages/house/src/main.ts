@@ -276,9 +276,9 @@ ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
       : `<li><span>House ${r.name}</span><a class="btn primary small" href="${r.name}/owner/">Claim it</a></li>`).join('');
     const hours = Number(a['lease-hours'] ?? 24) || 0;
     res.type('html').send(page('Claim a house', `<p class="eyebrow"><i></i>The Lake sandbox</p><h1>Claim a house</h1>
-<p class="lead">Free to try: synthetic data, simulated money, real signatures. Open one and tap <b>Pair this device</b>: your phone becomes its key.</p>
+<p class="lead">Free to try: synthetic data, simulated money, real signatures. Open one and tap <b>Use this phone</b>: your phone becomes its key.</p>
 <ul class="list">${li}</ul>
-<details><summary>What happens next</summary><ul class="small"><li>Your house has its own address. Open its door and give that out: people's AI leave you notes there.</li><li>Give your own AI a key, and it looks after your door and suggests; you decide.</li><li>${hours ? `A claim lasts ${hours} hours, then the house resets for the next person.` : 'A claim lasts until you hand it back.'} You can hand it back any time.</li></ul></details>`));
+<details><summary>What happens next</summary><ul class="small"><li>Pick a handle: then anyone can ask their AI to ping you, and the note reaches your phone. You answer there, or let your own AI answer.</li><li>Give your own AI a key, and it can also look for things you need and suggest; you decide.</li><li>${hours ? `A claim lasts ${hours} hours, then the house resets for the next person.` : 'A claim lasts until you hand it back.'} You can hand it back any time.</li></ul></details>`));
   });
 
   const server = app.listen(port, async () => {

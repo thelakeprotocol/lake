@@ -194,7 +194,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('.profile .handle', { hasText: '@panelowner' }).waitFor({ timeout: 10_000 });
     await tab('Chats');
     const door = await (await fetch(house, { headers: { accept: 'text/html' } })).text();
-    expect(door).toMatch(/Knock, knock[\s\S]*Knock on the door at/);
+    expect(door).toMatch(/Knock, knock[\s\S]*Ping <code>panelowner<\/code> on the Lake/);
     await tidy();
   });
 

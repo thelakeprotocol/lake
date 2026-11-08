@@ -2013,8 +2013,8 @@ function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) {
     h('section', { id: 'pair' },
       h('p', { class: 'big' }, handle && !owned ? 'Make this phone its key' : 'Make this phone its key'),
       owned
-        ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (Settings → Your key and recovery), or type your recovery code.')
-        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it. Lose this phone? A recovery code (Settings → Your key and recovery) brings your house back.'),
+        ? h('p', { class: 'muted' }, 'This house already has a key. To make this phone the key, open a pairing link from the device that has it (Settings → New or lost phone), or type your recovery code.')
+        : h('p', { class: 'muted' }, 'Your phone will be the only thing that can answer for you. The key is made here and never leaves it. Lose this phone? A recovery code (Settings → New or lost phone) brings your house back.'),
       owned ? null : h('button', { class: 'btn primary', type: 'button', disabled: open === null, onClick: () => void pair() }, 'Use this phone'),
       msg ? h('p', { class: 'muted' }, msg) : null,
       h('details', { class: 'fold', style: 'margin-top:24px', open: owned }, h('summary', {}, 'Have a recovery code?'),
@@ -2074,7 +2074,7 @@ function ConnectAI({ c, done }: { c: NonNullable<typeof connecting>; done: () =>
   return h('div', { class: 'shell unpaired' }, h('main', {},
     h('header', { class: 'top' }, h('div', { class: 'eyebrow' }, h('span', { class: 'dot' }), h('span', {}, 'Your house on the Lake')), h('h1', {}, `Connect ${c.app} to your house?`)),
     ok ? h('section', {},
-      h('p', { class: 'muted' }, `It becomes your assistant here: it sees what comes to your door and suggests, and sells for you if you ask it to (what it earns comes here). Only you decide anything. Remove it any time on My agent.${c.from ? ` It goes back to ${c.from}.` : ''}`),
+      h('p', { class: 'muted' }, `It becomes your assistant here: it sees what comes to your door and suggests, and sells for you if you ask it to (what it earns comes here). Only you decide anything. Remove it any time on My AI.${c.from ? ` It goes back to ${c.from}.` : ''}`),
       h('div', { class: 'row' }, h(Act, { label: 'Connect', cls: 'primary', run: go }), h('button', { class: 'btn small quiet', type: 'button', onClick: done }, 'Not now')))
       : h('section', {}, h('p', { class: 'muted' }, 'This sign-in didn\'t come from this house\'s own Lake, so it isn\'t offered here.'), h('button', { class: 'btn small', type: 'button', onClick: done }, 'Back to my house'))));
 }

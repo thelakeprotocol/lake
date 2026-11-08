@@ -26,7 +26,7 @@ pnpm test
 
 - Anything that lets an agent mint, widen or extend a key.
 - Anything that lets free text from another agent change a decision.
-- Anything that moves records out of a pod. The Records moved counter is sacred.
+- Anything that moves records out of a pod. The Records moved counter stays at 0.
 - A central server that the Lake depends on.
 
 ## Good things to build
@@ -34,9 +34,9 @@ pnpm test
 | You like… | Build… |
 |---|---|
 | Data plumbing | A converter into the canonical model: bank CSV, Apple Health, Strava, smart meters |
-| Agents | A visitor agent with a real question, or a guild that negotiates for its members |
+| Agents | A visitor agent with a real question, a shop agent that answers wants, or a guild that negotiates for its members |
 | Security | Attacks. Forged cards, replays, prompt injection, over-asking. Then the defence. |
-| Design | The map, the approvals app, the landing page |
+| Design | The map, the owner's phone panel, the landing page |
 | Writing | Docs that get a stranger from zero to a running house in 10 minutes |
 | Policy | Personas: opinionated `rules.yaml` files for carers, renters, gig workers |
 

@@ -38,5 +38,5 @@
 | One card per WebID at a node | A newer card replaces the old one | Key rotation must work; stale keys must not |
 | The owner's key | Ed25519, made on the phone with `@noble/curves` | Phones on a home network load the app over plain HTTP, where browsers disable WebCrypto |
 | Pairing | One-time token in the printed link; sandbox may allow first-come | A stranger on the Wi-Fi can't claim your house |
-| Live updates in the app | Polling (every 1.5 s for the badge, every 3 s for an open tab) | Works everywhere with no push service; push notifications are a follow-up |
+| Live updates in the app | Server-Sent Events while the panel is open (a one-use token from a signed call, since an EventSource can't sign), a look every minute anyway; **Web Push** (RFC 8030, VAPID, payload encrypted to the device) when it isn't | Standard browser push, no app store; the house holds its own VAPID keys, so no push account is needed |
 | LLM | **None bundled.** Rules decide; templates write reasons | People bring their own agents through MCP or A2A |

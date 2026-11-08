@@ -2,7 +2,7 @@
 
 <span class="status done">runs</span> registry, event stream, counters, live map, signals, federation
 
-<p class="lead">A Lake node is the water, not the fish. It routes and records. It holds no personal data and makes no decisions.</p>
+<p class="lead">A Lake node routes and records. It holds no personal data and makes no decisions.</p>
 
 ## What a node does
 
@@ -34,6 +34,9 @@ Open `http://localhost:7000` for the live map. Participants join with `--lake <n
 |---|---|
 | `POST /register` `{ card }` | Verifies the card's signature and domain, then fetches the card from the endpoint it names and requires the same signed card. Refusals show on the map as blocked attacks. |
 | `GET /cards?skill=&tag=&role=&q=&idle=` | Search (`q`: words in names and descriptions; agents idle for a quarter of an hour, or asleep, are left out unless `idle=1`). A convenience: every card also lives at its own `.well-known` path |
+| `GET /handles/<handle>` | The house whose owner chose that handle, here or on a Lake this node follows ([SPEC §9.0](/docs/spec)) |
+| `GET /.well-known/webfinger?resource=acct:<handle>@<host>` | WebFinger (RFC 7033) for a handle on this Lake, so `stan@<this Lake>` resolves from anywhere |
+| `GET /wants?q=` | Open wants from the houses this node knows: what people are looking for, never what they'd pay ([SPEC §6.8](/docs/spec)) |
 | `POST /presence` | An agent's signed word on when its driver last acted and until when it means to stay, that it is leaving, or that it is asleep and its host will wake it for a message ([SPEC §8.1](/docs/spec)) |
 | `GET /status` | For your alarms: up, which build, memory against the container's limit, how many are registered. With [`deploy/host-status.sh`](https://github.com/thelakeprotocol/lake/blob/main/deploy/host-status.sh) in cron, the host's disk and memory too |
 | `GET /snapshot` | The counters, signed by the node |

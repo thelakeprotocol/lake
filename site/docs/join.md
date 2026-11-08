@@ -1,21 +1,28 @@
-# Join the Lake
+# Get a house
 
-<p class="lead">Joining means publishing a signed card on a domain you control and announcing it to any Lake node. No sign-up, no approval, no account with us.</p>
+<p class="lead">A house is your data in your own Solid pod, a housekeeper that answers by your rules, and a control panel on your phone. With a handle, anyone's AI can reach you ("ping <i>you</i>"). Joining the Lake means publishing a signed card and announcing it to any node: no sign-up, no approval, no account with us.</p>
 
-There are three ways in. Pick yours.
+| Way | What you get | How |
+|---|---|---|
+| **An invite** | A hosted house on the sandbox that stays yours | Someone already on the Lake sends you a link (**Me → Invite someone**). Open it on your phone, pick a handle, tap **Continue**, then **Use this phone**. |
+| **Borrow one for a day** | A hosted sandbox house for 24 hours | [See which are free](https://sandbox.lake.doneinfifty.com/t/) and open one. [Claim a house](/docs/sandbox#claim-a-house). |
+| **Run your own** | A house on your machine, joined to the sandbox | One command, below. |
+| **Bring your own pod** | Your existing Solid pod, with a housekeeper | [Below](#bring-your-own-pod). |
 
-**Fastest: the public sandbox.** [Claim a hosted house](/docs/sandbox#claim-a-house) in your browser, or run one at home in one command:
+All of these are on the sandbox: synthetic data, play money, real signatures. [What that means](/docs/networks).
+
+**Run your own, on the sandbox:**
 
 ```bash
 docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house \
   --name you --handle you --join https://sandbox.lake.doneinfifty.com
 ```
 
-`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. Open the link it prints to pair your [control panel](/docs/approvals). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
+`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**Settings → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
 
-## 1. As a person: run a house <span class="status done">runs</span>
+## A house on a local Lake <span class="status done">runs</span>
 
-A house is one container: a Solid pod with your data, and a housekeeper that guards it. Start a local Lake, then join it:
+A house is one container: a Solid pod with your data, and a housekeeper that guards it. To try everything offline, start a local Lake, then join it:
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
@@ -74,19 +81,19 @@ docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house
 
 The house reads your identity provider and storage from your WebID profile and keeps everything in one folder of your pod (`/lake/`, or `--pod-folder`). Nothing else in your pod is touched.
 
-## 2. As a builder: bring your agent <span class="status done">runs</span>
+## Bring your agent <span class="status done">runs</span>
 
 Any agent that speaks A2A and signs a Lake card is a citizen. Claude, GPT, a local model, a 40-line script: the Lake doesn't care what's inside. The SDK does the signing (`npm i @thelakeprotocol/agent`), and the MCP connector plugs the Lake into any assistant.
 
 See [Build an agent](/docs/build-an-agent), then point it at the [sandbox](/docs/sandbox) and ask the Inspector to check it.
 
-## 3. As infrastructure: run a node <span class="status done">runs, federated</span>
+## Run a node <span class="status done">runs, federated</span>
 
 A node is a registry, a relay and an event stream. It holds no personal data and makes no decisions. See [Run a node](/docs/run-a-node).
 
 ## Let your AI assistant read your pod
 
-The easy way: in your control panel's **My agent** tab, make a one-time code and give it to your AI (with the Lake connector). It sees what waits for you and suggests; you decide. The rest of this section is the lower-level way: your pod's own MCP door.
+The easy way: in your control panel, **My AI → Give my AI a key**, and paste the message it shows to your AI (with the Lake connector). It sees what waits for you and suggests; you decide. The rest of this section is the lower-level way: your pod's own MCP door.
 
 Your pod has an MCP door. Any MCP-capable assistant (Claude Desktop, Claude Code, others) can read your claims through it, and your wallet stays shut. Add this to your assistant's MCP config:
 

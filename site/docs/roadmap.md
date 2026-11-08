@@ -14,6 +14,7 @@
 | 6 | **More Solid servers** | Bring-your-own-pod runs on Community Solid Server; Inrupt ESS and others should work but aren't tested. | <span class="status later">help wanted</span> |
 | 7 | **Favours across Lakes, privately** | To find loops of favours owed across Lakes, tallies share who owes whom (not what for) with each other, by WebID: a tally with a proven domain could read that. Loops found without showing the graph (private set intersection, MPC) would close it. Cross-Lake clearing has run between two Lakes on one laptop, not yet between operators. ([SPEC §11.4c](/docs/spec)) | <span class="status later">open</span> |
 | 8 | **Do people turn up?** | Circles, favour notes and loop clearing run; whether strangers keep promises they signed is not something code proves. The answers here are give-before-you-take (counted across every Lake), a record only the person helped can confirm, and reports against a key. The public circle on the sandbox is where it gets tested. | <span class="status later">open</span> |
+| 9 | **Real shops and real delivery** | Wants run end to end, but only demo shops with invented catalogues answer them, and "it arrived" is the owner's tap: nothing tracks a parcel. Real merchants' agents, and a delivery proof a shop and a buyer both accept, are open. ([SPEC §6.8](/docs/spec)) | <span class="status later">open</span> |
 
 ## Standards we're adopting
 
@@ -60,12 +61,12 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 
 ## What runs today
 
-- **Houses.** Your data in your own Solid pod, answered by your `rules.yaml`; a control panel with every consent and **Take it back**.
-- **Your assistant in your house.** A key from **My agent**: it sees what knocks and suggests; you tap, or answer in your own words.
-- **Errands.** What your assistant asked someone for you and is waiting on is kept by your house: an answer that comes after the chat ended is put to you as a question (Yes, No thanks, Ask my AI later), and the sender hears what you picked.
-- **AI on duty.** While you're away, your own AI answers people your side already knows and books in your free hours, under a grant you sign; never money, nothing to someone new, a few replies and one booking per person a night. In the morning, **While you slept** lists what it did, each with its receipt and an Undo. It runs on a computer you choose (`lake duty`, with your own AI app); when that computer sleeps, it isn't on duty, and the page says so.
-- **Reach a person by their handle.** "Ping stan" from any AI with the Lake connector finds their door (WebFinger, `stan@<lake>` across Lakes); they answer from their phone and the answer comes back to that AI. Owners invite people with a one-time link to a house of their own.
+- **Reach a person by their handle.** "Ping stan" from any AI with the Lake connector finds their door (WebFinger, `stan@<lake>` across Lakes); they answer from their phone and the answer comes back to that AI. Owners invite people with a one-time link to a house of their own. Notifications reach the owner's phone by Web Push; a note's notification says who wrote, not what.
 - **Shops come to you.** Your AI turns a photo into a want (a schema.org Demand) on your house's card; shops' agents read the Lake's wants and send signed offers; you buy on your phone, paid by your house under a signature for that offer only and held until you say it arrived. The most you'd pay stays in your house. On the sandbox, three demo shops with invented catalogues answer.
+- **Houses.** Your data in your own Solid pod, answered by your `rules.yaml`. A phone panel with five tabs (Chats, Requests, Me, My AI, Settings); every consent listed with **Take it back**.
+- **Your AI in your house.** A key from **My AI**: it sees what knocks and suggests; you tap, or answer in your own words. Spending money only under an allowance you sign on your phone.
+- **AI on duty.** While you're away, your own AI answers people your side already knows and books in your free hours, and in chats you hand it (**Let my AI reply**), under a grant you sign; never money, nothing to someone new unless you handed it that chat, a few replies and one booking per person a night. In the morning, **While you were away** lists what it did, each with its receipt and an Undo. It runs on a computer you choose (`lake duty`, with your own AI app); when that computer sleeps, it isn't on duty, and the page says so.
+- **Errands.** What your assistant asked someone for you and is waiting on is kept by your house: an answer that comes after the chat ended is put to you as a question (Yes, No thanks, Ask my AI later), and the sender hears what you picked.
 - **An open door.** Your house's address to hand out (a signature, a QR code); notes with a purpose that your rules deliver or decline; mute a sender by key; a status the sender can ask for.
 - **An agenda.** What you agreed to through your assistant, with who agreed on the other side; a private calendar feed for your own calendar app.
 - **The weekly shop**, priced inside houses (on the sandbox). Home loans work the same way, in the local demo Lake only.

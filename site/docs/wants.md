@@ -32,6 +32,6 @@ On the sandbox, three demo shops answer (Puddle Lane Bathrooms, Washer & Wrench,
 
 ## Honest limits
 
-- On the sandbox, the shops are demos with invented catalogues; nothing is posted and the money is play money.
+- On the sandbox, the shops are demos with invented catalogues (shower heads, hoses, taps, light bulbs, a toilet seat), priced in Australian dollars, and they deliver only to Australian addresses: a want elsewhere gets no offers. Nothing is posted and the money is play money.
 - Shops match by words and properties. A good match depends on your AI describing the thing well; it can ask you what it can't tell from the photo.
 - A want is public, like a tag on your house's card: don't put anything in it you wouldn't say out loud.

@@ -1,6 +1,6 @@
 # One Lake, two networks
 
-<p class="lead">The Lake works like email: it is a protocol, not a place. Nobody runs "the" Lake server. And like most new networks, it has two separate copies: a test network where everything is fake on purpose, and the real one. Same software, different trust.</p>
+<p class="lead">The Lake works like email: it is a protocol, and nobody runs "the" Lake server. And like most new networks, it has two separate copies: a test network where everything is fake on purpose, and the real one. Same software, different trust.</p>
 
 ## Is there one worldwide Lake?
 
