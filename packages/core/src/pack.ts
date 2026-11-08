@@ -66,6 +66,8 @@ export interface LakePack {
     offers?: Record<string, Omit<import('./offer.js').Offer, 'id' | 'requester'>>;
     /** Demo agents that quote for this pack's intents (lenders, insurers…), each with its certified program. */
     quoters?: QuoterExample[];
+    /** Demo shops that answer people's wants (SPEC §6.8) from a catalogue. */
+    shops?: import('./want.js').ShopExample[];
   };
 }
 

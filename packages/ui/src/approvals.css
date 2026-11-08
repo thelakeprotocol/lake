@@ -414,3 +414,10 @@ h1 .dot { display: inline-block; margin-left: 10px; vertical-align: middle; }
 .seg.filters { border: 0; padding: 0; background: none; border-radius: 0; }
 .chatinfo .block { margin-top: 18px; }
 .shell:has(.chat) header.top { display: none; }
+/* Wants (8 Nov): what you're looking for, a thread of offers. */
+.avatar.want { border-color: var(--mint); color: var(--mint); }
+ul.chats.wants { margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.wantspec .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.item.offer .offer-total { font-size: 18px; }
+.item.offer.bought { border-color: var(--mint); }
+.want-view .block { margin-top: 14px; }

@@ -13,6 +13,8 @@ import { generateIdentity, importIdentity, signMessage, type Identity } from '..
 import { createECDH, createPrivateKey, randomBytes } from 'node:crypto';
 import { ask, knock, makeVisitor } from '../packages/visitor/src/knock.js';
 import { joinLake } from '../packages/agent/src/index.js';
+import { startShop } from '../packages/visitor/src/shop.js';
+import { SHOPS } from '../usecases/shopping/src/shops.js';
 
 // The owner's panel as a person uses it, on a phone, against a real house: pairing, the door, the owner's own AI and its
 // spending money, notes arriving live, rules, More, signing out, long lists, a slow or dropped connection. Every step
@@ -47,8 +49,8 @@ async function tidy() {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 }
-// Four tabs (Chats, Me, My AI, Settings); everything else is a row under Settings (8 Nov).
-const RENAMED: Record<string, string> = { Home: 'Chats', Inbox: 'Chats', 'My agent': 'My AI', Keys: 'Keys you gave', Data: 'Your data', 'Your key': 'Your key and recovery' };
+// Five tabs (Chats, Requests, Me, My AI, Settings); everything else is a row under Settings (8 Nov).
+const RENAMED: Record<string, string> = { Home: 'Requests', Inbox: 'Requests', 'Needs you': 'Requests', Requests: 'Requests', 'Data requests': 'Data requests', 'My agent': 'My AI', Keys: 'Keys you gave', Data: 'Your data', 'Your key': 'Your key and recovery' };
 const tab = async (name: string) => {
   const label = RENAMED[name] ?? name;
   const main = page.locator('#nav > button', { hasText: label });
@@ -172,9 +174,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('button', { name: 'Use this phone' }).waitFor();
     expect(await page.locator('h1').textContent()).toMatch(/House|A house on the Lake/);
     await page.getByRole('button', { name: 'Use this phone' }).click();
-    // Four tabs, and Chats asks for the one setting that makes the house reachable.
+    // Five tabs, and Chats asks for the one setting that makes the house reachable.
     await page.locator('#nav > button').first().waitFor();
-    expect((await page.locator('#nav > button').allTextContents()).map((t) => t.replace(/\d+$/, ''))).toEqual(['Chats', 'Me', 'My AI', 'Settings']);
+    expect((await page.locator('#nav > button').allTextContents()).map((t) => t.replace(/\d+$/, ''))).toEqual(['Chats', 'Requests', 'Me', 'My AI', 'Settings']);
     await page.getByRole('heading', { name: 'Pick your handle' }).waitFor();
     await page.locator('h1', { hasText: 'Chats' }).waitFor();
     await tidy();
@@ -295,8 +297,59 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
+  it('looks for something by a photo\'s description: shops offer, the owner buys on the phone, held until it arrives (8 Nov)', async () => {
+    // Two demo shops that read the Lake's wants every second.
+    const [p1, p2] = [await freePort(), await freePort()];
+    const shops = await Promise.all([[SHOPS[0]!, p1], [SHOPS[1]!, p2]].map(([ex, port]) => startShop({ example: ex as (typeof SHOPS)[number], log: (m) => console.log(`[shop] ${m}`), node: nodeUrl, payments: `${specialists}/payments`, publicUrl: `http://localhost:${port}`, port: port as number, everyMs: 1000 })));
+    try {
+      // The owner's AI looked at the photo: what it is, its properties, where it goes; the most they'd pay stays in the house.
+      const posted = await asAssistant({ kind: 'assistant.want', name: 'Handheld shower head', description: 'To replace a worn one; the hose stays', properties: { Type: 'Handheld', 'Spray modes': 3, Finish: 'Chrome', Connection: '1/2 inch BSP' }, area: 'AU-QLD', currency: 'AUD', max_price: 34.5 });
+      expect(posted).toMatchObject({ ok: true, want: { '@type': 'Demand', name: 'Handheld shower head' } });
+      const wantId = posted.want.id as string;
+      // On the house's card, so on the Lake's list of wants, without the price.
+      let listed: { want: { id: string } }[] = [];
+      for (let i = 0; i < 20 && !listed.some((x) => x.want.id === wantId); i++) { listed = await (await fetch(`${nodeUrl}/wants?q=shower`)).json(); if (!listed.some((x) => x.want.id === wantId)) await page.waitForTimeout(500); }
+      expect(listed.find((x) => x.want.id === wantId)).toBeTruthy();
+      expect(JSON.stringify(listed)).not.toContain('34.5');
+      // Chats: a "Looking for" thread; the offers come in by themselves.
+      await tab('Chats');
+      const row = page.locator('.chatrow', { hasText: 'Looking for: Handheld shower head' });
+      // Two shops offer; one is over the most they'd pay, so the row counts one.
+      await row.locator('.chatlast', { hasText: /1 offer · from A\$34\.00/ }).waitFor({ timeout: 20_000 });
+      await row.click();
+      expect(await page.locator('#nav').isVisible()).toBe(false);
+      await page.getByText("The most you'd pay: A$34.50. Only your house knows it.").waitFor();
+      // Cheapest first, with what matched; the one over the limit folded away.
+      const first = page.locator('li.offer').first();
+      expect(await first.locator('.item-title').textContent()).toBe('Washer & Wrench');
+      await first.getByText(/Matches: Type, Spray modes, Finish, Connection/).waitFor();
+      await page.locator('summary', { hasText: "1 over the most you'd pay" }).waitFor({ timeout: 20_000 });
+      await tidy();
+      // Buy: signed on this phone for exactly that cart, paid by the house, held.
+      await first.getByRole('button', { name: 'Buy for A$34.00' }).click();
+      await first.getByRole('button', { name: /Tap again: pay A\$34\.00/ }).click();
+      await page.getByRole('heading', { name: /Bought|On its way/ }).waitFor({ timeout: 15_000 });
+      // The shop posts it: the house hears, and the owner says it arrived; then the shop is paid.
+      await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 15_000 });
+      await page.getByText(/Washer & Wrench: “Posted: 1 × Handheld shower head/).waitFor();
+      await page.getByRole('button', { name: 'It arrived' }).click();
+      await page.getByRole('heading', { name: 'Arrived' }).waitFor({ timeout: 15_000 });
+      await tidy();
+      // Off the card now, and the receipt is with the owner's money.
+      expect(((await (await fetch(`${nodeUrl}/wants`)).json()) as { want: { id: string } }[]).some((x) => x.want.id === wantId)).toBe(false);
+      const v = await asAssistant({ kind: 'list' });
+      expect(v.wants.find((w: { want: { id: string } }) => w.want.id === wantId)).toMatchObject({ bought: expect.any(String), offers: expect.arrayContaining([expect.objectContaining({ state: 'arrived', total: { currency: 'AUD', value: 34 } })]) });
+      await page.locator('.chathead .back').click();
+      await page.locator('.chatrow', { hasText: 'Arrived · Washer & Wrench is paid' }).waitFor({ timeout: 10_000 });
+      await tidy();
+    } finally {
+      await Promise.all(shops.map((x) => x.close()));
+      if (await page.locator('.chathead .back').count()) await page.goto(`${house}/owner/#chats`);
+    }
+  });
+
   it('shows a note from the web the moment it arrives, and the owner answers it', async () => {
-    await tab('Home');
+    await tab('Chats');
     const left = await (await fetch(`${house}/note?text=${encodeURIComponent('Hi, Ana here: coffee next week?')}&from=Ana`)).json();
     expect(left.kind).toBe('noted');
     // A chat row, as messaging apps show it; tapped, the conversation full screen without the tab bar.
@@ -424,7 +477,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('opens every page under Settings, each with a way back, without an error or a page wider than the phone', async () => {
-    for (const name of ['Notifications', 'When you can meet', 'Rules', 'Requests', 'Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house', 'About your house']) {
+    for (const name of ['Notifications', 'When you can meet', 'Rules', 'Data requests', 'Keys', 'Visitors', 'Money', 'Data', 'Your key', 'Move house', 'About your house']) {
       await tab(name);
       await page.waitForTimeout(600);
       expect(await page.locator('#view').textContent()).not.toMatch(/Couldn't reach your house/);
@@ -436,7 +489,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('opens at once with what it showed last time, even when the house is slow', async () => {
-    await tab('Home');
+    await tab('Chats');
     await page.locator('.chatrow').first().waitFor();
     await page.route('**/owner/api', async (route) => { await new Promise((r) => setTimeout(r, 2500)); await route.continue().catch(() => {}); });
     const t = Date.now();
@@ -499,8 +552,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(number).toMatch(/^\d{4}$/);
     // A browser that does hold the key could open the panel right there instead.
     expect(await app.getByRole('link', { name: 'Open it here' }).getAttribute('href')).toMatch(/\/owner\/#connect=/);
-    // On the owner's phone, Home asks, showing the same number.
+    // On the owner's phone, Requests asks, showing the same number.
     await page.goto(`${house}/owner/`);
+    await tab('Requests');
     const asked = page.locator('li.item', { hasText: 'Claude wants to connect to your house' });
     await asked.waitFor({ timeout: 10_000 });
     expect((await asked.locator('.connect-number').textContent())!.trim()).toBe(number);
@@ -638,7 +692,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Home');
     // A suggestion, or a chat the house kept for its AI while it was away.
     const match = page.locator('li.item, .chatrow', { hasText: 'offering:lift-to-cool-room' });
-    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); await page.locator('.more-items').first().click({ timeout: 1000 }).catch(() => {}); }
+    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); if (i % 2) await tab(i % 4 === 1 ? 'Chats' : 'Requests'); await page.locator('.more-items').first().click({ timeout: 1000 }).catch(() => {}); }
     expect(await match.count()).toBeGreaterThan(0);
     await one.call('lake_set_tags', { tags: [] });
     // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).
@@ -656,6 +710,17 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       turned = ((await shopper.callTool({ name: 'lake_ask', arguments: { to: me.url, kind: 'message', text: 'Your fee is overdue!' } })).content as { text: string }[])[0]!.text;
     }
     expect(turned).toMatch(/does not take messages from you/);
+    // Looking for something, through the connector (SPEC §6.8): the owner's AI lists it; another AI, a seller, finds it
+    // and offers a cart made out to the house; the owner's AI sees the offer, never having said the price to anyone.
+    const lamp = await one.call('lake_want', { action: 'post', name: 'Bedside lamp', properties: { Base: 'E27', Colour: 'White' }, currency: 'USD', max_price: 30 });
+    expect(lamp).toMatchObject({ ok: true, want: { name: 'Bedside lamp' } });
+    const want = async (args: Record<string, unknown>) => { const r = await shopper.callTool({ name: 'lake_want', arguments: args }); expect(r.isError, JSON.stringify(r.content)).toBeFalsy(); return JSON.parse((r.content as { text: string }[])[0]!.text); };
+    let found: { want: { id: string }; house: { url: string; webId: string } } | undefined;
+    for (let i = 0; i < 20 && !found; i++) { found = (await want({ action: 'find', q: 'lamp' })).wants.find((x: { want: { id: string } }) => x.want.id === lamp.want.id); if (!found) await page.waitForTimeout(500); }
+    expect(JSON.stringify(found)).not.toMatch(/max|budget|price"/);
+    expect(await want({ action: 'offer', want: found!.want.id, house: found!.house.url, house_webid: found!.house.webId, items: [{ label: 'White bedside lamp, E27', price: 22 }], offer_currency: 'USD', delivery: '3 days', matched: ['Base', 'Colour'] })).toMatchObject({ kind: 'want.received' });
+    expect((await one.call('lake_want', { action: 'mine' })).wants.find((w: { id: string }) => w.id === lamp.want.id)).toMatchObject({ offers: [{ total: 'USD 22.00', delivery: '3 days', state: 'open' }] });
+    expect(await one.call('lake_want', { action: 'close', id: lamp.want.id })).toMatchObject({ ok: true });
     await shopper.close(); await one.c.close();
     await tidy();
   });
@@ -676,7 +741,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await phone2.getByRole('button', { name: 'Use this phone' }).count()).toBe(0);
     await phone2.locator('input.recovery-input').fill(code.toLowerCase());
     await phone2.getByRole('button', { name: 'Use it' }).click();
-    await phone2.getByRole('heading', { name: 'Needs you' }).waitFor();
+    await phone2.locator('h1', { hasText: 'Chats' }).waitFor();
     // The old phone's next look: not the key any more, said plainly.
     // It may already know (the live stream refreshes it); otherwise its next tap finds out.
     await lostKey(page);
@@ -693,7 +758,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     phone3.on('pageerror', (e) => errors.push(e.message));
     phone3.on('dialog', (d) => { errors.push(`a dialog box: ${d.message()}`); void d.dismiss(); });
     await phone3.goto(link);
-    await phone3.getByRole('heading', { name: 'Needs you' }).waitFor();
+    await phone3.locator('h1', { hasText: 'Chats' }).waitFor();
     await lostKey(phone2);
     await ctx2.close();
     page = phone3;
@@ -734,7 +799,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const clinic = await makeVisitor(await generateIdentity(), 'clinic.example');
     const terms = { purpose: 'care', fields: ['medications'], priceUsd: 0, retention: 'none', credentials: { ethicsApproved: false, sponsorVerified: false, auditCertified: false } };
     expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'ask' });
-    await tab('Requests');
+    await tab('Data requests');
     const card = page.locator('article.req', { hasText: 'clinic.example' });
     await card.getByRole('button', { name: 'Allow' }).click();
     const next = page.locator('li.item', { hasText: 'You allowed clinic.example (care)' });
@@ -747,7 +812,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Another agent with the same name but its own key gets no standing yes (a name is not a key).
     const lookalike = await makeVisitor(await generateIdentity(), 'clinic.example');
     expect((await knock(house, lookalike, terms)).reply).toMatchObject({ decision: 'ask' });
-    await tab('Requests');
+    await tab('Data requests');
     await page.locator('article.req', { hasText: 'clinic.example' }).getByRole('button', { name: /^Deny/ }).click();
     await page.locator('li.item', { hasText: 'You declined clinic.example (care)' }).getByRole('button', { name: 'Ask me each time' }).click();
     // Listed in Keys, with how often it was used; removed, it asks again.
@@ -759,7 +824,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await row.waitFor({ state: 'detached', timeout: 10_000 });
     expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'ask' });
     // Declined, and "Always decline": that agent is turned away at the door from then on.
-    await tab('Requests');
+    await tab('Data requests');
     await page.locator('article.req', { hasText: 'clinic.example' }).first().getByRole('button', { name: /^Deny/ }).click();
     const no = page.locator('li.item', { hasText: 'You declined clinic.example (care)' });
     await no.waitFor({ timeout: 10_000 });
@@ -803,9 +868,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Call on Monday at 10:00', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, on: true });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.', reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
-    // The morning: Chats says it in one line, and My AI shows what it did, in order, with receipts and Undo; what it was
+    // The morning: Requests says it in one line, and My AI shows what it did, in order, with receipts and Undo; what it was
     // stopped from, folded away.
-    await tab('Chats');
+    await tab('Needs you');
     await page.locator('.pin', { hasText: 'Your AI handled 2 things while you were away' }).click();
     const slept = page.locator('section.slept');
     await slept.waitFor({ timeout: 10_000 });

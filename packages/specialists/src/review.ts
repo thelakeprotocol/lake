@@ -409,6 +409,8 @@ export async function createPayments(o: SpecialistOptions & {
     }
     // An owner's signature for one pledge pays that pledge, and only once.
     if (m.study?.startsWith('urn:lake:pledge:') && (!pledge || m.study !== pledgeAgreement(pledge.tally, pledge.id, pledge.bond))) return { kind: 'refused', problems: [`this allowance was signed for ${m.study} only`] };
+    // An owner's signature for one cart (a purchase from their phone, SPEC §6.8) pays that cart, and nothing else.
+    if (m.study?.startsWith('urn:ap2:cart:') && (!cart || m.study !== `urn:ap2:cart:${cart.id}`)) return { kind: 'refused', problems: [`this purchase was signed for ${m.study.slice('urn:ap2:cart:'.length)} only`] };
     const checked: { payee: string; amount: number; agreement: string }[] = [];
     for (const pm of payments) {
       try {

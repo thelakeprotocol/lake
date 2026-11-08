@@ -330,6 +330,17 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     res.json(registry.search(q).filter((e) => idle || (!e.asleep && (!e.lastActive || Date.now() - e.lastActive < IDLE_MS))).map((e) => ({ id: e.id, card: e.card, ...(e.asleep ? { asleep: true } : {}), ...(e.via !== 'direct' ? { via: e.via, ...(peerHealth.get(e.via)?.answering === false ? { unreachable_since: peerHealth.get(e.via)!.since } : {}) } : {}), ...(e.lastActive ? { active: new Date(e.lastActive).toISOString() } : {}), ...(e.hereUntil && e.hereUntil > Date.now() ? { until: new Date(e.hereUntil).toISOString() } : {}), ...registry.claimsOf(e) })));
   });
 
+  // What people are looking for (SPEC §6.8): every open want on the cards this node knows, its own Lake's first, newest
+  // first. `q` keeps those whose words include all of q's. Sellers' agents read this and offer to the house.
+  app.get('/wants', (req, res) => {
+    const words = (str(req.query.q) ?? '').toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+    const now = Date.now();
+    const out = registry.all().filter((e) => e.profile.role === 'house' && !e.asleep).flatMap((e) => (e.profile.wants ?? []).filter((w) => Date.parse(w.availabilityEnds) > now).map((w) => ({ want: w, house: { url: e.card.supportedInterfaces[0]?.url, webId: e.profile.webId, name: e.card.name, ...(e.profile.handle ? { handle: e.profile.handle } : {}) }, ...(e.via !== 'direct' ? { via: e.via } : {}) })))
+      .filter((x) => !words.length || ((t) => words.every((w) => t.includes(w)))([x.want.name, x.want.description ?? '', x.want.itemOffered.name, ...x.want.itemOffered.additionalProperty.map((p) => `${p.name} ${p.value}`)].join(' ').toLowerCase()))
+      .sort((a, b) => Number(!!a.via) - Number(!!b.via) || b.want.availabilityEnds.localeCompare(a.want.availabilityEnds));
+    res.json(out.slice(0, 200));
+  });
+
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
   // A demo reset: counters, history, quarantines, reputation and guilds go; houses and specialists stay.
   app.post('/reset', (req, res) => {

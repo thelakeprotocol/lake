@@ -49,6 +49,17 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
+describe('a purchase signed for one cart (SPEC §6.8)', () => {
+  it('pays that cart and no other', async () => {
+    const cartFor = () => signCart({ seller: seller.id, sellerWebId: seller.webId, sellerName: 'Seller', buyerWebId: buyer.webId, items: [{ label: 'A shower head', amount: { currency: 'USD', value: 2 } }] });
+    const [mine, other] = [await cartFor(), await cartFor()];
+    const signed = await signIntentMandate(human.id, human.webId, { id: buyer.webId, natural_language_description: 'Buy from Seller', study: `urn:ap2:cart:${mine.contents.id}`, budget: { currency: 'USD', amount: 2 }, intent_expiry: new Date(Date.now() + 3_600_000).toISOString(), user_cart_confirmation_required: false });
+    const pay = async (cart: CartMandate) => ask(buyer, { kind: 'settle', intent: { credential: signed, card: human.card }, payments: [await signPaymentMandate(buyer.id, buyer.webId, { payee: seller.webId, amount: 2, intentMandate: signed, agreement: `urn:ap2:cart:${cart.contents.id}`, cart: { detailsId: cart.contents.payment_request.details.id, hash: cartHash(cart.contents) } })], cart: { mandate: cart, card: seller.card }, hold: true });
+    expect(await pay(other)).toMatchObject({ kind: 'refused', problems: [`this purchase was signed for ${mine.contents.id} only`] });
+    expect(await pay(mine)).toMatchObject({ kind: 'settled', held: true });
+  });
+});
+
 describe('a held payment follows the delivery (SPEC §6.5)', () => {
   it('takes no accept before a delivery, no empty delivery, and an accept only of the latest one', async () => {
     const { hold } = await payHeld();

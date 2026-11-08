@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { seedFrom, type LakePack } from '@thelakeprotocol/core';
 import { CONVERTER, extractClaims } from './convert.js';
 import { GROCERS } from './grocers.js';
+import { SHOPS } from './shops.js';
 import { syntheticReceipts } from './synthetic.js';
 
 const S = 'https://lake.doneinfifty.com/usecases/shopping/v1#';
@@ -64,5 +65,5 @@ export const shopping: LakePack = {
   // On acceptance only the shopping list goes, to that one grocer: not eight weeks of receipts.
   release: ['claims'],
   releaseFields: ['household_size', 'dietary_needs', 'staples'],
-  examples: { quoters: GROCERS },
+  examples: { quoters: GROCERS, shops: SHOPS },
 };

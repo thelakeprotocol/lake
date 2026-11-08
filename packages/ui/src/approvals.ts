@@ -153,23 +153,25 @@ function Failed({ error }: { error?: string }) {
 
 // ---- navigation ----
 // Your agent and the agents that knock are different things: "My agent" is yours, "Visitors" are strangers.
-// Four places, each with one job (8 Nov, after a walk through every screen with Fable and ChatGPT): Chats, where the app
-// opens, with what needs you pinned on top; Me, your handle and how people reach you; your own AI; and everything else as
-// a plain list of pages under Settings, each with a way back.
+// Five places, each with one job (8 Nov: the owner asked for what needs them apart from their conversations): Chats, where
+// the app opens, only conversations; Requests, what waits for a tap; Me, your handle and how people reach you; your own
+// AI; and everything else as a plain list of pages under Settings, each with a way back.
 const TABS = [
-  ['chats', 'Chats'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
-  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Requests'], ['offers', 'Offers'], ['keys', 'Keys you gave'],
+  ['chats', 'Chats'], ['needs', 'Requests'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
+  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Data requests'], ['offers', 'Offers'], ['keys', 'Keys you gave'],
   ['agents', 'Visitors'], ['money', 'Money'], ['data', 'Your data'], ['key', 'Your key and recovery'], ['move', 'Move house'], ['about', 'About your house'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-const MAIN: Tab[] = ['chats', 'me', 'myagent', 'settings'];
+const MAIN: Tab[] = ['chats', 'needs', 'me', 'myagent', 'settings'];
 const labelOf = (t: Tab) => TABS.find(([id]) => id === t)?.[1] ?? t;
-const tabFromHash = (): Tab => (/^#(note|chat)=/.test(location.hash) ? 'chats' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
+const tabFromHash = (): Tab => (/^#(note|chat|want)=/.test(location.hash) ? 'chats' : location.hash === '#home' ? 'needs' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
 /** A note a notification was about (#note=<id>): its conversation opens, that message lit. */
 const focusNote = () => (location.hash.startsWith('#note=') ? decodeURIComponent(location.hash.slice(6)) : '');
 /** The conversation on screen (#chat=<sender key>), so the phone's back gesture leaves it as in any messaging app. */
 const openChat = () => (location.hash.startsWith('#chat=') ? decodeURIComponent(location.hash.slice(6)) : focusNote());
-const inChat = () => /^#(note|chat)=/.test(location.hash);
+const inChat = () => /^#(note|chat|want)=/.test(location.hash);
+/** A want on screen (#want=<id>): what the owner is looking for, and the offers. */
+const openWantId = () => (location.hash.startsWith('#want=') ? decodeURIComponent(location.hash.slice(6)) : '');
 
 function Nav({ tab, go, pending, noOffers, unread = 0 }: { tab: Tab; go: (t: Tab) => void; pending: number; noOffers: boolean; unread?: number }) {
   const [open, setOpen] = useState(false);
@@ -185,7 +187,7 @@ function Nav({ tab, go, pending, noOffers, unread = 0 }: { tab: Tab; go: (t: Tab
   const here = MAIN.includes(tab) ? tab : 'settings';
   const shown = TABS.filter(([id]) => MAIN.includes(id));
   const button = ([id, label]: readonly [Tab, string]) => h('button', { key: id, type: 'button', class: 'main', 'aria-current': id === here ? 'page' : undefined, onClick: () => { setOpen(false); go(id); } },
-    label, id === 'chats' && pending + unread ? h('span', { class: 'badge' }, String(pending + unread)) : null);
+    label, id === 'needs' && pending ? h('span', { class: 'badge' }, String(pending)) : id === 'chats' && unread ? h('span', { class: 'badge' }, String(unread)) : null);
   return h('nav', { id: 'nav', ref: nav, 'aria-label': 'Control panel' }, ...shown.map(button));
 }
 
@@ -217,15 +219,17 @@ type AgendaItem = { id: string; what: string; when: string; where?: string; with
 type DoorNote = { id: string; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; from: { web?: boolean; as?: string; key?: string; webId?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string } };
 interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 interface Connect { id: string; app: string; from: string; number: string; at: string }
-interface ListView { connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
+type WantOfferV = { id: string; at: string; seller: { name: string; domain: string }; total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string; matched?: string[]; delivery?: string; note?: string; over?: boolean; state: 'open' | 'paid' | 'shipped' | 'arrived'; shipped?: { note: string; at: string } };
+type WantV = { want: { id: string; name: string; description?: string; areaServed?: string; availabilityEnds: string; eligibleQuantity?: { value: number }; itemOffered: { additionalProperty: { name: string; value: string }[] } }; limit?: { amount: number; currency: string }; closed?: string; bought?: string; at: string; offers: WantOfferV[] };
+interface ListView { wants?: WantV[]; connects?: Connect[]; webId: string; until?: string; requests: Request[]; keys: Key[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 
-/** What needs you, pinned above the conversations: requests your rules left to you, your AI's suggestions, app sign-ins. */
-function Pinned({ go }: { go: (t: Tab) => void }) {
+/** Requests: what waits for a tap. Requests your rules left to you, your AI's questions and suggestions, app sign-ins. */
+function NeedsTab({ go }: { go: (t: Tab) => void }) {
   const bump = useBump();
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
   const log = useHouse<DutyLog>({ kind: 'panel.duty.log' });
-  if (!list.data) return null;
+  if (!list.data) return h(Failed, { error: list.error });
   const { suggestions, assistants, agenda } = list.data;
   const waiting = list.data.requests.length;
   const handled = (log.data?.duties ?? []).reduce((t, d) => t + d.summary.handled, 0);
@@ -243,10 +247,11 @@ function Pinned({ go }: { go: (t: Tab) => void }) {
     door.data && !door.data.error && !door.data.handle ? h(HandleCard, { d: door.data }) : null,
     notifyOffer() ? h(NotifyBar, {}) : null,
     waiting || handled ? h('div', { class: 'pins' },
-      waiting ? pin('req', `${waiting} request${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} your answer`, 'requests', 'amber') : null,
+      waiting ? pin('req', `${waiting} data request${waiting === 1 ? '' : 's'} need${waiting === 1 ? 's' : ''} your answer`, 'requests', 'amber') : null,
       // The morning, in one line; what it did, with receipts and Undo, is on My AI.
       handled ? pin('duty', `Your AI handled ${handled} thing${handled === 1 ? '' : 's'} while you were away`, 'myagent') : null) : null,
-    needs.length ? h('section', { class: 'block' }, h('h2', {}, 'Needs you'), h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() })) : null,
+    needs.length ? h('section', { class: 'block' }, h(Paged, { items: needs, render: (x: (typeof needs)[number]) => x.v() })) : null,
+    waiting || handled || needs.length ? null : h('p', { class: 'empty' }, door.data?.handle ? `All clear. People reach you by asking their AI to ping ${door.data.handle}.` : 'All clear.'),
     agenda?.length ? h('section', { class: 'block' }, h('h2', {}, 'Coming up'), h(AgendaList, { agenda })) : null);
 }
 
@@ -283,6 +288,7 @@ const leaveChat = () => { if ((history.state as { chat?: boolean } | null)?.chat
 /** Chats, where the app opens: what needs you pinned on top, then every conversation, newest first. */
 function ChatsTab({ go }: { go: (t: Tab) => void }) {
   const list = useHouse<ListView>({ kind: 'list' });
+  const door = useHouse<DoorState>({ kind: 'panel.door' });
   const [filter, setFilter] = useState<'all' | 'known' | 'new'>('all');
   const open = openChat();
   if (!list.data) return h(Failed, { error: list.error });
@@ -290,6 +296,9 @@ function ChatsTab({ go }: { go: (t: Tab) => void }) {
   // Opened from a notification, or tapped: that conversation, full screen.
   const picked = open ? chats.find((c) => c.key === open || c.notes.some((n) => n.id === open)) : undefined;
   if (picked) return h(ChatView, { c: picked });
+  const wants = (list.data.wants ?? []).filter((w) => !w.closed);
+  const wantPicked = openWantId() ? wants.find((w) => w.want.id === openWantId()) : undefined;
+  if (wantPicked) return h(WantView, { w: wantPicked });
   const row = (c: Chat) => h('li', { key: c.key }, h('button', { type: 'button', class: `chatrow${c.unread ? ' unread' : ''}`, onClick: () => goChat(c.key) },
     h('span', { class: `avatar trust-${c.trust}` }, initials(c.name)),
     h('span', { class: 'chatmain' },
@@ -299,8 +308,12 @@ function ChatsTab({ go }: { go: (t: Tab) => void }) {
         c.mode === 'ai' && c.canMode ? h('span', { class: 'aibadge', title: 'Your AI replies in this chat' }, 'AI') : null,
         c.unread ? h('span', { class: 'dot-unread' }, String(c.unread)) : null))));
   const shown = chats.filter((c) => filter === 'all' || (filter === 'known' ? c.trust === 'known' : c.trust !== 'known'));
+  void go;
   return h('div', {},
-    h(Pinned, { go }),
+    // No handle yet: nobody can reach you, so the one thing to do comes first here too.
+    door.data && !door.data.error && !door.data.handle ? h(HandleCard, { d: door.data }) : null,
+    // What you're looking for, above the conversations: each is a thread of offers.
+    wants.length ? h('ul', { class: 'chats wants' }, ...wants.map((w) => h('li', { key: w.want.id }, h(WantRow, { w })))) : null,
     chats.length ? h('div', { class: 'seg filters', role: 'group', 'aria-label': 'Show' },
       ...(['all', 'known', 'new'] as const).map((f) => h('button', { key: f, type: 'button', 'aria-pressed': String(filter === f), onClick: () => setFilter(f) },
         f === 'all' ? 'All' : f === 'known' ? `Known (${chats.filter((c) => c.trust === 'known').length})` : `New (${chats.filter((c) => c.trust !== 'known').length})`))) : null,
@@ -357,6 +370,68 @@ function ChatView({ c }: { c: Chat }) {
       h('div', { class: 'composer-row' },
         h('input', { ref: input, type: 'text', maxlength: 1000, placeholder: c.forwarded ? 'Passed on by your AI: reply through it' : 'Message', 'aria-label': 'Message', disabled: c.forwarded }),
         h(Act, { label: 'Send', cls: 'primary', run: async () => { const t = input.current!.value.trim(); if (!t) return; const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.note.reply', id: latest.id, text: t }); if (r.error) throw new Error(r.error); input.current!.value = ''; bump(); } }))));
+}
+
+// ---- wants: what you're looking for, and what shops offered (SPEC §6.8) ----
+const money = (m: { currency: string; value: number }) => `${m.currency === 'AUD' ? 'A$' : m.currency === 'USD' ? '$' : `${m.currency} `}${m.value.toFixed(2)}`;
+const goWant = (id: string) => { history.pushState({ chat: true }, '', `#want=${encodeURIComponent(id)}`); dispatchEvent(new HashChangeEvent('hashchange')); };
+const lens = () => h('svg', { viewBox: '0 0 24 24', width: 20, height: 20, 'aria-hidden': 'true' }, h('circle', { cx: 10.5, cy: 10.5, r: 6.5, fill: 'none', stroke: 'currentColor', 'stroke-width': 2 }), h('path', { d: 'M15.5 15.5L21 21', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' }));
+const wantState = (w: WantV) => {
+  const b = w.offers.find((o) => o.id === w.bought);
+  if (b) return b.state === 'arrived' ? `Arrived · ${shortShop(b.seller.name)} is paid` : b.state === 'shipped' ? `On its way from ${shortShop(b.seller.name)}` : `Bought from ${shortShop(b.seller.name)} · paid, held until it arrives`;
+  const open = w.offers.filter((o) => o.state === 'open' && !o.over);
+  if (!open.length) return Date.parse(w.want.availabilityEnds) < Date.now() ? 'Closed: no offers' : 'Waiting for offers';
+  return `${open.length} offer${open.length === 1 ? '' : 's'} · from ${money(open.map((o) => o.total).sort((a, b) => a.value - b.value)[0]!)}`;
+};
+const shortShop = (n: string) => n.replace(/ \(demo\)$/, '');
+
+function WantRow({ w }: { w: WantV }) {
+  const fresh = !w.bought && w.offers.some((o) => o.state === 'open' && !o.over);
+  return h('button', { type: 'button', class: `chatrow${fresh ? ' unread' : ''}`, onClick: () => goWant(w.want.id) },
+    h('span', { class: 'avatar want' }, lens()),
+    h('span', { class: 'chatmain' },
+      h('span', { class: 'chattop' }, h('b', {}, `Looking for: ${w.want.name}`), h('time', {}, when(w.offers.at(-1)?.at ?? w.at))),
+      h('span', { class: 'chatbottom' }, h('span', { class: 'chatlast' }, wantState(w)))));
+}
+
+/** One want, full screen: what it says, then the offers, cheapest first, each with Buy; once bought, how it's going. */
+function WantView({ w }: { w: WantV }) {
+  const bump = useBump();
+  const bought = w.offers.find((o) => o.id === w.bought);
+  const open = w.offers.filter((o) => o.state === 'open').sort((a, b) => a.total.value - b.total.value);
+  const fits = open.filter((o) => !o.over), over = open.filter((o) => o.over);
+  const buy = (o: WantOfferV) => async () => {
+    const d = await call<{ id?: string; draft?: Record<string, unknown>; error?: string }>({ kind: 'panel.want.draft', want: w.want.id, offer: o.id });
+    if (d.error || !d.id) throw new Error(d.error ?? 'could not draft it');
+    const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.want.buy', draft: d.id, credential: signCredential({ ...d.draft!, validFrom: new Date().toISOString() }, loadKey()) });
+    if (r.error) throw new Error(r.error);
+    bump();
+  };
+  const card = (o: WantOfferV, canBuy: boolean) => h('li', { key: o.id, class: `item offer${o.id === w.bought ? ' bought' : ''}` },
+    h('div', { class: 'item-head' }, h('span', { class: 'item-title' }, shortShop(o.seller.name)), h('b', { class: 'offer-total' }, money(o.total))),
+    ...o.items.map((i) => h('p', { class: 'item-meta', key: i.label }, `${i.label} · ${money(i.amount)}`)),
+    h('p', { class: 'item-meta' }, [o.delivery ? `Delivery: ${o.delivery}` : '', o.matched?.length ? `Matches: ${o.matched.join(', ')}` : ''].filter(Boolean).join(' · ')),
+    o.note ? h('p', { class: 'item-meta' }, `Their words: “${o.note}”`) : null,
+    canBuy ? h('div', { class: 'item-actions' }, h(Act, { label: `Buy for ${money(o.total)}`, cls: 'primary', confirm: `Tap again: pay ${money(o.total)}, held until it arrives`, run: buy(o) })) : null);
+  return h('div', { class: 'chat want-view' },
+    h('div', { class: 'chathead' },
+      h('button', { class: 'back', type: 'button', onClick: leaveChat, 'aria-label': 'Back to Chats' }, '‹'),
+      h('div', { class: 'chatwho' }, h('span', { class: 'avatar want' }, lens()), h('span', { class: 'chatmain' }, h('b', {}, w.want.name), h('span', { class: 'chatvia' }, 'What you\'re looking for')))),
+    h('section', { class: 'block wantspec' },
+      w.want.description ? h('p', { class: 'muted' }, w.want.description) : null,
+      h('div', { class: 'chips' }, ...w.want.itemOffered.additionalProperty.map((p) => h('span', { class: 'chip', key: p.name }, `${p.name}: ${p.value}`))),
+      h('p', { class: 'item-meta' }, [w.want.eligibleQuantity ? `${w.want.eligibleQuantity.value} wanted` : '', w.want.areaServed ? `To ${w.want.areaServed}` : '', bought ? '' : `Shops can offer until ${new Date(w.want.availabilityEnds).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`].filter(Boolean).join(' · ')),
+      w.limit ? h('p', { class: 'item-meta' }, `The most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })}. Only your house knows it.`) : null,
+      h('p', { class: 'item-meta' }, 'Shops see what you\'re looking for, never what you\'d pay.')),
+    bought ? h('section', { class: 'block' }, h('h2', {}, bought.state === 'arrived' ? 'Arrived' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
+      h('ul', { class: 'items' }, card(bought, false)),
+      h('p', { class: 'item-meta' }, bought.state === 'arrived' ? `${shortShop(bought.seller.name)} is paid.` : bought.shipped ? `${shortShop(bought.seller.name)}: “${bought.shipped.note}”` : `Paid by your house, held until you say it arrived. ${shortShop(bought.seller.name)} posts it now.`),
+      bought.state !== 'arrived' ? h('p', { class: 'item-meta' }, 'If you don\'t say, the shop is paid a week after it\'s sent, unless you report a problem.') : null,
+      bought.state === 'shipped' ? h('div', { class: 'row' }, h(Act, { label: 'It arrived', cls: 'primary', run: async () => { const r = await call<{ ok?: boolean; error?: string }>({ kind: 'panel.want.arrived', want: w.want.id }); if (r.error) throw new Error(r.error); } })) : null)
+      : h('section', { class: 'block' }, h('h2', {}, fits.length ? `Offers (${fits.length})` : 'Offers'),
+        fits.length ? h('ul', { class: 'items' }, ...fits.map((o) => card(o, true))) : h('p', { class: 'empty' }, 'No offers yet. Shops on the Lake look every few minutes; you get a notification when one offers.'),
+        over.length ? h('details', { class: 'fold' }, h('summary', {}, `${over.length} over the most you'd pay`), h('ul', { class: 'items' }, ...over.map((o) => card(o, true)))) : null,
+        h('div', { class: 'row' }, h(Act, { label: 'Stop looking', cls: 'quiet', confirm: 'Tap again: shops stop offering', run: async () => { await call({ kind: 'panel.want.close', id: w.want.id }); leaveChat(); } }))));
 }
 
 /** About a conversation (a tap on its name, as in messaging apps): who it is, what's checked, who replies, mute and clear. */
@@ -1399,7 +1474,7 @@ function MyAgent() {
     h(DutyCard, { houseUrl, log: duty.data }),
     h(WhileYouSlept, {}),
     h('section', { class: 'block' }, h('h2', {}, 'What it suggests'),
-      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and at the top of Chats.')),
+      v.data.suggestions.length ? h('ul', { class: 'items' }, ...v.data.suggestions.map((x) => h(SuggestionItem, { key: x.id, x }))) : h('p', { class: 'empty' }, 'Nothing yet. Its suggestions show up here and under Requests.')),
     h('h2', { class: 'section-title' }, 'Your AI\'s keys'),
     h('p', { class: 'muted' }, 'Your own AI, with a key to your house: it sees what comes to your door and suggests. Only you decide.'),
     v.data.assistants.length ? h('section', { class: 'block' }, h('ul', { class: 'items' }, ...v.data.assistants.map((a) => h('li', { key: a.kid, class: 'item' },
@@ -1688,7 +1763,7 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, needs: NeedsTab, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
 
 /**
  * Notifications on this device, always reachable (7 Nov: once "Not now" was tapped on Home, nothing brought them back):
@@ -1817,7 +1892,7 @@ function App() {
   return h(Version.Provider, { value: { version, bump } },
     h('div', { class: 'shell' },
       h('aside', { class: 'side' }, h('div', { class: 'brand' }, h('span', { class: 'sq' }), 'Your house'),
-        h(Nav, { tab, go, pending: list?.requests.length ?? 0, noOffers, unread: ((list as { notes?: { answered?: unknown }[] } | null)?.notes ?? []).filter((n) => !n.answered).length })),
+        h(Nav, { tab, go, pending: (list?.requests.length ?? 0) + ((list as { suggestions?: unknown[]; connects?: unknown[] } | null)?.suggestions?.length ?? 0) + ((list as { connects?: unknown[] } | null)?.connects?.length ?? 0), noOffers, unread: ((list as { notes?: { answered?: unknown }[] } | null)?.notes ?? []).filter((n) => !n.answered).length })),
       h('main', {},
         notified ? h('div', { class: 'notified' }, h('span', {}, `Notification: ${notified}`), h('button', { type: 'button', class: 'btn small quiet', onClick: () => setNotified(''), 'aria-label': 'Close' }, '×')) : null,
         pull ? h('div', { class: 'pull', style: `height:${pull / 2}px` }, pull > 80 ? 'Release to refresh' : 'Pull to refresh') : null,

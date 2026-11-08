@@ -3,8 +3,9 @@ import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
+import type { WantOfferRecord, WantRecord } from './wants.js';
 import {
-  allowanceDraft, dutyDraft, pledgeDraft, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, dutyDraft, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -89,6 +90,13 @@ export interface PanelProvider {
   passFavour?(): Promise<Record<string, any>>;
   /** Pay a cart priced in favours with one owed to the owner (SPEC §6.7). */
   payWithFavour?(cart: unknown, sellerUrl: string): Promise<Record<string, any>>;
+  /** What the owner is looking for (SPEC §6.8). */
+  wantsList?(): WantRecord[];
+  postWant?(input: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number }, limit?: { amount: number; currency: string }): Promise<Want>;
+  closeWant?(id: string): Promise<boolean>;
+  wantOffer?(wantId: string, offerId: string): WantOfferRecord | undefined;
+  buyWant?(wantId: string, offerId: string, signed: { credential: string; owner: string }): Promise<Record<string, any>>;
+  wantArrived?(wantId: string): Promise<Record<string, any>>;
   /** Answer a circle's vote on its rules, privately (SPEC §11.4c). */
   voteCircle?(tally: string, id: string, vote: string, yes: boolean): Promise<Record<string, any>>;
   fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
@@ -234,7 +242,7 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -258,6 +266,7 @@ export class OwnerDesk {
   private saveCircleRules = () => writeFile(join(this.o.dataDir, 'circle-rules.json'), JSON.stringify(this.circleRules)).catch(() => {});
   /** Who answers each conversation, by the sender's key (8 Nov): 'ai' (the owner's AI on duty may reply) or 'me'. Unset: AI for someone known, the owner for someone new. */
   chatModes: Record<string, 'ai' | 'me'> = {};
+  private buyDrafts = new Map<string, { want: string; offer: string; draft: ReturnType<typeof purchaseDraft> }>();
   private saveChatModes = () => writeFile(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes)).catch(() => {});
   standingUsed(jkt: string, purpose: string) {
     const k = `${jkt}|${purpose}`;
@@ -601,7 +610,7 @@ export class OwnerDesk {
   /** Tell the owner's phones, at most once every two minutes for each kind of thing. */
   notifyOwner(tag: string, body: string, url?: string) {
     // Where a tap on it opens, and what it said (8 Nov: a tap opened the app and nothing said what the push was about).
-    const where = url ?? (tag === 'request' ? './#requests' : tag === 'test' ? './#notify' : tag.startsWith('circle') ? './#me' : tag === 'duty' ? './#myagent' : './#chats');
+    const where = url ?? (tag === 'request' ? './#requests' : tag === 'test' ? './#notify' : tag.startsWith('circle') ? './#me' : tag === 'duty' ? './#myagent' : './#needs');
     const [path, hash = ''] = where.split('#');
     url = `${path}?n=${encodeURIComponent(body)}${hash ? `#${hash}` : ''}`;
     void (async () => {
@@ -1282,6 +1291,24 @@ export class OwnerDesk {
           await this.saveAgenda();
           return void res.json({ ok: true, id: item.id, status: agreed ? `agreed: by ${agreed.by}${agreed.speaks_for?.checked ? `, which speaks for ${agreed.speaks_for.house}` : ', an agent that showed no house it speaks for'}` : 'proposed: it holds the time (your human\'s calendar shows it as tentative); when they agree, send agenda { id, agreed_in }', note: 'in your human\'s agenda, in their house' });
         }
+        // What its human is looking for (SPEC §6.8), from a photo or a few words: the house puts it on its card, and shops
+        // offer. The most they'd pay stays in the house: offers over it are kept folded away, and no shop hears of it.
+        if (p.kind === 'assistant.want') {
+          const q = p as unknown as { name?: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number; max_price?: number };
+          if (!this.o.panel?.postWant) return void res.status(501).json({ error: 'this house can\'t list wants' });
+          const currency = isCurrency(q.currency) ? q.currency : undefined;
+          try {
+            const w = await this.o.panel.postWant({ name: String(q.name ?? ''), description: q.description ? String(q.description) : undefined, properties: q.properties && typeof q.properties === 'object' ? q.properties : {}, quantity: Number.isInteger(q.quantity) ? q.quantity : undefined, area: q.area ? String(q.area) : undefined, currency, days: Number.isFinite(q.days) ? Number(q.days) : undefined },
+              Number.isFinite(q.max_price) && q.max_price! > 0 && currency ? { amount: Number(q.max_price), currency } : undefined);
+            this.touch();
+            return void res.json({ ok: true, want: w, note: `on your human's card now: shops' agents find it at the Lake's /wants and send offers to the house; your human sees them in Chats and buys with a tap. ${q.max_price && !currency ? 'max_price was not kept: give currency too. ' : ''}Nothing in it says what they'd pay.` });
+          } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
+        }
+        if (p.kind === 'assistant.want.close') {
+          const ok = await this.o.panel?.closeWant?.(String((p as { id?: string }).id ?? ''));
+          if (ok) this.touch();
+          return void res.json(ok ? { ok: true } : { error: 'no want with that id' });
+        }
         // An answer to a note left over plain web: its sender reads it at the private link it was given.
         // The owner's AI answered an agent's note itself (on duty, to someone the owner knows): the note says so.
         if (p.kind === 'assistant.answered') {
@@ -1888,6 +1915,34 @@ export class OwnerDesk {
             await this.saveChatModes();
             return { ok: true, mode: w.mode };
           },
+          // Buying what a shop offered for a want (SPEC §6.8): the house drafts a purchase for exactly that cart, this device
+          // signs it, and the house pays it, held until the owner says it arrived.
+          'panel.want.close': async () => ((await panel.closeWant?.(String((q as { id?: string }).id ?? ''))) ? { ok: true } : { error: 'no want with that id' }),
+          'panel.want.draft': async () => {
+            const w = q as { want?: string; offer?: string };
+            const offer = panel.wantOffer?.(String(w.want ?? ''), String(w.offer ?? ''));
+            if (!offer || offer.state !== 'open') return { error: 'that offer is not open' };
+            if (Date.parse(offer.expires) < Date.now() + 60_000) return { error: `${offer.seller.name}'s offer has run out: they can send it again` };
+            if (!this.o.statusUrl) return { error: 'this house cannot pay' };
+            const statusId = `buy:${randomBytes(6).toString('hex')}`;
+            const draft = purchaseDraft(this.o.webId, { id: offer.cart.contents.id, merchant: offer.seller.name, total: offer.total }, new Date(Date.now() + 3_600_000), statusEntry(this.o.statusUrl(), await this.statusIndex(statusId)));
+            this.buyDrafts.set(statusId, { want: String(w.want), offer: offer.id, draft });
+            return { id: statusId, draft };
+          },
+          'panel.want.buy': async () => {
+            const w = q as { draft?: string; credential?: string };
+            const d = this.buyDrafts.get(String(w.draft ?? ''));
+            if (!d) return { error: 'no purchase drafted with that id: start again' };
+            let vc;
+            try { vc = await verifyCredential(String(w.credential ?? ''), this.ownerJwk!); } catch { return { error: 'the purchase is not signed by your key' }; }
+            if (!['issuer', 'type', 'credentialSubject', 'credentialStatus'].every((k) => JSON.stringify((vc as unknown as Record<string, unknown>)[k]) === JSON.stringify((d.draft as Record<string, unknown>)[k]))) return { error: 'the purchase does not match its draft' };
+            if (!this.o.vouchOwner || !panel.buyWant) return { error: 'this house cannot pay' };
+            this.buyDrafts.delete(String(w.draft));
+            const r = await panel.buyWant(d.want, d.offer, { credential: String(w.credential), owner: await this.o.vouchOwner(this.ownerJwk!) });
+            if (!r.error) this.news({ about: 'want.bought', want: d.want, offer: d.offer, note: 'your human bought it on their phone: paid by the house, held until they say it arrived. Nothing for you to pay.' });
+            return r;
+          },
+          'panel.want.arrived': async () => panel.wantArrived?.(String((q as { want?: string }).want ?? '')) ?? { error: 'this house can\'t' },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },
           'panel.circle.dispute': async () => {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));
@@ -1969,6 +2024,8 @@ export class OwnerDesk {
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
+      // What the owner is looking for, and what shops offered (the signed carts stay in the house).
+      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: (n.from.key ? this.chatModes[n.from.key] : undefined) ?? (known && !n.from.web ? 'ai' : 'me') }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),

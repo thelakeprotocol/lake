@@ -8,6 +8,7 @@ import { exampleStudies, loadPacks, packs, type Study } from '@thelakeprotocol/c
 import { attack, houseUrls, swarm } from './attack.js';
 import { ask, knock, makeVisitor, presets, type Tamper } from './knock.js';
 import { startQuoter } from './quoter.js';
+import { startShop } from './shop.js';
 
 const HELP = `lake — talk to the Lake
 
@@ -147,7 +148,17 @@ else if (cmd === 'quoters') {
   const base = (a['public-url'] ?? `http://${existsSync('/.dockerenv') ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
   const server = root.listen(port);
   const examples = packs().flatMap((p) => p.examples?.quoters ?? []);
-  if (!examples.length) throw new Error('no loaded pack brings quoters; try --packs mortgage');
+  // And the demo shops a pack brings: they answer people's wants (SPEC §6.8) from a catalogue.
+  const shops = packs().flatMap((p) => p.examples?.shops ?? []);
+  if (!examples.length && !shops.length) throw new Error('no loaded pack brings quoters or shops; try --packs mortgage');
+  for (const ex of shops) {
+    const slug = ex.domain.split('.')[0]!;
+    let mounted: import('express').Express | null = null;
+    root.use(`/${slug}`, (req, res, next) => (mounted ? mounted(req, res, next) : res.status(503).end()));
+    if (!a.payments) { console.log(`${ex.name}: no --payments, so no shop`); continue; }
+    await startShop({ example: ex, node: a.node!, payments: a.payments, acceptPayments: a['accept-payments']!.split(',').map((u) => u.trim()).filter(Boolean), publicUrl: `${base}/${slug}`, mount: (app) => { mounted = app; }, log: (m) => console.log(m) })
+      .catch((e: Error) => console.log(`${ex.name}: ${e.message}`));
+  }
   for (const ex of examples) {
     const slug = ex.domain.split('.')[0]!;
     const authority = a.authority ?? `http://specialists:4300/${packs().find((p) => ex.program.pack.startsWith(`${p.id}@`))?.authority?.path ?? 'register'}`;
@@ -156,7 +167,7 @@ else if (cmd === 'quoters') {
     await startQuoter({ example: ex, node: a.node!, auditor: a.auditor!, authority, payments: a.payments, acceptPayments: a['accept-payments']!.split(',').map((u) => u.trim()).filter(Boolean), publicUrl: `${base}/${slug}`, mount: (app) => { mounted = app; }, log: (m) => console.log(m) })
       .catch((e: Error) => console.log(`${ex.name}: ${e.message}`));
   }
-  console.log(`${examples.length} quoters on :${port}`);
+  console.log(`${examples.length} quoters on :${port}${shops.length ? `, and ${shops.length} shops answering wants` : ''}`);
   process.on('SIGTERM', () => server.close());
 }
 else if (cmd === 'sponsor') {

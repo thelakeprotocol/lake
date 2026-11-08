@@ -1,4 +1,4 @@
-import { canonicalize, cardUrlFor, badgeProblems, checkBadges, keyThumbprint, menuProblems, ownWordClaims, proveDomain, verifyLakeCard, type AgentCard, type CheckedBadge, type LakeProfile } from '@thelakeprotocol/core';
+import { canonicalize, cardUrlFor, badgeProblems, checkBadges, keyThumbprint, menuProblems, wantProblems, MAX_WANTS, ownWordClaims, proveDomain, verifyLakeCard, type AgentCard, type CheckedBadge, type LakeProfile } from '@thelakeprotocol/core';
 
 export interface Entry {
   /** Short, stable id the map and events use: role plus the start of the key id. */
@@ -52,6 +52,11 @@ export class Registry {
     }
     // A menu others will order from must make sense: a search shows it as it is.
     if (profile.menu !== undefined && menuProblems(profile.menu).length) return { ok: false, refusal: { code: 'not-lake', why: menuProblems(profile.menu).join('; ') } };
+    // Wants (SPEC §6.8): a few, each well formed, on a house's card. One that has closed is still fine on a card: lists skip it.
+    if (profile.wants !== undefined) {
+      const bad = !Array.isArray(profile.wants) || profile.wants.length > MAX_WANTS || profile.role !== 'house' ? [`wants: up to ${MAX_WANTS}, on a house's card`] : profile.wants.flatMap((w) => wantProblems({ ...w, availabilityEnds: new Date(Math.max(Date.parse(w.availabilityEnds), Date.now() + 1000)).toISOString() }));
+      if (bad.length) return { ok: false, refusal: { code: 'not-lake', why: bad.join('; ') } };
+    }
     if (badgeProblems(profile.badges).length) return { ok: false, refusal: { code: 'not-lake', why: badgeProblems(profile.badges).join('; ') } };
     const claimed = via === 'direct' ? this.claims(card, profile) : undefined;
     if (claimed) return { ok: false, refusal: { code: 'reserved', why: claimed } };

@@ -4,12 +4,13 @@ import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, cartHash, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
 import { OwnerDesk, type PanelProvider } from './owner.js';
+import { openWants, type Wants } from './wants.js';
 import { Parser } from 'n3';
 import { parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
 import { createPodMcpServer } from './pod-mcp.js';
@@ -167,6 +168,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const relayed = o.relay && nodes.length ? nodes.map((n) => `${n}/relay/${id.kid.replace(/[^a-zA-Z0-9]/g, '')}/a2a`) : null;
   if (!rules.trust && o.sandbox) say(`no trust section in rules.yaml; sandbox default: issuers ${demoIssuers.join(', ')}, auditor ${DEMO_TRUST.auditors}, ethics ${DEMO_TRUST.ethics}`);
 
+  // What the owner is looking for (SPEC §6.8), kept in their pod; the open ones go on the card, for shops to find.
+  const wants = await openWants({
+    load: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/wants.json`).catch(() => null); return r?.ok ? r.json() : []; },
+    save: (list) => put(owner, 'wallet/wants.json', JSON.stringify(list), 'application/json'),
+  });
   // The card is the house's public face, so the owner's rules decide what it says: its interest tags, and whether it names
   // the kinds of data it holds (privacy.show_packs). Hidden, agents searching by kind of data won't find it; that is the trade.
   const cardFor = async (r: Rules) => {
@@ -185,7 +191,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
           skills: show
             ? o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: r.tags ?? [] }))
             : [{ id: 'offers', name: 'Offers', description: 'Considers offers by its owner\'s rules', tags: r.tags ?? [] }],
-          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [], ...(r.door?.handle ? { handle: r.door.handle } : {}) },
+          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [], ...(r.door?.handle ? { handle: r.door.handle } : {}), ...(wants.open().length ? { wants: wants.open() } : {}) },
         },
         id,
       ),
@@ -255,7 +261,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const recard = async (r: Rules) => { Object.assign(card, await cardFor(r)); await link?.register(3); };
   // Consent records that are settled (withdrawn, or past their date), so the panel doesn't re-read them on every refresh.
   const consentCache = new Map<string, Record<string, unknown>>();
-  const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache });
+  const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, wants });
   const desk = new OwnerDesk({
     panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl,
@@ -324,6 +330,23 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     inCircle: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/circles.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     answeredQuorum: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     signals: () => signals,
+    // A shop's offer for something the owner is looking for, or word that it sent what was bought (SPEC §6.8).
+    wantIn: async (p, profile, from) => {
+      if (p.kind === 'want.offer') {
+        const r = await wants.offerIn(p, profile, from, owner.webId);
+        if (!r.ok) return { kind: 'refused', problems: [r.why] };
+        note('want.offer', `${r.offer.seller.name} offered ${r.offer.total.currency} ${r.offer.total.value.toFixed(2)} for "${r.want.name}"`);
+        desk.touch();
+        if (!r.replaced && !r.offer.over) desk.notifyOwner('want', `A shop made an offer for "${r.want.name.slice(0, 60)}".`, `./#want=${r.want.id}`);
+        return { kind: 'want.received', want: r.want.id, offer: r.offer.id, note: 'the owner sees it on their phone and decides; you hear if they buy' };
+      }
+      const r = await wants.shippedIn(p, profile);
+      if (!r.ok) return { kind: 'refused', problems: [r.why] };
+      note('want.shipped', `${r.offer.seller.name} sent "${r.want.name}": ${r.offer.shipped?.note ?? ''}`);
+      desk.notifyOwner('want', `${r.offer.seller.name.slice(0, 40)} sent your "${r.want.name.slice(0, 50)}".`, `./#want=${r.want.id}`);
+      desk.touch();
+      return { kind: 'want.noted', want: r.want.id };
+    },
     // Run 58 and 59: a release replaced the held receipt in the pod, but Money kept its five-minute copy of the held one,
     // so Earned missed it.
     onReceiptFiled: (path) => panel.forgetReceipt?.(path),
@@ -425,6 +448,7 @@ function panelFor(x: {
   records: { pack: LakePack; paths: RecordPaths }[];
   trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
   consentCache: Map<string, Record<string, unknown>>;
+  wants: Wants;
 }): PanelProvider {
   const { owner } = x;
   // A signed request from this house to another agent, and its verified reply.
@@ -434,6 +458,12 @@ function panelFor(x: {
     const v = await verifyLakeData<Record<string, unknown>>(reply as LakeData<Record<string, unknown>>, { sandbox: x.o.sandbox });
     if (!v.ok) throw new Error(v.rejection.why);
     return { payload: v.payload, card: (reply as LakeData).card };
+  };
+  // The payments agent to pay a cart through: one of this Lake's that the shop named, or this Lake's own if it named none.
+  const paymentsFor = async (cart: CartMandate) => {
+    const ours = (await Promise.all(x.nodes.map((n) => fetch(`${n}/cards?skill=payments`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ card: AgentCard; via?: string }[]>).catch(() => [])))).flat().filter((c) => !c.via).map((c) => String(c.card.supportedInterfaces?.[0]?.url ?? ''));
+    const named = cartTerms(cart.contents).payments.map((p) => p.url);
+    return named.length ? named.find((u) => ours.includes(u)) : ours[0];
   };
   const stamp = async (): Promise<{ credential: string; card: AgentCard; person: string } | null> => {
     const r = await owner.fetch(`${owner.podRoot}wallet/personhood.json`).catch(() => null);
@@ -822,6 +852,32 @@ function panelFor(x: {
         if (last.kind === 'circle.paid') { x.note('favour.paid', `You paid ${sellerCard.name} with a favour owed to you: the one who owed it owes them now`); return last; }
       }
       return last;
+    },
+    // What the owner is looking for (SPEC §6.8): post, close, and buy one offer with their signature for its cart.
+    wantsList: () => x.wants.all(),
+    async postWant(input, limit) { const w = await x.wants.post(input, limit); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
+    async closeWant(id) { const ok = await x.wants.close(id); if (ok) await x.recard(x.keeper().rules); return ok; },
+    wantOffer: (wantId, offerId) => x.wants.find(wantId)?.offers.find((o) => o.id === offerId),
+    async buyWant(wantId, offerId, signed) {
+      const offer = x.wants.find(wantId)?.offers.find((o) => o.id === offerId);
+      if (!offer) return { error: 'no such offer' };
+      const payments = await paymentsFor(offer.cart);
+      if (!payments) return { error: 'no payments agent on this Lake that the shop takes: nothing was paid' };
+      const r = await x.wants.buy(wantId, offerId, signed, { id: x.id, webId: owner.webId, card: x.card, payments, send });
+      if ('error' in r) return r;
+      if (r.receipt) await put(owner, `receipts/spent-cart-${createHash('sha256').update(offer.cart.contents.id).digest('hex').slice(0, 16)}.receipt.jwt`, r.receipt, 'text/plain').catch(() => {});
+      await x.recard(x.keeper().rules);
+      x.note('want.bought', `You bought "${r.want.name}" from ${offer.seller.name} for ${offer.total.currency} ${offer.total.value.toFixed(2)}: paid, held until you say it arrived`);
+      return { ok: true, want: r.want.id, offer: offer.id };
+    },
+    async wantArrived(wantId) {
+      const r = x.wants.find(wantId), offer = r?.offers.find((o) => o.id === r.bought);
+      if (!offer) return { error: 'nothing bought for that want' };
+      const payments = await paymentsFor(offer.cart);
+      if (!payments) return { error: 'no payments agent on this Lake' };
+      const out = await x.wants.arrived(wantId, { payments, send });
+      if (!('error' in out)) x.note('want.arrived', `"${r!.want.name}" arrived: ${offer.seller.name} is paid`);
+      return out;
     },
     async passFavour() {
       const dir = `${owner.podRoot}wallet/favours/`;

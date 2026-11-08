@@ -42,6 +42,14 @@ paths:
         - { name: idle, in: query, description: 'Agents whose driver last acted more than 15 minutes ago, and agents asleep, are left out unless this is 1', schema: { enum: ['1'] } }
       responses:
         '200': { description: 'Matching cards, those registered with this node before those synced from peers; verify each yourself', content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: string }, card: { type: object }, active: { type: string, format: date-time, description: 'When its driver last acted through it, in its own signed word (POST /presence), if it says' }, via: { type: string, format: uri, description: 'The peer node this node learned the card from (SPEC §9); absent when the agent registered here directly' }, unreachable_since: { type: string, format: date-time, description: 'That peer has not answered since then (SPEC §9): its agents cannot be reached for now' }, asleep: { type: boolean, description: 'Asleep (SPEC §8.1): a message wakes it, so it may answer later' } } } } } } }
+  /wants:
+    get:
+      summary: What people are looking for (SPEC §6.8)
+      description: Every open want (a schema.org Demand) on the house cards this node knows, its own Lake's first. A want never says what its owner would pay. Sellers offer to the house, `{ kind "want.offer", want, cart }`.
+      parameters:
+        - { name: q, in: query, description: Words to find in a want's name, description and properties (all must appear), schema: { type: string }, example: shower head }
+      responses:
+        '200': { description: 'Open wants, with the house to offer to', content: { application/json: { schema: { type: array, items: { type: object, properties: { want: { type: object }, house: { type: object, properties: { url: { type: string, format: uri }, webId: { type: string, format: uri }, name: { type: string }, handle: { type: string } } }, via: { type: string, format: uri } } } } } } }
   /presence:
     post:
       summary: Say when whoever drives this agent last acted through it (signed; SPEC §8.1)

@@ -43,6 +43,8 @@ export interface HousekeeperOptions {
   inCircle?: (tally: string, id: string) => Promise<boolean>;
   /** Whether this house's owner answered the quorum of a pledge at this tally (by the tally's WebID). */
   answeredQuorum?: (tally: string, id: string) => Promise<boolean>;
+  /** A shop's offer for what the owner is looking for, or word that it sent it (SPEC §6.8): the house's answer. */
+  wantIn?: (payload: Record<string, unknown>, profile: LakeProfile, card: AgentCard) => Promise<Record<string, unknown>>;
   /** The nodes this house follows, and its links to them (for intents). */
   nodes?: string[];
   links?: () => import('@thelakeprotocol/core').LakeLinks | null;
@@ -194,6 +196,7 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
+    if (['want.offer', 'want.shipped'].includes(String(v.payload.kind)) && this.o.wantIn) return this.reply((await this.o.wantIn(v.payload as unknown as Record<string, unknown>, v.profile, (data as LakeData).card)) as never);
     // A promise circle this house's owner is in (SPEC §11.4c), from its tally only: a member needs help (the caller unnamed),
     // their own call was taken or couldn't be, or a promise of theirs counted as kept.
     const circleIds = (x: Record<string, unknown>) => [String(x.id ?? ''), ...(Array.isArray(x.ids) ? x.ids.map(String) : [])];
