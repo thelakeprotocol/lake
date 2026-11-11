@@ -46,8 +46,8 @@ function togglePause() { paused.value = !paused.value; lake?.setPaused(paused.va
 const fmt = (n) => n.toLocaleString('en-US');
 
 const laws = [
-  { n: '01', h: 'Data never moves.', p: 'Code travels to your data, runs inside your house and leaves with an answer, not your records. Every record that leaves a pod is counted, publicly. The number is zero.' },
-  { n: '02', h: 'Agents knock.', p: 'Every agent carries a signed card tied to a domain someone answers for. It says who it is, why it’s here and what it pays. No card, no conversation.' },
+  { n: '01', h: 'Data never moves.', p: 'Code travels to your data, runs inside your house and leaves with an answer, not your records. Visitors never hold a key to your pod: the house reads only what you granted and sends out the answer. Each house reports every computation publicly, with what it let out.' },
+  { n: '02', h: 'Agents knock.', p: 'Every agent carries a signed card tied to a domain someone answers for. It says who it is, why it’s here and what it pays. No card, no conversation. (On the sandbox, domain proof is switched off, and every reply says so.)' },
   { n: '03', h: 'Only humans cut keys.', p: 'Agents can use access. They can never grant it, widen it or extend it. Every key traces back to a human tap, or a rule a human wrote.' },
 ];
 
@@ -58,7 +58,7 @@ const everyday = [
   { h: 'Your own AI, on duty', p: 'While you’re away, your AI answers people you know and books times you’re free, under a grant you sign. Never money. In the morning you see what it did, with Undo.', to: '/docs/approvals' },
   { h: 'Price your time your way', p: 'Money, a favour someone owes you, or an hour of certified help given to a charity: “go and help them, then book me”.', to: '/docs/trade' },
   { h: 'Consents you can see', p: 'Every yes sits in your house beside its record: who, what, for how long. Take it back and the next request is refused.', to: '/docs/approvals' },
-  { h: 'Studies that pay you', p: 'A question runs inside every house that agrees; the houses bargain together and get paid; only totals come out. Your records never leave.', to: '/docs/how-it-works' },
+  { h: 'Studies that pay you', p: 'A question runs inside every house that agrees; the houses bargain together and get paid (play money on the sandbox); only totals come out. Your records never leave.', to: '/docs/how-it-works' },
 ];
 
 const flow = [
@@ -70,8 +70,8 @@ const flow = [
   ['Bargain', 'Housekeepers see the identical offer and counter as one bloc: $5, and drop the postcode.'],
   ['Grant', 'Owners’ standing rules or live taps issue 48-hour keys that match the signed agreement exactly.'],
   ['Compute', 'The certified study runs inside each house, re-checks every signature, and sends its answer as two unreadable shares, one to each teller.'],
-  ['Pay', 'The Payments agent settles under the mandate. A receipt lands in every pod.'],
-  ['Answer', 'The tellers publish totals only. Records moved: 0.'],
+  ['Pay', 'The Payments agent settles under the mandate (simulated money; real signed receipts). A receipt lands in every pod.'],
+  ['Answer', 'The tellers publish totals only. Each house reports records out: 0.'],
 ];
 
 const standards = [
@@ -80,13 +80,13 @@ const standards = [
   ['MCP', 'Housekeeper ↔ pod. Your AI ↔ the Lake.', 'https://modelcontextprotocol.io'],
   ['ODRL', 'Machine-readable terms of every deal.', 'https://www.w3.org/TR/odrl-model/'],
   ['Verifiable Credentials', 'Proof your data is real.', 'https://www.w3.org/TR/vc-data-model-2.0/'],
-  ['Access Grants', 'Scoped, expiring, revocable keys.', 'https://docs.inrupt.com/'],
+  ['Solid Access Grants', 'Scoped, expiring, revocable keys (Inrupt\'s spec).', 'https://docs.inrupt.com/'],
   ['AP2', 'Signed spending mandates for agents.', 'https://ap2-protocol.org'],
 ];
 
 const milestones = [
   ['Core', 'done'], ['Spec', 'done'], ['House', 'done'], ['Lake node', 'done'], ['Mission', 'done'], ['Approvals', 'done'],
-  ['Money', 'done'], ['Wild life', 'done'], ['1,000 houses', 'done'], ['Federation', 'done'], ['Open door', 'done'], ['Polish', 'done'],
+  ['Money', 'done'], ['Wild life', 'done'], ['1,000 houses', 'runs, 10 min'], ['Federation', 'runs, no second public node yet'], ['Open door', 'done'], ['Polish', 'done'],
 ];
 </script>
 
@@ -163,7 +163,7 @@ const milestones = [
     <section class="block gutter real">
       <div class="eyebrow">Not a simulation</div>
       <h2>The map above is a simulation.<br><span class="mint">This one is real.</span></h2>
-      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 owners get paid, an attacker is quarantined, an owner revokes every key. Records moved: 0.</p>
+      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 houses get paid (play money), an attacker is quarantined, an owner revokes every key. Records moved, as the houses report it: 0. <a href="/docs/verify">Check it yourself</a>: what the live sandbox shows, and what it can't prove yet.</p>
       <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
         <source src="/demo.mp4" type="video/mp4">
       </video>
@@ -173,7 +173,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">Point your own AI at it</div>
       <h2>Point an AI at it.<br><span class="mint">It builds the rest.</span></h2>
-      <p class="kicker">Unmodified AI agents (these runs were Claudes; any app that takes MCP connectors can join, and Grok has), each with one connector to the public sandbox. Real runs, unedited. The last two have no server at all: the only shared thing is a markdown blueprint, and every Claude builds its own version of the app.</p>
+      <p class="kicker">Unmodified AI agents (these runs were Claudes; any app that takes MCP connectors can join, and Grok has), each with one connector to the public sandbox. Real runs, sped up, nothing cut. The last two have no server at all: the only shared thing is a markdown blueprint, and every Claude builds its own version of the app.</p>
       <div class="clips">
         <a v-for="c in clips" :key="c.file" class="clip" :href="withBase('/docs/demos#' + c.id)">
           <img :src="withBase('/demos/' + c.file + '.jpg')" :alt="c.title" loading="lazy">
@@ -207,7 +207,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">One example among many: a study, end to end</div>
       <h2>“Do over-60s on drug X get readmitted less?”</h2>
-      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute, and nothing gets copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
+      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute for a few hundred houses (ten at a thousand, measured), and nothing gets copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
       <ol class="flow">
         <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
           <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>
@@ -228,7 +228,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">No new silos</div>
       <h2>Built on open standards. Owned by nobody.</h2>
-      <p class="kicker">The Lake invents almost nothing. It's a thin profile that makes existing standards work together, so it outlives any company, including whoever wrote it.</p>
+      <p class="kicker">The Lake is a thin profile over existing standards, and it is replacing the pieces it had to invent with standard ones (<a href="/docs/roadmap">What's next</a> lists them), so it can outlive any company, including whoever wrote it.</p>
       <div class="stds">
         <a v-for="([n, d, u]) in standards" :key="n" class="std" :href="u" target="_blank" rel="noopener"><b>{{ n }}</b><span>{{ d }}</span></a>
       </div>

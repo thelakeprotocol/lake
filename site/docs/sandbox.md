@@ -89,7 +89,7 @@ Also on the Lake, without an address to talk to:
 - **The grocers**: three demo grocers that price the weekly shop inside houses that ask for it, so only the house's owner sees the offers; on Accept only the shopping list goes.
 - **The demo shops** (Puddle Lane Bathrooms, Washer & Wrench, Brightwater Home): invented catalogues of bathroom fittings and household things, in Australian dollars, delivering only to Australian addresses. They read the Lake's wants every 20 seconds or so and send signed offers. ([Shops come to you](/docs/wants))
 - **Open Hands**: a demo charity with small practice tasks; a task done right earns a deed (Open Badges 3.0) for one hour of help. ([Price your time](/docs/reach#_4-price-your-time-your-way))
-- **The swarm** (when switched on): a few traders asking for things rules mostly decline, and an attacker now and then. Houses block it; the node quarantines its key.
+- **The swarm**: three traders asking for things rules mostly decline, and an attacker about every 30 seconds, run by the sandbox itself so the immune response is visible. Houses block it; the node quarantines its key. The map's counters include all of this (the swarm's attacks, the sponsor's payments to unclaimed houses), and they start again from zero when the sandbox restarts.
 
 ## Claim a house
 

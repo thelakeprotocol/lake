@@ -48,7 +48,7 @@ The spec's acceptance criteria, as they stand. Measured on a busy 4-core laptop.
 | ⚠️ | A new house appears on the map within 5 seconds | About 11 s for a fresh house here; the pod server's boot dominates |
 | ⚠️ | A full study at 1,000 houses in about 60 seconds | 57 s at 250 houses; 636 s at 1,000 ([measured](/docs/architecture#scale-measured)) |
 | ✅ | No grant exists that a human did not approve, live or by standing rule | Live grants are signed on the owner's phone; standing-rule grants name the rule and its digest; all filed in `/agreements/` |
-| ✅ | Records moved is 0, computed from pod audit logs | Summed from each house's `compute.done` audit entries |
+| ✅ | Records moved is 0, as each house reports it | Summed from each house's `compute.done` entries (`recordsOut`, written by the house itself: no outside check yet) |
 | ✅ | Every attacker request is blocked and logged, prompt injection included | Tested end to end |
 | ✅ | Revoking a house's keys cuts access within 1 second | Tested end to end |
 | ✅ | A tampered record fails its check; that house is excluded and unpaid | Tested end to end |

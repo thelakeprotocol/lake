@@ -90,6 +90,7 @@ export default defineConfig({
             { text: 'Spec (Lake profile v0.1)', link: '/docs/spec' },
             { text: 'Architecture', link: '/docs/architecture' },
             { text: 'Security & threat model', link: '/docs/security' },
+            { text: 'Check it yourself', link: '/docs/verify' },
             { text: 'Transparency log', link: '/docs/transparency-log' },
             { text: 'Decisions', link: '/docs/decisions' },
             { text: "What runs, what's next", link: '/docs/roadmap' },

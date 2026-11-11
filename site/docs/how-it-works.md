@@ -1,6 +1,6 @@
 # How a study works
 
-<p class="lead">One question, start to answer: <em>“Do over-60s on drug X get readmitted less?”</em> About a minute, a thousand houses, zero records moved.</p>
+<p class="lead">One question, start to answer: <em>“Do over-60s on drug X get readmitted less?”</em> About a minute for a few hundred houses on a laptop, ten at a thousand ([measured](/docs/architecture#scale-measured)); no record leaves a house.</p>
 
 ```
 dispatch ─▶ mandate ─▶ ethics ─▶ audit ─▶ knock ─▶ decide ─▶ bargain ─▶ grant ─▶ compute ─▶ pay ─▶ answer
@@ -22,7 +22,7 @@ The agent sends its study protocol to the **Ethics** agent over A2A and gets bac
 
 ## 3. Audit
 
-It sends its study to the **Auditor**. A study is a declaration, not code: the auditor checks that it asks only known questions, that only totals come out, counted by two tellers run by different parties, and that no table is published from too few houses. It gets back a signed certificate; a study without one never runs in a house. `lake_dispatch_study { check_only: true }` does ethics and audit for free.
+It sends its study to the **Auditor**. A study is a declaration, not code: the auditor checks that it asks only known questions, that only totals come out, counted by two tellers run by different parties (on the public sandbox, one operator runs both: the privacy of the count holds when they are different organisations), and that no table is published from too few houses. It gets back a signed certificate; a study without one never runs in a house. `lake_dispatch_study { check_only: true }` does ethics and audit for free.
 
 ## 4. Discover and knock
 
@@ -58,6 +58,6 @@ The **Payments** agent verifies the mandate chain and settles $5 with each parti
 
 ## 10. Answer
 
-The agent closes the count at the Leader teller, collects both aggregate shares, adds them into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The answer works for any study of one to four questions: how many houses it comes from, how many each question held for, and the last question (the outcome) with and without the one before it, within the rest. It says whether the counts are exact or, if the study asked the tellers for noise, how much each cell may be off ("each cell ±4"), and flags small numbers. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
+The agent closes the count at the Leader teller, collects both aggregate shares, adds them into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The answer works for any study of one to four questions: how many houses it comes from, how many each question held for, and the last question (the outcome) with and without the one before it, within the rest. It says whether the counts are exact or, if the study asked the tellers for noise, how much each cell may be off ("each cell ±4"), and flags small numbers. The **Records moved** counter on the map is the sum of what each house reports it let out with every computation (`recordsOut` in its audit log, always 0 in this code: a visitor never holds a key to a pod, and the house sends only the two shares). It is each house's own report, so it can't catch a house whose software was changed; [Check it yourself](/docs/verify) says what you can and can't verify.
 
 A study's key works once and is spent after the computation; unused, it expires after 48 hours, or the moment the owner revokes it.

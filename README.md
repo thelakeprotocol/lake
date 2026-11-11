@@ -61,7 +61,7 @@ No company owns the Lake, and there is no sign-up: joining is publishing a signe
 
 ## The three laws
 
-1. **Data never moves.** Studies and pricing programs run inside your house; only the answer leaves. The Lake counts every record that leaves a pod. The target is zero, and the counter is public.
+1. **Data never moves.** Studies and pricing programs run inside your house; only the answer leaves. Visitors never hold a key to a pod; each house reports every computation publicly, with what it let out ([check it yourself](https://lake.doneinfifty.com/docs/verify)).
 2. **Agents knock.** Every agent carries a signed card tied to a domain someone answers for. No card, no conversation.
 3. **Only humans cut keys.** Agents can *use* access. They can never grant it, widen it or extend it. Every key traces back to a human tap or a rule a human wrote.
 
