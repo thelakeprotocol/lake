@@ -262,13 +262,15 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // Consent records that are settled (withdrawn, or past their date), so the panel doesn't re-read them on every refresh.
   const consentCache = new Map<string, Record<string, unknown>>();
   const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, wants });
+  // The consent records read once, a little after start, so the first look at Who has access doesn't wait for them.
+  setTimeout(() => void panel.consents().catch(() => {}), 20_000).unref();
   const desk = new OwnerDesk({
     panel,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl,
     readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
     saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),
     writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),
-    writeConsent: (gid, record) => put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json'),
+    writeConsent: async (gid, record) => { await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json'); consentCache.set(`agreements/${gid}.consent.jsonld`, record as Record<string, unknown>); },
     withdrawConsent: async (gid, at) => {
       const r = await owner.fetch(`${owner.podRoot}agreements/${gid}.consent.jsonld`).catch(() => null);
       if (!r?.ok) return;
@@ -628,16 +630,18 @@ function panelFor(x: {
   };
   const consents = async () => {
       const files = (await listContainer(owner, 'agreements/')).filter((f) => f.endsWith('.consent.jsonld'));
-      const read = await Promise.all(files.map(async (f) => {
+      // Each record is read once and kept: what changes later (taken back, used, past its date) the house knows itself
+      // (desk.isRevoked, the date), so a kept copy is never wrong. New ones are read a few at a time (11 Nov: the demo
+      // house's 160 records, re-read on every look, took over two minutes and the page never opened).
+      const read: (ReturnType<typeof readConsentRecord> | null)[] = [];
+      for (let i = 0; i < files.length; i += 12) read.push(...(await Promise.all(files.slice(i, i + 12).map(async (f) => {
         const cached = x.consentCache.get(f);
         if (cached) return readConsentRecord(cached);
         const r = await owner.fetch(owner.podRoot + f).catch(() => null);
         const rec = r?.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null;
-        const c = rec ? readConsentRecord(rec) : null;
-        // A record taken back or past its date won't change again: read it once. A live one is read each time.
-        if (c && (c.withdrawn || Date.parse(c.until) <= Date.now())) x.consentCache.set(f, rec!);
-        return c;
-      }));
+        if (rec) x.consentCache.set(f, rec);
+        return rec ? readConsentRecord(rec) : null;
+      }))));
       // On a leased house, the list starts at this owner's claim: the last owner's consents were theirs, not this one's.
       const since = x.desk().claimedAt();
       const desk = x.desk();
