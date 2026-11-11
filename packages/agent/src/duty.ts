@@ -11,6 +11,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { ModelRun } from './model.js';
 
 export interface DutyOptions {
   /** The Lake's MCP connector, e.g. https://sandbox.lake.doneinfifty.com/mcp */
@@ -23,8 +24,15 @@ export interface DutyOptions {
   menu?: unknown[];
   /** Its card's line and tags, so people find what it sells (set with the menu; on duty it can't change them). */
   about?: string; tags?: string[];
-  /** The agent CLI to run: "claude -p" (default), or any command that takes the prompt on stdin and LAKE_MCP_CONFIG. */
-  agent?: string;
+  /**
+   * The agent to run: a CLI ("claude -p", the default, or any command that takes the prompt on stdin and LAKE_MCP_CONFIG),
+   * or a model the house runs itself (model.ts).
+   */
+  agent?: string | ModelRun;
+  /** With a model: at most this many tokens in 24 hours (default 200,000); past it, nothing runs until the day rolls on. */
+  maxTokens?: number;
+  /** What its house is told it runs on (default this machine's name): "house" when the house runs it. */
+  host?: string;
   /** How often to look, in ms (default 10 minutes). */
   every?: number;
   /** At most this many runs in 24 hours (default 30). */
@@ -119,7 +127,7 @@ async function call(o: DutyOptions, s: Saved, name: string, args: Record<string,
 /** Unread messages for this agent, without reading them (the connector's GET <lake>/duty/pending). */
 const started = new Date().toISOString();
 async function pending(o: DutyOptions, s: Saved, lookMs = o.every ?? 600_000): Promise<{ waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string } }> {
-  const q = new URLSearchParams({ host: hostname(), since: started, every: String(Math.round(lookMs / 1000)) });
+  const q = new URLSearchParams({ host: o.host ?? hostname(), since: started, every: String(Math.round(lookMs / 1000)) });
   const r = await fetch(`${o.lake.replace(/\/$/, '')}/duty/pending?${q}`, { headers: { authorization: `Bearer ${s.access_token}` } });
   if (r.status === 401) { s.expires_at = 0; throw new Error('401'); }
   return (await r.json()) as { waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string } };
@@ -157,12 +165,14 @@ export async function runDuty(o: DutyOptions): Promise<void> {
   let s = await signIn(o, file, log);
   const every = o.every ?? 10 * 60_000, maxRuns = o.maxRuns ?? 30, maxTools = o.maxTools ?? 40;
   const runs: number[] = [];
+  const spent: [number, number][] = []; // [when, tokens] of model runs, for the 24-hour cap
+  const maxTokens = o.maxTokens ?? 200_000;
   let offSaid = false;
   // A paid order is someone waiting in their chat: looked for every minute and run at once; anything else waits for the
   // usual look (Fable, 6 Nov: ten minutes is too long for a reader watching their AI buy a haiku).
   const sells = ((s.duty as { kinds?: string[] } | null)?.kinds ?? []).includes('deliver');
   const look = sells ? Math.min(every, 60_000) : every;
-  log(`on duty since ${hhmm()} on ${hostname()}, for ${o.house}, as ${s.agent?.name ?? 'its agent'}; looking every ${Math.round((sells ? Math.min(every, 60_000) : every) / 1000)} s`);
+  log(`on duty since ${hhmm()} on ${o.host ?? hostname()}, for ${o.house}, as ${s.agent?.name ?? 'its agent'}; looking every ${Math.round((sells ? Math.min(every, 60_000) : every) / 1000)} s`);
   const work = join(state, 'duty-work');
   mkdirSync(work, { recursive: true });
   while (!o.signal?.aborted) {
@@ -176,14 +186,20 @@ export async function runDuty(o: DutyOptions): Promise<void> {
       else if ((p.to_deliver ?? 0) > 0 || ((p.waiting ? p.waiting > 0 : unknownDue) && !runs.some((t) => Date.now() - t < every - 5_000))) {
         offSaid = false;
         const recent = runs.filter((t) => Date.now() - t < 24 * 3_600_000);
+        const used = spent.filter(([t]) => Date.now() - t < 24 * 3_600_000).reduce((n, [, k]) => n + k, 0);
         if (recent.length >= maxRuns) log(`${p.waiting ?? 'something'} waiting, but ${maxRuns} runs in 24 hours is the cap: not running`);
+        else if (typeof o.agent === 'function' && used >= maxTokens) log(`${p.waiting ?? 'something'} waiting, but ${used} tokens in 24 hours reached the cap (${maxTokens}): not running`);
         else {
           runs.push(Date.now());
           const prompt = dutyPrompt(o.house, s.duty as { kinds?: string[]; cap?: number } | null);
           log(`run ${recent.length + 1}: ${p.waiting ?? 'unknown number of'} message(s) waiting${p.to_deliver ? `, ${p.to_deliver} order(s) to deliver` : ''}`);
-          const r = await runAgent({ agent: o.agent ?? 'claude -p', lake: o.lake, token: s.access_token, prompt, maxTools, cwd: work });
+          const r = typeof o.agent === 'function'
+            ? await o.agent({ lake: o.lake, token: s.access_token, prompt, maxTools })
+            : await runAgent({ agent: o.agent ?? 'claude -p', lake: o.lake, token: s.access_token, prompt, maxTools, cwd: work });
+          const tokens = 'tokens' in r ? Number(r.tokens ?? 0) : 0;
+          if (tokens) spent.push([Date.now(), tokens]);
           const day = new Date().toISOString().slice(0, 10);
-          appendFileSync(join(logs, `${day}.log`), `--- ${new Date().toISOString()} run on ${hostname()} (exit ${r.code})\n[prompt]\n${prompt}\n[said]\n${r.out}\n`, { mode: 0o600 });
+          appendFileSync(join(logs, `${day}.log`), `--- ${new Date().toISOString()} run on ${o.host ?? hostname()} (exit ${r.code}${tokens ? `, ${tokens} tokens` : ''})\n[prompt]\n${prompt}\n[said]\n${r.out}\n`, { mode: 0o600 });
           const said = r.out.split('\n').filter(Boolean);
           log(`run done (exit ${r.code}): ${(r.code === 0 ? said.at(-1) : said.slice(-6).join(' | '))?.slice(0, 600) ?? '(nothing said)'}`);
 

@@ -126,6 +126,8 @@ What the commands above leave out, for a house you keep.
 
 **Upgrade.** Images are tagged `latest` and with the commit they were built from (`lake-house:<git sha>`). Pin the commit in the compose file and change it when you choose; back up first, then `docker compose pull && docker compose up -d`. The house reads its old folder; if anything's wrong, put the old tag and the backup back.
 
+**Your AI on duty, in your house.** Set `ANTHROPIC_API_KEY` on the house (in the compose file's `environment`) and start it with `--duty-model anthropic` (or `anthropic:<model id>`): your house can then run your AI on duty itself, and **My AI → Set up AI on duty → In my house** is one tap. Without it, each owner can still add their own key from their phone. A day of duty is capped at 30 runs and 200,000 tokens.
+
 **What the relay sees.** With `--relay`, your house keeps one outgoing WebSocket to each node it follows and answers through it, so nothing is opened on your router and no port is published. Every message is signed by its sender and sealed for its recipient ([SPEC §3](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md)): the node passes them on but can't read, change or forge them, or see who sent them. It does see that your house is connected, and when and how much passes. If the node goes away, your house keeps reconnecting and is unreachable meanwhile; following two nodes (`--lake a,b`) keeps it reachable when one is down. Your control panel is the one thing reached directly: keep that port to your own network, or put it behind your own HTTPS proxy.
 
 ## No Docker?

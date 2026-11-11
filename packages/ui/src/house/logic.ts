@@ -135,7 +135,7 @@ export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you kn
 export const dutyLive = (d: DutyInfo) => !(d.off && !d.off.night) && Date.parse(d.until) > Date.now() && !(!d.state.on && /took you off duty|has ended/.test(d.state.why));
 export const watching = (r: NonNullable<DutyInfo['runner']>) => {
   const late = Date.now() - Date.parse(r.last) > 3 * r.every * 1000;
-  return `On ${r.host} since ${time(r.since)} · ${late ? `not looking since ${time(r.last)} (asleep?)` : `last looked ${time(r.last)}`}`;
+  return `${r.host === 'house' ? 'Runs in your house' : `On ${r.host}`} since ${time(r.since)} · ${late ? `not looking since ${time(r.last)}${r.host === 'house' ? '' : ' (asleep?)'}` : `last looked ${time(r.last)}`}`;
 };
 export function dutyLine(e: DutyEntry): string {
   const name = e.to?.name ? shortName(e.to.name) : e.to?.webId ? who(e.to.webId) : '';

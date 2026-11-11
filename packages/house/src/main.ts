@@ -17,7 +17,7 @@ const { values: a } = parseCli({
   about: 'A Lake house: your Solid pod and the housekeeper that answers by your rules (https://lake.doneinfifty.com/docs/join).',
   usage: 'lake-house --name <you> [--data <dir>] [--rules <rules.yaml>] [--lake <node url>] [--join <lake url>] [--relay] …',
   example: 'NODE_ENV=production lake-house --name you --data ./my-house --rules personas/research.yaml --lake http://localhost:7000 --issuer-url http://localhost:4300/issuer --auditor-url http://localhost:4300/auditor',
-  notes: { name: 'your house\'s name (its pod and WebID)', data: 'where the pod, its keys and the house\'s state live: back this folder up', rules: 'your rules.yaml', port: 'the house\'s HTTP port (A2A, panel at /owner/, page at /)', 'pod-port': 'the Solid pod\'s port', lake: 'the Lake node(s) to announce to, comma-separated', join: 'a Lake that serves its specialists under /s/ (the sandbox does): node, issuer and auditor in one', 'issuer-url': 'where your pack\'s demo records come from', 'auditor-url': 'who certifies the converter', relay: 'reached through the node: nothing to open on your router', handle: 'open your door under this handle', tenants: 'host this many houses in one process', 'public-url': 'the address others reach this house at' },
+  notes: { name: 'your house\'s name (its pod and WebID)', data: 'where the pod, its keys and the house\'s state live: back this folder up', rules: 'your rules.yaml', port: 'the house\'s HTTP port (A2A, panel at /owner/, page at /)', 'pod-port': 'the Solid pod\'s port', lake: 'the Lake node(s) to announce to, comma-separated', join: 'a Lake that serves its specialists under /s/ (the sandbox does): node, issuer and auditor in one', 'issuer-url': 'where your pack\'s demo records come from', 'auditor-url': 'who certifies the converter', relay: 'reached through the node: nothing to open on your router', handle: 'open your door under this handle', tenants: 'host this many houses in one process', 'public-url': 'the address others reach this house at', connector: 'the Lake\'s MCP connector, for an AI on duty the house runs (default: this site\'s /mcp)', 'duty-model': 'a model this house offers owners for their AI on duty: stub, anthropic or anthropic:<model> (an operator\'s ANTHROPIC_API_KEY)' },
   options: {
     name: { type: 'string' },
     rules: { type: 'string', default: process.env.LAKE_RULES ?? '/rules.yaml' },
@@ -25,6 +25,9 @@ const { values: a } = parseCli({
     port: { type: 'string', default: process.env.LAKE_PORT ?? '4000' },
     'pod-port': { type: 'string', default: process.env.LAKE_POD_PORT ?? '3000' },
     'public-url': { type: 'string', default: process.env.LAKE_PUBLIC_URL },
+    // The owner's AI on duty, run by the house: the Lake's connector, and a model the operator offers ("stub", "anthropic").
+    connector: { type: 'string', default: process.env.LAKE_MCP_URL },
+    'duty-model': { type: 'string', default: process.env.LAKE_DUTY_MODEL },
     'pod-url': { type: 'string', default: process.env.LAKE_POD_URL },
     // The use cases this house takes part in, by pack id (each one is a package: @thelakeprotocol/usecase-<id>).
     packs: { type: 'string', default: process.env.LAKE_PACKS ?? 'health' },
@@ -107,7 +110,7 @@ const named = Object.fromEntries((a.issuers ?? '').split(',').filter((x) => x.in
 const issuerUrls = Object.fromEntries(packs.filter((p) => p.source).map((p, i) => [p.id,
   (named[p.id] ?? (i === 0 ? a['issuer-url'] : undefined) ?? (a.join ? `${a.join.replace(/\/$/, '')}/s/${p.source!.issuer.path}` : `http://${p.source!.issuer.path}:4300`)).replace(/\/$/, '')]));
 const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], tellerUrls: (a.tellers ?? '').split(',').map((u) => u.trim()).filter(Boolean), lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain,
-  demoDomains: a['demo-domain']!.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean) };
+  demoDomains: a['demo-domain']!.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean), connector: a.connector, dutyModel: a['duty-model'] };
 
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();

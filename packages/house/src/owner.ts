@@ -4,6 +4,7 @@ import webpush from 'web-push';
 import { join } from 'node:path';
 import express from 'express';
 import type { WantOfferRecord, WantRecord } from './wants.js';
+import type { HouseRunner } from './duty-runner.js';
 import {
   allowanceDraft, dutyDraft, postalAddress, postalAddressProblems, type PostalAddress, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
@@ -322,6 +323,8 @@ export class OwnerDesk {
     private o: {
       dataDir: string;
       webId: string;
+      /** The owner's AI on duty, run by the house itself (duty-runner.ts), when the house can. */
+      dutyRunner?: HouseRunner;
       /** The house's own address (a sign-in that asks to connect an AI must come from its own Lake's site). */
       publicUrl?: string;
       actor: string;
@@ -1507,8 +1510,9 @@ export class OwnerDesk {
         return void res.json({ id: statusId, draft, note: 'sign it on this device and send it back with panel.duty.set' });
       }
       if (p.kind === 'panel.duty.set') {
-        const q = p as unknown as { id?: string; credential?: string; label?: string };
+        const q = p as unknown as { id?: string; credential?: string; label?: string; runner?: string };
         const d = this.dutyDrafts.get(String(q.id ?? ''));
+        if (q.runner === 'house' && !(await this.o.dutyRunner?.status())?.can) return void res.status(400).json({ error: 'this house has no model to run your AI with: connect your own first' });
         if (!d) return void res.status(404).json({ error: 'no duty draft with that id: start again' });
         let vc;
         try { vc = await verifyCredential(String(q.credential ?? ''), this.ownerJwk); } catch { return void res.status(403).json({ error: 'the duty grant is not signed by your key' }); }
@@ -1519,13 +1523,35 @@ export class OwnerDesk {
         this.dutyDrafts.delete(d.statusId);
         const code = randomBytes(9).toString('base64url');
         this.invites.set(code, { label: String(q.label ?? 'AI on duty').slice(0, 60), until: Date.now() + 15 * 60_000, duty });
+        // "Run it in my house": the house's own runner takes the code now, so nothing is copied anywhere.
+        if (q.runner === 'house') { await this.o.dutyRunner!.start(code); return void res.json({ ok: true, runner: 'house', note: 'your house runs your AI on duty now, under the grant you signed' }); }
         return void res.json({ ok: true, code, until: new Date(Date.now() + 15 * 60_000).toISOString(), note: 'give this code to your AI on duty (it works once, for 15 minutes)' });
       }
       if (p.kind === 'panel.duty.off') {
         const kid = String((p as unknown as { kid?: string }).kid ?? '');
         const on = [...this.assistants.values()].filter((a) => a.duty && (!kid || a.kid === kid) && !this.isRevoked(a.duty.statusId));
         for (const a of on) await this.dutyOff(a, 'your human took you off duty');
+        // With nobody left on duty, the house's own runner stops too (it would only look, but a model costs nothing asleep).
+        if (![...this.assistants.values()].some((a) => a.duty && !this.isRevoked(a.duty.statusId) && !a.duty.off)) this.o.dutyRunner?.stop();
         return void res.json({ ok: true, off: on.length });
+      }
+      // Where the owner's AI on duty can run, and with whose model (never the key).
+      if (p.kind === 'panel.duty.runner') return void res.json((await this.o.dutyRunner?.status()) ?? { can: false, model: null, running: false });
+      // The owner's own model for the house to run their AI with: a key for Anthropic's API, kept in the house's data folder.
+      if (p.kind === 'panel.model.set') {
+        if (!this.o.dutyRunner) return void res.status(400).json({ error: 'this house can\'t run an AI' });
+        const q = p as unknown as { provider?: string; key?: string; model?: string };
+        if (q.provider !== 'anthropic') return void res.status(400).json({ error: 'provider: "anthropic" (Claude, with your API key)' });
+        const key = String(q.key ?? '').trim();
+        if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key)) return void res.status(400).json({ error: 'that doesn\'t look like an Anthropic API key (it starts sk-ant-)' });
+        const model = q.model ? String(q.model).trim() : undefined;
+        if (model && !/^claude-[a-z0-9.-]{3,40}$/.test(model)) return void res.status(400).json({ error: 'model: a Claude model id, like claude-opus-5-5' });
+        await this.o.dutyRunner.setModel({ provider: 'anthropic', apiKey: key, ...(model ? { model } : {}) });
+        return void res.json({ ok: true, ...(await this.o.dutyRunner.status()) });
+      }
+      if (p.kind === 'panel.model.clear') {
+        await this.o.dutyRunner?.setModel(null);
+        return void res.json({ ok: true, ...((await this.o.dutyRunner?.status()) ?? {}) });
       }
       if (p.kind === 'panel.duty.log') {
         const since = Number((p as unknown as { since?: number }).since) || Date.now() - 24 * 3_600_000;

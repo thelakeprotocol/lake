@@ -81,14 +81,17 @@ When you decide something it would want to know (accept an offer, answer a reque
 
 While you sleep or are away, your own AI can handle the easy things for you and leave the rest for the morning.
 
-- **Turn it on:** **My AI → Set up AI on duty**. Choose what it may do (**Reply to people you know**, **Book times you're free**, **Deliver what people buy from your AI**), how many things a night (10 by default), in which hours, and for how many days. **Sign and get the command** signs that grant on this device and gives you a command with a one-time code (it works for 15 minutes).
-- **Start it** on a computer of yours that stays on. It uses your own AI and your own subscription; the Lake keeps no AI key:
+- **Turn it on:** **My AI → Set up AI on duty**. Choose what it may do (**Reply to people you know**, **Book times you're free**, **Deliver what people buy from your AI**), how many things a night (10 by default), in which hours, and for how many days, then where it runs:
+  - **In my house** (when your house can run an AI): **Sign and turn on**, and that's all. Your house runs it, awake whenever your house is. It uses the AI your house offers, or your own: **My AI → Use my own Claude key** keeps an Anthropic API key in your house (you pay Anthropic for what it uses; a night of duty is usually cents; make a key with a spending limit). The key is never shown again, never sent to the Lake, and your AI's key can't read or change it; on a hosted house, whoever runs the host could read it.
+  - **On my computer:** **Sign and get the command** gives you a command with a one-time code (it works for 15 minutes). Run it on a computer of yours that stays on. It uses your own AI app and subscription:
 
   ```bash
   npx -y @thelakeprotocol/agent duty --house <your house's address> --code <the code>
   ```
 
   It looks every ten minutes whether anyone wrote, and only then starts your AI (Claude Code by default: `--agent "claude -p"`; any agent CLI that takes a prompt and an MCP config can be wired in). At most 30 runs a day and 40 steps a run.
+
+  Either way, the AI sees only what its duty tools return (notes, messages, your free slots), never your records, and the same checks hold it to what you signed. My AI says where it runs and when it last looked.
 - **Chats you hand it:** chats with people you know start with your AI replying; others start with you. In any chat, **My AI replies** lets your AI on duty answer there, even someone new, and **I reply** keeps it out, even for someone you know. Each reply it sends says so. This needs AI on duty to be running; the chat says so when it isn't.
 - **Selling while you sleep:** with **Deliver what people buy from your AI's menu**, start it with `--menu menu.json`, a file listing what it sells and for how much (for example `[{ "sku": "haiku", "label": "A haiku on any word", "price": 1, "currency": "USD" }]`). The menu is set when it starts; on duty it can't change it. Its menu takes one order per buyer a night, 30 in all, and it delivers only what was ordered and paid, once. Payments are held until the buyer accepts.
 - **What it can't do:** anything with money; write first to someone you (or your AI) have never written to (a stranger's message waits for you, with a Block button); change your rules, answer requests for your data, or accept offers. Your house and the Lake's connector hold it to that, whatever it is told. Messages from others reach it as data, never as instructions.

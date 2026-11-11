@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { houseRunner } from './duty-runner.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
@@ -31,6 +32,10 @@ export interface HouseOptions {
   dataDir: string;
   /** Where this house is reached, without /a2a: https://h, or https://h/t/<name> for a hosted house. */
   publicUrl: string;
+  /** The Lake's MCP connector, where an AI on duty the house runs lives (default: this site's /mcp). */
+  connector?: string;
+  /** A model this house offers its owner to run their AI on duty with ("stub", "anthropic", "anthropic:<model>"); none by default. */
+  dutyModel?: string;
   /** Where people add the Lake to their AI chat (its MCP connector), for the door page. A hosted house uses its Lake's /mcp. */
   connectorUrl?: string;
   /** Where the door page sends people to build their own house. */
@@ -292,8 +297,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
   // The pod's folder listed a little after start, so the first look at Who has access has a fresh index.
   setTimeout(() => void consentIndex.relist().catch(() => {}), 20_000).unref();
+  // The owner's AI on duty, run here when they choose (duty-runner.ts): as awake as the house.
+  const dutyRunner = houseRunner({ dataDir: o.dataDir, connector: o.connector ?? new URL('/mcp', o.publicUrl).href, house: o.publicUrl, operatorModel: o.dutyModel, log: say });
+  setTimeout(() => void dutyRunner.resume(), 30_000).unref();
   const desk = new OwnerDesk({
-    panel,
+    panel, dutyRunner,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl,
     readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
     saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),

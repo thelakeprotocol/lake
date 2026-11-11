@@ -13,6 +13,8 @@ import { generateIdentity, issueCredential, signMessage } from '../packages/core
 // the runner signs in with the code, looks whether anything waits, and runs the agent once when someone writes.
 
 const procs: ChildProcess[] = [];
+let owner: (p: Record<string, unknown>) => Promise<any>;
+let phone: Awaited<ReturnType<typeof generateIdentity>>;
 let dir: string, site: string, proxy: Server;
 const freePort = () => new Promise<number>((ok) => { const s = createServer().listen(0, () => { const p = (s.address() as { port: number }).port; s.close(() => ok(p)); }); });
 function start(args: string[], ready: RegExp, env: Record<string, string> = {}): Promise<ChildProcess> {
@@ -43,7 +45,7 @@ beforeAll(async () => {
   await start(['packages/lake/dist/main.js', '--port', String(np), '--data', join(dir, 'node'), '--feed-batch-ms', '200'], /Lake node on/);
   await start(['packages/specialists/dist/main.js', 'all', '--port', String(sp), '--data', join(dir, 'specialists'), '--lake', node, '--packs', 'health,shopping'], /register registered with the Lake node/);
   await start(['packages/house/dist/main.js', '--name', 'duty', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
-    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/);
+    '--auditor-url', `http://localhost:${sp}/auditor`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site, '--duty-model', 'stub'], /joined the Lake/, { LAKE_DUTY_EVERY_MS: '1000' });
   await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20' });
 }, 240_000);
 
@@ -57,10 +59,10 @@ afterAll(async () => {
 describe('AI on duty: the runner', { timeout: 120_000 }, () => {
   it('signs in with the owner\'s code, runs the owner\'s agent only when someone writes, and keeps its sign-in private', async () => {
     // The owner pairs their phone and signs a duty grant: replies and bookings, never money.
-    const phone = await generateIdentity('phone');
+    phone = await generateIdentity('phone');
     const post = (path: string, body: unknown) => fetch(`${site}/owner${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
     expect(await post('/pair', { publicJwk: phone.publicJwk })).toMatchObject({ paired: true });
-    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'owner' }));
+    owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'owner' }));
     const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 5 });
     const set = await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, phone) });
     expect(set).toMatchObject({ ok: true, code: expect.any(String) });
@@ -112,5 +114,46 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
 
     runner.kill('SIGINT');
     await until(/off duty at \d\d:\d\d/);
+  });
+
+  it('runs in the house itself: the owner connects nothing, signs the grant, and their AI on duty is as awake as the house', async () => {
+    // This house offers a model (the stub: no key needed), so "In my house" is there to choose; the key stays the owner's business.
+    expect(await owner({ kind: 'panel.duty.runner' })).toMatchObject({ can: true, model: { provider: 'stub', whose: 'house' }, running: false });
+    // The owner's own key: checked, never shown back; removed, the house's model is back.
+    expect((await owner({ kind: 'panel.model.set', provider: 'anthropic', key: 'not-a-key' })).error).toMatch(/Anthropic API key/);
+    expect(await owner({ kind: 'panel.model.set', provider: 'anthropic', key: `sk-ant-${'x'.repeat(30)}` })).toMatchObject({ ok: true, model: { provider: 'anthropic', model: 'claude-opus-5-5', whose: 'yours' } });
+    expect(JSON.stringify(await owner({ kind: 'panel.duty.runner' }))).not.toContain('sk-ant-');
+    expect((await stat(join(dir, 'house', 'duty', 'model.json'))).mode & 0o077).toBe(0);
+    expect(await owner({ kind: 'panel.model.clear' })).toMatchObject({ ok: true, model: { whose: 'house' } });
+    // An AI's key may not touch it.
+    const ai = await generateIdentity('assistant');
+    const code = (await owner({ kind: 'panel.assistant.invite', label: 'Nova' })).code;
+    await fetch(`${site}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: ai.publicJwk, code, label: 'Nova' }) });
+    const asAi = async (p: Record<string, unknown>) => (await fetch(`${site}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, ai, { iss: 'assistant' })) })).json();
+    expect((await asAi({ kind: 'panel.model.set', provider: 'anthropic', key: `sk-ant-${'y'.repeat(30)}` })).error).toMatch(/only your human's key/);
+
+    // One signed grant, "in my house": no code to copy, nothing to run anywhere else.
+    const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 5 });
+    expect(await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, phone), runner: 'house' })).toMatchObject({ ok: true, runner: 'house' });
+    expect(await owner({ kind: 'panel.duty.runner' })).toMatchObject({ running: true });
+    // It signs in like any AI on duty (its sign-in kept in the house's data folder, 0600) and its house says where it runs.
+    const wait = async <T>(f: () => Promise<T | undefined>, ms = 30_000): Promise<T> => { const t = Date.now(); for (;;) { const v = await f(); if (v) return v; if (Date.now() - t > ms) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 300)); } };
+    const runnerDir = join(dir, 'house', 'duty', 'duty-house');
+    const saved = await wait(async () => (await readdir(runnerDir).catch(() => [] as string[])).find((f) => /^duty-[0-9a-f]{12}\.json$/.test(f)));
+    expect((await stat(join(runnerDir, saved))).mode & 0o077).toBe(0);
+    const agent = JSON.parse(await readFile(join(runnerDir, saved), 'utf8')).agent as { url: string };
+    await wait(async () => ((await owner({ kind: 'panel.duty.log' })).duties as { runner?: { host: string } }[]).some((d) => d.runner?.host === 'house') || undefined);
+
+    // Someone writes to it at night: the house runs the model once, and the owner finds a note in the morning.
+    const anon = await (await fetch(`${site}/mcp/oauth/anonymous`, { method: 'POST' })).json() as { access_token: string };
+    const kim = new Client({ name: 'Kim', version: '0' });
+    await kim.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
+    await kim.callTool({ name: 'lake_ask', arguments: { to: agent.url, kind: 'message', text: 'Could your human lend me a ladder on Sunday?' } });
+    await kim.close();
+    await wait(async () => ((await owner({ kind: 'list' })).suggestions as { text: string }[]).some((x) => /lend me a ladder on Sunday/.test(x.text)) || undefined);
+
+    // Off duty: the house's runner stops.
+    expect(await owner({ kind: 'panel.duty.off' })).toMatchObject({ ok: true });
+    expect(await owner({ kind: 'panel.duty.runner' })).toMatchObject({ running: false });
   });
 });

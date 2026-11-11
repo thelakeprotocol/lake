@@ -440,3 +440,5 @@ export { createLakeMcpServer } from './mcp.js';
 export { lakeMcpHttpApp } from './http.js';
 
 export const defaultKeyFile = (domain: string) => `${homedir()}/.lake/agent-${domain}.json`;
+export { runDuty, DUTY_TOOLS, type DutyOptions } from './duty.js';
+export { modelDriver, DEFAULT_MODEL, type ModelRun, type ModelSpec } from './model.js';

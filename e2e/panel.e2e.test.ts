@@ -99,7 +99,7 @@ beforeAll(async () => {
   house = site;
   // A sandbox house: the first device to open its panel becomes its owner, as on the public sandbox.
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
-    '--auditor-url', `http://localhost:${sp}/auditor`, '--person-url', `http://localhost:${sp}/person`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
+    '--auditor-url', `http://localhost:${sp}/auditor`, '--person-url', `http://localhost:${sp}/person`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site, '--duty-model', 'stub'], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
   // The connector, with sign-in on.
   await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500', LAKE_MCP_SLEEP_MS: '3000' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
@@ -911,6 +911,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Off until set up: a row on My AI, and its form in a sheet.
     await page.locator('ion-item.lake-row', { hasText: 'Set up AI on duty' }).click();
     const card = sheet();
+    // This house offers a model, so it can run the AI itself: one tap. This test runs it elsewhere, to pair its own stand-in.
+    await card.locator('ion-segment-button', { hasText: 'In my house' }).waitFor({ timeout: 10_000 });
+    await card.getByRole('button', { name: 'Sign and turn on' }).waitFor();
+    await card.locator('ion-segment-button', { hasText: 'On my computer' }).click();
     await card.getByText('Never money; anything new waits for you.').waitFor({ timeout: 10_000 });
     // Hours around now, so what it does below counts as on duty.
     const [from, to] = await page.evaluate(() => { const hh = (d: number) => String((new Date().getHours() + d + 24) % 24).padStart(2, '0') + ':00'; return [hh(-1), hh(2)]; });
@@ -968,7 +972,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Off duty: back to Set up.
     await page.locator('ion-item.lake-row', { hasText: 'Set up AI on duty' }).waitFor({ timeout: 10_000 });
     await page.locator('ion-item.lake-row', { hasText: 'Set up AI on duty' }).click();
-    await sheet().getByRole('button', { name: 'Sign and get the command' }).waitFor({ timeout: 10_000 });
+    await sheet().getByRole('button', { name: 'Sign and turn on' }).waitFor({ timeout: 10_000 });
     await closeSheet();
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
     await tidy();
