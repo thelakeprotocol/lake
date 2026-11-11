@@ -271,7 +271,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     /** Lists the pod's folder and reads what the index lacks, a dozen at a time; one listing at a time. */
     relist() {
       return (this.listing ??= (async () => {
-        const files = (await listContainer(owner, 'agreements/')).filter((f) => f.endsWith('.consent.jsonld'));
+        // A listing that fails is no listing: the index isn't marked fresh, and the next look tries again (11 Nov: a failed
+        // listing read as an empty folder, and the demo house showed nobody with access for ten minutes).
+        const res = await owner.fetch(owner.podRoot + 'agreements/', { headers: { accept: 'text/turtle' } }).catch((e: Error) => ({ ok: false, status: 0, statusText: e.message, text: async () => '' }) as unknown as Response);
+        if (!res.ok) { say(`consent index: listing agreements/ failed (${res.status} ${res.statusText}); keeping what it has`); return; }
+        const files = new Parser({ baseIRI: owner.podRoot + 'agreements/' }).parse(await res.text()).filter((q) => q.predicate.value === LDP_CONTAINS).map((q) => q.object.value.slice(owner.podRoot.length)).filter((f) => f.endsWith('.consent.jsonld'));
         const missing = files.filter((f) => !consentCache.has(f));
         for (let i = 0; i < missing.length; i += 12) await Promise.all(missing.slice(i, i + 12).map(async (f) => {
           const r = await owner.fetch(owner.podRoot + f).catch(() => null);
