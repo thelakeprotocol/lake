@@ -254,13 +254,13 @@ importers:
   packages/ui:
     dependencies:
       '@ionic/core':
-        specifier: '8'
+        specifier: 8.8.19
         version: 8.8.19
       '@noble/curves':
         specifier: 2.4.0
         version: 2.4.0
       ionicons:
-        specifier: '7'
+        specifier: 7.4.0
         version: 7.4.0
       preact:
         specifier: 10.27.2
@@ -9283,7 +9283,7 @@ snapshots:
 
   ionicons@8.1.0:
     dependencies:
-      '@stencil/core': 4.43.5
+      '@stencil/core': 4.45.2
 
   ioredis@5.11.1:
     dependencies:
