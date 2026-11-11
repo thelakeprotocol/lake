@@ -898,7 +898,7 @@ export class OwnerDesk {
 
   noteState(id: string, sender: string): string | null {
     const open = this.notes.find((x) => x.id === id && x.from.webId === sender);
-    if (open) return 'with the owner, not yet set aside';
+    if (open) return 'the owner has it and hasn\'t answered or dismissed it yet';
     const closed = this.closedNotes.get(id);
     return closed && closed.by === sender ? closed.state : null;
   }

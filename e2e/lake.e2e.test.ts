@@ -136,7 +136,7 @@ describe('one house', () => {
     const seminar = (await ask(houses.stan!, uni, { kind: 'note', text: 'Would you speak at our seminar?' })).reply;
     expect(seminar).toMatchObject({ kind: 'noted', note: expect.stringMatching(/^[0-9a-f]{12}$/), says: expect.stringContaining('lake_inbox') });
     // Its sender can ask what became of it; nobody else can.
-    expect((await ask(houses.stan!, uni, { kind: 'status', note: seminar.note })).reply).toMatchObject({ kind: 'note.status', status: 'with the owner, not yet set aside' });
+    expect((await ask(houses.stan!, uni, { kind: 'status', note: seminar.note })).reply).toMatchObject({ kind: 'note.status', status: 'the owner has it and hasn\'t answered or dismissed it yet' });
     expect((await ask(houses.stan!, ads, { kind: 'status', note: seminar.note })).reply).toMatchObject({ kind: 'rejected' });
     // House manners: turned down for a purpose, it isn't heard again on that purpose for a day.
     expect((await knock(houses.stan!, ads, presets().marketing!)).reply).toMatchObject({ decision: 'decline', code: 'repeat' });
@@ -483,6 +483,11 @@ describe('the owner', () => {
     expect(await tool('lake_ping', { who: 'nobody-here', about: 'hi' })).toMatchObject({ error: expect.stringMatching(/nobody goes by "nobody-here"/) });
     const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? From the Claude Code class.', from: 'Alex' });
     expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they'll see it on their phone/) });
+    // Until Sam answers, Alex's inbox says it is waiting on Sam, and how to see where it stands (round 2, 11 Nov).
+    const before = await tool('lake_inbox', { wait_seconds: 0 });
+    expect(before.waiting_on).toEqual([expect.objectContaining({ to: 'sam', check: expect.objectContaining({ tool: 'lake_ask', message: { kind: 'status', note: pinged.note } }) })]);
+    // And a search finds Sam by the handle.
+    expect(JSON.stringify(await tool('lake_search', { q: 'sam' }))).toContain('Sam (house)');
     // Sam sees it on the phone and answers there; it goes back to Alex's AI, signed by Sam's house.
     const note = ((await ownerCall({ kind: 'list' })).notes as { id: string; text: string; from: { as?: string } }[]).find((x) => x.text.startsWith('Dinner on Tuesday?'))!;
     // Who it's from, as Alex's AI says: shown on Sam's phone as "Alex, via <their AI>" (unchecked words).
@@ -492,6 +497,7 @@ describe('the owner', () => {
     const inbox = await tool('lake_inbox', { wait_seconds: 5 });
     expect(JSON.stringify(inbox)).toContain('Yes! 7pm at mine?');
     expect(inbox.messages.find((m: { message: { kind: string } }) => m.message.kind === 'note.reply')).toMatchObject({ message: { kind: 'note.reply', note: pinged.note, text: 'Yes! 7pm at mine?' } });
+    expect(inbox.waiting_on).toBeUndefined();
     await c.close();
     // WebFinger (RFC 7033), as the fediverse finds @name@host: acct:sam@<this Lake> names the house; and from another
     // Lake, "ping sam@<this Lake>" finds it that way.
@@ -620,7 +626,7 @@ describe('the owner', () => {
     // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', rules: 'rules: [' })).toMatchObject({ error: expect.stringMatching(/^rules:/) });
     // Its sender can check the note by either id, and hears when the owner last looked (run 62: "no such request from you").
-    expect((await ask(houses.strict!, neighbour, { kind: 'status', offerId: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'with the owner, not yet set aside', ownerActive: expect.stringMatching(/^owner last active/) });
+    expect((await ask(houses.strict!, neighbour, { kind: 'status', offerId: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'the owner has it and hasn\'t answered or dismissed it yet', ownerActive: expect.stringMatching(/^owner last active/) });
     // A sender the owner won't hear from again, by key: its next note is declined at the door.
     expect(await ownerCall({ kind: 'panel.note.mute', id: twice.note })).toMatchObject({ ok: true, muted: 'neighbour.example' });
     // And its notes don't vanish: they were seen and set aside (run 62: "no such note from you" after a mute).

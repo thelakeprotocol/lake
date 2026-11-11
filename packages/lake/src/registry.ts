@@ -167,7 +167,7 @@ export class Registry {
         (!q.role || e.profile.role === q.role) &&
         (!tag || e.profile.tags.some((t) => t.toLowerCase() === tag || t.toLowerCase().startsWith(`${tag}:`) || t.toLowerCase().startsWith(tag))) &&
         (!q.skill || e.card.skills.some((s) => s.id === q.skill)) &&
-        (!words.length || ((text) => words.every((w) => text.includes(w)))([e.card.name, e.card.description, ...e.profile.tags, ...e.card.skills.map((s) => `${s.id} ${s.name} ${s.description}`), ...(e.profile.menu ?? []).map((m) => `${m.sku} ${m.label}`)].join(' ').toLowerCase())),
+        (!words.length || ((text) => words.every((w) => text.includes(w)))([e.card.name, e.card.description, ...e.profile.tags, ...e.card.skills.map((s) => `${s.id} ${s.name} ${s.description}`), ...(e.profile.menu ?? []).map((m) => `${m.sku} ${m.label}`), e.profile.handle ?? ''].join(' ').toLowerCase())),
     ).sort((a, b) => Number(a.via !== 'direct') - Number(b.via !== 'direct'));
   }
 

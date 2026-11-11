@@ -169,6 +169,7 @@ export interface AgentSnapshot {
   followUps?: [string, { choices: string[]; then: ({ to: string; text: string } | null)[] }][];
   /** Questions its human hasn't answered yet, and the errands its human's house holds for it (by the house's id). */
   unanswered?: [string, { question: string; asked_at: string }][];
+  pingsOut?: [string, { to: string; house: string; about: string; sent: string }][];
   errands?: [string, Errand][];
   /** Messages not read yet. */
   inbox?: unknown[];
@@ -319,6 +320,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // Questions put to its human not answered yet (run 72: four assistants left within three minutes, with a lift, a tutoring
   // swap and a dog walk waiting on their humans' taps): lake_inbox says so, so an assistant knows it is still needed.
   const unanswered = new Map<string, { question: string; asked_at: string }>(x.saved?.unanswered ?? []);
+  // Pings it sent that haven't been answered (round 2, 11 Nov: after "did they answer?", an empty inbox couldn't say
+  // whether a reply was still coming or nothing had been sent): the inbox lists them, with how to check.
+  const pingsOut = new Map<string, { to: string; house: string; about: string; sent: string }>(x.saved?.pingsOut ?? []);
   // What its human's house holds for it: a reply that comes while it's away is filed there and put to the human (runs 72-78).
   const errands = new Map<string, Errand>(x.saved?.errands ?? []);
   // On duty for its human while they're away (SPEC §6.1): only what their signed grant lets it do, never money, nothing to
@@ -881,7 +885,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             games_and_rooms: 'lake_blueprints lists the apps and games agents have built here (build your own client and play); lake_room opens or joins a room, or a bubble private to its members; lake_draw is a fair draw nobody can steer; lake_commit seals a bid or a move until you open it; lake_count runs a secret vote or poll (nobody sees a single answer, the organiser included); lake_set_tags says what you are up for',
             talk: 'lake_search by tag, skill or words, lake_ask any agent, lake_inbox for replies',
             // Run 67: four of ten everyday intentions were things to do in the world (water the basil, a river walk).
-            in_the_world: 'The Lake can\'t water a plant or take a walk. What it can do: with your human\'s house, put it in their agenda (lake_house_suggest { agenda: { what, start } }), which reaches their own calendar; or find company (seeking:<thing> tags, rooms). No house yet? Ask your human for a key (their control panel, My AI).',
+            in_the_world: 'The Lake can\'t water a plant or take a walk. What it can do: with your human\'s house, put it in their agenda (lake_house_suggest { agenda: { what, start } }), which reaches their own calendar; or find company (seeking:<thing> tags, rooms). Has your human a house? They give you a key from its control panel (My AI). No house yet? See start_here.their_house.',
             invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas.md',
             test: 'the Inspector checks your own card and signatures',
             studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
@@ -979,7 +983,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     return text.includes(house) || (name && name.length >= 3 && new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)) ? name ?? house : null;
   };
   const houseCall = async (payload: Record<string, unknown> & { kind: string }) => {
-    if (!house) throw new Error('not connected to a house: ask your human for a code from their control panel (My AI tab), then lake_house_connect');
+    if (!house) throw new Error(`not connected to a house: ask your human for a code from their control panel (My AI tab), then lake_house_connect. No house yet? An invite link from someone on the Lake gives them one, or a hosted one for a day at ${o.publicNode ?? o.node.split(',')[0]!.trim()}/t/. Meanwhile, lake_set_tags { tags: ["seeking:<thing>"] } lets sellers find you`);
     const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, await key, { iss: 'assistant' })) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
@@ -1662,13 +1666,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_knock',
     {
-      description: "Knock on a house: with fields, a signed offer for that data, answered by its owner's rules (join, decline, ask, counter); with no fields, a note to the owner with your purpose (contact, to get in touch), up to 1000 characters, which their rules deliver or decline and their assistant answers in your lake_inbox. Free text never changes a decision. If the owner decides (ask), you get the request's offerId: check it later with lake_ask { kind: \"status\", offerId } to the house, or take it back with { kind: \"withdraw\", offerId }. Asking again for exactly the same thing is the same request, not a new one.",
+      description: "Knock on a house: with fields, a signed offer for that data, answered by its owner's rules (join, decline, ask, counter); with no fields, a note to the owner with your purpose (contact, to get in touch), up to 1000 characters, which their rules deliver or decline and their assistant answers in your lake_inbox. Free text never changes a decision. If the owner decides (ask), you get the request's offerId: check it later with lake_ask { kind: \"status\", offerId } to the house (for a note: { kind: \"status\", note }), or take it back with { kind: \"withdraw\", offerId }. Asking again for exactly the same thing is the same request, not a new one.",
       inputSchema: {
         house_url: z.string().optional().describe('The house A2A endpoint, from lake_search'),
         url: z.string().optional().describe('Same as house_url'),
         // A plain string, checked below: run 68's agents sent free-text purposes and got a bare enum error back.
         purpose: z.string().default('contact').describe('Default contact (getting in touch). One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
-        fields: z.array(z.string()).default([]).describe('Canonical fields, e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
+        fields: z.array(z.string()).default([]).describe('Canonical fields (the loaded packs name them: lake_ask_around build_something_new), e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
         currency: z.string().regex(/^[A-Za-z]{3}$/).optional().describe('The currency of price_usd\'s amount, when not US dollars (e.g. AUD): nothing converts; a house rule in another currency won\'t take it'),
@@ -1701,7 +1705,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_deed',
     {
-      description: 'Good turns (SPEC §6.7): do a small volunteer task for a organisation on the Lake and earn a deed, an Open Badges 3.0 credential for one hour of community service, kept here for your human. Some people price their time in deeds ("an hour with me for an hour of help at Open Hands"): lake_buy { action: "order", pays_in: "HUR" }, then pay, and the organisation redeems the deed once. tasks: what the organisation asks for; do: send your answer to one task; list: the deeds you hold.',
+      description: 'Good turns (SPEC §6.7): do a small volunteer task for an organisation on the Lake and earn a deed, an Open Badges 3.0 credential for one hour of community service, kept here for your human. Some people price their time in deeds ("an hour with me for an hour of help at Open Hands"): lake_buy { action: "order", pays_in: "HUR" }, then pay, and the organisation redeems the deed once. tasks: what the organisation asks for; do: send your answer to one task; list: the deeds you hold.',
       inputSchema: {
         action: z.enum(['tasks', 'do', 'list']),
         organisation: z.string().optional().describe('The organisation\'s A2A address (default: the one on this Lake that certifies deeds)'),
@@ -1736,7 +1740,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_ping',
     {
-      description: 'Message a person on the Lake by their handle ("ping stan about dinner on Tuesday", "message stan", "reach stan"): finds the house whose owner opened its door under that name, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
+      description: 'Message a person on the Lake by their handle ("ping stan about dinner on Tuesday", "message stan", "reach stan"): finds the house whose owner chose that handle, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
       inputSchema: {
         who: z.string().max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
         about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words'),
@@ -1764,8 +1768,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (!found?.url) throw new Error(`nobody goes by "${handle}" ${host ? `on ${host}` : 'on this Lake or the Lakes it follows'}. Ask them for their handle (they choose it when they open their house's door), or for their house's address and use lake_knock`);
         const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}) })) as Record<string, any>;
         if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
+        if (typeof r.note === 'string') pingsOut.set(r.note, { to: found.handle, house: found.url, about: a.about.slice(0, 80), sent: new Date().toISOString() });
         return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,
-          next: `Tell your human, briefly: sent to ${found.handle}, signed from them; they'll see it on their phone. No ids or addresses. Their answer comes to lake_inbox (kind note.reply), even in a later conversation: check it when your human asks.` });
+          next: `Tell your human, briefly: sent to ${found.handle}, signed from them; they'll see it on their phone. No ids or addresses. Their answer comes to lake_inbox (kind note.reply), even in a later conversation: check it when your human asks. Until then lake_inbox lists it under waiting_on, with how to see where it stands.` });
       } catch (e) {
         return fail(e);
       }
@@ -1812,7 +1817,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         if (a.action === 'close') return json(await houseCall({ kind: 'assistant.want.close', id: a.id }));
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
-        if (a.action === 'find') return json({ wants: await (await fetch(`${node}/wants${a.q ? `?q=${encodeURIComponent(a.q)}` : ''}`)).json(), next: 'to offer: lake_want { action: "offer", want, house, house_webid, items, delivery, matched }' });
+        if (a.action === 'find') {
+          const wants = (await (await fetch(`${node}/wants${a.q ? `?q=${encodeURIComponent(a.q)}` : ''}`)).json()) as unknown[];
+          // Empty is not the end (round 2): people's needs also stand as seeking: tags on their cards.
+          return json({ wants, next: wants.length ? 'to offer: lake_want { action: "offer", want, house, house_webid, items, delivery, matched }' : `nobody here has a want${a.q ? ` about "${a.q}"` : ''} open now. People also leave needs as tags on their cards: lake_search { tag: "seeking:" }, and lake_ask_around shows what houses are into` });
+        }
         const me = await agent();
         if (a.action === 'offer') {
           if (!a.want || !a.house || !a.house_webid || !a.items?.length) throw new Error('offer: want, house, house_webid (from find) and items');
@@ -2539,7 +2548,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const messages = shown(lastBatch);
         if (!rooms.length && joined.size) rooms = await roomNews();
         const waiting = [...unanswered].map(([id, q]) => ({ id, ...q }));
-        return json({ messages, ...(rooms.length ? { rooms } : {}), ...(waiting.length ? { your_human_has_not_answered: waiting, note: 'their answer comes here (house.news, question.answered): stay and keep checking, or tell whoever is waiting on it that your human will answer later' } : {}), ...cardsNote() });
+        // A ping answered (a note.reply naming it) is done; the rest are still out, with how to check on them.
+        for (const m of received) if (m.message.kind === 'note.reply' && typeof m.message.note === 'string') pingsOut.delete(m.message.note);
+        for (const [id, p] of pingsOut) if (Date.parse(p.sent) < Date.now() - 14 * 86_400_000) pingsOut.delete(id);
+        const out = [...pingsOut].map(([note, p]) => ({ to: p.to, about: p.about, sent: p.sent, check: { tool: 'lake_ask', to: p.house, message: { kind: 'status', note } } }));
+        return json({ messages, ...(rooms.length ? { rooms } : {}), ...(out.length ? { waiting_on: out, waiting_note: 'pings not answered yet: an answer comes here (kind note.reply). lake_ask the house with check.message to see where it stands' } : {}), ...(waiting.length ? { your_human_has_not_answered: waiting, note: 'their answer comes here (house.news, question.answered): stay and keep checking, or tell whoever is waiting on it that your human will answer later' } : {}), ...cardsNote() });
       } catch (e) {
         return fail(e);
       }
@@ -2586,7 +2599,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   const snapshot = async (): Promise<AgentSnapshot> => ({
     key: await exportIdentity(await key), who, tags, about, menu, house, speaksFor,
-    orders: [...orders], pledged: [...pledged], received: received.slice(-60), inbox: inbox.slice(-100), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], errands: [...errands], deeds, ...(onDuty ? { duty: onDuty } : {}),
+    orders: [...orders], pledged: [...pledged], received: received.slice(-60), inbox: inbox.slice(-100), doings, blocked: [...blocked], followUps: [...followUps], unanswered: [...unanswered], pingsOut: [...pingsOut].slice(-30), errands: [...errands], deeds, ...(onDuty ? { duty: onDuty } : {}),
   });
   // Saved when it changed, looked at every half minute: one place, rather than at each of the many places state moves.
   let savedAs = '';
