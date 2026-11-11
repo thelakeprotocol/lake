@@ -1,0 +1,111 @@
+import { createContext } from 'preact';
+import { useContext, useEffect, useState } from 'preact/hooks';
+import { loadKey, signEnvelope } from '../owner-crypto';
+
+// Talking to the house. Every call is signed on this device with the owner's key, which never leaves it; the house only
+// checks. Screens are functions of what the house said, fetched again when it says something changed.
+
+export const key = loadKey();
+export const api = new URL('./', location.href).href; // served at /owner/
+export const state = { webId: '', leaseUntil: null as string | null };
+export const houseBase = () => location.origin + location.pathname.replace(/\/owner\/.*$/, '');
+
+/** Whether the house is answering, as the last call found: the status chip in the header. */
+export let reachable = true;
+export const reachWatchers = new Set<(ok: boolean) => void>();
+const reached = (ok: boolean) => { if (ok !== reachable) { reachable = ok; for (const w of reachWatchers) w(ok); } };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
+  let res: Response;
+  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signEnvelope(payload, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
+  reached(true);
+  if (!res.ok) {
+    const error = (await res.json().catch(() => ({}))).error ?? String(res.status);
+    // This device's key isn't the house's any more (moved to another device, or recovered there): back to pairing.
+    // Only that answer ("no key … for …"): an expired or replayed signature, or a phone's clock off, is not a lost key.
+    if (res.status === 403 && state.webId && /^no key \S+ for /.test(String(error))) dispatchEvent(new CustomEvent('lake:not-the-key', { detail: error }));
+    throw new Error(error);
+  }
+  return res.json();
+}
+
+/** A call whose answer may carry { error } or { kind: 'refused', problems }: thrown, so a button shows it. */
+export async function must<T = Record<string, unknown>>(payload: Record<string, unknown>): Promise<T> {
+  const r = await call<T & { error?: string; kind?: string; problems?: string[]; ok?: boolean }>(payload);
+  if (r?.error || r?.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; '));
+  return r;
+}
+
+/**
+ * What each screen last showed, shown at once while it's fetched again (stale-while-revalidate). Kept for this tab only
+ * (sessionStorage) and for at most 12 hours: what a house holds is private, and a phone may be shared.
+ */
+export const CACHE = `lake-panel:${location.pathname}:`;
+const CACHE_MS = 12 * 3_600_000;
+export const cached = <T>(k: string): T | undefined => {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(CACHE + k) ?? 'null') as { at: number; v: T } | null;
+    return v && Date.now() - v.at < CACHE_MS ? v.v : undefined;
+  } catch { return undefined; }
+};
+// Set on sign-out: a fetch still landing must not put back what was just cleared.
+let forgetting = false;
+export const remember = (k: string, v: unknown) => { if (forgetting) return; try { sessionStorage.setItem(CACHE + k, JSON.stringify({ at: Date.now(), v })); } catch { /* full or private */ } };
+try { for (const k of Object.keys(localStorage)) if (k.startsWith('lake-panel:')) localStorage.removeItem(k); } catch { /* nothing kept */ }
+
+/** `version` goes up when the house says something changed (its stream), and after anything done here (bump). */
+export const Version = createContext({ version: 0, bump: () => {} });
+export const useBump = () => useContext(Version).bump;
+export const useRedraw = () => { const [, set] = useState(0); return () => set((n) => n + 1); };
+
+/** One signed call, fetched again whenever something changed; keeps what it had while it fetches, so nothing flickers. */
+export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {
+  const { version } = useContext(Version);
+  const k = JSON.stringify(payload);
+  const [s, set] = useState<{ data?: T; error?: string }>(() => ({ data: cached<T>(k) }));
+  useEffect(() => {
+    let live = true;
+    call<T>(payload).then((data) => { remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((x) => ({ ...x, error: e.message })));
+    return () => { live = false; };
+  }, [k, version]);
+  return s;
+}
+
+/** Your key lives only on this device: signing out forgets it here, and what the screens last showed. */
+export function signOut() {
+  forgetting = true;
+  try {
+    localStorage.removeItem(`lake-owner-key:${location.host}`);
+    localStorage.setItem('lake-houses', JSON.stringify((JSON.parse(localStorage.getItem('lake-houses') ?? '[]') as string[]).filter((x) => x !== houseBase())));
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith(CACHE)) sessionStorage.removeItem(k);
+  } catch { /* nothing kept */ }
+  location.reload();
+}
+
+// ---- notifications (Web Push) ----
+export const pushable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+export const iosNotInstalled = () => /iPhone|iPad/.test(navigator.userAgent) && !(navigator as unknown as { standalone?: boolean }).standalone && !matchMedia('(display-mode: standalone)').matches;
+export const notifyOffer = () => {
+  try { if (localStorage.getItem('lake-notify') === 'dismissed') return false; } catch { /* private mode */ }
+  return (pushable() && Notification.permission !== 'granted') || iosNotInstalled();
+};
+export const notifyDismiss = () => { try { localStorage.setItem('lake-notify', 'dismissed'); } catch { /* private mode */ } };
+const b64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
+export async function turnOnNotifications(): Promise<string> {
+  const reg = await navigator.serviceWorker.register('./owner-sw.js', { scope: './' });
+  if ((await Notification.requestPermission()) !== 'granted') throw new Error('Notifications are blocked for this site: allow them in your browser settings.');
+  const { publicKey } = await call<{ publicKey: string }>({ kind: 'panel.push.key' });
+  const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64url(publicKey) }));
+  await call({ kind: 'panel.push.subscribe', subscription: sub.toJSON() });
+  await call({ kind: 'panel.push.test' });
+  return 'On for this phone. A test notification is on its way.';
+}
+export async function turnOffNotifications(): Promise<string> {
+  const reg = await navigator.serviceWorker.getRegistration('./');
+  const sub = await reg?.pushManager.getSubscription();
+  await call({ kind: 'panel.push.off', ...(sub ? { endpoint: sub.endpoint } : {}) });
+  await sub?.unsubscribe().catch(() => false);
+  notifyDismiss();
+  return 'Off for this phone.';
+}

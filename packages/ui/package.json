@@ -17,7 +17,9 @@
     "vite": "6"
   },
   "dependencies": {
+    "@ionic/core": "8.8.19",
     "@noble/curves": "2.4.0",
+    "ionicons": "7.4.0",
     "preact": "10.27.2",
     "qrcode": "1.5.4",
     "yaml": "2"

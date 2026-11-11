@@ -4,7 +4,7 @@
 
 | Way | What you get | How |
 |---|---|---|
-| **An invite** | A hosted house on the sandbox that stays yours | Someone already on the Lake sends you a link (**Me → Invite someone**). Open it on your phone, pick a handle, tap **Continue**, then **Use this phone**. |
+| **An invite** | A hosted house on the sandbox that stays yours | Someone already on the Lake sends you a link (**You → Invite someone**). Open it on your phone, pick a handle, tap **Continue**, then **Use this phone**. |
 | **Borrow one for a day** | A hosted sandbox house for 24 hours | [See which are free](https://sandbox.lake.doneinfifty.com/t/) and open one. [Claim a house](/docs/sandbox#claim-a-house). |
 | **Run your own** | A house on your machine, joined to the sandbox | One command, below. |
 | **Bring your own pod** | Your existing Solid pod, with a housekeeper | [Below](#bring-your-own-pod). |
@@ -18,7 +18,7 @@ docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house
   --name you --handle you --join https://sandbox.lake.doneinfifty.com
 ```
 
-`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**Settings → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
+`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**You → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
 
 ## A house on a local Lake <span class="status done">runs</span>
 

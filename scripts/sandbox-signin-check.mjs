@@ -27,8 +27,8 @@ try {
   must(!!href, 'a free sandbox house to claim');
   const house = new URL(href, `${lake}/t/`).href.replace(/\/owner\/?$/, '');
   await page.goto(`${house}/owner/`);
-  await page.getByRole('button', { name: 'Pair this device' }).click();
-  await page.locator('#nav').waitFor({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Use this phone' }).click();
+  await page.locator('ion-tab-bar').waitFor({ timeout: 15_000 });
   claimed = true;
   ok(`claimed ${house}`);
 
@@ -55,8 +55,8 @@ try {
   ok(`the sign-in page shows a number to match (${number})`);
   // The owner's panel, in another tab of the browser that holds the key, asks with the same number.
   const panel = await page.context().newPage();
-  await panel.goto(`${house}/owner/`);
-  const asked = panel.locator('li.item', { hasText: 'Sign-in check wants to connect to your house' });
+  await panel.goto(`${house}/owner/#inbox`);
+  const asked = panel.locator('ion-card', { hasText: 'Sign-in check wants to connect to your house' });
   await asked.waitFor({ timeout: 20_000 });
   must((await asked.locator('.connect-number').textContent()).trim() === number, 'the house\'s panel asks, with the same number');
   await page.route(`${cb}**`, (r) => r.fulfill({ body: 'back in the app' }));
@@ -95,22 +95,18 @@ try {
   await shopper.close(); await one.c.close(); await two.c.close();
 
   // The owner finds it on Money, with what it was for and who paid.
-  await page.goto(`${house}/owner/`);
-  await page.locator('#nav .more-btn').click();
-  await page.locator('#nav .more-menu button', { hasText: 'Money' }).click();
-  const sale = page.locator('li.pay', { hasText: 'Sign-in check item' });
+  await page.goto(`${house}/owner/#money`);
+  const sale = page.locator('ion-item.pay', { hasText: 'Sign-in check item' });
   // A receipt reaches the house from the payments agent and is read from the pod: allow a slow server a minute,
   // looking again (the screen refetches when it opens).
   for (let i = 0; i < Number(process.env.WAIT_TRIES ?? 6) && !(await sale.isVisible()); i++) {
     await page.waitForTimeout(10_000);
-    await page.locator('#nav > button', { hasText: 'Home' }).click();
-    await page.locator('#nav .more-btn').click();
-    await page.locator('#nav .more-menu button', { hasText: 'Money' }).click();
+    await page.reload();
   }
-  if (!(await sale.isVisible())) throw new Error(`the sale isn't on Money; it shows: ${(await page.locator('#view').innerText()).slice(0, 600)}`);
-  must(/from .*sold by /.test(await sale.locator('summary').textContent()), 'Money says what for, who paid and who sold');
-  await sale.locator('summary').click();
-  await sale.getByText(/Held until the buyer accepts/).waitFor();
+  if (!(await sale.isVisible())) throw new Error(`the sale isn't on Money; it shows: ${(await page.locator('.lake-body').innerText()).slice(0, 600)}`);
+  must(/from .*sold by /.test(await sale.textContent()), 'Money says what for, who paid and who sold');
+  await sale.click();
+  await page.getByText(/Held until the buyer accepts/).waitFor();
   ok('a tap opens the receipt');
   must(!errors.length, `no page errors${errors.length ? `: ${errors.join('; ')}` : ''}`);
 } finally {

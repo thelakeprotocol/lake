@@ -6,4 +6,4 @@
 pnpm --filter @thelakeprotocol/ui dev   # proxies /events to a node on :7000
 ```
 
-**The approvals app runs** (`approvals.html`, served by each house at `/owner/`): pair the phone, see each request, Allow or Deny, Your keys with Revoke. The owner's Ed25519 key is made and kept on the phone; grants are signed there. See [Your phone, your keys](https://lake.doneinfifty.com/docs/approvals).
+**The house app runs** (`approvals.html`, served by each house at `/owner/`): four tabs (Chats, Inbox, My AI, You), drawn by Preact with [Ionic](https://ionicframework.com/docs/components)'s web components and the Lake's own theme (`src/house/theme.css`, light and dark). Sources in `src/house/`: `api.ts` (signed calls), `ion.ts` (components), `logic.ts` (pure helpers), one file per tab, `pages.ts` (the pages under You), `pair.ts`. The owner's Ed25519 key is made and kept on the phone; grants are signed there. See [Your phone, your keys](https://lake.doneinfifty.com/docs/approvals).
