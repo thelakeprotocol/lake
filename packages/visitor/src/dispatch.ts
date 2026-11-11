@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, cardUrlFor, cellCount, cellLabels, unshardCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
-  pickTellers, type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type TellerRef, type Study,
+  buildCard, cardUrlFor, cellCount, cellLabels, summarizeTable, unshardCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  pickTellers, type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type TellerRef, type Study, type TableSummary,
 } from '@thelakeprotocol/core';
 import { readFile, writeFile } from 'node:fs/promises';
 import { ask, type Visitor } from './knock.js';
@@ -58,7 +58,14 @@ export interface StudyRun {
   excluded: { house: string; why: string }[];
   /** The exact table, from the two tellers' sums; empty when too few houses answered to publish one. */
   cells: { label: string; count: number }[];
-  answer: { onX: { rate: number; n: number }; notOnX: { rate: number; n: number }; summary: string; reliable: boolean };
+  /** What the table says, for any shape of study, with how exact it is (null when no table was published). */
+  answer: { summary: string; table: TableSummary | null };
+  /**
+   * Why houses said no, in aggregate (never which house): the coarse codes houses give visitors (SPEC §5): price,
+   * purpose, default (no rule covers it), retention, identifying, and so on. And the asks still with their owners.
+   */
+  declinedBecause: Record<string, number>;
+  pending: { house: string; url: string; offerId: string }[];
   paid: { total: number; houses: number; receiptsFiled: number; refused?: string; notFiled?: string[] } | null;
   seconds: number;
   /** The keys this agent was given, by house. Its own to keep until they expire or are revoked. */
@@ -137,6 +144,8 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   const houses = await discover(o, log);
 
   const decisions: Record<string, number> = {};
+  const declinedBecause: Record<string, number> = {};
+  const pending: StudyRun['pending'] = [];
   const joined = new Map<string, Joined>();
   const asked: House[] = [];
   const counters: { house: House; counter: { fields: string[]; priceUsd: number } }[] = [];
@@ -147,8 +156,10 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
         const { reply } = await askPatiently(h.url, o.visitor, { kind: 'offer', offer, study, attachments: { ethics: ethicsAtt, audit: auditAtt } });
         const d = reply.kind === 'decision' ? String(reply.decision) : 'rejected';
         if (tally) decisions[d] = (decisions[d] ?? 0) + 1;
+        if (tally && d === 'decline') { const why = typeof reply.code === 'string' && /^[a-z-]{2,20}$/.test(reply.code) ? reply.code : 'unsaid'; declinedBecause[why] = (declinedBecause[why] ?? 0) + 1; }
         if (d === 'join' && reply.grant) joined.set(h.url, { house: h, grant: reply.grant, agreement: reply.agreement, priceUsd: offer.priceUsd });
         if (d === 'ask' && tally) asked.push(h);
+        if (d === 'ask' && tally) pending.push({ house: h.name, url: h.url, offerId: offer.id });
         if (d === 'counter' && reply.counter && reply.bloc) counters.push({ house: h, counter: reply.counter });
       } catch {
         if (tally) decisions.unreachable = (decisions.unreachable ?? 0) + 1;
@@ -166,6 +177,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   report('offer', { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' });
   await knockAll(houses, offer, true);
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));
+  if (Object.keys(declinedBecause).length) log('decide', `declined because: ${Object.entries(declinedBecause).map(([k, n]) => `${n} ${{ price: 'it pays too little', purpose: 'they take no research', default: 'no rule of theirs covers it', retention: 'they keep no data', identifying: 'it asks for something identifying' }[k] ?? k}`).join(' · ')}`);
   await beat();
 
   // Houses that countered the same offer bargain as one bloc: the highest price, only fields all accept (SPEC §5.3).
@@ -324,18 +336,10 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
       }
     }
   }
-  // Bits: 0 the group (over 60), 1 the exposure (on drug X), 2 the outcome (readmitted).
-  const [group, exposure, outcome] = study.predicates.map((p) => p.name);
-  // With teller noise a small cell can come out below zero: count it as zero for the rates.
-  const rate = (readmRaw: number, notRaw: number) => { const readm = Math.max(0, readmRaw), not = Math.max(0, notRaw); return { rate: readm + not > 0 ? readm / (readm + not) : 0, n: Math.round(readm + not) }; };
-  const onX = rate(cells[0b111]!, cells[0b011]!);
-  const notOnX = rate(cells[0b101]!, cells[0b001]!);
-  // Exact counts: a table from a handful of houses is true, just small.
-  const reliable = n >= 50;
-  const pct = (x: number) => `${Math.round(x * 100)}%`;
-  // Nobody took part: say so, rather than print a rate made of nothing.
-  const summary = n === 0 ? (tooFew ? `No table: ${tooFew}.` : 'No answer: no house took part.') : `${group}, ${exposure}: ${pct(onX.rate)} ${outcome} (${onX.n}) vs ${pct(notOnX.rate)} not ${exposure} (${notOnX.n})`;
-  log('answer', n === 0 ? summary : `${summary}. Exact counts from ${n} houses${reliable ? '' : '; a small sample, so read it with care'}`);
+  // Any shape of study (1 to 4 predicates): the last is the outcome, the one before it the exposure (core summarizeTable).
+  const table = n > 0 ? summarizeTable(study, cells, n) : null;
+  const summary = table ? table.summary : tooFew ? `No table: ${tooFew}.` : 'No answer: no house took part.';
+  log('answer', summary);
   // Houses batch their reports for ~150 ms; let theirs land first so the log reads in order.
   await new Promise((r) => setTimeout(r, 400));
   report('study.result', { participants: took, summary });
@@ -344,7 +348,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   return {
     study: id, question: study.question, houses: houses.length, decisions, bloc, participants: took, excluded,
     cells: n ? cellLabels(study).map((label, i) => ({ label, count: cells[i]! })) : [],
-    answer: { onX, notOnX, summary, reliable }, paid,
+    answer: { summary, table }, declinedBecause, pending: pending.filter((x) => !joined.has(x.url)), paid,
     seconds: Math.round((Date.now() - t0) / 100) / 10,
     grants: [...joined.values()].map((j) => ({ house: j.house.name, url: j.house.url, grant: j.grant })),
     evidence: {

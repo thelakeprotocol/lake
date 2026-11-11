@@ -2050,6 +2050,11 @@ describe('a study run', () => {
     expect(r.excluded).toEqual([]);
     // Three is the sandbox's minimum: the tellers publish a table, exact, one house per answer.
     expect(r.cells.reduce((n, c) => n + c.count, 0)).toBe(3);
+    // The answer says what the table shows and that it's exact; the house that asked its owner is still pending, by name.
+    expect(r.answer.table).toMatchObject({ n: 3, precision: { exact: true }, comparison: { outcome: expect.any(String) } });
+    expect(JSON.stringify(r.answer)).not.toMatch(/NaN|undefined/);
+    expect(r.pending).toEqual([expect.objectContaining({ offerId: expect.any(String) })]);
+    expect(r.declinedBecause).toEqual({});
     await new Promise((ok) => setTimeout(ok, 500));
     const state = await (await fetch(`${node}/state`)).json();
     expect(state.counters.recordsMoved).toBe(0);
@@ -2090,6 +2095,8 @@ describe('a study run', () => {
     await writeFile(file, original.replace(/"(\d)0-(\d)9"/, '"90+"'));
     const r = await run();
     expect(r.decisions).toEqual({ join: 2, decline: 1, ask: 1 });
+    // Why it said no comes back coarsely, counted, never by house.
+    expect(Object.values(r.declinedBecause).reduce((a, b) => a + b, 0)).toBe(1);
     // The two that joined are fewer than a table needs: nothing is countersigned or paid.
     expect(r.participants).toBe(0);
     expect(r.answer.summary).toMatch(/^No table: 2 joined/);

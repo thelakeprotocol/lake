@@ -93,3 +93,45 @@ export function cellOf(s: Study, claims: Claim[]): number {
 export function cellLabels(s: Study): string[] {
   return Array.from({ length: cellCount(s) }, (_, cell) => s.predicates.map((p, i) => ((cell >> i) & 1 ? p.name : `not ${p.name}`)).join(' · '));
 }
+
+/** What a study's table says, for any number of predicates (1 to 4), and how exact it is. */
+export interface TableSummary {
+  n: number;
+  /** How many of the n each predicate was true for. */
+  marginals: { name: string; yes: number; share: number }[];
+  /**
+   * With 2 or more predicates: the last one (the outcome) among those with the one before it (the exposure) against
+   * those without, within the houses the others hold for. Absent with one predicate.
+   */
+  comparison?: { outcome: string; exposure: string; within: string[]; with: { yes: number; of: number; rate: number }; without: { yes: number; of: number; rate: number } };
+  /** Exact counts, or the noise both tellers added: the standard deviation of each published cell. */
+  precision: { exact: true } | { exact: false; epsilon: number; sdPerCell: number };
+  /** A cell under 5: small numbers, read with care. */
+  small: boolean;
+  summary: string;
+}
+
+export function summarizeTable(s: Study, cells: number[], n: number): TableSummary {
+  const k = s.predicates.length, names = s.predicates.map((p) => p.name);
+  const at = (i: number) => Math.max(0, cells[i] ?? 0); // noise can push a small cell below zero
+  const sum = (f: (cell: number) => boolean) => cells.reduce((t, _, i) => t + (f(i) ? at(i) : 0), 0);
+  const bit = (cell: number, i: number) => ((cell >> i) & 1) === 1;
+  const share = (x: number) => (n > 0 ? Math.round((x / n) * 1000) / 1000 : 0);
+  const marginals = names.map((name, i) => { const yes = Math.round(sum((c) => bit(c, i))); return { name, yes, share: share(yes) }; });
+  let comparison: TableSummary['comparison'];
+  if (k >= 2) {
+    const out = k - 1, exp = k - 2, within = names.slice(0, exp);
+    const inside = (c: number) => within.every((_, i) => bit(c, i));
+    const arm = (e: boolean) => { const yes = Math.round(sum((c) => inside(c) && bit(c, exp) === e && bit(c, out))), of = Math.round(sum((c) => inside(c) && bit(c, exp) === e)); return { yes, of, rate: of > 0 ? Math.round((yes / of) * 1000) / 1000 : 0 }; };
+    comparison = { outcome: names[out]!, exposure: names[exp]!, within, with: arm(true), without: arm(false) };
+  }
+  const eps = s.privacy.noise?.epsilon;
+  // Each teller adds a two-sided geometric draw with ratio q = e^(-ε/2): variance 2q/(1-q)² each, two tellers.
+  const precision: TableSummary['precision'] = eps ? { exact: false, epsilon: eps, sdPerCell: Math.round((2 * Math.sqrt(Math.exp(-eps / 2)) / (1 - Math.exp(-eps / 2))) * 10) / 10 } : { exact: true };
+  const small = n > 0 && cells.some((c) => c > 0 && c < 5);
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const summary = n === 0 ? 'No table.'
+    : comparison ? `${comparison.within.length ? `${comparison.within.join(', ')}: ` : ''}${comparison.outcome} ${pct(comparison.with.rate)} with ${comparison.exposure} (${comparison.with.yes} of ${comparison.with.of}) vs ${pct(comparison.without.rate)} without (${comparison.without.yes} of ${comparison.without.of}), from ${n} houses`
+    : `${marginals[0]!.name}: ${marginals[0]!.yes} of ${n} (${pct(marginals[0]!.share)})`;
+  return { n, marginals, ...(comparison ? { comparison } : {}), precision, small, summary: `${summary}${n === 0 ? '' : precision.exact ? '; exact counts' : `; each cell ±${precision.sdPerCell} (noise, ε ${eps})`}${small ? '; small numbers' : ''}` };
+}

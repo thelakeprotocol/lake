@@ -2601,7 +2601,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const { grants: _, evidence, ...result } = r;
         bundles.set(r.study, evidence);
         // The bundle is big; say what's in it, and how to get it.
-        return json({ ...result, steps, evidence: { ethics: true, audit: true, mandate: !!evidence.mandate, agreements: evidence.agreements.length, tellers: Object.keys(evidence.tellers).length, receipts: evidence.receipts.length, on_the_log: evidence.receipts.filter((x) => x.logged).length, get: `lake_dispatch_study { evidence_for: "${r.study}" }` } });
+        // Asks still with their owners (round 5: they were dropped silently): a later yes carries a key, but this count has closed.
+        const pendingNote = r.pending.length ? { pending_note: `${r.pending.length} house${r.pending.length === 1 ? '' : 's'} left it to their owner, who decides on their phone. Ask later with lake_ask { to: url, message: { kind: "status", offerId } }; a yes then would need a new run to count.` } : {};
+        return json({ ...result, ...pendingNote, steps, evidence: { ethics: true, audit: true, mandate: !!evidence.mandate, agreements: evidence.agreements.length, tellers: Object.keys(evidence.tellers).length, receipts: evidence.receipts.length, on_the_log: evidence.receipts.filter((x) => x.logged).length, get: `lake_dispatch_study { evidence_for: "${r.study}" }` } });
       } catch (e) {
         return fail(e);
       }

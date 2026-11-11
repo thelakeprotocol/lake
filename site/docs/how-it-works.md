@@ -32,7 +32,7 @@ The agent asks the Lake registry for houses advertising the `health-study` skill
 
 ## 5. Decide
 
-Each housekeeper evaluates the offer against its owner's [`rules.yaml`](/docs/rules) **in code**: `join`, `decline`, `ask` or `counter`. An `ask` buzzes the owner's phone. The offer's free text is never read.
+Each housekeeper evaluates the offer against its owner's [`rules.yaml`](/docs/rules) **in code**: `join`, `decline`, `ask` or `counter`. An `ask` buzzes the owner's phone. The offer's free text is never read. A house that declines says why, coarsely (it pays too little, it takes no research, nothing in its rules covers it): the research agent reports these counted, never by house (`declinedBecause: { price: 4, default: 2 }`), and lists the houses still waiting on their owner (`pending`), so you can tell what would change the answer.
 
 ## 6. Bargain
 
@@ -58,6 +58,6 @@ The **Payments** agent verifies the mandate chain and settles $5 with each parti
 
 ## 10. Answer
 
-The agent closes the count at the Leader teller, collects both aggregate shares, adds them into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
+The agent closes the count at the Leader teller, collects both aggregate shares, adds them into the exact table, and publishes `study.result`. Too few houses (under the study's minimum), and no table is published at all. The answer works for any study of one to four questions: how many houses it comes from, how many each question held for, and the last question (the outcome) with and without the one before it, within the rest. It says whether the counts are exact or, if the study asked the tellers for noise, how much each cell may be off ("each cell ±4"), and flags small numbers. The **Records moved** counter, computed from pod audit logs rather than hard-coded, reads **0**.
 
 A study's key works once and is spent after the computation; unused, it expires after 48 hours, or the moment the owner revokes it.

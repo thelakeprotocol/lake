@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, type Study } from './index.js';
+import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, summarizeTable, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -126,5 +126,34 @@ describe('trusted attachments', () => {
     expect(await checkAttachment({ credential, card: ox.card }, { ...o, trusted: ['ethics.ox.example'], subject: 'urn:other' })).toMatchObject({ ok: false });
     const fake = await ethicsAgent('ethics.ox.example');
     expect(await checkAttachment({ credential, card: fake.card }, { ...o, trusted: ['ethics.ox.example'] })).toMatchObject({ ok: false });
+  });
+});
+
+describe('a table, summarised (any number of predicates)', () => {
+  it('compares the outcome with and without the exposure, within the group, as before', () => {
+    // bit 0 over 60, bit 1 on drug X, bit 2 readmitted
+    const cells = [5, 4, 3, 6, 1, 2, 2, 1];
+    const t = summarizeTable(study, cells, 24);
+    expect(t.comparison).toEqual({ outcome: 'readmitted', exposure: 'on drug X', within: ['over 60'], with: { yes: 1, of: 7, rate: 0.143 }, without: { yes: 2, of: 6, rate: 0.333 } });
+    expect(t.marginals.map((m) => m.yes)).toEqual([13, 12, 6]);
+    expect(t.precision).toEqual({ exact: true });
+    expect(t.small).toBe(true);
+    expect(t.summary).toBe('over 60: readmitted 14% with on drug X (1 of 7) vs 33% without (2 of 6), from 24 houses; exact counts; small numbers');
+  });
+  it('works for one, two and four predicates, never NaN', () => {
+    const one = summarizeTable({ ...study, predicates: study.predicates.slice(0, 1) }, [7, 13], 20);
+    expect(one.comparison).toBeUndefined();
+    expect(one.summary).toBe('over 60: 13 of 20 (65%); exact counts');
+    const two = summarizeTable({ ...study, predicates: study.predicates.slice(1) }, [10, 5, 3, 2], 20);
+    expect(two.comparison).toMatchObject({ within: [], with: { yes: 2, of: 7 }, without: { yes: 3, of: 13 } });
+    const four = summarizeTable({ ...study, predicates: [...study.predicates, { name: 'female', field: 'age_band', op: 'present' }] }, Array.from({ length: 16 }, (_, i) => i), 120);
+    expect(JSON.stringify(four)).not.toMatch(/NaN|undefined/);
+    expect(four.comparison).toMatchObject({ outcome: 'female', exposure: 'readmitted', within: ['over 60', 'on drug X'] });
+  });
+  it('says how noisy the cells are when the tellers add noise', () => {
+    const t = summarizeTable({ ...study, privacy: { ...study.privacy, noise: { epsilon: 1 } } }, [5, -1, 3, 6, 1, 2, 2, 1], 19);
+    expect(t.precision).toEqual({ exact: false, epsilon: 1, sdPerCell: 4 });
+    expect(t.marginals[0]!.yes).toBe(9); // the cell below zero counts as zero
+    expect(t.summary).toMatch(/each cell ±4 \(noise, ε 1\)/);
   });
 });
