@@ -50,7 +50,7 @@ async function tidy() {
   expect(errors).toEqual([]);
 }
 // Five tabs (Chats, Requests, Me, My AI, Settings); everything else is a row under Settings (8 Nov).
-const RENAMED: Record<string, string> = { Home: 'Requests', Inbox: 'Requests', 'Needs you': 'Requests', Requests: 'Requests', 'Data requests': 'Requests', 'My agent': 'My AI', Keys: 'Who can see your data', Data: 'Your data', 'Your key': 'New or lost phone', Visitors: 'Who asked lately', 'Move house': 'Download everything', 'About your house': 'Activity', Offers: 'Offers for you' };
+const RENAMED: Record<string, string> = { Home: 'Requests', Inbox: 'Requests', 'Needs you': 'Requests', Requests: 'Requests', 'Data requests': 'Requests', 'My agent': 'My AI', Keys: 'Who has access', Data: 'Your data', 'Your key': 'New or lost phone', Visitors: 'Who has access', 'Move house': 'Download everything', 'About your house': 'Activity', Offers: 'Offers for you' };
 const tab = async (name: string) => {
   // Your AIs: a page under My AI (8 Nov: their settings had sat under a growing list of suggestions).
   if (name === 'Your AIs') { await page.locator('#nav > button', { hasText: 'My AI' }).click(); await page.waitForTimeout(300); const m = page.locator('.rowlink', { hasText: 'Manage your AIs' }); if (await m.count()) await m.click(); await page.waitForTimeout(300); return; }
@@ -822,7 +822,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('li.item', { hasText: 'You declined clinic.example (care)' }).getByRole('button', { name: 'Ask me each time' }).click();
     // Listed in Keys, with how often it was used; removed, it asks again.
     await tab('Keys');
-    const row = page.locator('li', { hasText: 'Always yes to clinic.example, for care' });
+    // On Who has access, the agent's row; its always-yes is under Everything with this agent.
+    const agent = page.locator('li.access-row', { hasText: 'clinic.example' }).first();
+    await page.locator('.seg.filters button', { hasText: 'Everyone' }).click();
+    await agent.locator('summary', { hasText: 'Everything with this agent' }).click();
+    const row = agent.locator('li', { hasText: 'Always yes to clinic.example, for care' });
     await row.waitFor({ timeout: 10_000 });
     expect(await row.textContent()).toMatch(/used 1 time/);
     await row.getByRole('button', { name: 'Remove' }).click();

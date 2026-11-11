@@ -600,6 +600,65 @@ function panelFor(x: {
     if (hold && payload.kind === 'refused') return { ...payload, note: 'your contribution was held but not counted: it comes back a day after the deadline' };
     return payload;
   };
+  const standingRules = () => {
+      const uses = x.desk().standingUses;
+      return x.keeper().rules.rules.filter((r) => typeof r.match.requester_key === 'string').map((r) => ({
+        jkt: String(r.match.requester_key), domain: r.standing?.domain ?? '', purpose: String(r.match.purpose ?? ''), fields: (r.match.fields_within as string[] | undefined) ?? r.allow_fields ?? [],
+        retention: String(r.match.retention_at_most ?? r.retention ?? 'none'), ...(r.min_price ? { floor: r.min_price } : r.min_price_usd !== undefined ? { floor: { amount: r.min_price_usd, currency: 'USD' } } : {}),
+        added: r.standing?.added ?? '', until: r.until ?? '', uses: uses.get(`${String(r.match.requester_key)}|${String(r.match.purpose ?? '')}`) ?? 0,
+      }));
+  };
+  const agents = () => {
+      const by = new Map<string, { agent: string; knocks: number; last: string; lastDecision?: string; lastReason?: string; blocked: number; asks: { at: string; decision: string; reason: string }[] }>();
+      for (const a of [...mine()].reverse()) {
+        // A block is reported by key; once the sender's card verified, it lands on the row it knocked under (run 32's
+        // injector showed "blocked: 0" there, its blocks on a separate "unverified key" row).
+        const who = a.kind === 'attack.blocked' && a.data?.verified && (a.data.from ?? a.data.claimed) ? `agent:${a.data.from ?? a.data.claimed}` : a.subject;
+        if (!who) continue;
+        const e = by.get(who) ?? { agent: who, knocks: 0, last: a.at, blocked: 0, asks: [] };
+        if (a.kind === 'knock') e.knocks++;
+        // What the house said, and why, in the engine's own words ("your rule 3 declines marketing requests").
+        if (a.kind === 'decision') { e.lastDecision = String(a.data?.decision ?? ''); e.lastReason = String(a.data?.reason ?? ''); e.asks = [{ at: a.at, decision: e.lastDecision, reason: e.lastReason }, ...e.asks].slice(0, 10); }
+        if (a.kind === 'attack.blocked') e.blocked++;
+        e.last = a.at;
+        by.set(who, e);
+      }
+      const rep = x.signals().reputation;
+      return [...by.values()].sort((a, b) => (a.last < b.last ? 1 : -1)).map((e) => ({ ...e, reputation: e.agent.startsWith('agent:') ? rep[e.agent.slice(6)] ?? null : null }));
+  };
+  const consents = async () => {
+      const files = (await listContainer(owner, 'agreements/')).filter((f) => f.endsWith('.consent.jsonld'));
+      const read = await Promise.all(files.map(async (f) => {
+        const cached = x.consentCache.get(f);
+        if (cached) return readConsentRecord(cached);
+        const r = await owner.fetch(owner.podRoot + f).catch(() => null);
+        const rec = r?.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null;
+        const c = rec ? readConsentRecord(rec) : null;
+        // A record taken back or past its date won't change again: read it once. A live one is read each time.
+        if (c && (c.withdrawn || Date.parse(c.until) <= Date.now())) x.consentCache.set(f, rec!);
+        return c;
+      }));
+      // On a leased house, the list starts at this owner's claim: the last owner's consents were theirs, not this one's.
+      const since = x.desk().claimedAt();
+      const desk = x.desk();
+      return read.filter((c): c is ConsentSummary => !!c && (!since || Date.parse(c.given) >= since))
+        .sort((a, b) => (a.given < b.given ? 1 : -1))
+        .map((c) => {
+          const g = desk.grants.get(c.id);
+          // Two Lake purposes can share a DPV term; the key in memory says which one it was, else both are named.
+          const purposes = c.purposes.length > 1 && g && c.purposes.includes(g.purpose) ? [g.purpose] : c.purposes;
+          // Taken back by the owner (the record says when), used up (a study key is good for one run), past its date, or live.
+          const status = c.withdrawn ? 'withdrawn' : desk.isRevoked(c.id) ? (g && !g.spent ? 'withdrawn' : 'used') : Date.parse(c.until) <= Date.now() ? 'ended' : 'active';
+          return {
+            id: c.id, visitor: c.visitor.domain || c.visitor.webId, visitorWebId: c.visitor.webId,
+            fields: c.fields.map((f) => ({ name: f, label: fieldSpec(f)?.label ?? f.replace(/_/g, ' ') })),
+            purpose: purposes.join(' or '), purposeLabel: purposes.map((p) => PURPOSES[p]?.label ?? p.replace(/-/g, ' ')).join(' or ') || 'unstated',
+            given: c.given, until: c.until, retention: c.retention,
+            how: c.method && 'live' in c.method ? { live: true } : { rule: c.method?.standingRule ?? null },
+            status, ...(c.withdrawn ? { withdrawnAt: c.withdrawn } : {}),
+          };
+        });
+  };
   let recordCheck: { at: number; claims: Awaited<ReturnType<ReturnType<typeof x.keeper>['allClaims']>>; chain: Awaited<ReturnType<ReturnType<typeof x.keeper>['verifyOwnRecord']>> } | null = null;
   return {
     forgetReceipt: (path: string) => void receiptCache.delete(path),
@@ -619,7 +678,9 @@ function panelFor(x: {
         record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
         knocksToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
         blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
-        pending: view.requests.length, keys: view.keys.length,
+        // Who can see something now, from the consent records in the pod (the same source as Who has access): the keys in
+        // memory are gone after a restart, which showed "0 live keys" beside 101 open consents.
+        pending: view.requests.length, keys: (await consents()).filter((c) => c.status === 'active').length,
         earned: (await money()).total,
         rulesOwner: x.keeper().rules.owner,
         person: await stamp().then((s) => (s ? { stamped: true, by: s.card?.name, person: s.person.slice(-8) } : { stamped: false, checker: !!x.o.personUrl })),
@@ -676,14 +737,7 @@ function panelFor(x: {
       const r = await this.setRules(String(doc));
       return r.ok ? { ok: true as const, removed } : r;
     },
-    standing() {
-      const uses = x.desk().standingUses;
-      return x.keeper().rules.rules.filter((r) => typeof r.match.requester_key === 'string').map((r) => ({
-        jkt: String(r.match.requester_key), domain: r.standing?.domain ?? '', purpose: String(r.match.purpose ?? ''), fields: (r.match.fields_within as string[] | undefined) ?? r.allow_fields ?? [],
-        retention: String(r.match.retention_at_most ?? r.retention ?? 'none'), ...(r.min_price ? { floor: r.min_price } : r.min_price_usd !== undefined ? { floor: { amount: r.min_price_usd, currency: 'USD' } } : {}),
-        added: r.standing?.added ?? '', until: r.until ?? '', uses: uses.get(`${String(r.match.requester_key)}|${String(r.match.purpose ?? '')}`) ?? 0,
-      }));
-    },
+    standing: standingRules,
     async setDoor(d) {
       const doc = parseDocument(x.keeper().rulesText);
       if (!d.open) doc.delete('door');
@@ -723,57 +777,39 @@ function panelFor(x: {
       const after = !Number.isNaN(n) ? (n > (x.activity[0]?.seq ?? 0) ? mine() : mine().filter((a) => a.seq > n)) : mine().filter((a) => Date.parse(a.at) > t);
       return after.slice(0, 100);
     },
-    agents() {
-      const by = new Map<string, { agent: string; knocks: number; last: string; lastDecision?: string; blocked: number }>();
-      for (const a of [...mine()].reverse()) {
-        // A block is reported by key; once the sender's card verified, it lands on the row it knocked under (run 32's
-        // injector showed "blocked: 0" there, its blocks on a separate "unverified key" row).
-        const who = a.kind === 'attack.blocked' && a.data?.verified && (a.data.from ?? a.data.claimed) ? `agent:${a.data.from ?? a.data.claimed}` : a.subject;
-        if (!who) continue;
-        const e = by.get(who) ?? { agent: who, knocks: 0, last: a.at, blocked: 0 };
-        if (a.kind === 'knock') e.knocks++;
-        if (a.kind === 'decision') e.lastDecision = String(a.data?.decision ?? '');
-        if (a.kind === 'attack.blocked') e.blocked++;
-        e.last = a.at;
-        by.set(who, e);
-      }
-      const rep = x.signals().reputation;
-      return [...by.values()].sort((a, b) => (a.last < b.last ? 1 : -1)).map((e) => ({ ...e, reputation: e.agent.startsWith('agent:') ? rep[e.agent.slice(6)] ?? null : null }));
-    },
+    agents,
     money,
-    async consents() {
-      const files = (await listContainer(owner, 'agreements/')).filter((f) => f.endsWith('.consent.jsonld'));
-      const read = await Promise.all(files.map(async (f) => {
-        const cached = x.consentCache.get(f);
-        if (cached) return readConsentRecord(cached);
-        const r = await owner.fetch(owner.podRoot + f).catch(() => null);
-        const rec = r?.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null;
-        const c = rec ? readConsentRecord(rec) : null;
-        // A record taken back or past its date won't change again: read it once. A live one is read each time.
-        if (c && (c.withdrawn || Date.parse(c.until) <= Date.now())) x.consentCache.set(f, rec!);
-        return c;
-      }));
-      // On a leased house, the list starts at this owner's claim: the last owner's consents were theirs, not this one's.
-      const since = x.desk().claimedAt();
-      const desk = x.desk();
-      return read.filter((c): c is ConsentSummary => !!c && (!since || Date.parse(c.given) >= since))
-        .sort((a, b) => (a.given < b.given ? 1 : -1))
-        .map((c) => {
-          const g = desk.grants.get(c.id);
-          // Two Lake purposes can share a DPV term; the key in memory says which one it was, else both are named.
-          const purposes = c.purposes.length > 1 && g && c.purposes.includes(g.purpose) ? [g.purpose] : c.purposes;
-          // Taken back by the owner (the record says when), used up (a study key is good for one run), past its date, or live.
-          const status = c.withdrawn ? 'withdrawn' : desk.isRevoked(c.id) ? (g && !g.spent ? 'withdrawn' : 'used') : Date.parse(c.until) <= Date.now() ? 'ended' : 'active';
-          return {
-            id: c.id, visitor: c.visitor.domain || c.visitor.webId, visitorWebId: c.visitor.webId,
-            fields: c.fields.map((f) => ({ name: f, label: fieldSpec(f)?.label ?? f.replace(/_/g, ' ') })),
-            purpose: purposes.join(' or '), purposeLabel: purposes.map((p) => PURPOSES[p]?.label ?? p.replace(/-/g, ' ')).join(' or ') || 'unstated',
-            given: c.given, until: c.until, retention: c.retention,
-            how: c.method && 'live' in c.method ? { live: true } : { rule: c.method?.standingRule ?? null },
-            status, ...(c.withdrawn ? { withdrawnAt: c.withdrawn } : {}),
-          };
-        });
+    /**
+     * Who has access (one page, one source per number): every agent that can see something now (from the consent records
+     * in the pod, the truth), its always-yes rules, and what it asked lately and what the house said, joined by agent.
+     */
+    async access(tzOffset?: number) {
+      const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;
+      const midnight = (() => { const d = new Date(Date.now() - offset * 60_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() + offset * 60_000; })();
+      const yes = await consents();
+      const standing = standingRules();
+      const asked = agents();
+      type Row = { id: string; domain?: string; webId?: string; reputation: number | null; yeses: typeof yes; standing: typeof standing; asked: number; blocked: number; lastAsked?: string; last?: { decision: string; reason: string; at: string }; asks: { at: string; decision: string; reason: string }[] };
+      const rows = new Map<string, Row>();
+      const row = (id: string) => rows.get(id) ?? (rows.set(id, { id, reputation: null, yeses: [], standing: [], asked: 0, blocked: 0, asks: [] }), rows.get(id)!);
+      for (const c of yes) { const r = row(c.visitor); r.domain = c.visitor.includes('://') ? undefined : c.visitor; r.webId = c.visitorWebId; r.yeses.push(c); }
+      for (const s of standing) row(s.domain || s.jkt).standing.push(s);
+      for (const a of asked) {
+        const r = row(a.agent.replace(/^agent:/, ''));
+        if (a.agent.startsWith('agent:')) r.domain ??= a.agent.slice(6);
+        r.reputation = a.reputation; r.asked = a.knocks; r.blocked = a.blocked; r.lastAsked = a.last; r.asks = a.asks;
+        if (a.lastDecision) r.last = { decision: a.lastDecision, reason: a.lastReason ?? '', at: a.last };
+      }
+      const all = [...rows.values()].map((r) => ({ ...r, canSee: r.yeses.some((c) => c.status === 'active') }))
+        .sort((a, b) => Number(b.canSee) - Number(a.canSee) || String(b.lastAsked ?? b.yeses[0]?.given ?? '').localeCompare(String(a.lastAsked ?? a.yeses[0]?.given ?? '')));
+      return {
+        now: all.filter((r) => r.canSee).length,
+        askedToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
+        blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
+        agents: all,
+      };
     },
+    consents,
     async data() {
       const claims = await x.keeper().allClaims();
       const chain = await x.keeper().verifyOwnRecord();

@@ -158,15 +158,15 @@ function Failed({ error }: { error?: string }) {
 // AI; and everything else as a plain list of pages under Settings, each with a way back.
 const TABS = [
   ['chats', 'Chats'], ['needs', 'Requests'], ['me', 'Me'], ['myagent', 'My AI'], ['settings', 'Settings'],
-  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Data requests'], ['offers', 'Offers for you'], ['keys', 'Who can see your data'],
+  ['notify', 'Notifications'], ['free', 'When you can meet'], ['rules', 'Rules'], ['requests', 'Data requests'], ['offers', 'Offers for you'], ['access', 'Who has access'], ['keys', 'Who can see your data'],
   ['agents', 'Who asked lately'], ['money', 'Money'], ['data', 'Your data'], ['key', 'New or lost phone'], ['move', 'Download everything'], ['about', 'Activity'], ['ais', 'Your AIs'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 const MAIN: Tab[] = ['chats', 'needs', 'me', 'myagent', 'settings'];
 /** The pages listed under Settings: their way back is always Settings (Fable: opened from elsewhere, it said "‹ Me"). */
-const SETTINGS_PAGES = new Set<string>(['notify', 'free', 'rules', 'offers', 'keys', 'agents', 'money', 'data', 'key', 'move', 'about']);
+const SETTINGS_PAGES = new Set<string>(['notify', 'free', 'rules', 'offers', 'access', 'keys', 'agents', 'money', 'data', 'key', 'move', 'about']);
 const labelOf = (t: Tab) => TABS.find(([id]) => id === t)?.[1] ?? t;
-const tabFromHash = (): Tab => (/^#(note|chat|want)=/.test(location.hash) ? 'chats' : location.hash === '#home' || location.hash === '#requests' ? 'needs' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
+const tabFromHash = (): Tab => (/^#(note|chat|want)=/.test(location.hash) ? 'chats' : location.hash === '#home' || location.hash === '#requests' ? 'needs' : location.hash === '#keys' || location.hash === '#agents' ? 'access' : TABS.find(([id]) => id === location.hash.slice(1))?.[0] ?? 'chats');
 /** A note a notification was about (#note=<id>): its conversation opens, that message lit. */
 const focusNote = () => (location.hash.startsWith('#note=') ? decodeURIComponent(location.hash.slice(6)) : '');
 /** The conversation on screen (#chat=<sender key>), so the phone's back gesture leaves it as in any messaging app. */
@@ -523,8 +523,8 @@ const plainFeed = (t: string) => t.replace(/^house:\S+ told agent:(\S+?):? (join
 function SettingsTab({ go }: { go: (t: Tab) => void }) {
   const groups: [string, [Tab, string][]][] = [
     ['Reaching you', [['notify', 'On this phone, when something needs you'], ['free', 'The hours your AI may offer people']]],
-    ['Your data', [['rules', 'What your rules say yes or no to'], ['keys', 'Everyone you said yes to, and taking it back'], ['agents', 'Agents that asked, and what your rules told them'], ['offers', 'Shops pricing what you need, from your data'], ['money', 'What you earned and paid'], ['data', 'What your house holds']]],
-    ['This phone', [['key', 'A recovery code, or a link for a new phone'], ['move', 'All your data in one file, to take anywhere'], ['about', 'What happened lately, in numbers']]],
+    ['Your data', [['rules', 'What your rules say yes or no to'], ['access', 'Who can see your data now, who asked, and what your house said'], ['offers', 'Shops pricing what you need, from your data'], ['money', 'What you earned and paid'], ['data', 'What your house holds']]],
+    ['This phone', [['key', 'A recovery code, or a link for a new phone'], ['move', 'All your data in one file, to take anywhere'], ['about', 'Your record, and what happened at your door lately']]],
   ];
   return h('div', {},
     ...groups.map(([title, rows]) => h('div', { key: title, class: 'rowgroup' }, h('h3', {}, title),
@@ -548,14 +548,8 @@ function AboutTab({ go }: { go: (t: Tab) => void }) {
   const list = useHouse<ListView>({ kind: 'list' });
   if (!o.data) return h(Failed, { error: o.error });
   const assistants = list.data?.assistants ?? [];
-  const stat = (label: string, value: string | number, to: Tab, cls = '') =>
-    h('button', { class: `stat ${cls}`, type: 'button', onClick: () => go(to) }, h('b', {}, String(value)), h('span', {}, label));
   return h('div', {},
-    h('div', { class: 'stats' },
-      stat(o.data.knocksToday === 1 ? 'knock today' : 'knocks today', o.data.knocksToday, 'agents'),
-      stat(o.data.keys === 1 ? 'live key' : 'live keys', o.data.keys, 'keys'),
-      stat('earned', `$${o.data.earned}`, 'money'),
-      o.data.blockedToday ? stat('attacks blocked', o.data.blockedToday, 'agents', 'threat') : null),
+    // The counts live on Who has access now, from one source (they disagreed here: "0 live keys" beside 101 open consents).
     h('dl', { class: 'facts' },
       h('div', {}, h('dt', {}, 'Your record'), h('dd', {}, o.data.record.ok ? `Checks out: signed by a trusted issuer, unchanged. ${o.data.claims} claims (${o.data.holds.map(nice).join(', ') || 'none'}).` : `Failed its check: ${o.data.record.why}`)),
       h('div', {}, h('dt', {}, 'Your AI'), h('dd', {}, assistants.length ? `${assistants.map((a) => shortName(a.label)).join(', ')}: can suggest; you decide.` : 'None yet.')),
@@ -1035,6 +1029,56 @@ interface Consent {
 
 interface StandingYes { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor?: { amount: number; currency: string }; added: string; until: string; uses: number }
 /** Your standing yeses: an agent you said "always allow" for, each removable (a change to your rules). */
+// ---- Who has access: one page, one source per number ----
+type AccessRow = { id: string; domain?: string; webId?: string; reputation: number | null; yeses: Consent[]; standing: StandingYes[]; asked: number; blocked: number; lastAsked?: string; last?: { decision: string; reason: string; at: string }; asks: { at: string; decision: string; reason: string }[]; canSee: boolean };
+const said = (d: string) => (d === 'join' ? 'said yes' : d === 'decline' ? 'said no' : d === 'ask' ? 'asked you' : d === 'counter' ? 'asked for better terms' : d);
+const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60_000); return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+
+/**
+ * Who has access (8 Nov, after a privacy-minded owner couldn't say who had their data and why: three pages, three counts,
+ * three vocabularies): one row per agent, with what it can see now, why (your tap, your rule, an always-yes), how often it
+ * asked and what your house last said, and taking it back. The numbers come from one answer of the house's.
+ */
+function Access() {
+  const a = useHouse<{ now: number; askedToday: number; blockedToday: number; agents: AccessRow[] }>({ kind: 'panel.access', tz_offset: new Date().getTimezoneOffset() });
+  const [filter, setFilter] = useState<'now' | 'asked' | 'all'>('now');
+  if (!a.data) return h(Failed, { error: a.error });
+  const { now, askedToday, blockedToday, agents } = a.data;
+  const proven = (r: AccessRow) => !!r.domain || r.yeses.length > 0;
+  const junk = agents.filter((r) => !proven(r) && !r.asked && r.blocked);
+  const shown = agents.filter((r) => !junk.includes(r)).filter((r) => filter === 'now' ? r.canSee : filter === 'asked' ? !!r.lastAsked : true);
+  const summary = [now ? `${now} agent${now === 1 ? '' : 's'} can see something now` : '', askedToday ? `${askedToday} asked today` : '', blockedToday ? `${blockedToday} blocked today` : ''].filter(Boolean).join(' · ') || 'Nobody can see your data right now.';
+  const why = (c: Consent) => (c.how.live ? 'you tapped Allow' : c.how.rule ? `your rule ${c.how.rule} said yes` : 'one of your rules said yes');
+  const row = (r: AccessRow) => {
+    const open = r.yeses.filter((c) => c.status === 'active');
+    const fields = [...new Set(open.flatMap((c) => c.fields.map((f) => f.label)))];
+    const latest = open.sort((x, y) => y.until.localeCompare(x.until))[0];
+    return h('li', { key: r.id, class: 'access-row' },
+      h('div', {},
+        h('div', { class: 'r-title' }, r.domain ?? r.id.replace(/^key:/, 'unverified key ')),
+        h('div', { class: 'r-meta' }, latest ? `Can see: ${fields.join(', ')} · for ${latest.purposeLabel} · until ${dayTime(latest.until)} (${hoursLeft(latest.until)} left)` : 'Can\'t see anything now'),
+        latest || r.standing.length ? h('div', { class: 'r-meta' }, [latest ? why(latest) : '', ...r.standing.map((s) => `always yes for ${s.purpose} · used ${s.uses} time${s.uses === 1 ? '' : 's'}`)].filter(Boolean).join(' · ')) : null,
+        r.asked || r.last ? h('div', { class: 'r-meta' }, [`Asked ${r.asked} time${r.asked === 1 ? '' : 's'}${r.lastAsked ? `, last ${ago(r.lastAsked)}` : ''}`, r.last ? `your house last ${said(r.last.decision)}${r.last.reason ? `: ${r.last.reason}` : ''}` : '', r.blocked ? `blocked ${r.blocked} time${r.blocked === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')) : null,
+        h('details', { class: 'fold' }, h('summary', {}, 'Everything with this agent'),
+          r.standing.length ? h('ul', { class: 'rows compact' }, ...r.standing.map((st) => h('li', { key: `${st.jkt}|${st.purpose}` },
+            h('span', { class: 'r-meta' }, `Always yes to ${st.domain || 'this agent'}, for ${st.purpose} · ${st.fields.map(nice).join(', ')}${st.until ? ` · until ${st.until}` : ''} · used ${st.uses} time${st.uses === 1 ? '' : 's'}`),
+            h(Act, { label: 'Remove', cls: 'danger', run: () => call({ kind: 'panel.standing.remove', jkt: st.jkt, purpose: st.purpose }) })))) : null,
+          r.yeses.length ? h(Paged, { items: r.yeses, cls: 'rows compact', render: (c: Consent) => h('li', { key: c.id },
+            h('span', { class: 'r-meta' }, `${dayTime(c.given)} · ${c.fields.map((f) => f.label).join(', ')} · ${why(c)} · ${{ active: `until ${dayTime(c.until)}`, withdrawn: c.withdrawnAt ? `taken back ${dayTime(c.withdrawnAt)}` : 'taken back', used: 'used', ended: 'ended' }[c.status]}`),
+            c.status === 'active' ? h(Act, { label: 'Take it back', cls: 'danger', run: () => call({ kind: 'revoke', revoke: c.id }) }) : null) }) : null,
+          r.asks.length ? h('ul', { class: 'rows compact' }, ...r.asks.map((q, i) => h('li', { key: i }, h('span', { class: 'r-meta' }, `${time(q.at)} · your house ${said(q.decision)}${q.reason ? `: ${q.reason}` : ''}`)))) : null,
+          r.webId ? h('p', { class: 'r-meta' }, h('code', {}, r.webId)) : null)),
+      open.length ? h(Act, { label: open.length > 1 ? `Take all ${open.length} back` : 'Take it back', cls: 'danger', confirm: open.length > 1 ? `Tap again: ${open.length} taken back` : undefined, run: async () => { for (const c of open) await call({ kind: 'revoke', revoke: c.id }); } }) : null);
+  };
+  return h('div', {},
+    h('p', { class: 'lede' }, summary),
+    h('div', { class: 'seg filters', role: 'group', 'aria-label': 'Show' },
+      ...([['now', 'Can see now'], ['asked', 'Asked lately'], ['all', 'Everyone']] as const).map(([k, l]) => h('button', { key: k, type: 'button', 'aria-pressed': String(filter === k), onClick: () => setFilter(k) }, l))),
+    shown.length ? h(Paged, { items: shown, size: 15, cls: 'rows', render: row }) : h('p', { class: 'empty' }, filter === 'now' ? 'Nobody can see your data right now.' : filter === 'asked' ? 'Nobody has asked lately.' : 'Nobody has come to your door yet.'),
+    junk.length ? h('details', { class: 'fold' }, h('summary', {}, `${junk.length} unproven key${junk.length === 1 ? '' : 's'} tried something and ${junk.length === 1 ? 'was' : 'were'} blocked`), h('ul', { class: 'rows compact' }, ...junk.map((r) => h('li', { key: r.id }, h('span', { class: 'r-meta' }, `${r.id.replace(/^key:/, 'unverified key ')} · blocked ${r.blocked} time${r.blocked === 1 ? '' : 's'}`))))) : null,
+    now ? h('div', { class: 'savebar' }, h(Act, { label: 'Take everything back', cls: 'danger', confirm: 'Tap again to take every yes back', run: () => call({ kind: 'revoke', revoke: 'all' }) })) : null);
+}
+
 function StandingYeses() {
   const s = useHouse<{ standing: StandingYes[] }>({ kind: 'panel.standing' });
   if (!s.data?.standing.length) return null;
@@ -1843,7 +1887,7 @@ function Move() {
 }
 
 // ---- the app ----
-const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, needs: NeedsTab, ais: AisPage, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
+const VIEWS: Record<Tab, (p: { go: (t: Tab) => void }) => VNode | null> = { chats: ChatsTab, needs: NeedsTab, ais: AisPage, access: Access, requests: Requests, offers: Offers, myagent: MyAgent, keys: Keys, rules: RulesTab, agents: Visitors, money: Money, data: DataTab, move: Move, key: YourKey, notify: NotifySettings, me: MeTab, settings: SettingsTab, free: FreeTab, about: AboutTab };
 
 /**
  * Notifications on this device, always reachable (7 Nov: once "Not now" was tapped on Home, nothing brought them back):

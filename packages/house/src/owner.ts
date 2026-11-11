@@ -67,6 +67,8 @@ export interface PanelProvider {
   forgetReceipt?(path: string): void;
   /** The owner's consent records (one beside each agreement), newest first, each with where it stands now. */
   consents(): Promise<unknown>;
+  /** Who has access: agents that can see something now, what they asked, what the house said (one source per number). */
+  access?(tzOffset?: number): Promise<unknown>;
   data(): Promise<unknown>;
   exportAll(): Promise<unknown>;
   /** What the owner is looking for, and the offers priced for them in this house. */
@@ -242,7 +244,7 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
+const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -1788,6 +1790,7 @@ export class OwnerDesk {
           'panel.agents': async () => panel.agents(),
           'panel.money': () => panel.money(),
           'panel.consents': () => panel.consents(),
+          'panel.access': async () => panel.access?.(Number((q as { tz_offset?: number }).tz_offset)) ?? { error: 'this house can\'t list access' },
           'panel.data': () => panel.data(),
           'panel.export': () => panel.exportAll(),
           'panel.market': () => panel.market(),
