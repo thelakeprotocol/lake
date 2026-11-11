@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { parseArgs } from 'node:util';
 import express from 'express';
-import { addToLog, keepAliveBehindProxy, LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type Identity, type LakePack } from '@thelakeprotocol/core';
+import { addToLog, keepAliveBehindProxy, parseCli, LakeLinks, loadOrCreateIdentity, loadPacks, makeEvent, type AgentCard, type Identity, type LakePack } from '@thelakeprotocol/core';
 import { createIssuer } from './issuer.js';
 import { createAuditor, createAuthority, createEthics, createPayments } from './review.js';
 import { createGuide } from './guide.js';
@@ -16,14 +15,19 @@ import { createRooms } from './room.js';
 import { createArbiter } from './arbiter.js';
 import { createLog, type Logger } from './log.js';
 
-const { positionals, values } = parseArgs({
+const { positionals, values } = parseCli({
+  name: 'lake-specialist',
+  about: 'The Lake\'s specialists: issuer, ethics, auditor, payments, tellers, tally, rooms, the guides… one by name, or all in one process.',
+  usage: 'lake-specialist <name | all> --port <port> [--url <public url>] [--lake <node url>] [--data <dir>] [--skip a,b]',
+  example: 'lake-specialist all --port 4300 --url http://localhost:4300 --lake http://localhost:7000 --data ./specialists',
+  notes: { port: 'its HTTP port', url: 'the address others reach it at (each specialist under /<name>)', lake: 'the Lake node to register with', data: 'where it keeps its keys and state' },
   allowPositionals: true,
   options: {
     port: { type: 'string' },
     url: { type: 'string' },
     domain: { type: 'string' },
     'demo-domain': { type: 'string', default: process.env.LAKE_DEMO_DOMAIN ?? 'lake.local' },
-    data: { type: 'string', default: '/data' },
+    data: { type: 'string', default: process.env.LAKE_DATA ?? '/data' },
     seed: { type: 'string' },
     lake: { type: 'string', default: process.env.LAKE_NODE_URL },
     'public-node': { type: 'string', default: process.env.LAKE_PUBLIC_NODE_URL },

@@ -4,8 +4,8 @@ import { signMessage, type AgentCard, type Identity } from '@thelakeprotocol/cor
 /**
  * For a house behind a home router: keep one outgoing connection to a node, and answer the requests the
  * node relays down it by passing them to this house's own A2A server. Nothing to open, nothing to forward.
- * Messages are signed end to end, so the node can't forge or alter them; it can see offers and decisions,
- * never records (they don't leave the house anyway).
+ * Messages are signed end to end and sealed for their recipient (SPEC §3), so the node can't forge, alter or read them,
+ * or see who sent them: it sees that this house is connected, and when and how much passes.
  */
 export function connectRelay(o: { nodeUrl: string; card: AgentCard; id: Identity; webId: string; localPort: number; log?: (msg: string) => void }) {
   let ws: WebSocket | null = null;

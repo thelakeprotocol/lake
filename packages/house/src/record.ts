@@ -21,9 +21,9 @@ export async function fetchRecord(issuerUrl: string, webId: string, p: LakePack,
   let last: unknown;
   for (let i = 0; i < tries; i++) {
     try {
-      const issuerCard = (await (await fetch(`${issuerUrl}/.well-known/agent-card.json`)).json()) as AgentCard;
+      const issuerCard = (await (await fetch(`${issuerUrl}/.well-known/agent-card.json`, { signal: AbortSignal.timeout(10_000) })).json()) as AgentCard;
       const profile = await verifyLakeCard(issuerCard);
-      const res = await fetch(`${issuerUrl}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subject: webId, pack: p.id }) });
+      const res = await fetch(`${issuerUrl}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subject: webId, pack: p.id }), signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(`issuer said ${res.status}`);
       const r = (await res.json()) as { recordId: string; original?: string; bundle?: string; credential: string };
       const original = r.original ?? r.bundle ?? '';

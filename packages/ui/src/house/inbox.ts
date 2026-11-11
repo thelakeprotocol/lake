@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
-import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, h, toast } from './ion';
-import { adviceOf, doorOf, duration, grantFor, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type Note, type Request } from './logic';
+import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
+import { adviceOf, doorOf, duration, grantFor, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type Note, type Request } from './logic';
 import { goTab, push } from './nav';
 
 // Inbox: everything that waits for your tap, newest first. Data requests your rules left to you, your AI's questions and
@@ -30,8 +30,9 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       h('p', {}, waitingLine(a))))),
     ...groups.map((all) => h(RequestCard, { key: all[0]!.id, all })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
-    notes.length ? h('h3', { class: 'section-h', key: 'nh' }, 'From your AI') : null,
-    ...notes.map((x) => h(SuggestionCard, { key: x.id, x })),
+    // Notes that need nothing from you: one short line each, the newest few; the whole note opens in a sheet (12 Nov: a
+    // wall of long notes drowned the few that need you).
+    notes.length ? h(Notes, { key: 'notes', notes }) : null,
     !any && !notes.length ? h(Empty, { key: 'e', icon: 'checkmark-done-outline', title: 'Nothing needs you', text: 'Your rules answered everything.' }) : null,
     v.agenda?.length ? h(Section, { title: 'Coming up', key: 'ag' }, ...v.agenda.map((a) => h(AgendaRow, { key: a.id, a }))) : null);
 }
@@ -84,9 +85,25 @@ function AgendaRow({ a }: { a: AgendaItem }) {
     h('ion-button', { slot: 'end', fill: 'clear', color: 'medium', 'aria-label': `Remove ${a.what}`, onClick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void toast('Removed'); } }, h('ion-icon', { name: 'close', slot: 'icon-only' })));
 }
 
+function Notes({ notes }: { notes: Note[] }) {
+  const [all, setAll] = useState(false);
+  const [open, setOpen] = useState<Note | null>(null);
+  const shown = [...notes].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')).slice(0, all ? 50 : 3);
+  return h('div', {},
+    h(Section, { title: `From your AI (${notes.length})`, cls: 'notes' },
+      ...shown.map((x) => h('ion-item', { key: x.id, button: true, detail: false, lines: 'full', class: 'note-row', onClick: () => setOpen(x) },
+        h('ion-label', {},
+          h('div', { class: 'row-top' }, h('h3', {}, shortName(x.from), x.advice ? h(Pill, { text: { do: 'Advises yes', dont: x.sender ? 'Warning' : 'Advises no', your_call: 'Your call' }[x.advice], tone: x.advice === 'do' ? 'mint' : x.advice === 'dont' ? 'red' : 'muted' }) : null), x.at ? h('span', { class: 'row-time' }, when(x.at)) : null),
+          h('p', { class: 'note-line' }, x.text)))),
+      notes.length > 3 ? h(Row, { label: all ? 'Show fewer' : `Show all ${notes.length}`, detail: false, cls: 'see-all', onClick: () => setAll(!all) }) : null,
+      h(Btn, { label: 'Clear all', size: 'small', fill: 'clear', color: 'medium', cls: 'clear-notes', run: async () => { for (const x of notes) await call({ kind: 'panel.assistant.dismiss', id: x.id }); }, ask: { header: `Clear all ${notes.length} notes from your AI?`, button: 'Clear all' } })),
+    h(Sheet, { open: !!open, onClose: () => setOpen(null), title: open ? shortName(open.from) : undefined }, open ? h(SuggestionCard, { x: open, onDone: () => setOpen(null) }) : null));
+}
+
 /** Your AI's question or suggestion: what it says and advises, and each answer as a button. */
-function SuggestionCard({ x }: { x: Note }) {
+function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
   const bump = useBump();
+  const [more, setMore] = useState(false);
   const [reply, setReply] = useState('');
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   const kicker = x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.sender ? 'A warning' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
@@ -107,7 +124,8 @@ function SuggestionCard({ x }: { x: Note }) {
   return h('ion-card', { class: 'lake-card sug' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
     x.sender ? h('p', { class: 'muted-line' }, `About: ${x.sender}`) : null,
-    h('p', { class: 'sug-text' }, x.text),
+    h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
+    !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.pledge?.money ? h('p', { class: 'muted-line' }, `Puts in ${money$(x.pledge.money.amount, x.pledge.money.currency)}, held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}. Paid on only if ${x.pledge.money.threshold} sign (${x.pledge.money.count} so far); otherwise it comes back.`) : null,
     x.pledge?.circle ? h('p', { class: 'muted-line' }, `A promise circle: you promise ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year. No money.`) : null,
@@ -120,7 +138,7 @@ function SuggestionCard({ x }: { x: Note }) {
     x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : h('div', { class: 'card-reply' },
       h('ion-input', { value: reply, placeholder: 'Reply in your own words', 'aria-label': 'Reply', class: 'reply-input', onionInput: (e: CustomEvent) => setReply(String(e.detail.value ?? '')) }),
       reply.trim() ? h(Btn, { label: 'Send', size: 'small', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, text: reply.trim() }); setReply(''); void toast('Sent to your AI'); } }) : null),
-    h('div', { class: 'card-foot' }, h('ion-button', { fill: 'clear', size: 'small', color: 'medium', onClick: async () => { await dismiss(); bump(); } }, 'Dismiss'))));
+    h('div', { class: 'card-foot' }, h('ion-button', { fill: 'clear', size: 'small', color: 'medium', onClick: async () => { await dismiss(); onDone?.(); bump(); } }, 'Dismiss'))));
 }
 
 function Quorum({ x }: { x: Note }) {

@@ -469,14 +469,21 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
-  it('lists everything its AI suggested, newest on top, each with Dismiss', async () => {
+  it('keeps notes from its AI to short lines, newest few first: the whole note a tap away, Clear all with a sheet', async () => {
     await tab('Inbox');
     for (let i = 0; i < 23; i++) await asAssistant({ kind: 'assistant.suggest', text: `Suggestion number ${i + 1}` });
-    await page.getByText('Suggestion number 23').waitFor({ timeout: 5000 });
-    await page.getByText('Suggestion number 1', { exact: true }).waitFor();
-    const card = page.locator('ion-card.sug', { hasText: 'Suggestion number 23' });
-    await card.getByRole('button', { name: 'Dismiss' }).click();
-    await card.waitFor({ state: 'detached', timeout: 5000 });
+    const rows = page.locator('ion-item.note-row');
+    await page.locator('ion-list.notes', { hasText: 'From your AI (' }).waitFor({ timeout: 5000 });
+    expect(await rows.count()).toBe(3);
+    await page.locator('ion-item.see-all', { hasText: /Show all \d+/ }).click();
+    expect(await rows.count()).toBeGreaterThan(20);
+    await rows.filter({ hasText: 'Suggestion number 23' }).click();
+    await sheet().getByText('Suggestion number 23').waitFor();
+    await sheet().getByRole('button', { name: 'Dismiss' }).click();
+    await rows.filter({ hasText: 'Suggestion number 23' }).waitFor({ state: 'detached', timeout: 5000 });
+    await page.locator('ion-list.notes').getByRole('button', { name: 'Clear all' }).click();
+    await confirmSheet('Clear all');
+    await page.locator('ion-list.notes').waitFor({ state: 'detached', timeout: 10_000 });
     await tidy();
   });
 
@@ -744,7 +751,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await shopper.callTool({ name: 'lake_set_tags', arguments: { tags: ['offering:lift-to-cool-room'] } });
     await tab('Inbox');
     // A suggestion, or a chat the house kept for its AI while it was away.
-    const match = page.locator('ion-card.sug, .chatrow', { hasText: 'offering:lift-to-cool-room' });
+    const match = page.locator('ion-card.sug, ion-item.note-row, .chatrow', { hasText: 'offering:lift-to-cool-room' });
     for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); if (i % 2) await tab(i % 4 === 1 ? 'Chats' : 'Inbox'); }
     expect(await match.count()).toBeGreaterThan(0);
     await one.call('lake_set_tags', { tags: [] });

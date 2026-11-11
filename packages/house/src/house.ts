@@ -410,7 +410,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
           if (s) { signals.blocklist = new Set(s.blocklist); signals.reputation = s.reputation; }
         }, 2000).unref();
       }
-      emit(makeEvent('house.joined', actor, undefined, { tags: (rules.tags ?? []).join(',') }));
+      // "Joined" only when some node was told (round 6: a house with no --lake said it had joined).
+      if (nodes.length) emit(makeEvent('house.joined', actor, undefined, { tags: (rules.tags ?? []).join(',') }));
+      else say('not announced to any Lake node, so nobody can find it: pass --lake <node url> (or LAKE_NODE_URL), or --join a Lake');
       // Intents the owner opened before a restart, then the standing ones in their rules.
       await keeper.market.load();
       await keeper.market.resume();

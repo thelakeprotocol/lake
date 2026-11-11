@@ -2,11 +2,15 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
-import { parseArgs } from 'node:util';
-import { keepAliveBehindProxy, loadOrCreateIdentity } from '@thelakeprotocol/core';
+import { keepAliveBehindProxy, loadOrCreateIdentity, parseCli } from '@thelakeprotocol/core';
 import { createNode, replayNode } from './node.js';
 
-const { values: a } = parseArgs({
+const { values: a } = parseCli({
+  name: 'lake-node',
+  about: 'A Lake node: a registry, a relay and an event stream. It holds no personal data and decides nothing (https://lake.doneinfifty.com/docs/run-a-node).',
+  usage: 'lake-node [--port 7000] [--url <public url>] [--data <dir>] [--follow <other nodes>] …',
+  example: 'lake-node --port 7000 --url http://localhost:7000 --data ./node',
+  notes: { port: 'its HTTP port (map at /, cards, wants, events)', url: 'the address houses and agents reach it at', data: 'where it keeps cards and the feed', follow: 'other Lakes\' nodes to follow, comma-separated' },
   options: {
     port: { type: 'string', default: process.env.LAKE_PORT ?? '7000' },
     url: { type: 'string', default: process.env.LAKE_NODE_PUBLIC_URL },

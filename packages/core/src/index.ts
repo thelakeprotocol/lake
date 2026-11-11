@@ -39,3 +39,4 @@ export * from './blueprint.js';
 export * from './pack.js';
 export * from './shapes.js';
 export * from './program.js';
+export * from './cli.js';

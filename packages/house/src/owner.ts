@@ -1027,6 +1027,8 @@ export class OwnerDesk {
       await this.o.saveOwnerKey(this.ownerJwk);
       this.token = await secret(join(this.o.dataDir, 'pairing-token'), true); // one use only
       this.seen();
+      // Said in the log too: the link printed at start is spent now (round 6: pairing left no trace).
+      console.log(`[owner] ${recovered ? 'recovered with the recovery code' : 'paired'}: that device holds this house's key now; the pairing link printed earlier is spent`);
       res.json({ paired: true, webId: this.o.webId, until: this.leaseUntil()?.toISOString() });
     });
 

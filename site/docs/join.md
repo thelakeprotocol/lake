@@ -18,7 +18,7 @@ docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house
   --name you --handle you --join https://sandbox.lake.doneinfifty.com
 ```
 
-`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**You → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
+`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. (It expects a Lake that serves its specialists under `/s/`, as the sandbox does; with a bare node, pass `--lake`, `--issuer-url` and `--auditor-url` instead.) `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**You → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
 
 ## A house on a local Lake <span class="status done">runs</span>
 
@@ -26,7 +26,7 @@ A house is one container: a Solid pod with your data, and a housekeeper that gua
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
-docker compose up -d     # two Lake nodes, the specialists, three houses
+docker compose up -d     # two Lake nodes, the specialists, three houses, demo shops and lenders, a swarm of traders (--scale swarm=0 for a quiet Lake)
 open http://localhost:7000   # the live map
 
 docker run -d --network lake_default --hostname house-you \
@@ -36,7 +36,7 @@ docker run -d --network lake_default --hostname house-you \
 
 On start, your house:
 
-1. Starts a pod (Community Solid Server) and creates your WebID and folders: `/agreements/`, `/receipts/`, `/wallet/`, `/audit/`, `/settings/`, and one per use case it takes part in (`/health/` by default; `--packs` picks them). Each one is registered in your pod's Solid Type Index, so any Solid app can find it. Its signing key goes in `/wallet/`.
+1. Starts a pod (Community Solid Server) and creates your WebID and folders: `/agreements/`, `/receipts/`, `/wallet/`, `/audit/`, `/settings/`, `/offers/`, `/profile/`, and one per use case it takes part in (`/health/` by default; `--packs` picks them). Each one is registered in your pod's Solid Type Index, so any Solid app can find it. Its signing key goes in `/wallet/`.
 2. For each use case, asks that use case's issuer for a **synthetic** record (the demo hospital, for health), checks the signature, and stores the original untouched in `/health/original/`.
 3. Converts it to claims inside the pod (`/health/claims.ttl`), checks them against the use case's shapes, and signs the result.
 4. Re-verifies the whole chain, publishes its signed Agent Card at `/.well-known/agent-card.json`, and starts answering on A2A.
@@ -110,6 +110,36 @@ Your pod has an MCP door. Any MCP-capable assistant (Claude Desktop, Claude Code
 
 Tools: `pod_list`, `pod_read`, `pod_claims`. Read-only. Your assistant, your model, your bill: the Lake bundles none.
 
+Outside Docker, the door needs to know where the house keeps things: `LAKE_OWNER=you LAKE_DATA=<your --data> LAKE_POD_URL=http://localhost:<pod port>/ node packages/house/dist/pod-mcp-stdio.js`.
+
+## Run it for real
+
+What the commands above leave out, for a house you keep.
+
+**What it needs.** One house is two Node processes, the housekeeper and its Solid pod: about 300 MB of memory together, a little CPU when something knocks, and a data folder that starts under 1 MB and grows with your records and receipts. A small VPS, a Raspberry Pi 4 or 5 (ARM64), or a home server is plenty. No AI model runs in the house: your AI, if you connect one, runs wherever it runs. Hosting several houses on one machine (a family): one container each, or one process with `--tenants N` (each house its own pod, keys and owner).
+
+**Keep it running.** [`deploy/house.compose.yml`](https://github.com/thelakeprotocol/lake/blob/main/deploy/house.compose.yml) is one house as a service: restarted after a reboot or a crash, a health check on its card, a memory limit, and its folder on your disk. Edit the name, handle and time zone, put your `rules.yaml` beside it, then `docker compose -f house.compose.yml up -d`; `docker compose logs -f` to watch. `lake-house --help` lists every option.
+
+**Back it up.** The data folder is everything: the pod (your records, agreements, receipts), the house's keys in the pod's `/wallet/`, and the house's own state (its pod login, its owner key, the pairing token). Stop the house, copy the folder, start it again: `docker compose stop && tar czf house-$(date +%F).tgz house && docker compose start`. Keep the copy somewhere else, encrypted: it holds keys. From your phone, **You → Download everything** gives you the pod's contents too (wallet included) as one file.
+
+**Move it.** Put the folder on the new machine and start the house with the same `--name`. With `--relay` (or `--join`), your house is reached at an address made from its key, so it is the same house to everyone after the move. With `--public-url`, keep that URL (point its name at the new machine).
+
+**Upgrade.** Images are tagged `latest` and with the commit they were built from (`lake-house:<git sha>`). Pin the commit in the compose file and change it when you choose; back up first, then `docker compose pull && docker compose up -d`. The house reads its old folder; if anything's wrong, put the old tag and the backup back.
+
+**What the relay sees.** With `--relay`, your house keeps one outgoing WebSocket to each node it follows and answers through it, so nothing is opened on your router and no port is published. Every message is signed by its sender and sealed for its recipient ([SPEC §3](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md)): the node passes them on but can't read, change or forge them, or see who sent them. It does see that your house is connected, and when and how much passes. If the node goes away, your house keeps reconnecting and is unreachable meanwhile; following two nodes (`--lake a,b`) keeps it reachable when one is down. Your control panel is the one thing reached directly: keep that port to your own network, or put it behind your own HTTPS proxy.
+
 ## No Docker?
 
-Open the [rules playground](/#playground) on the home page. It runs the real rules engine in your browser.
+Run it from the repository (Node 20 or later): a node, the demo specialists (issuer, auditor and the rest, in one process), and your house. Pick a data folder of your own: `/data` is Docker's.
+
+```bash
+git clone https://github.com/thelakeprotocol/lake && cd lake
+corepack enable && pnpm install && pnpm build
+node packages/lake/dist/main.js --port 7000 --url http://localhost:7000 --data ./lake-node &
+node packages/specialists/dist/main.js all --port 4300 --url http://localhost:4300 --lake http://localhost:7000 --data ./specialists --skip sparring,quests &
+NODE_ENV=production node packages/house/dist/main.js --name you --data ./my-house --rules personas/research.yaml \
+  --port 4000 --pod-port 3000 --lake http://localhost:7000 \
+  --issuer-url http://localhost:4300/issuer --auditor-url http://localhost:4300/auditor
+```
+
+The house prints its pairing link in about 15 seconds, then "joined the Lake". The house and node aren't on npm; the [agent SDK and connector](/docs/build-an-agent) are. Each command has `--help`. Just want to see your rules work? The [rules playground](/#playground) runs the real rules engine in your browser.

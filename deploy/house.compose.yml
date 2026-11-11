@@ -1,0 +1,21 @@
+# One house, kept running: docker compose -f house.compose.yml up -d
+# Its folder ./house is everything (the pod, its keys, the house's state): back it up (see the docs, "Run it for real").
+# Pin the image to a commit (ghcr.io/thelakeprotocol/lake-house:<git sha>) to upgrade only when you choose.
+services:
+  house:
+    image: ghcr.io/thelakeprotocol/lake-house:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      TZ: Australia/Brisbane
+    volumes:
+      - ./house:/data
+      - ./rules.yaml:/rules.yaml:ro
+    # --relay: reached through the Lake's node, so nothing is opened on your router and no port is published.
+    command: ["--name", "you", "--handle", "you", "--join", "https://sandbox.lake.doneinfifty.com"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/.well-known/agent-card.json').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      start_period: 60s
+    mem_limit: 768m

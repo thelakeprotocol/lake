@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs } from 'node:util';
 import express from 'express';
 import { page } from './page.js';
-import { describe, HANDLE, keepAliveBehindProxy, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
+import { describe, HANDLE, keepAliveBehindProxy, parseCli, parseRules, seedFrom, type LakeEvent } from '@thelakeprotocol/core';
 import { randomBytes } from 'node:crypto';
 
 import { startHouse, type House } from './house.js';
 import { loadPacks } from './packs.js';
 import { closePodRoot, externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
 
-const { values: a } = parseArgs({
+const { values: a } = parseCli({
+  name: 'lake-house',
+  about: 'A Lake house: your Solid pod and the housekeeper that answers by your rules (https://lake.doneinfifty.com/docs/join).',
+  usage: 'lake-house --name <you> [--data <dir>] [--rules <rules.yaml>] [--lake <node url>] [--join <lake url>] [--relay] …',
+  example: 'NODE_ENV=production lake-house --name you --data ./my-house --rules personas/research.yaml --lake http://localhost:7000 --issuer-url http://localhost:4300/issuer --auditor-url http://localhost:4300/auditor',
+  notes: { name: 'your house\'s name (its pod and WebID)', data: 'where the pod, its keys and the house\'s state live: back this folder up', rules: 'your rules.yaml', port: 'the house\'s HTTP port (A2A, panel at /owner/, page at /)', 'pod-port': 'the Solid pod\'s port', lake: 'the Lake node(s) to announce to, comma-separated', join: 'a Lake that serves its specialists under /s/ (the sandbox does): node, issuer and auditor in one', 'issuer-url': 'where your pack\'s demo records come from', 'auditor-url': 'who certifies the converter', relay: 'reached through the node: nothing to open on your router', handle: 'open your door under this handle', tenants: 'host this many houses in one process', 'public-url': 'the address others reach this house at' },
   options: {
     name: { type: 'string' },
     rules: { type: 'string', default: process.env.LAKE_RULES ?? '/rules.yaml' },
@@ -67,6 +71,11 @@ const { values: a } = parseArgs({
     'max-houses': { type: 'string', default: process.env.LAKE_MAX_HOUSES ?? '20' },
   },
 });
+// Its data folder first: outside Docker the default /data usually isn't writable, and the error was a stack trace.
+try { mkdirSync(a.data!, { recursive: true }); accessSync(a.data!, constants.W_OK); } catch (e) {
+  console.error(`lake-house: can't write to ${a.data} (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}): pass --data ./my-house (or LAKE_DATA). In Docker, /data is the volume.`);
+  process.exit(2);
+}
 
 // `--join https://sandbox.lake.example`: one flag for a house at home. That Lake's node, its issuer and
 // auditor (at /s/issuer, /s/auditor, as a sandbox serves them), reached through its relay.
