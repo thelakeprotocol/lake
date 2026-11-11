@@ -433,8 +433,9 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 
 /* ---- welcome (pairing, connecting an AI) ---- */
 .welcome .welcome-inner { max-width: 420px; margin: 0 auto; padding: calc(64px + var(--ion-safe-area-top, 0px)) 24px 40px; display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
-.welcome-mark { width: 84px; height: 84px; border-radius: 28px; display: grid; place-items: center; background: linear-gradient(140deg, #3ddc97, #2bb5c9 55%, #8b7cff); box-shadow: 0 20px 50px rgba(61, 220, 151, 0.3); margin-bottom: 10px; }
-.welcome-mark span { width: 30px; height: 30px; border-radius: 8px; background: rgba(255, 255, 255, 0.92); }
+.welcome-mark { width: 84px; height: 84px; border-radius: 26px; display: grid; place-items: center; background: #070b12; border: 1px solid rgba(61, 220, 151, 0.35); box-shadow: 0 20px 50px rgba(61, 220, 151, 0.3); margin-bottom: 10px; }
+.welcome-mark svg { color: #3ddc97; }
+.welcome-mark.ai { background: linear-gradient(140deg, #3ddc97, #2bb5c9 55%, #8b7cff); border: 0; }
 .welcome-mark.ai ion-icon { font-size: 40px; color: #fff; }
 .welcome-kicker { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--lake-mint); margin: 0; }
 .welcome h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.035em; line-height: 1.08; margin: 0 0 4px; }

@@ -22,8 +22,11 @@ ul.list{list-style:none;margin:0;padding:0;display:grid;gap:8px}ul.list li{displ
 .btn.small{padding:8px 12px;font-size:14px;border-radius:8px}
 .chip{font-size:12px;font-weight:600;padding:5px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}.chip.ok{color:var(--mint);border-color:rgba(61,220,151,.45)}`;
 
+// The Lake's mark (an arc over a dot: your place, and what stays in it), as the tab's icon.
+const ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070B12'/%3E%3Cpath d='M11 38 A21 21 0 0 1 53 38' fill='none' stroke='%233DDC97' stroke-width='5.5' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='41' r='8' fill='%233DDC97'/%3E%3C/svg%3E";
+
 /** A page in the shared look. `head` adds to <head> (a description for agents, say). */
 export function page(title: string, body: string, head = ''): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta name="theme-color" content="#070B12"><title>${esc(title)}</title>${head}
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><meta name="theme-color" content="#070B12"><link rel="icon" href="${ICON}"><title>${esc(title)}</title>${head}
 <style>${CSS}</style></head><body><main>${body}</main></body></html>`;
 }

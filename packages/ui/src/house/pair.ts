@@ -28,7 +28,7 @@ export function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) 
   }, []);
   const owned = open === false;
   return h('div', { class: 'ion-page lake-page welcome' }, h('ion-content', { class: 'lake-content' }, h('div', { class: 'welcome-inner' },
-    h('div', { class: 'welcome-mark', 'aria-hidden': 'true' }, h('span', {})),
+    h('div', { class: 'welcome-mark', 'aria-hidden': 'true' }, h('svg', { viewBox: '0 0 64 64', width: 52, height: 52 }, h('path', { d: 'M11 38 A21 21 0 0 1 53 38', fill: 'none', stroke: 'currentColor', 'stroke-width': 5.5, 'stroke-linecap': 'round' }), h('circle', { cx: 32, cy: 41, r: 8, fill: 'currentColor' }))),
     h('p', { class: 'welcome-kicker' }, handle && !owned ? 'Your house, almost ready' : 'A house on the Lake'),
     h('h1', {}, handle || (name ? `House ${name}` : 'A house on the Lake')),
     h('p', { class: 'welcome-text' }, owned
