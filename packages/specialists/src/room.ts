@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { canonicalize, type AgentCard, type LakeData } from '@thelakeprotocol/core';
 import { specialist, type SpecialistOptions } from './review.js';
 
@@ -56,7 +56,9 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
   await mkdir(dir, { recursive: true });
   const file = `${dir}/rooms.json`;
   const rooms = new Map<string, Room>((JSON.parse(await readFile(file, 'utf8').catch(() => '[]')) as Room[]).map((r) => [r.id, r]));
-  const save = () => writeFile(file, JSON.stringify([...rooms.values()])).catch(() => {});
+  // Written whole and renamed into place, one at a time: a reader (or a restart after a crash) never sees half a file.
+  let saving = Promise.resolve();
+  const save = () => (saving = saving.then(async () => { await writeFile(`${file}.tmp`, JSON.stringify([...rooms.values()])); await rename(`${file}.tmp`, file); }).catch(() => {}));
   const close = (r: Room, why: string) => {
     if (r.closed) return;
     r.closed = `${new Date().toISOString()} (${why})`;
