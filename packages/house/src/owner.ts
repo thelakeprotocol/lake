@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import express from 'express';
 import type { WantOfferRecord, WantRecord } from './wants.js';
 import {
-  allowanceDraft, dutyDraft, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, dutyDraft, postalAddress, postalAddressProblems, type PostalAddress, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -98,6 +98,8 @@ export interface PanelProvider {
   closeWant?(id: string): Promise<boolean>;
   wantOffer?(wantId: string, offerId: string): WantOfferRecord | undefined;
   buyWant?(wantId: string, offerId: string, signed: { credential: string; owner: string }): Promise<Record<string, any>>;
+  deliveryAddress?(): Promise<PostalAddress | null>;
+  setDeliveryAddress?(a: PostalAddress | null): Promise<void>;
   wantArrived?(wantId: string): Promise<Record<string, any>>;
   /** Answer a circle's vote on its rules, privately (SPEC §11.4c). */
   voteCircle?(tally: string, id: string, vote: string, yes: boolean): Promise<Record<string, any>>;
@@ -1959,6 +1961,18 @@ export class OwnerDesk {
             const r = await panel.buyWant(d.want, d.offer, { credential: String(w.credential), owner: await this.o.vouchOwner(this.ownerJwk!) });
             if (!r.error) this.news({ about: 'want.bought', want: d.want, offer: d.offer, note: 'your human bought it on their phone: paid by the house, held until they say it arrived. Nothing for you to pay.' });
             return r;
+          },
+          // Where to send what the owner buys (SPEC §6.8): the owner's own; an assistant key can neither read nor set it.
+          'panel.address': async () => ({ address: (await panel.deliveryAddress?.()) ?? null }),
+          'panel.address.set': async () => {
+            const a = (q as { address?: unknown }).address;
+            if (a === null) { await panel.setDeliveryAddress?.(null); return { ok: true, address: null }; }
+            const problems = postalAddressProblems(a);
+            if (problems.length) return { kind: 'refused', problems };
+            const tidy = postalAddress(a as Record<string, unknown>);
+            if (!panel.setDeliveryAddress) return { error: 'this house can\'t keep an address' };
+            await panel.setDeliveryAddress(tidy);
+            return { ok: true, address: tidy };
           },
           'panel.want.arrived': async () => panel.wantArrived?.(String((q as { want?: string }).want ?? '')) ?? { error: 'this house can\'t' },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },

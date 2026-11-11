@@ -196,7 +196,7 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
-    if (['want.offer', 'want.shipped'].includes(String(v.payload.kind)) && this.o.wantIn) return this.reply((await this.o.wantIn(v.payload as unknown as Record<string, unknown>, v.profile, (data as LakeData).card)) as never);
+    if (['want.offer', 'want.shipped', 'want.status'].includes(String(v.payload.kind)) && this.o.wantIn) return this.reply((await this.o.wantIn(v.payload as unknown as Record<string, unknown>, v.profile, (data as LakeData).card)) as never);
     // A promise circle this house's owner is in (SPEC §11.4c), from its tally only: a member needs help (the caller unnamed),
     // their own call was taken or couldn't be, or a promise of theirs counted as kept.
     const circleIds = (x: Record<string, unknown>) => [String(x.id ?? ''), ...(Array.isArray(x.ids) ? x.ids.map(String) : [])];

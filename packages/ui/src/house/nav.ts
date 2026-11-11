@@ -1,11 +1,11 @@
 // Where you are: one hash per screen, so links from notifications open the right one and the phone's back gesture works.
 //   tabs: #chats  #inbox  #ai  #you        chats: #chat=<sender key>  #note=<id>  #want=<id>
-//   my AI: #aikey=<kid>                     you: #door #notify #free #rules #access #offers #money #data #circles #key #move #about
+//   my AI: #aikey=<kid>                     you: #door #notify #free #address #rules #access #offers #money #data #circles #key #move #about
 // Old addresses (in notifications already sent, and bookmarks) still land in the right place.
 
 export type Tab = 'chats' | 'inbox' | 'ai' | 'you';
 export type Route = { tab: Tab; page?: string; arg?: string };
-export const YOU_PAGES = ['door', 'notify', 'free', 'rules', 'access', 'offers', 'money', 'data', 'circles', 'key', 'move', 'about'] as const;
+export const YOU_PAGES = ['door', 'notify', 'free', 'address', 'rules', 'access', 'offers', 'money', 'data', 'circles', 'key', 'move', 'about'] as const;
 const OLD: Record<string, string> = { home: 'inbox', needs: 'inbox', requests: 'inbox', myagent: 'ai', ais: 'ai', me: 'you', settings: 'you', keys: 'access', agents: 'access' };
 
 export function parse(hash = location.hash): Route {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
-import { chatsOf, day, dutyLive, money, seen, shortName, shortShop, signDraft, time, unseen, when, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type WantOfferV, type WantV } from './logic';
+import { addressLine, chatsOf, day, dutyLive, money, seen, shortName, shortShop, signDraft, time, unseen, when, type Address, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type WantOfferV, type WantV } from './logic';
 import { back, focusNote, push } from './nav';
 
 // Chats: conversations, as messaging apps show them, and what you're looking for, each a thread of shops' offers.
@@ -148,6 +148,7 @@ const confirmClear = () => confirm({ header: 'Clear this chat?', sub: 'The messa
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
 export function WantPage({ arg }: { arg: string }) {
   const list = useHouse<ListView>({ kind: 'list' });
+  const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
   const w = list.data?.wants?.find((x) => x.want.id === arg && !x.closed);
   if (!w) return h(Page, { title: 'Looking for', back: () => back('#chats'), backLabel: 'Chats' }, list.data ? h(Empty, { icon: 'search-outline', title: 'Not looking for this any more' }) : h(Failed, { error: list.error }));
   const bought = w.offers.find((o) => o.id === w.bought);
@@ -168,14 +169,16 @@ export function WantPage({ arg }: { arg: string }) {
       o.matched ? h('p', { class: 'offer-match' }, `Matches: ${o.matched.join(', ') || 'none'}`) : null,
       miss.length ? h('p', { class: 'offer-miss' }, `Not confirmed: ${miss.join(', ')}`) : null,
       o.note ? h('p', { class: 'offer-note' }, `“${o.note}”`) : null,
-      canBuy ? h(Btn, { label: `Buy for ${money(o.total)}`, expand: 'block', run: buy(o), ask: { header: `Pay ${money(o.total)} to ${shortShop(o.seller.name)}?`, sub: 'Your house pays; the money is held until you say it arrived.', button: `Pay ${money(o.total)}`, destructive: false }, done: 'Paid, held until it arrives' }) : null));
+      canBuy ? (addr.data?.address
+        ? h(Btn, { label: `Buy for ${money(o.total)}`, expand: 'block', run: buy(o), ask: { header: `Pay ${money(o.total)} to ${shortShop(o.seller.name)}?`, sub: `Your house pays; the money is held until you say it arrived. ${shortShop(o.seller.name)} gets your address: ${addressLine(addr.data.address)}.`, button: `Pay ${money(o.total)}`, destructive: false }, done: 'Paid, held until it arrives' })
+        : h('ion-button', { expand: 'block', shape: 'round', fill: 'outline', onClick: () => push('#address') }, h('ion-icon', { name: 'home-outline', slot: 'start' }), 'Add your delivery address to buy')) : null));
   };
   return h(Page, { title: w.want.name, back: () => back('#chats'), backLabel: 'Chats', cls: 'want-page' },
     h('ion-card', { class: 'lake-card spec-card' }, h('ion-card-content', {},
       h('div', { class: 'spec-head' }, h(Avatar, { name: w.want.name, iconName: 'search', size: 40 }), h('div', {}, h('h2', {}, w.want.name), h('p', {}, bought ? 'What you asked for' : `Open until ${day(w.want.availabilityEnds)}`))),
       w.want.description ? h('p', { class: 'spec-desc' }, w.want.description) : null,
       h('div', { class: 'spec-chips' }, ...w.want.itemOffered.additionalProperty.map((p) => h('span', { key: p.name, class: 'field-tag' }, h('span', { class: 'tag-k' }, `${p.name} `), p.value))),
-      h('p', { class: 'spec-limit' }, [w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
+      h('p', { class: 'spec-limit' }, [addr.data?.address ? `To ${addressLine(addr.data.address)}` : w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
     bought ? [
       h('h3', { class: 'section-h', key: 'bh' }, bought.state === 'arrived' ? 'Arrived' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
       card(bought, false),

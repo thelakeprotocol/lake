@@ -142,3 +142,39 @@ export const purchaseDraft = (houseWebId: string, cart: { id: string; merchant: 
   } satisfies IntentMandateSubject,
   ...(status ? { credentialStatus: status } : {}),
 });
+
+/**
+ * Where to send what the owner buys (SPEC §6.8): a schema.org PostalAddress, kept in their pod and given only to the
+ * seller they bought from, with the receipt.
+ */
+export interface PostalAddress {
+  '@type': 'PostalAddress';
+  name?: string;
+  streetAddress: string;
+  addressLocality: string;
+  addressRegion?: string;
+  postalCode: string;
+  addressCountry: string;
+}
+const ADDRESS_FIELDS: [keyof PostalAddress, number, boolean][] = [['name', 80, false], ['streetAddress', 160, true], ['addressLocality', 80, true], ['addressRegion', 40, false], ['postalCode', 16, true], ['addressCountry', 2, true]];
+
+/** Problems with an address as given (empty if fine); `postalAddress` makes the tidy one. */
+export function postalAddressProblems(a: unknown): string[] {
+  if (!a || typeof a !== 'object') return ['an address is an object'];
+  const o = a as Record<string, unknown>;
+  const out: string[] = [];
+  for (const [k, max, need] of ADDRESS_FIELDS) {
+    const v = o[k];
+    if (v === undefined || v === '') { if (need) out.push(`${k} is needed`); continue; }
+    if (typeof v !== 'string') out.push(`${k} is text`);
+    else if (v.trim().length > max) out.push(`${k} is at most ${max} characters`);
+  }
+  if (typeof o.addressCountry === 'string' && o.addressCountry && !/^[A-Za-z]{2}$/.test(o.addressCountry.trim())) out.push('addressCountry is a two-letter country code (AU, NZ, GB…)');
+  return out;
+}
+export function postalAddress(a: Record<string, unknown>): PostalAddress {
+  const t = (k: string) => (typeof a[k] === 'string' ? (a[k] as string).replace(/\s+/g, ' ').trim() : '');
+  return { '@type': 'PostalAddress', ...(t('name') ? { name: t('name') } : {}), streetAddress: t('streetAddress'), addressLocality: t('addressLocality'), ...(t('addressRegion') ? { addressRegion: t('addressRegion') } : {}), postalCode: t('postalCode'), addressCountry: t('addressCountry').toUpperCase() };
+}
+/** One line, for a screen: "12 Example St, Brisbane QLD 4000". */
+export const addressLine = (a: PostalAddress) => `${a.streetAddress}, ${[a.addressLocality, a.addressRegion, a.postalCode].filter(Boolean).join(' ')}`;

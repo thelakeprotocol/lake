@@ -81,7 +81,7 @@ async function checkMoney(p: Record<string, unknown>, from: LakeProfile, me: str
     }
     // Verified says who signed it; settled says whether money moved. A transfer is the sender's own word, however it's named.
     // Held: the money is set aside for you, and moves when the buyer accepts or its time runs out (SPEC §6.5).
-    if (p.kind === 'receipt' && sub.settlement === 'held') return { verified: true, settled: false, held: { id: String(sub.settlementId), until: sub.heldUntil }, amount: sub.amount?.value, unit: sub.amount?.currency ?? 'USD', signedBy: signer.ownerDomain, ...(sub.cart ? { cart: sub.cart } : {}), note: `held for you by the payments agent: deliver by ${sub.heldUntil}, then it is released when the buyer accepts (or with no answer in their time)` };
+    if (p.kind === 'receipt' && sub.settlement === 'held') return { verified: true, settled: false, held: { id: String(sub.settlementId), until: sub.heldUntil }, amount: sub.amount?.value, unit: sub.amount?.currency ?? 'USD', signedBy: signer.ownerDomain, ...(sub.cart ? { cart: sub.cart } : {}), note: p.want ? `a house bought what you offered for its want ${String(p.want)}: held for you by the payments agent. Send it to deliverTo, then lake_want { action: "shipped", want, house, cart, hold }; it is released when they say it arrived (or by ${sub.heldUntil})` : `held for you by the payments agent: deliver by ${sub.heldUntil}, then it is released when the buyer accepts (or with no answer in their time)` };
     return p.kind === 'receipt'
       ? { verified: true, settled: true, amount: sub.amount?.value, unit: sub.amount?.currency ?? 'USD', signedBy: signer.ownerDomain, ...(forHouse ? { paid_to: sub.id, note: 'paid to the house you sell for: it is your human\'s' } : {}),
           // The payer's memo rides inside the receipt; the payments agent signed the amount, not the payer's words.
@@ -1780,9 +1780,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_want',
     {
-      description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays); shipped tells the house you sent it and files the delivery with the payments agent holding the money.',
+      description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays; in the want\'s currency; one open offer per shop, a new one replaces it; it binds you to deliver within within_hours, 168 by default); status says where your offer stands; when they buy, lake_inbox brings { kind: "receipt", want, cart, hold, deliverTo } (deliverTo: the address to send it to, given to you alone, for this order); shipped then tells the house you sent it and files the delivery with the payments agent holding the money.',
       inputSchema: {
-        action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'shipped']),
+        action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'status', 'shipped']),
         name: z.string().max(80).optional().describe('post: what, in a few words ("Handheld shower head")'),
         description: z.string().max(280).optional().describe('post: one line more, if it helps ("to replace a worn one; the hose stays")'),
         properties: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe('post: what it must be, as name: value pairs (up to 12), as a shop would list them'),
@@ -1793,11 +1793,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         max_price: z.number().positive().optional().describe('post: the most your human would pay, in currency: kept in their house only'),
         id: z.string().optional().describe('close: the want\'s id'),
         q: z.string().max(100).optional().describe('find: words to look for'),
-        want: z.string().optional().describe('offer, shipped: the want\'s id'),
-        house: z.string().optional().describe('offer, shipped: the house\'s A2A address, from find'),
+        want: z.string().optional().describe('offer, status, shipped: the want\'s id'),
+        house: z.string().optional().describe('offer, status, shipped: the house\'s A2A address, from find'),
         house_webid: z.string().optional().describe('offer: the house\'s WebID, from find (the cart is made out to it)'),
         items: z.array(z.object({ label: z.string().max(120), price: z.number().positive() })).max(12).optional().describe('offer: what you offer and for how much, delivery included as a line if it costs'),
-        offer_currency: z.string().optional().describe('offer: the currency of your prices (the want\'s, if it names one)'),
+        offer_currency: z.string().optional().describe('offer: the currency of your prices (default: the want\'s)'),
+        within_hours: z.number().int().min(1).max(720).optional().describe('offer: the hours you promise to deliver within, as signed in your cart (default 168)'),
         delivery: z.string().max(80).optional().describe('offer: how soon, in words ("2 days, free"); shipped: your dispatch note'),
         matched: z.array(z.string()).max(12).optional().describe('offer: which of its properties your item has'),
         cart: z.string().optional().describe('shipped: the cart id the house paid'),
@@ -1824,17 +1825,27 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         }
         const me = await agent();
         if (a.action === 'offer') {
-          if (!a.want || !a.house || !a.house_webid || !a.items?.length) throw new Error('offer: want, house, house_webid (from find) and items');
-          const currency = (a.offer_currency ?? 'USD').toUpperCase();
-          const cart = await me.cart(a.house_webid, a.items.map((x) => ({ label: x.label, amount: { currency, value: Math.round(x.price * 100) / 100 } })), 24 * 60, undefined, undefined, { within_hours: 168, review_hours: 168 });
-          return json(await me.ask(a.house, { kind: 'want.offer', want: a.want, cart, ...(a.matched ? { matched: a.matched } : {}), ...(a.delivery ? { delivery: a.delivery } : {}) }));
+          const missing = ([['want', a.want], ['house', a.house], ['house_webid', a.house_webid], ['items', a.items?.length]] as [string, unknown][]).filter(([, v]) => !v).map(([k]) => k);
+          if (missing.length) throw new Error(`offer: missing ${missing.join(', ')} (want, house and house_webid come from find)`);
+          // The want as the node lists it: its currency is the default, and a want on another house is said plainly (round 4).
+          const listed = ((await (await fetch(`${node}/wants`).catch(() => null))?.json().catch(() => []) ?? []) as { want: { id: string; priceCurrency?: string }; house: { url: string } }[]).find((x) => x.want.id === a.want);
+          const bare = (u: string) => u.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+          if (listed && bare(listed.house.url) !== bare(a.house!)) throw new Error(`${a.want} is on ${listed.house.url}, not ${a.house}`);
+          const currency = (a.offer_currency ?? listed?.want.priceCurrency ?? 'USD').toUpperCase();
+          if (listed?.want.priceCurrency && currency !== listed.want.priceCurrency) throw new Error(`your prices are in ${currency}; offers for this want are in ${listed.want.priceCurrency}`);
+          const cart = await me.cart(a.house_webid!, a.items!.map((x) => ({ label: x.label, amount: { currency, value: Math.round(x.price * 100) / 100 } })), 24 * 60, undefined, undefined, { within_hours: a.within_hours ?? 168, review_hours: 168 });
+          return json(await me.ask(a.house!, { kind: 'want.offer', want: a.want, cart, ...(a.matched ? { matched: a.matched } : {}), ...(a.delivery ? { delivery: a.delivery } : {}) }));
+        }
+        if (a.action === 'status') {
+          if (!a.want || !a.house) throw new Error('status: want and house (from find)');
+          return json(await me.ask(a.house, { kind: 'want.status', want: a.want }));
         }
         if (!a.want || !a.house || !a.cart) throw new Error('shipped: want, house and cart (and hold, from the receipt)');
         const note = a.delivery ?? 'Sent.';
         const sha256 = createHash('sha256').update(note).digest('hex');
         const told = await me.ask(a.house, { kind: 'want.shipped', want: a.want, cart: a.cart, note, sha256 });
         const filed = a.hold ? await me.ask(`${(o.payments ?? 'http://payments:4600').replace(/\/$/, '')}/a2a`, { kind: 'delivered', hold: a.hold, sha256 }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] })) : undefined;
-        return json({ house: told, ...(filed ? { payments: filed } : {}), note: 'the money reaches you when they say it arrived, or by itself after the cart\'s review time' });
+        return json({ house: told, ...(filed ? { payments: filed } : {}), ...(told.kind === 'want.noted' ? { note: 'the money reaches you when they say it arrived, or by itself after the cart\'s review time' } : {}) });
       } catch (e) {
         return fail(e);
       }

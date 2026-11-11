@@ -43,3 +43,16 @@ describe('wants (SPEC §6.8)', () => {
     expect(d.credentialSubject).toMatchObject({ id: 'https://h.example/#house', study: 'urn:ap2:cart:c1', budget: { currency: 'AUD', amount: 34 } });
   });
 });
+
+describe('a delivery address', () => {
+  it('is checked and tidied as a schema.org PostalAddress', async () => {
+    const { postalAddressProblems, postalAddress, addressLine } = await import('./want.js');
+    expect(postalAddressProblems({ streetAddress: '12 Example St', addressLocality: 'Brisbane', postalCode: '4000' })).toEqual(['addressCountry is needed']);
+    expect(postalAddressProblems({ streetAddress: '12 Example St', addressLocality: 'Brisbane', postalCode: '4000', addressCountry: 'Australia' })).toEqual(['addressCountry is at most 2 characters', 'addressCountry is a two-letter country code (AU, NZ, GB…)']);
+    expect(postalAddressProblems(null)).toEqual(['an address is an object']);
+    const a = postalAddress({ name: ' Sam  Example ', streetAddress: '12 Example St', addressLocality: 'Brisbane', addressRegion: 'QLD', postalCode: '4000', addressCountry: 'au' });
+    expect(a).toEqual({ '@type': 'PostalAddress', name: 'Sam Example', streetAddress: '12 Example St', addressLocality: 'Brisbane', addressRegion: 'QLD', postalCode: '4000', addressCountry: 'AU' });
+    expect(postalAddressProblems(a)).toEqual([]);
+    expect(addressLine(a)).toBe('12 Example St, Brisbane QLD 4000');
+  });
+});

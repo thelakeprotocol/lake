@@ -358,13 +358,26 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await first.getByText(/Matches: Type, Spray modes, Finish, Connection/).waitFor();
       await page.locator('ion-accordion', { hasText: "1 over the most you'd pay" }).waitFor({ timeout: 20_000 });
       await tidy();
-      // Buy: asked on a sheet, signed on this phone for exactly that cart, paid by the house, held.
+      // No address yet: the one thing to add before buying, a tap away; kept in the house, given only to the shop bought from.
+      await first.getByRole('button', { name: 'Add your delivery address to buy' }).click();
+      await page.getByLabel('Street address').fill('12 Example St');
+      await page.getByLabel('Suburb or town').fill('Brisbane');
+      await page.getByLabel('State (optional)').fill('QLD');
+      await page.getByLabel('Postcode').fill('4000');
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.getByText('Saved').first().waitFor();
+      // An AI's key can't read it.
+      expect((await asAssistant({ kind: 'panel.address' })).error).toMatch(/only your human's key/);
+      await goBack();
+      await page.getByText(/To 12 Example St, Brisbane QLD 4000/).waitFor();
+      // Buy: asked on a sheet (saying the shop gets the address), signed on this phone for exactly that cart, paid by the house, held.
       await first.getByRole('button', { name: 'Buy for A$34.00' }).click();
+      await page.locator('ion-action-sheet').getByText(/Washer & Wrench gets your address: 12 Example St, Brisbane QLD 4000/).waitFor();
       await confirmSheet('Pay A$34.00');
       await page.getByRole('heading', { name: /Bought|On its way/ }).waitFor({ timeout: 15_000 });
       // The shop posts it: the house hears, and the owner says it arrived; then the shop is paid.
       await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 15_000 });
-      await page.getByText(/Washer & Wrench: “Posted: 1 × Handheld shower head/).waitFor();
+      await page.getByText(/Washer & Wrench: “Posted to Brisbane QLD 4000: 1 × Handheld shower head/).waitFor();
       await page.getByRole('button', { name: 'It arrived' }).click();
       await page.getByRole('heading', { name: 'Arrived' }).waitFor({ timeout: 15_000 });
       await tidy();
@@ -757,7 +770,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     let found: { want: { id: string }; house: { url: string; webId: string } } | undefined;
     for (let i = 0; i < 20 && !found; i++) { found = (await want({ action: 'find', q: 'lamp' })).wants.find((x: { want: { id: string } }) => x.want.id === lamp.want.id); if (!found) await page.waitForTimeout(500); }
     expect(JSON.stringify(found)).not.toMatch(/max|budget|price"/);
-    expect(await want({ action: 'offer', want: found!.want.id, house: found!.house.url, house_webid: found!.house.webId, items: [{ label: 'White bedside lamp, E27', price: 22 }], offer_currency: 'USD', delivery: '3 days', matched: ['Base', 'Colour'] })).toMatchObject({ kind: 'want.received' });
+    // In the want's currency without saying it; "matched" keeps only the want's own properties.
+    expect(await want({ action: 'offer', want: found!.want.id, house: found!.house.url, house_webid: found!.house.webId, items: [{ label: 'White bedside lamp, E27', price: 22 }], delivery: '3 days', matched: ['base', 'Colour', 'Dimmable'] })).toMatchObject({ kind: 'want.received', matched_dropped: ['Dimmable'] });
+    // A second offer replaces the first, and says so; where it stands, from the seller's side.
+    const again = await want({ action: 'offer', want: found!.want.id, house: found!.house.url, house_webid: found!.house.webId, items: [{ label: 'White bedside lamp, E27', price: 22 }], delivery: '3 days', matched: ['Base', 'Colour'] });
+    expect(again).toMatchObject({ kind: 'want.received', replaced: expect.stringMatching(/^o-/) });
+    expect(await want({ action: 'status', want: found!.want.id, house: found!.house.url })).toMatchObject({ kind: 'want.status', offer: again.offer, state: 'open' });
     expect((await one.call('lake_want', { action: 'mine' })).wants.find((w: { id: string }) => w.id === lamp.want.id)).toMatchObject({ offers: [{ total: 'USD 22.00', delivery: '3 days', state: 'open' }] });
     expect(await one.call('lake_want', { action: 'close', id: lamp.want.id })).toMatchObject({ ok: true });
     await shopper.close(); await one.c.close();

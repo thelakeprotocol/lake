@@ -8,6 +8,8 @@ export type Decision = 'join' | 'ask' | 'decline';
 export interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
 export interface Rules { owner: string; device?: string; default: Decision; tags?: string[]; rules: Rule[]; negotiation?: { join_collectives?: boolean }; trust?: Record<string, string[]>; privacy?: { show_packs?: boolean }; availability?: { tz: string; free: string[]; meetings?: number } }
 export type DoorState = { open: boolean; about?: string; name?: string; handle?: string; address: string; error?: string };
+export type Address = { '@type': 'PostalAddress'; name?: string; streetAddress: string; addressLocality: string; addressRegion?: string; postalCode: string; addressCountry: string };
+export const addressLine = (a: Address) => `${a.streetAddress}, ${[a.addressLocality, a.addressRegion, a.postalCode].filter(Boolean).join(' ')}`;
 export type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
 export type PledgeMoney = { amount: number; currency: string; payee: string; threshold: number; deadline: string; count: number; bond?: number; text: string };
 export type CircleItem = { tally: string; id: string; call: string; need: string; when?: string; promise?: string; help?: string; role: 'ask' | 'caller' | 'kept' | 'unmet' | 'cleared' | 'pass' | 'passed' | 'vote' | 'voted'; state: string; contact?: string };

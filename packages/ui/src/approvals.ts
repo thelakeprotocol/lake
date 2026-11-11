@@ -14,7 +14,7 @@ import { ChatPage, ChatsTab, WantPage, unreadChats } from './house/chats';
 import { InboxTab, decisions } from './house/inbox';
 import { AiKeyPage, AiTab } from './house/ai';
 import { DoorPage, NotifyPage, YouTab } from './house/you';
-import { AboutPage, AccessPage, CirclesPage, DataPage, FreePage, KeyPage, MoneyPage, MovePage, OffersPage, RulesPage } from './house/pages';
+import { AboutPage, AccessPage, AddressPage, CirclesPage, DataPage, FreePage, KeyPage, MoneyPage, MovePage, OffersPage, RulesPage } from './house/pages';
 import { ConnectAI, Pair, connecting } from './house/pair';
 
 // The control panel that comes with every house (open source). Served by the house at /owner/; every call is signed on
@@ -27,7 +27,7 @@ const TABS: { tab: Tab; label: string; icon: string }[] = [
   { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];
-const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage };
+const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, address: AddressPage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage };
 
 function App() {
   const [route, setRoute] = useState(parse());

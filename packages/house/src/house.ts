@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   allFields, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
-  type AgentCard, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
+  type AgentCard, type PostalAddress, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
@@ -174,6 +174,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     load: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/wants.json`).catch(() => null); return r?.ok ? r.json() : []; },
     save: (list) => put(owner, 'wallet/wants.json', JSON.stringify(list), 'application/json'),
   });
+  // Where to send what the owner buys: in /wallet/ (only the owner's key reads it), given to a seller only with a purchase.
+  const deliveryAddress = async (): Promise<PostalAddress | null> => { const r = await owner.fetch(`${owner.podRoot}wallet/delivery-address.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => null)) as PostalAddress | null) : null; };
   // The card is the house's public face, so the owner's rules decide what it says: its interest tags, and whether it names
   // the kinds of data it holds (privacy.show_packs). Hidden, agents searching by kind of data won't find it; that is the trade.
   const cardFor = async (r: Rules) => {
@@ -287,7 +289,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       })().finally(() => { this.listing = null; }));
     },
   };
-  const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants });
+  const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
   // The pod's folder listed a little after start, so the first look at Who has access has a fresh index.
   setTimeout(() => void consentIndex.relist().catch(() => {}), 20_000).unref();
   const desk = new OwnerDesk({
@@ -367,8 +369,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         note('want.offer', `${r.offer.seller.name} offered ${r.offer.total.currency} ${r.offer.total.value.toFixed(2)} for "${r.want.name}"`);
         desk.touch();
         if (!r.replaced && !r.offer.over) desk.notifyOwner('want', `A shop made an offer for "${r.want.name.slice(0, 60)}".`, `./#want=${r.want.id}`);
-        return { kind: 'want.received', want: r.want.id, offer: r.offer.id, note: 'the owner sees it on their phone and decides; you hear if they buy' };
+        return { kind: 'want.received', want: r.want.id, offer: r.offer.id, cart: r.offer.cart.contents.id, ...(r.replaced ? { replaced: r.replaced } : {}), ...(r.dropped ? { matched_dropped: r.dropped } : {}),
+          note: `the owner sees it on their phone and decides; if they buy, a receipt comes with where to send it (keep the cart id for shipped).${r.replaced ? ' One open offer per shop: this replaces your earlier one.' : ''}${r.dropped ? ` Not shown as matched (not properties of this want): ${r.dropped.join(', ')}.` : ''}` };
       }
+      if (p.kind === 'want.status') return wants.statusFor(String(p.want ?? ''), profile.webId);
       const r = await wants.shippedIn(p, profile);
       if (!r.ok) return { kind: 'refused', problems: [r.why] };
       note('want.shipped', `${r.offer.seller.name} sent "${r.want.name}": ${r.offer.shipped?.note ?? ''}`);
@@ -479,6 +483,7 @@ function panelFor(x: {
   consentCache: Map<string, Record<string, unknown>>;
   consentIndex: { listedAt: number; relist: () => Promise<void> };
   wants: Wants;
+  deliveryAddress: () => Promise<PostalAddress | null>;
 }): PanelProvider {
   const { owner } = x;
   // A signed request from this house to another agent, and its verified reply.
@@ -919,12 +924,16 @@ function panelFor(x: {
     async postWant(input, limit) { const w = await x.wants.post(input, limit); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
     async closeWant(id) { const ok = await x.wants.close(id); if (ok) await x.recard(x.keeper().rules); return ok; },
     wantOffer: (wantId, offerId) => x.wants.find(wantId)?.offers.find((o) => o.id === offerId),
+    deliveryAddress: () => x.deliveryAddress(),
+    async setDeliveryAddress(a) { if (a) await put(owner, 'wallet/delivery-address.json', JSON.stringify(a), 'application/json'); else await owner.fetch(`${owner.podRoot}wallet/delivery-address.json`, { method: 'DELETE' }).catch(() => null); },
     async buyWant(wantId, offerId, signed) {
       const offer = x.wants.find(wantId)?.offers.find((o) => o.id === offerId);
       if (!offer) return { error: 'no such offer' };
+      const deliverTo = await x.deliveryAddress();
+      if (!deliverTo) return { error: 'add your delivery address first (You → Delivery address): the shop needs to know where to send it. Nothing was paid' };
       const payments = await paymentsFor(offer.cart);
       if (!payments) return { error: 'no payments agent on this Lake that the shop takes: nothing was paid' };
-      const r = await x.wants.buy(wantId, offerId, signed, { id: x.id, webId: owner.webId, card: x.card, payments, send });
+      const r = await x.wants.buy(wantId, offerId, signed, { id: x.id, webId: owner.webId, card: x.card, payments, deliverTo, send });
       if ('error' in r) return r;
       if (r.receipt) await put(owner, `receipts/spent-cart-${createHash('sha256').update(offer.cart.contents.id).digest('hex').slice(0, 16)}.receipt.jwt`, r.receipt, 'text/plain').catch(() => {});
       await x.recard(x.keeper().rules);

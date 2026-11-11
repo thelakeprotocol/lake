@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import {
-  buildCard, cartParty, cardUrlFor, deliversTo, generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signCart, signMessage, verifyLakeData, wantFit,
-  type AgentCard, type CartParty, type LakeData, type ShopExample, type Want,
+  buildCard, cartParty, cardUrlFor, deliversTo, generateIdentity, lakeAgentApp, LakeLinks, loadOrCreateIdentity, ReplayGuard, signCard, signCart, signMessage, verifyLakeData, wantFit, postalAddressProblems,
+  type AgentCard, type CartParty, type LakeData, type ShopExample, type Want, type PostalAddress,
 } from '@thelakeprotocol/core';
 import { ask, type Visitor } from './knock.js';
 
@@ -91,11 +91,11 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   }
 
   /** Paid, held: we post it, tell the house with a dispatch note, and file the note's digest with the payments agent. */
-  async function ship(cartId: string, s: { house: string; want: string; label: string }, receipt: string) {
+  async function ship(cartId: string, s: { house: string; want: string; label: string }, receipt: string, to?: PostalAddress) {
     const vc = JSON.parse(Buffer.from(receipt.split('.')[1] ?? '', 'base64url').toString()) as { iss?: string; issuer?: string | { id?: string }; credentialSubject?: { settlement?: string; settlementId?: string } };
     const issuer = typeof vc.issuer === 'string' ? vc.issuer : (vc.issuer?.id ?? vc.iss);
     const tracking = `DEMO-${createHash('sha256').update(cartId).digest('hex').slice(0, 8).toUpperCase()}`;
-    const note = `Posted: ${s.label}. Tracking ${tracking} (a demo: nothing is really sent). About ${ex.delivery.days === 1 ? 'a day' : `${ex.delivery.days} days`}.`;
+    const note = `Posted${to ? ` to ${[to.addressLocality, to.addressRegion, to.postalCode].filter(Boolean).join(' ')}` : ''}: ${s.label}. Tracking ${tracking} (a demo: nothing is really sent). About ${ex.delivery.days === 1 ? 'a day' : `${ex.delivery.days} days`}.`;
     const sha256 = createHash('sha256').update(note).digest('hex');
     await ask(s.house, me, { kind: 'want.shipped', want: s.want, cart: cartId, note, sha256 });
     if (vc.credentialSubject?.settlement === 'held' && vc.credentialSubject.settlementId) {
@@ -112,7 +112,10 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     if (m.kind === 'receipt') {
       const s = typeof m.cart === 'string' ? sold.get(m.cart) : undefined;
       const credential = (m.receipt as { credential?: string } | undefined)?.credential;
-      if (s && credential) setTimeout(() => void ship(String(m.cart), s, credential).catch((e: Error) => log(`${ex.name}: could not post it: ${e.message}`)), 500);
+      // Where to send it comes with the purchase, for this order only (a real shop would keep it only as long as the law asks).
+      const to = postalAddressProblems(m.deliverTo).length ? undefined : (m.deliverTo as PostalAddress);
+      if (s && credential && !to) return reply({ kind: 'received', note: 'thank you: we need a delivery address to post it (send it with the purchase)' });
+      if (s && credential) setTimeout(() => void ship(String(m.cart), s, credential, to).catch((e: Error) => log(`${ex.name}: could not post it: ${e.message}`)), 500);
       return reply({ kind: 'received', note: s ? 'thank you: it goes in the post today' : 'thank you' });
     }
     return reply({ kind: 'rejected', code: 'malformed', why: 'we answer wants: tell your human\'s house what you are looking for (lake_want), and we offer if we have it' });

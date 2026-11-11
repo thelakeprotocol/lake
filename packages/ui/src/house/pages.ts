@@ -3,7 +3,7 @@ import { stringify } from 'yaml';
 import { useRef, useState } from 'preact/hooks';
 import { call, key, must, state, useBump, useHouse, useRedraw } from './api';
 import { Btn, CopyBtn, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, said, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Consent, type Decision, type FreeState, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
+import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, said, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
 import { signEnvelope } from '../owner-crypto';
 
 // The pages under You. Each is one job, with its back to You.
@@ -347,4 +347,29 @@ export function AboutPage({ backTo }: P) {
       h('ion-input', { value: pid, placeholder: 'pledge id', 'aria-label': 'Pledge id', onionInput: (e: CustomEvent) => setPid(String(e.detail.value ?? '')) }),
       h(Btn, { label: 'Sign this pledge', fill: 'outline', run: async () => { const r = await signPledge(tally.trim(), pid.trim()); void toast(r.kind === 'tally.triggered' ? `Signed: that was the last one needed (${r.count} of ${r.threshold}).` : `Signed: ${r.count} of ${r.threshold}.`); } })))),
     h('p', { class: 'mono small pad' }, state.webId));
+}
+
+// ---- delivery address ----
+const COUNTRIES = ['AU', 'NZ', 'GB', 'IE', 'US', 'CA'];
+export function AddressPage({ backTo }: P) {
+  const a = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
+  const [form, setForm] = useState<Record<string, string> | null>(null);
+  if (!a.data) return page('Delivery address', backTo, h(Failed, { error: a.error }));
+  const cur = a.data.address;
+  const guess = /-(\w\w)$/.exec(navigator.language)?.[1]?.toUpperCase() ?? 'AU';
+  const f = form ?? { name: cur?.name ?? '', streetAddress: cur?.streetAddress ?? '', addressLocality: cur?.addressLocality ?? '', addressRegion: cur?.addressRegion ?? '', postalCode: cur?.postalCode ?? '', addressCountry: cur?.addressCountry ?? (COUNTRIES.includes(guess) ? guess : 'AU') };
+  const set = (k: string) => (e: CustomEvent) => setForm({ ...f, [k]: String(e.detail.value ?? '') });
+  const field = (k: string, label: string, o: Record<string, unknown> = {}) => h('ion-item', { key: k }, h('ion-input', { label, labelPlacement: 'stacked', value: f[k], 'aria-label': label, onionInput: set(k), ...o }));
+  return page('Delivery address', backTo,
+    h('p', { class: 'muted-line pad' }, 'Kept in your house. It goes only to a shop you buy from, when you buy.'),
+    h(Section, {},
+      field('name', 'Name on the parcel (optional)', { autocomplete: 'name', maxlength: 80 }),
+      field('streetAddress', 'Street address', { autocomplete: 'street-address', maxlength: 160 }),
+      field('addressLocality', 'Suburb or town', { autocomplete: 'address-level2', maxlength: 80 }),
+      field('addressRegion', 'State (optional)', { autocomplete: 'address-level1', maxlength: 40 }),
+      field('postalCode', 'Postcode', { autocomplete: 'postal-code', maxlength: 16, inputmode: 'numeric' }),
+      h('ion-item', { lines: 'none' }, h('ion-select', { label: 'Country', class: 'country', value: f.addressCountry, interface: 'popover', onionChange: (e: CustomEvent) => setForm({ ...f, addressCountry: String(e.detail.value) }) }, ...COUNTRIES.map((c) => h('ion-select-option', { key: c, value: c }, new Intl.DisplayNames(undefined, { type: 'region' }).of(c) ?? c))))),
+    h('div', { class: 'pad stack' },
+      h(Btn, { label: 'Save', expand: 'block', run: async () => { await must({ kind: 'panel.address.set', address: f }); setForm(null); }, done: 'Saved' }),
+      cur ? h(Btn, { label: 'Remove my address', expand: 'block', fill: 'clear', color: 'medium', run: async () => { await must({ kind: 'panel.address.set', address: null }); setForm(null); }, ask: { header: 'Remove your address?', sub: 'You\'ll be asked for it next time you buy.', button: 'Remove' } }) : null));
 }

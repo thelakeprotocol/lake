@@ -2,7 +2,7 @@ import QRCode from 'qrcode';
 import { useState } from 'preact/hooks';
 import { call, iosNotInstalled, must, notifyDismiss, notifyOffer, pushable, signOut, state, turnOffNotifications, turnOnNotifications, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, CopyBtn, Failed, Page, Row, Section, Sheet, confirm, h, toast } from './ion';
-import { type DoorState, type ListView } from './logic';
+import { type Address, type DoorState, type ListView } from './logic';
 import { push } from './nav';
 
 // You: your handle and how people reach you, then every setting as one grouped list of rows, each a page.
@@ -12,6 +12,7 @@ export function YouTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const circles = useHouse<{ url: string; id: string; view: { text?: string; promise?: string } }[]>({ kind: 'panel.circles' });
   const market = useHouse<{ packs: unknown[] }>({ kind: 'panel.market' });
   const list = useHouse<ListView>({ kind: 'list' });
+  const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
   const bump = useBump();
   const [share, setShare] = useState(false);
   const [invite, setInvite] = useState(false);
@@ -36,6 +37,7 @@ export function YouTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       h(Row, { icon: 'eye-outline', tint: 'blue', label: 'Who has access', onClick: () => push('#access') }),
       market.data?.packs?.length ? h(Row, { icon: 'pricetags-outline', tint: 'amber', label: 'Offers for you', onClick: () => push('#offers') }) : null,
       h(Row, { icon: 'wallet-outline', tint: 'mint', label: 'Money', onClick: () => push('#money') }),
+      h(Row, { icon: 'home-outline', tint: 'blue', label: 'Delivery address', note: addr.data?.address ? addr.data.address.addressLocality : 'Not set', onClick: () => push('#address') }),
       h(Row, { icon: 'folder-open-outline', tint: 'violet', label: 'What your house holds', onClick: () => push('#data') })),
     circles.data?.length ? h(Section, { title: 'Circles' }, h(Row, { icon: 'people-outline', tint: 'violet', label: 'Your promise circles', note: String(circles.data.length), onClick: () => push('#circles') })) : null,
     h(Section, { title: 'This phone' },
