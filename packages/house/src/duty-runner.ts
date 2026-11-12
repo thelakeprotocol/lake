@@ -70,7 +70,7 @@ export function houseRunner(o: HouseRunnerOptions) {
     lastError = undefined;
     let ok!: () => void, fail!: (e: Error) => void;
     const signedIn = new Promise<void>((y, n) => { ok = y; fail = n; });
-    loop = runDuty({ lake: o.connector, house: o.house, code, agent: modelDriver(s.spec), state: dir, host: 'house', every: o.every ?? (Number(process.env.LAKE_DUTY_EVERY_MS) || 5 * 60_000), signal: ctl.signal, counters, ready: () => ok(), log: (l) => { o.log(`AI on duty: ${l}`); if (/^run done|^run \d/.test(l)) void saveOn(); } })
+    loop = runDuty({ lake: o.connector, house: o.house, code, agent: modelDriver(s.spec), state: dir, host: 'house', every: o.every ?? (Number(process.env.LAKE_DUTY_EVERY_MS) || 5 * 60_000), signal: ctl.signal, counters, ready: () => ok(), log: (l) => { o.log(`AI on duty: ${l.startsWith('run done') ? l.replace(/\):.*$/s, ')') : l}`); if (/^run done|^run \d/.test(l)) void saveOn(); } })
       .catch((e: Error) => { lastError = e.message; o.log(`AI on duty stopped: ${e.message}`); fail(e); })
       .finally(() => { if (stop === ctl) stop = null; });
     await Promise.race([signedIn, new Promise<void>((_, n) => setTimeout(() => n(new Error('the AI on duty did not sign in within 30 seconds')), 30_000))])

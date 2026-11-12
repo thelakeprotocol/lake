@@ -975,7 +975,8 @@ export class OwnerDesk {
     this.notes = [note, ...this.notes].slice(0, 50);
     void this.saveNotes();
     const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from);
-    this.news({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true } : {}) }, text: n.text, ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
+    const mine = !!n.from.key && this.chatModes[n.from.key] === 'me';
+    this.news({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true } : {}) }, ...(mine ? { text_hidden: 'your human answers this conversation themselves: its words stay with them' } : { text: n.text }), ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
     return note.id;
   }
 
@@ -1847,7 +1848,7 @@ export class OwnerDesk {
         }
         return void res.json({ ok: true });
       }
-      if (p.kind === 'list') return void res.json(this.view(!!(signer !== this.ownerJwk?.kid)));
+      if (p.kind === 'list') return void res.json(this.view(signer !== this.ownerJwk?.kid ? (assistant?.duty && !this.isRevoked(assistant.duty.statusId) ? 'duty' : signer) : false));
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
       if (p.kind === 'revoke') return void res.json({ revoked: await this.revoke(p.revoke ?? 'all') });
       if (p.kind === 'release' && this.o.leaseHours) {
@@ -2136,7 +2137,22 @@ export class OwnerDesk {
   }
 
   /** What the panel lists; for an assistant, a private answer shows only that it was given. */
-  view(forAssistant = false) {
+  /**
+   * The house as the owner sees it, or as an assistant may (its own entry only, no sign-ins waiting, keys as a count, and
+   * chats the owner answers themselves without their words), or as an AI on duty may: only what its grant needs, the notes
+   * at the door and its own errands (round 10: on duty it had seen price limits, the agenda, keys and other AIs' allowances).
+   */
+  view(who: false | string | 'duty' = false) {
+    const forAssistant = who !== false;
+    const hidden = (key?: string) => forAssistant && !!key && this.chatModes[key] === 'me';
+    const full = this.fullView(forAssistant);
+    const notes = full.notes.map((n) => (hidden(n.from.key) ? { ...n, text: '(your human answers this conversation themselves)', hidden: true } : n));
+    if (!forAssistant) return full;
+    if (who === 'duty') return { webId: full.webId, until: full.until, requests: [], suggestions: full.suggestions.filter((x) => (x as { errand?: unknown }).errand), notes, wants: [], agenda: [], keys: [], assistants: [], connects: [], seen: undefined };
+    return { ...full, notes, connects: [], assistants: full.assistants.filter((a) => a.kid === who), keys: [], keys_open: full.keys.length };
+  }
+
+  private fullView(forAssistant: boolean) {
     return {
       webId: this.o.webId,
       until: this.leaseUntil()?.toISOString() ?? null,

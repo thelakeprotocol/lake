@@ -59,6 +59,9 @@ export const Version = createContext({ version: 0, bump: () => {} });
 export const useBump = () => useContext(Version).bump;
 export const useRedraw = () => { const [, set] = useState(0); return () => set((n) => n + 1); };
 
+/** Kept off the phone's quick-start cache: what the house holds about its owner, their money, an export (round 10). */
+const PRIVATE = new Set(['panel.data', 'panel.money', 'panel.export', 'panel.address', 'panel.consents']);
+
 /** One signed call, fetched again whenever something changed; keeps what it had while it fetches, so nothing flickers. */
 export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {
   const { version } = useContext(Version);
@@ -66,7 +69,7 @@ export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error
   const [s, set] = useState<{ data?: T; error?: string }>(() => ({ data: cached<T>(k) }));
   useEffect(() => {
     let live = true;
-    call<T>(payload).then((data) => { remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((x) => ({ ...x, error: e.message })));
+    call<T>(payload).then((data) => { if (!PRIVATE.has(String(payload.kind))) remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((x) => ({ ...x, error: e.message })));
     return () => { live = false; };
   }, [k, version]);
   return s;

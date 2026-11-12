@@ -31,7 +31,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       : h('ion-card', { class: 'lake-card hero-card' }, h('ion-card-content', {},
         h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'sparkles' })),
         h('h2', {}, 'Bring your own AI'),
-        h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It sees who writes to you and suggests. Only you decide.'),
+        h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It can read what\'s in it (who writes to you, your records, money and consents) and suggest. Only you decide.'),
         h('ion-button', { shape: 'round', onClick: () => setConnect(true) }, 'Give my AI a key'))),
     h(Section, { title: 'AI on duty' },
       live.length ? live.map((d) => h('ion-item', { key: d.kid, lines: 'full', class: 'lake-row duty-row' },

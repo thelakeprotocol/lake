@@ -80,7 +80,7 @@ export function ConnectAI({ c, done }: { c: NonNullable<typeof connecting>; done
     h('h1', {}, `Connect ${c.app}?`),
     ok ? [
       h('ul', { class: 'welcome-points', key: 'p' },
-        h('li', {}, h('ion-icon', { name: 'eye-outline' }), 'Sees what comes to your door, and suggests'),
+        h('li', {}, h('ion-icon', { name: 'eye-outline' }), 'Reads what\'s in your house (who writes, your records, money) and suggests'),
         h('li', {}, h('ion-icon', { name: 'hand-left-outline' }), 'Only you decide anything'),
         h('li', {}, h('ion-icon', { name: 'trash-outline' }), 'Remove it any time, on My AI')),
       c.from ? h('p', { class: 'welcome-text', key: 'f' }, `It goes back to ${c.from}.`) : null,

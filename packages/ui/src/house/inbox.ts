@@ -86,7 +86,7 @@ function ConnectCard({ c }: { c: Connect }) {
   return h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'link-outline' }), 'Wants to connect'),
     h('h3', {}, `${c.app} wants to connect to your house`),
-    h('p', {}, `As your assistant${c.from ? `, from ${c.from}` : ''}. Connect only if your sign-in page shows:`),
+    h('p', {}, `As your assistant${c.from ? `, from ${c.from}` : ''}: it can read what\'s in your house (who writes to you, your records, money and consents) and suggest; only you decide. Connect only if your sign-in page shows:`),
     h('div', { class: 'connect-number' }, c.number),
     h('div', { class: 'card-actions' },
       h(Btn, { label: 'Connect', run: async () => { const r = await must<{ name?: string }>({ kind: 'panel.connect.answer', id: c.id, yes: true }); connectedNote = `Connected${r.name ? `: ${shortName(r.name)}` : ''}. Go back to ${c.app}.`; } }),

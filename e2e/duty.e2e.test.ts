@@ -131,6 +131,10 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     await fetch(`${site}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: ai.publicJwk, code, label: 'Nova' }) });
     const asAi = async (p: Record<string, unknown>) => (await fetch(`${site}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, ai, { iss: 'assistant' })) })).json();
     expect((await asAi({ kind: 'panel.model.set', provider: 'anthropic', key: `sk-ant-${'y'.repeat(30)}` })).error).toMatch(/only your human's key/);
+    // An everyday AI sees its own entry, not other AIs' allowances or a sign-in waiting.
+    const v = await asAi({ kind: 'list' }) as { assistants: { label: string }[]; connects: unknown[] };
+    expect(v.assistants.map((x) => x.label)).toEqual(['Nova']);
+    expect(v.connects).toEqual([]);
 
     // One signed grant, "in my house": no code to copy, nothing to run anywhere else.
     const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 5 });
@@ -153,6 +157,9 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     expect(await tryTool('lake_house', { view: 'data' })).toMatchObject({ isError: true, text: expect.stringMatching(/requests, free hours, the overview and errands only/) });
     expect(await tryTool('lake_house_suggest', { text: 'Confirm with the courier?', ask: { choices: ['Yes', 'No'] }, then: [{ to: 'https://stranger.example/a2a', text: 'hello' }, null] })).toMatchObject({ isError: true, text: expect.stringMatching(/nothing their tap would send or sign/) });
     expect((await tryTool('lake_house', { view: 'free' })).isError).toBe(false);
+    // What it sees of the house: the notes at the door and its own errands; no agenda, keys, wants or other AIs (round 10).
+    const seen = JSON.parse((await tryTool('lake_house', { view: 'requests' })).text) as Record<string, unknown>;
+    for (const k of ['agenda', 'keys', 'wants', 'assistants', 'connects', 'requests']) expect(seen[k] ?? []).toEqual([]);
     await asDuty.close();
 
     // Someone writes to it at night: the house runs the model once, and the owner finds a note in the morning.
