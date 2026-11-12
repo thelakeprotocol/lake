@@ -45,4 +45,4 @@ So the counter is each house's own report. It shows that no house running this c
 - **That money moved.** Payments are simulated; the mandates and receipts are real signatures over play money.
 - **How fast it is at scale on your machine.** A paid study takes about a minute at 250 houses and 10.6 minutes at 1,000 on a busy 4-core laptop ([measured](/docs/architecture#scale-measured)).
 
-The owner's key on the phone is an Ed25519 key in the browser's storage, not yet a passkey ([threat model](/docs/security)). The [roadmap](/docs/roadmap) says what runs and what doesn't yet.
+Over HTTPS the owner's key on the phone is a non-extractable Ed25519 key the browser holds (the page can ask it to sign, not copy it out); it is not yet a passkey ([threat model](/docs/security)). The [roadmap](/docs/roadmap) says what runs and what doesn't yet.

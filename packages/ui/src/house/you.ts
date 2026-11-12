@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import { useState } from 'preact/hooks';
-import { call, iosNotInstalled, must, notifyDismiss, notifyOffer, pushable, signOut, state, turnOffNotifications, turnOnNotifications, useBump, useHouse } from './api';
+import { call, iosNotInstalled, key, must, notifyDismiss, notifyOffer, pushable, signOut, state, turnOffNotifications, turnOnNotifications, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, CopyBtn, Failed, Page, Row, Section, Sheet, confirm, h, toast } from './ion';
 import { type Address, type DoorState, type ListView } from './logic';
 import { push } from './nav';
@@ -41,10 +41,12 @@ export function YouTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       h(Row, { icon: 'folder-open-outline', tint: 'violet', label: 'What your house holds', onClick: () => push('#data') })),
     circles.data?.length ? h(Section, { title: 'Circles' }, h(Row, { icon: 'people-outline', tint: 'violet', label: 'Your promise circles', note: String(circles.data.length), onClick: () => push('#circles') })) : null,
     h(Section, { title: 'This phone' },
+      // Where this phone keeps your key (SPEC §6.1): said plainly, since over plain HTTP the page itself can read it.
+      h(Row, { icon: 'key-outline', tint: key.store === 'device' ? 'mint' : 'amber', label: 'Your key', cls: 'key-store', detail: false, sub: key.store === 'device' ? 'Held by this browser: it signs here and can\'t be copied out' : 'Kept where this page can read it (opened without https)' }),
       h(Row, { icon: 'phone-portrait-outline', tint: 'blue', label: 'New or lost phone', onClick: () => push('#key') }),
       h(Row, { icon: 'download-outline', tint: 'muted', label: 'Download everything', onClick: () => push('#move') }),
       h(Row, { icon: 'information-circle-outline', tint: 'muted', label: 'About this house', onClick: () => push('#about') })),
-    h(Section, {}, h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { if (await confirm({ header: 'Sign out on this phone?', sub: 'To get back in you\'ll need a pairing link or your recovery code.', button: 'Sign out' })) signOut(); } }, h('ion-label', { color: 'danger' }, 'Sign out on this device'))),
+    h(Section, {}, h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { if (await confirm({ header: 'Sign out on this phone?', sub: 'To get back in you\'ll need a pairing link or your recovery code.', button: 'Sign out' })) await signOut(); } }, h('ion-label', { color: 'danger' }, 'Sign out on this device'))),
     d ? h(Sheet, { open: share, onClose: () => setShare(false), title: 'How people reach you' }, h(ShareSheet, { d })) : null,
     h(Sheet, { open: invite, onClose: () => setInvite(false), title: 'Invite someone' }, h(InviteSheet, {})),
     void list);

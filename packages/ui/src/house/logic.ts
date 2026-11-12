@@ -1,5 +1,5 @@
 import { call, key, state } from './api';
-import { loadKey, signCredential } from '../owner-crypto';
+import { signCredential } from '../owner-crypto';
 
 // What the house says, typed, and the pure helpers the screens share (no drawing here).
 
@@ -17,7 +17,11 @@ export type PledgeQuorum = { text: string; options: string[]; closes: string; le
 export type Note = { id: string; from: string; text: string; at: string; invitedBy?: { name: string; known: boolean }; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; circleVote?: { sent?: boolean }; favourPay?: { paid?: boolean; sellerName?: string }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 export type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
 export type DoorNote = { id: string; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; from: { web?: boolean; as?: string; key?: string; webId?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string } };
-export interface Assistant { kid: string; label: string; addedAt: string; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
+/** What else an AI may read besides the notes at your door (SPEC §6.1). */
+export type Reads = 'records' | 'money';
+/** "Messages only", "Messages, records", …: what an AI reads, in a row's few words. */
+export const readsLine = (r?: Reads[]) => ['Messages', ...(r?.includes('records') ? ['records'] : []), ...(r?.includes('money') ? ['money'] : [])].join(', ').replace(/^Messages$/, 'Messages only');
+export interface Assistant { kid: string; label: string; addedAt: string; reads?: Reads[]; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 export interface Connect { id: string; app: string; from: string; number: string; at: string }
 export type WantOfferV = { id: string; at: string; seller: { name: string; domain: string }; total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string; matched?: string[]; delivery?: string; note?: string; over?: boolean; state: 'open' | 'paid' | 'shipped' | 'arrived'; shipped?: { note: string; at: string } };
 export type WantV = { want: { id: string; name: string; description?: string; areaServed?: string; availabilityEnds: string; eligibleQuantity?: { value: number }; itemOffered: { additionalProperty: { name: string; value: string }[] } }; limit?: { amount: number; currency: string }; closed?: string; bought?: string; at: string; offers: WantOfferV[] };
@@ -105,21 +109,21 @@ export function adviceOf(rec: string): { verdict: string; why: string[]; suggest
   return { verdict: cap((parts[0] ?? rec).replace(/, for the reasons in red/i, '')) + '.', why: parts.slice(1).map((x) => `${cap(x)}.`), suggest };
 }
 /** Allow: the grant the house drafted (exactly what was shown), dated and signed here, with your key. */
-export const grantFor = (r: Request) => {
+export const grantFor = async (r: Request) => {
   const draft = structuredClone(r.grantDraft) as { credentialSubject: { providedConsent: { hasStatus: string } } };
   draft.credentialSubject.providedConsent.hasStatus = 'https://w3id.org/GConsent#ConsentStatusExplicitlyGiven';
-  return signCredential({ ...draft, issuer: state.webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString() }, key);
+  return await signCredential({ ...draft, issuer: state.webId, validFrom: new Date().toISOString(), validUntil: new Date(Date.now() + 48 * 3_600_000).toISOString() }, key);
 };
 /** Signs a pledge from your house; one with money puts its contribution in first, signed here (SPEC §11.4a). */
 export async function signPledge(tally: string, id: string): Promise<Signed> {
   const d = await call<{ id?: string; draft?: Record<string, unknown>; free?: boolean; error?: string }>({ kind: 'panel.pledge.draft', tally, id });
   if (d.error) throw new Error(d.error);
-  const r = await call<Signed>(d.free ? { kind: 'panel.pledge.sign', tally, id } : { kind: 'panel.pledge.sign', tally, id, draft: d.id, credential: signCredential({ ...d.draft!, validFrom: new Date().toISOString() }, loadKey()) });
+  const r = await call<Signed>(d.free ? { kind: 'panel.pledge.sign', tally, id } : { kind: 'panel.pledge.sign', tally, id, draft: d.id, credential: await signCredential({ ...d.draft!, validFrom: new Date().toISOString() }, key) });
   if (r.error || r.kind === 'refused') throw new Error(r.error ?? (r.problems ?? ['refused']).join('; '));
   return r;
 }
 /** A draft signed on this device and sent back (allowances, duty grants, purchases, pledges). */
-export const signDraft = (draft: Record<string, unknown>) => signCredential({ ...draft, validFrom: new Date().toISOString() }, loadKey());
+export const signDraft = (draft: Record<string, unknown>) => signCredential({ ...draft, validFrom: new Date().toISOString() }, key);
 // Only a web address is a door (round 8: a hostile tally could have sent a javascript: link).
 export const doorOf = (url?: string) => (url && /^https?:\/\//i.test(url) ? url.replace(/\/a2a\/?$/, '') : '');
 

@@ -47,6 +47,8 @@ export function lakeMcpHttpApp(o: Omit<LakeAgentOptions, 'name' | 'domain' | 'po
   data?: string;
   /** A secret that encrypts the agents' keys at rest, so a copy of the folder alone gives none away. */
   kek?: string;
+  /** The tool sets a conversation lists when its address doesn't say (toolSet): the everyday ones if unset. */
+  tools?: string;
 }): express.Express {
   const path = o.path ?? '/mcp';
   const base = o.publicUrl.replace(/\/$/, '');
@@ -417,7 +419,8 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
       });
       const entry = { live: l, principal, transport, seen: Date.now() };
       transport.onclose = () => { if (transport.sessionId) endSession(transport.sessionId); };
-      await l.agent.session().connect(transport);
+      // Which tools this conversation lists: ?tools= on the connector's address (SPEC §6.1), else this connector's default.
+      await l.agent.session({ tools: typeof req.query.tools === 'string' ? req.query.tools : o.tools }).connect(transport);
       s = entry;
     }
     s.seen = s.live.seen = Date.now();

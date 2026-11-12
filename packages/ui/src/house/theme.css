@@ -487,3 +487,12 @@ ion-checkbox::part(label) { white-space: normal; }
 .all-clear b { display: block; font-size: 16px; }
 .all-clear p { margin: 2px 0 0; color: var(--lake-muted); font-size: 13.5px; }
 .handled-row h3 { white-space: normal !important; font-weight: 600 !important; }
+
+/* What an AI may read: two switches, each with a line saying what it covers. */
+.reads-list { margin: 8px 0 14px; }
+ion-toggle .toggle-title { display: block; font-weight: 600; }
+ion-toggle .toggle-sub { display: block; font-size: 13px; color: var(--ion-color-medium); margin-top: 2px; white-space: normal; }
+ion-toggle::part(label) { white-space: normal; flex: 1 1 auto; }
+.welcome-reads { text-align: left; width: 100%; }
+.welcome-reads .reads-list { margin-left: 0; margin-right: 0; }
+.lake-card .reads-list { margin: 10px 0; }

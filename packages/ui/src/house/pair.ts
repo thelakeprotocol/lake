@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, call, houseBase, key, state } from './api';
+import { ReadsToggles } from './ai';
 import { Btn, h } from './ion';
+import type { Reads } from './logic';
 
 // Before the house is yours on this phone: make this phone its key. And an AI app signing in through this house.
 
@@ -57,11 +59,12 @@ export const connecting = (() => {
 
 /** "Connect Claude to your house?": one tap with your key makes it your assistant here, and sends you back to it. */
 export function ConnectAI({ c, done }: { c: NonNullable<typeof connecting>; done: () => void }) {
+  const [reads, setReads] = useState<Reads[]>([]);
   // The code goes only to a sign-in on this house's own Lake: a link from anywhere else can't collect one.
   let ok = false;
   try { const u = new URL(c.back, location.href); ok = u.origin === location.origin && u.pathname.endsWith('/oauth/approve'); } catch { /* not a URL */ }
   const go = async () => {
-    const r = await call<{ code: string }>({ kind: 'panel.assistant.invite', label: c.app });
+    const r = await call<{ code: string }>({ kind: 'panel.assistant.invite', label: c.app, reads });
     const f = document.createElement('form');
     f.method = 'post';
     f.action = c.back;
@@ -80,9 +83,10 @@ export function ConnectAI({ c, done }: { c: NonNullable<typeof connecting>; done
     h('h1', {}, `Connect ${c.app}?`),
     ok ? [
       h('ul', { class: 'welcome-points', key: 'p' },
-        h('li', {}, h('ion-icon', { name: 'eye-outline' }), 'Reads what\'s in your house (who writes, your records, money) and suggests'),
+        h('li', {}, h('ion-icon', { name: 'eye-outline' }), 'Reads the messages at your door and suggests'),
         h('li', {}, h('ion-icon', { name: 'hand-left-outline' }), 'Only you decide anything'),
         h('li', {}, h('ion-icon', { name: 'trash-outline' }), 'Remove it any time, on My AI')),
+      h('div', { key: 'r', class: 'welcome-reads' }, h(ReadsToggles, { value: reads, onChange: setReads })),
       c.from ? h('p', { class: 'welcome-text', key: 'f' }, `It goes back to ${c.from}.`) : null,
       h(Btn, { key: 'b', label: 'Connect', expand: 'block', size: 'large', run: go }),
       h('ion-button', { key: 'n', expand: 'block', fill: 'clear', color: 'medium', onClick: done }, 'Not now'),

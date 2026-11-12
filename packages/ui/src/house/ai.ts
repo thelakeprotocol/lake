@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, houseBase, must, useHouse, useRedraw } from './api';
 import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { CURRENCIES, DUTY_KINDS, dutyLine, dutyLive, lastHere, money$, receiptWords, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView } from './logic';
+import { CURRENCIES, DUTY_KINDS, dutyLine, dutyLive, lastHere, money$, readsLine, receiptWords, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads } from './logic';
 import { back, push } from './nav';
 
 // My AI: your own AI with a key to your house. Your AIs first, then AI on duty, then what it did while you were away.
@@ -26,12 +26,12 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const ais = v.data.assistants;
   return h(Page, { title: 'My AI', big: true, status, footer: tabbar },
     ais.length ? h(Section, { title: 'Your AIs' },
-      ...ais.map((a) => h(Row, { key: a.kid, start: h('div', { slot: 'start' }, h(Avatar, { name: shortName(a.label), size: 40 })), label: shortName(a.label), sub: [onDuty.has(a.kid) ? 'On duty' : 'Can suggest', lastHere(a.seenAt).text, a.waiting ? `${a.waiting.count} waiting` : ''].filter(Boolean).join(' · '), onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`), cls: 'ai-row' })),
+      ...ais.map((a) => h(Row, { key: a.kid, start: h('div', { slot: 'start' }, h(Avatar, { name: shortName(a.label), size: 40 })), label: shortName(a.label), sub: [onDuty.has(a.kid) ? 'On duty' : readsLine(a.reads), lastHere(a.seenAt).text, a.waiting ? `${a.waiting.count} waiting` : ''].filter(Boolean).join(' · '), onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`), cls: 'ai-row' })),
       h(Row, { icon: 'add', label: 'Connect another AI', onClick: () => setConnect(true), detail: false }))
       : h('ion-card', { class: 'lake-card hero-card' }, h('ion-card-content', {},
         h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'sparkles' })),
         h('h2', {}, 'Bring your own AI'),
-        h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It can read what\'s in it (who writes to you, your records, money and consents) and suggest. Only you decide.'),
+        h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It reads the messages at your door and suggests; you choose whether it also sees your records or money. Only you decide.'),
         h('ion-button', { shape: 'round', onClick: () => setConnect(true) }, 'Give my AI a key'))),
     h(Section, { title: 'AI on duty' },
       live.length ? live.map((d) => h('ion-item', { key: d.kid, lines: 'full', class: 'lake-row duty-row' },
@@ -64,11 +64,13 @@ function KeySheet({ done }: { done: () => void }) {
 /** The one-time code to paste into your AI app; gone once your AI uses it. */
 function ConnectSheet({ houseUrl, ais }: { houseUrl: string; ais: Assistant[] }) {
   const redraw = useRedraw();
+  const [reads, setReads] = useState<Reads[]>([]);
   useEffect(() => { const t = setInterval(redraw, 30_000); return () => clearInterval(t); }, []);
   if (invite && (invite.until < Date.now() || ais.some((a) => Date.parse(a.addedAt) >= invite!.made - 1000))) invite = null;
   if (!invite) return h('div', { class: 'sheet-body' },
     h('p', {}, 'Your AI needs the Lake connector. You get a message with a one-time code to paste into it.'),
-    h(Btn, { label: 'Make the code', expand: 'block', run: async () => { const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant' }); invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until), made: Date.now() }; redraw(); } }));
+    h(ReadsToggles, { value: reads, onChange: setReads }),
+    h(Btn, { label: 'Make the code', expand: 'block', run: async () => { const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant', reads }); invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until), made: Date.now() }; redraw(); } }));
   const mins = Math.max(1, Math.round((invite.until - Date.now()) / 60_000));
   return h('div', { class: 'sheet-body' },
     h('p', {}, `Paste this to your AI. It works once, for ${mins} minute${mins === 1 ? '' : 's'}.`),
@@ -111,8 +113,8 @@ function DutySetup({ houseUrl, log, done }: { houseUrl: string; log?: DutyLog; d
         if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
         if (from === to) throw new Error('The hours need to start and end at different times.');
         const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
-        if (inHouse) { await must({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: signDraft(d.draft), runner: 'house' }); void toast('Your house runs your AI on duty now'); done(); return; }
-        const r = await must<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: signDraft(d.draft) });
+        if (inHouse) { await must({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: await signDraft(d.draft), runner: 'house' }); void toast('Your house runs your AI on duty now'); done(); return; }
+        const r = await must<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: await signDraft(d.draft) });
         dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
         redraw();
       } }),
@@ -151,6 +153,10 @@ export function AiKeyPage({ arg }: { arg: string }) {
     h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(a.label), size: 72 }), h('h2', {}, shortName(a.label)), h(Pill, { text: lastHere(a.seenAt).text, tone: lastHere(a.seenAt).now ? 'mint' : 'muted' })),
     a.waiting ? h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {}, h('p', {}, waitingLine(a)))) : null,
     h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${time(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: 'Replies and bookings only, never money' }) : null),
+    // On duty it reads the notes and its errands only, whatever is switched on here.
+    onDuty ? null : h(Section, { title: 'What it can read', cls: 'reads' },
+      h(Row, { icon: 'chatbubbles-outline', label: 'Messages at your door', sub: 'Always: notes, its own errands, your agenda and free hours', detail: false }),
+      h(ReadsToggles, { value: a.reads ?? [], bare: true, onChange: async (reads: Reads[]) => { await must({ kind: 'panel.assistant.reads', kid: a.kid, reads }); void toast(readsLine(reads)); } })),
     onDuty ? null : h(Allowance, { a }),
     h('div', { class: 'pad' }, h(Btn, { label: 'Remove this AI', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); back('#ai'); }, ask: { header: `Remove ${shortName(a.label)}?`, sub: 'Its key stops working.', button: 'Remove' }, done: 'Removed' })));
 }
@@ -171,14 +177,25 @@ function Allowance({ a }: { a: Assistant }) {
     h('ion-item', {}, h('ion-select', { label: 'Currency', value: currency, 'aria-label': 'Currency', interface: 'action-sheet', onionChange: (e: CustomEvent) => setCurrency(String(e.detail.value)) }, ...CURRENCIES.map((c) => h('ion-select-option', { key: c, value: c }, c)))),
     h('ion-item', {}, h('ion-input', { type: 'number', label: 'Total it may spend', value: amount, min: 1, max: 1000, 'aria-label': 'Amount', onionInput: (e: CustomEvent) => setAmount(Number(e.detail.value)) })),
     h('ion-item', {}, h('ion-input', { type: 'number', label: 'For how many days', value: days, min: 1, max: 31, 'aria-label': 'Days it lasts', onionInput: (e: CustomEvent) => setDays(Number(e.detail.value)) })),
+    a.reads?.includes('money') ? null : h('ion-item', {}, h('ion-label', { class: 'ion-text-wrap' }, h('p', { class: 'warn-text' }, 'It will also see your money and offers, so it can pay for what you accept.'))),
     h('ion-item', { lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, `${shortName(a.label)} can spend ${money$(amount || 0, currency)} in total until ${days >= 1 && days <= 31 ? new Date(Date.now() + days * 86_400_000).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '…'}. Not per day.`))),
     h('div', { class: 'pad row-btns' },
       h(Btn, { label: a.allowance ? 'Sign the change' : 'Sign and give', run: async () => {
         if (!(amount >= 1 && amount <= 1000)) throw new Error('An amount from 1 to 1000.');
         if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
         const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.allowance.draft', kid: a.kid, amount, currency, days });
-        await must({ kind: 'panel.allowance.set', id: d.id, credential: signDraft(d.draft) });
+        await must({ kind: 'panel.allowance.set', id: d.id, credential: await signDraft(d.draft) });
         setEdit(false); void toast('Signed');
       } }),
       h('ion-button', { fill: 'clear', color: 'medium', shape: 'round', onClick: () => setEdit(false) }, 'Cancel')));
+}
+
+const READS_SAID: [Reads, string, string][] = [
+  ['records', 'Your records', 'What your house holds about you, who has access, requests waiting for you, your rules'],
+  ['money', 'Your money', 'What you\'ve earned and spent, offers priced for you, the most you\'d pay for things you want'],
+];
+/** Besides the messages at your door, what an AI may read: off unless you switch it on. */
+export function ReadsToggles({ value, onChange, bare }: { value: Reads[]; onChange: (r: Reads[]) => void; bare?: boolean }) {
+  const items = READS_SAID.map(([r, label, sub]) => h('ion-item', { key: r, lines: 'full', class: `reads-${r}` }, h('ion-toggle', { checked: value.includes(r), justify: 'space-between', onionChange: (e: CustomEvent) => onChange(e.detail.checked ? [...new Set([...value, r])] : value.filter((x) => x !== r)) }, h('span', { class: 'toggle-title' }, label), h('span', { class: 'toggle-sub' }, sub))));
+  return bare ? items : h('ion-list', { inset: true, class: 'lake-list reads-list' }, h('ion-list-header', {}, h('ion-label', {}, 'It also sees')), ...items);
 }

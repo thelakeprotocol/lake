@@ -209,6 +209,8 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(paired).toMatchObject({ paired: true, duty: { kinds: ['reply', 'book'], cap: 2 } });
     const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
     expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0, cap: 2 });
+    // On duty it reads the notes and its errands only, whatever it asks the house for (not just what the connector allows).
+    expect(await asAi({ kind: 'panel.consents' })).toMatchObject({ needs: 'records' });
 
     // Known: a key the owner's side wrote to, or a standing yes; a stranger isn't, however often it writes.
     expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: false });
@@ -366,5 +368,67 @@ describe('a private question', () => {
     expect(await asAi({ kind: 'assistant.private_answer', question: q.id, options: bands })).toEqual({ choice: '80-90k' });
     expect(await asAi({ kind: 'assistant.private_answer', question: q.id, options: bands })).toMatchObject({ error: expect.stringContaining('already') });
     d.close();
+  });
+});
+
+describe('what an assistant reads (SPEC §6.1)', () => {
+  it('notes and its own errands by default; records and money only when the owner turns them on, enforced by the house', async () => {
+    const told: Record<string, unknown>[] = [];
+    let key: JWK | null = null;
+    const legacy = await generateIdentity('old-ai');
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [],
+      tell: async (_u, p) => { told.push(p); },
+      // Connected before scopes: keeps what it had.
+      loadAssistants: async () => [{ kid: legacy.publicJwk.kid!, jwk: legacy.publicJwk, label: 'Old AI', addedAt: '' }],
+      panel: { data: async () => ({ claims: [] }), money: async () => ({ total: 5 }), overview: async () => ({ name: 'h', holds: ['age_band'], claims: 3, pending: 1, earned: 5 }) } as never,
+    });
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    expect(desk.view().assistants[0]).toMatchObject({ label: 'Old AI', reads: ['records', 'money'] });
+
+    const { code } = await owner({ kind: 'panel.assistant.invite', label: 'New AI' });
+    const ai = await generateIdentity('ai');
+    const paired = await post('/assistant', { publicJwk: ai.publicJwk, code, url: 'https://ai.example/a2a' });
+    expect(paired).toMatchObject({ paired: true, reads: [], not_shared: [expect.stringContaining('records'), expect.stringContaining('money')] });
+    expect(paired.may).not.toContain('panel.data');
+    const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    expect(await asAi({ kind: 'panel.data' })).toMatchObject({ needs: 'records', error: expect.stringContaining('lake_house_suggest') });
+    expect(await asAi({ kind: 'panel.money' })).toMatchObject({ needs: 'money' });
+    const view = await asAi({ kind: 'list' });
+    expect(view).toMatchObject({ requests: [], requests_waiting: 0, reads: [] });
+    expect(view.keys_open).toBeUndefined();
+    const over = await asAi({ kind: 'panel.overview' });
+    expect(over).toMatchObject({ name: 'h', reads: [] });
+    expect(over.holds ?? over.earned ?? over.pending).toBeUndefined();
+    // Requests and offers aren't told to it either.
+    desk.news({ about: 'request.waiting', request: 'r1' });
+    desk.news({ about: 'offer.accepted', offer: 'o1' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.filter((t) => t.about === 'request.waiting' || t.about === 'offer.accepted')).toEqual([]);
+
+    // Only the owner changes it, and it takes effect at once.
+    expect(await asAi({ kind: 'panel.assistant.reads', kid: ai.publicJwk.kid, reads: ['records', 'money'] })).toMatchObject({ error: expect.stringContaining('only your human') });
+    expect(await owner({ kind: 'panel.assistant.reads', kid: ai.publicJwk.kid, reads: ['records', 'nonsense'] })).toMatchObject({ ok: true, reads: ['records'] });
+    expect(await asAi({ kind: 'panel.data' })).toMatchObject({ claims: [] });
+    expect(await asAi({ kind: 'panel.money' })).toMatchObject({ needs: 'money' });
+    expect(await asAi({ kind: 'panel.overview' })).toMatchObject({ holds: ['age_band'], pending: 1 });
+    desk.news({ about: 'request.waiting', request: 'r2' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.some((t) => t.about === 'request.waiting' && t.request === 'r2')).toBe(true);
+    expect(told.some((t) => t.about === 'reads' && JSON.stringify(t.reads) === '["records"]')).toBe(true);
+
+    // Chosen at the invite: money only.
+    const c2 = (await owner({ kind: 'panel.assistant.invite', label: 'Shopper', reads: ['money', 'bogus'] })).code;
+    const shopper = await generateIdentity('shopper');
+    expect(await post('/assistant', { publicJwk: shopper.publicJwk, code: c2 })).toMatchObject({ reads: ['money'] });
+    expect(await post('/api', await signMessage({ kind: 'panel.money' }, shopper, { iss: 'assistant' }))).toMatchObject({ total: 5 });
+    server.close();
   });
 });

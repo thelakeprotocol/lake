@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: './',
-  build: { outDir: 'dist', emptyOutDir: true, rollupOptions: { input: { map: resolve(__dirname, 'index.html'), approvals: resolve(__dirname, 'approvals.html') } } },
+  // ES2022: the owner's key is loaded with a top-level await before anything signs (src/house/api.ts).
+  build: { target: 'es2022', outDir: 'dist', emptyOutDir: true, rollupOptions: { input: { map: resolve(__dirname, 'index.html'), approvals: resolve(__dirname, 'approvals.html') } } },
   server: { proxy: { '/events': { target: 'ws://localhost:7000', ws: true } } },
 });

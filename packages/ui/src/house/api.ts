@@ -1,11 +1,11 @@
 import { createContext } from 'preact';
 import { useContext, useEffect, useState } from 'preact/hooks';
-import { loadKey, signEnvelope } from '../owner-crypto';
+import { forgetKey, loadKey, signEnvelope } from '../owner-crypto';
 
 // Talking to the house. Every call is signed on this device with the owner's key, which never leaves it; the house only
 // checks. Screens are functions of what the house said, fetched again when it says something changed.
 
-export const key = loadKey();
+export const key = await loadKey();
 export const api = new URL('./', location.href).href; // served at /owner/
 export const state = { webId: '', leaseUntil: null as string | null };
 export const houseBase = () => location.origin + location.pathname.replace(/\/owner\/.*$/, '');
@@ -18,7 +18,7 @@ const reached = (ok: boolean) => { if (ok !== reachable) { reachable = ok; for (
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
-  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signEnvelope(payload, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
+  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signEnvelope(payload, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
   reached(true);
   if (!res.ok) {
     const error = (await res.json().catch(() => ({}))).error ?? String(res.status);
@@ -76,10 +76,10 @@ export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error
 }
 
 /** Your key lives only on this device: signing out forgets it here, and what the screens last showed. */
-export function signOut() {
+export async function signOut() {
   forgetting = true;
+  await forgetKey();
   try {
-    localStorage.removeItem(`lake-owner-key:${location.host}`);
     localStorage.setItem('lake-houses', JSON.stringify((JSON.parse(localStorage.getItem('lake-houses') ?? '[]') as string[]).filter((x) => x !== houseBase())));
     for (const k of Object.keys(sessionStorage)) if (k.startsWith(CACHE)) sessionStorage.removeItem(k);
   } catch { /* nothing kept */ }

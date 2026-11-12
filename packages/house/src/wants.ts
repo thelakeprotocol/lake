@@ -22,7 +22,7 @@ export interface WantOfferRecord {
   /** Bought with the owner's delivery address sent to this seller (the address itself stays in the pod). */
   addressSent?: boolean;
 }
-export interface WantRecord { want: Want; limit?: { amount: number; currency: string }; offers: WantOfferRecord[]; closed?: string; bought?: string; at: string }
+export interface WantRecord { want: Want; limit?: { amount: number; currency: string }; offers: WantOfferRecord[]; closed?: string; bought?: string; at: string; /** The assistant that posted it (its key): it follows its own want's offers. */ by?: string }
 
 const MAX_OFFERS = 10;
 const short = (s: unknown, n: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -43,10 +43,10 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
     open: (): Want[] => list.filter(live).map((r) => r.want),
     all: () => list,
     find,
-    async post(input: Parameters<typeof makeWant>[0], limit?: { amount: number; currency: string }) {
+    async post(input: Parameters<typeof makeWant>[0], limit?: { amount: number; currency: string }, by?: string) {
       if (list.filter(live).length >= MAX_WANTS) throw new Error(`at most ${MAX_WANTS} open wants: close one first`);
       const want = makeWant(input);
-      list = [...list.filter((r) => live(r) || Date.parse(r.at) > Date.now() - 30 * 86_400_000), { want, ...(limit ? { limit } : {}), offers: [], at: new Date().toISOString() }].slice(-50);
+      list = [...list.filter((r) => live(r) || Date.parse(r.at) > Date.now() - 30 * 86_400_000), { want, ...(limit ? { limit } : {}), offers: [], at: new Date().toISOString(), ...(by ? { by } : {}) }].slice(-50);
       await save();
       return want;
     },

@@ -1,7 +1,8 @@
 import { useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type Note, type Request } from './logic';
+import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type Note, type Reads, type Request } from './logic';
+import { ReadsToggles } from './ai';
 import { push } from './nav';
 
 // Inbox: everything that waits for your tap, newest first. Data requests your rules left to you, your AI's questions and
@@ -61,7 +62,7 @@ function RequestCard({ all }: { all: Request[] }) {
   const suggest = a.suggest || (risky ? 'deny' : '');
   const [terms, setTerms] = useState(false);
   const after = (allowed: boolean) => void toast(`${allowed ? 'Allowed' : 'Declined'} ${r.visitor.domain}`, { buttons: [{ text: allowed ? 'Always allow' : 'Always decline', handler: async () => { await call({ kind: 'panel.request.always', request: r.id, answer: allowed ? 'allow' : 'decline' }); void toast(allowed ? `${r.visitor.domain} gets a yes for this from now on (90 days)` : `You won't hear from ${r.visitor.domain} again`); } }] });
-  const allow = async () => { for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'allow', grant: grantFor(q) }); after(true); };
+  const allow = async () => { for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'allow', grant: await grantFor(q) }); after(true); };
   const deny = async () => { for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {}); after(false); };
   const allowBtn = h(Btn, { key: 'a', label: n > 1 ? `Allow all ${n}` : 'Allow', fill: suggest === 'deny' ? 'outline' : 'solid', color: suggest === 'deny' ? 'medium' : 'primary', run: allow, ...(risky ? { ask: { header: `Let ${r.visitor.domain} use your ${r.fields.map(nice).join(', ')}?`, sub: 'Your rules advise against it.', button: 'Allow anyway' } } : {}) });
   const denyBtn = h(Btn, { key: 'd', label: n > 1 ? `Deny all ${n}` : 'Deny', fill: suggest === 'deny' ? 'solid' : 'outline', color: suggest === 'deny' ? 'primary' : 'medium', run: deny });
@@ -83,13 +84,15 @@ function RequestCard({ all }: { all: Request[] }) {
 
 /** An AI app signing in through this house, from its own sign-in page: approved here, where the key is. */
 function ConnectCard({ c }: { c: Connect }) {
+  const [reads, setReads] = useState<Reads[]>([]);
   return h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'link-outline' }), 'Wants to connect'),
     h('h3', {}, `${c.app} wants to connect to your house`),
-    h('p', {}, `As your assistant${c.from ? `, from ${c.from}` : ''}: it can read what\'s in your house (who writes to you, your records, money and consents) and suggest; only you decide. Connect only if your sign-in page shows:`),
+    h('p', {}, `As your assistant${c.from ? `, from ${c.from}` : ''}: it reads the messages at your door and suggests; only you decide. Connect only if your sign-in page shows:`),
     h('div', { class: 'connect-number' }, c.number),
+    h(ReadsToggles, { value: reads, onChange: setReads }),
     h('div', { class: 'card-actions' },
-      h(Btn, { label: 'Connect', run: async () => { const r = await must<{ name?: string }>({ kind: 'panel.connect.answer', id: c.id, yes: true }); connectedNote = `Connected${r.name ? `: ${shortName(r.name)}` : ''}. Go back to ${c.app}.`; } }),
+      h(Btn, { label: 'Connect', run: async () => { const r = await must<{ name?: string }>({ kind: 'panel.connect.answer', id: c.id, yes: true, reads }); connectedNote = `Connected${r.name ? `: ${shortName(r.name)}` : ''}. Go back to ${c.app}.`; } }),
       h(Btn, { label: 'No', fill: 'outline', color: 'medium', run: async () => { await call({ kind: 'panel.connect.answer', id: c.id, yes: false }); connectedNote = 'Turned down.'; } }))));
 }
 
@@ -127,7 +130,7 @@ function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
   const acts: Child[] = [];
   if (x.ask && !x.ask.answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: c }) })));
   if (x.offer) acts.push(h(Btn, { key: 'of', label: 'Accept the offer', run: async () => { const r = await call<{ error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: x.offer, even_over_allowance: true }); if (r.error) throw new Error(r.error); await dismiss(); }, ask: { header: 'Accept this offer?', sub: 'What it needs goes to that one agent.', button: 'Accept', destructive: false } }));
-  if (x.allowance && x.by) acts.push(h(Btn, { key: 'al', label: `Give ${money$(x.allowance.amount, x.allowance.currency)} for ${x.allowance.days} day${x.allowance.days === 1 ? '' : 's'}`, run: async () => { const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.allowance.draft', kid: x.by, amount: x.allowance!.amount, currency: x.allowance!.currency, days: x.allowance!.days }); await must({ kind: 'panel.allowance.set', id: d.id, credential: signDraft(d.draft) }); await dismiss(); } }));
+  if (x.allowance && x.by) acts.push(h(Btn, { key: 'al', label: `Give ${money$(x.allowance.amount, x.allowance.currency)} for ${x.allowance.days} day${x.allowance.days === 1 ? '' : 's'}`, run: async () => { const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.allowance.draft', kid: x.by, amount: x.allowance!.amount, currency: x.allowance!.currency, days: x.allowance!.days }); await must({ kind: 'panel.allowance.set', id: d.id, credential: await signDraft(d.draft) }); await dismiss(); } }));
   if (x.sender && /^https?:\/\//.test(x.sender)) acts.push(h(Btn, { key: 'bl', label: 'Block them', color: 'danger', run: () => call({ kind: 'panel.assistant.block', id: x.id }), ask: { header: 'Block this agent?', sub: 'Its messages are turned away.', button: 'Block' } }));
   if (x.note && x.mute) acts.push(h(Btn, { key: 'mu', label: 'Mute this sender', fill: 'outline', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }));
   if (x.rules) acts.push(h(Btn, { key: 'ru', label: 'Apply these rules', run: async () => { await must({ kind: 'panel.rules.set', text: x.rules }); await dismiss(); } }));

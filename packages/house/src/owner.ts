@@ -95,7 +95,7 @@ export interface PanelProvider {
   payWithFavour?(cart: unknown, sellerUrl: string): Promise<Record<string, any>>;
   /** What the owner is looking for (SPEC §6.8). */
   wantsList?(): WantRecord[];
-  postWant?(input: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number }, limit?: { amount: number; currency: string }): Promise<Want>;
+  postWant?(input: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number }, limit?: { amount: number; currency: string }, by?: string): Promise<Want>;
   closeWant?(id: string): Promise<boolean>;
   wantOffer?(wantId: string, offerId: string): WantOfferRecord | undefined;
   buyWant?(wantId: string, offerId: string, signed: { credential: string; owner: string }): Promise<Record<string, any>>;
@@ -180,7 +180,11 @@ export interface Duty { statusId: string; credential: string; kinds: DutyKind[];
   /** Where its runner runs, since when, when it last looked, and the gaps when it didn't (the computer slept): said honestly. */ runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] } }
 /** One thing the AI on duty did, or was refused: what the owner's morning page shows, with its signed reply and an undo. */
 export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction'; ref: string }; undone?: string }
-export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
+/** What else an assistant may read, beyond the notes at the door and its own errands (SPEC §6.1): the owner's choice. */
+export type Reads = 'records' | 'money';
+const READS: readonly Reads[] = ['records', 'money'];
+const asReads = (v: unknown): Reads[] => (Array.isArray(v) ? READS.filter((r) => v.includes(r)) : []);
+export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; /** What else it may read (none: notes, its errands, the agenda and free hours only). */ reads?: Reads[]; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
@@ -259,6 +263,9 @@ const oneTimeCode = (): string => { for (;;) { const c = randomBytes(9).toString
 const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; } };
 
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
+// What each look needs beyond the base: the owner turns these on per assistant; the house refuses the rest (SPEC §6.1).
+const NEEDS: Record<string, Reads> = { 'panel.rules': 'records', 'panel.activity': 'records', 'panel.agents': 'records', 'panel.consents': 'records', 'panel.access': 'records', 'panel.data': 'records', 'panel.money': 'money', 'panel.market': 'money' };
+const NEEDS_SAID: Record<Reads, string> = { records: 'records (data, consents, requests, activity, rules)', money: 'money (what they earned and spent, offers priced for them, the most they\'d pay)' };
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
@@ -318,7 +325,7 @@ export class OwnerDesk {
    */
   private connects = new Map<string, { ask: string; app: string; from: string; number: string; back: string; at: number }>();
   private connectTimes: number[] = [];
-  private invites = new Map<string, { label: string; until: number; duty?: Duty }>();
+  private invites = new Map<string, { label: string; until: number; duty?: Duty; reads?: Reads[] }>();
   private dutyDrafts = new Map<string, { statusId: string; draft: Record<string, unknown> }>();
   /** What the AI on duty did and was refused, newest last (the morning page). */
   dutyLog: DutyEntry[] = [];
@@ -518,7 +525,8 @@ export class OwnerDesk {
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
     for (const [id, i] of Object.entries((await this.o.loadStatus?.().catch(() => ({}))) ?? {})) this.statusIndexes.set(id, Number(i));
-    for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a);
+    // Assistants connected before the owner chose what each reads keep what they had (everything), until the owner changes it.
+    for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a.reads || a.duty ? a : { ...a, reads: [...READS] });
     // Allowances saved before they had a currency were in dollars.
     for (const a of (await this.o.loadAllowances?.().catch(() => [])) ?? []) this.allowances.set(a.kid, { ...a, amount: a.amount ?? (a as unknown as { amountUsd: number }).amountUsd, currency: a.currency ?? 'USD' });
     return { paired: !!this.ownerJwk, token: this.token };
@@ -714,8 +722,11 @@ export class OwnerDesk {
     // Who, not what: the name they gave (or their AI's), so the owner knows at a glance; the words stay in the panel.
     if (payload.about === 'note') { const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined; this.notifyOwner('note', f?.as ? `${f.as} left you a note${f.web ? '' : ', via their AI'}.` : f?.name && !f.web ? `${f.name.replace(/ \(.*\)$/, '')} left you a note.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`); }
     if (!this.o.tell) return;
+    // Requests carry fields and prices, offers and purchases money: only to an assistant allowed to read them.
+    const about = String(payload.about ?? ''), needs: Reads | undefined = about.startsWith('request.') ? 'records' : about.startsWith('offer.') || about === 'want.bought' ? 'money' : undefined;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;
+      if (needs && !this.readsOf(a).has(needs)) continue;
       // A busy network loses a message now and then (run 24's assistant never heard of its allowance): try three times.
       const send = (left: number, wait: number): void => void this.o.tell!(a.url!, { kind: 'house.news', house: this.o.webId, ...payload })
         .catch(() => { if (left > 1) setTimeout(() => send(left - 1, wait * 4), wait).unref(); });
@@ -1134,11 +1145,11 @@ export class OwnerDesk {
       this.invites.delete(String(code));
       const kid = String(publicJwk.kid);
       if (kid === this.ownerJwk?.kid) return void res.status(400).json({ error: 'that is the owner\'s own key' });
-      const a: AssistantKey = { ...(invite.duty ? { duty: invite.duty } : {}), kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
+      const a: AssistantKey = { ...(invite.duty ? { duty: invite.duty } : {}), reads: invite.duty ? [] : invite.reads ?? [], kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       const badge = await this.assistantBadge(a).catch(() => undefined);
-      res.json({ paired: true, role: 'assistant', webId: this.o.webId, ...(a.duty ? { duty: { kinds: a.duty.kinds, cap: a.duty.cap, until: a.duty.until, ...(a.duty.hours ? { hours: a.duty.hours } : {}), note: 'you are your human\'s AI on duty: only these kinds, no money, nothing to an agent they or their assistants never wrote to (leave them a note instead), and every action is logged for them' } } : {}), may: [...ASSISTANT_MAY], may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
+      res.json({ paired: true, role: 'assistant', webId: this.o.webId, ...(a.duty ? { duty: { kinds: a.duty.kinds, cap: a.duty.cap, until: a.duty.until, ...(a.duty.hours ? { hours: a.duty.hours } : {}), note: 'you are your human\'s AI on duty: only these kinds, no money, nothing to an agent they or their assistants never wrote to (leave them a note instead), and every action is logged for them' } } : {}), may: [...ASSISTANT_MAY].filter((k) => !NEEDS[k] || this.readsOf(a).has(NEEDS[k]!)), reads: [...this.readsOf(a)], ...(this.readsOf(a).size < READS.length ? { not_shared: READS.filter((r) => !this.readsOf(a).has(r)).map((r) => NEEDS_SAID[r]), not_shared_note: 'your human chose not to share these with you; if you need one, ask them (lake_house_suggest, saying why)' } : {}), may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
     });
 
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
@@ -1187,6 +1198,8 @@ export class OwnerDesk {
           await this.o.saveAssistants?.([...this.assistants.values()]);
         }
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
+        const need = NEEDS[p.kind];
+        if (need && !this.readsOf(assistant).has(need)) return void res.status(403).json({ needs: need, error: `your human hasn't let you read their ${NEEDS_SAID[need]}. If you need it, ask them (lake_house_suggest, saying why): they turn it on in My AI, under your name, What it can read.` });
         // Messages waiting for it while nobody reads (its chat ended): its human's panel says so (run 58).
         if (p.kind === 'assistant.waiting') {
           const q = p as unknown as { count?: number; senders?: number; since?: string; last_read?: string };
@@ -1404,7 +1417,7 @@ export class OwnerDesk {
           const currency = isCurrency(q.currency) ? q.currency : undefined;
           try {
             const w = await this.o.panel.postWant({ name: String(q.name ?? ''), description: q.description ? String(q.description) : undefined, properties: q.properties && typeof q.properties === 'object' ? q.properties : {}, quantity: Number.isInteger(q.quantity) ? q.quantity : undefined, area: q.area ? String(q.area) : undefined, currency, days: Number.isFinite(q.days) ? Number(q.days) : undefined },
-              Number.isFinite(q.max_price) && q.max_price! > 0 && currency ? { amount: Number(q.max_price), currency } : undefined);
+              Number.isFinite(q.max_price) && q.max_price! > 0 && currency ? { amount: Number(q.max_price), currency } : undefined, assistant.kid);
             this.touch();
             return void res.json({ ok: true, want: w, note: `on your human's card now: shops' agents find it at the Lake's /wants and send offers to the house; your human sees them in Chats and buys with a tap. ${q.max_price && !currency ? 'max_price was not kept: give currency too. ' : ''}Nothing in it says what they'd pay.` });
           } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
@@ -1550,13 +1563,13 @@ export class OwnerDesk {
       // The owner's answer to an AI app's sign-in: yes makes a one-time assistant code and hands it to the sign-in, which
       // uses it at once for that AI's agent; no tells the sign-in so.
       if (p.kind === 'panel.connect.answer') {
-        const q = p as unknown as { id?: string; yes?: boolean };
+        const q = p as unknown as { id?: string; yes?: boolean; reads?: unknown };
         const c = this.connects.get(String(q.id ?? ''));
         if (!c) return void res.status(404).json({ error: 'that sign-in has gone (they last 15 minutes)' });
         this.connects.delete(String(q.id));
         this.touch();
         const code = oneTimeCode();
-        if (q.yes) this.invites.set(code, { label: c.app, until: Date.now() + 15 * 60_000 });
+        if (q.yes) this.invites.set(code, { label: c.app, until: Date.now() + 15 * 60_000, reads: asReads(q.reads) });
         const house = this.o.publicUrl!.replace(/\/$/, '');
         const r2 = await fetch(c.back, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(q.yes ? { ask: c.ask, house, code } : { ask: c.ask, house, refused: true }), signal: AbortSignal.timeout(20_000) }).catch((e: Error) => ({ ok: false, json: async () => ({ error: e.message }) }) as Response);
         const said = (await r2.json().catch(() => ({}))) as { ok?: boolean; error?: string; name?: string };
@@ -1566,8 +1579,17 @@ export class OwnerDesk {
       if (p.kind === 'panel.assistant.invite') {
         // Fifteen minutes, one use: long enough to paste into a chat with your agent.
         const code = oneTimeCode();
-        this.invites.set(code, { label: String((p as unknown as { label?: string }).label ?? 'my assistant').slice(0, 60), until: Date.now() + 15 * 60_000 });
+        this.invites.set(code, { label: String((p as unknown as { label?: string }).label ?? 'my assistant').slice(0, 60), until: Date.now() + 15 * 60_000, reads: asReads((p as unknown as { reads?: unknown }).reads) });
         return void res.json({ code, until: new Date(Date.now() + 15 * 60_000).toISOString() });
+      }
+      if (p.kind === 'panel.assistant.reads') {
+        const q = p as unknown as { kid?: string; reads?: unknown };
+        const a = this.assistants.get(String(q.kid ?? ''));
+        if (!a) return void res.status(404).json({ error: 'no such assistant' });
+        a.reads = asReads(q.reads);
+        await this.o.saveAssistants?.([...this.assistants.values()]);
+        this.news({ about: 'reads', reads: a.reads, note: a.reads.length ? `your human lets you read their ${a.reads.map((r) => NEEDS_SAID[r]).join(' and ')}, besides the notes at their door` : 'your human lets you read the notes at their door, your own errands, their agenda and free hours: nothing else' }, a.kid);
+        return void res.json({ ok: true, reads: a.reads });
       }
       if (p.kind === 'panel.assistant.revoke') {
         const kid = String((p as unknown as { kid?: string }).kid ?? '');
@@ -1703,6 +1725,12 @@ export class OwnerDesk {
         const old = this.allowances.get(d.kid);
         if (old) await this.revoke(old.statusId);
         this.allowances.set(d.kid, { kid: d.kid, credential: String(q.credential), statusId: d.statusId, amount: s.budget.amount, currency: s.budget.currency, until: s.intent_expiry, at: new Date().toISOString() });
+        // Paying needs to see the offers it pays for (offer.accepted): an allowance lets it read money too, as the sheet said.
+        const payer = this.assistants.get(d.kid);
+        if (payer && !payer.duty && !payer.reads?.includes('money')) {
+          payer.reads = [...(payer.reads ?? []), 'money'];
+          await this.o.saveAssistants?.([...this.assistants.values()]);
+        }
         this.allowanceDrafts.delete(d.statusId);
         await this.saveAllowances();
         this.news({ about: 'allowance', amount: s.budget.amount, currency: s.budget.currency, until: s.intent_expiry, note: 'your human signed you a spending allowance: lake_pay spends under it, in this currency. Within it, and in their free hours (lake_house free), you may say yes for them without asking: a booking, a purchase, a time to meet. Above it, about their data, or anything they would want to know first: ask them (lake_house_suggest)' }, d.kid);
@@ -2156,6 +2184,7 @@ export class OwnerDesk {
             ? `your human accepted this offer themselves, on their phone. The shop has sent you a signed cart for exactly it (cart ${(x.answer as { cart: string }).cart}): pay it with lake_buy { action: "pay", cart }, with the money held until you accept the delivery. Tell your human it is paid and held until it arrives.`
             : 'your human accepted this offer themselves, on their phone: pay it with lake_pay, naming the order. When you tell them, be exact: it pays outright (an accepted offer is no cart, so nothing holds the money until delivery), and the delivery happens outside the Lake.' });
         }
+        if (answer !== undefined && assistant && p.kind === 'panel.overview' && !(answer as { error?: string }).error) return void res.json(this.overviewFor(answer as Record<string, unknown>, this.readsOf(assistant)));
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }
       res.status(400).json({ error: 'unknown request' });
@@ -2167,7 +2196,9 @@ export class OwnerDesk {
       res.json({ revoked: await this.revoke('all') });
     });
 
-    if (appDir) r.use(express.static(appDir, { index: 'approvals.html' }));
+    // The app runs only its own scripts: injected script is what could make the owner's key sign (SPEC §6.1). Ionic sets
+    // styles inline; icons and the QR code are data: images. No form-action: a sign-in's form goes on to the AI app's page.
+    if (appDir) r.use((_req, res, next) => { res.set('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' data:; font-src 'self' data:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"); next(); }, express.static(appDir, { index: 'approvals.html' }));
     return r;
   }
 
@@ -2184,7 +2215,31 @@ export class OwnerDesk {
     const notes = full.notes.map((n) => (hidden(n.from.key) ? { ...n, text: '(your human answers this conversation themselves)', hidden: true } : n));
     if (!forAssistant) return full;
     if (who === 'duty') return { webId: full.webId, until: full.until, requests: [], suggestions: full.suggestions.filter((x) => (x as { errand?: unknown }).errand), notes, wants: [], agenda: [], keys: [], assistants: [], connects: [], seen: undefined };
-    return { ...full, notes, connects: [], assistants: full.assistants.filter((a) => a.kid === who), keys: [], keys_open: full.keys.length };
+    const reads = this.readsOf(this.assistants.get(who)), records = reads.has('records'), money = reads.has('money');
+    return {
+      ...full, notes, connects: [], assistants: full.assistants.filter((a) => a.kid === who), keys: [],
+      // Requests carry fields and prices: with records. Without, how many wait, so it can say "something waits for you".
+      requests: records ? full.requests : [], ...(records ? { keys_open: full.keys.length } : { requests_waiting: full.requests.length }),
+      // Its own notes and the house's, never another AI's (their offers, carts and allowance proposals).
+      suggestions: full.suggestions.filter((x) => !x.by || x.by === who),
+      // The most the owner would pay, and shops' prices: with money, or on a want it posted itself (it set the limit).
+      wants: full.wants.map(({ by, ...w }) => (money || by === who ? w : { want: w.want, closed: w.closed, at: w.at })),
+      reads: [...reads],
+    };
+  }
+
+  /** What an assistant may read beyond the base: nothing while it's on duty, else what the owner chose. */
+  private readsOf(a?: AssistantKey): Set<Reads> {
+    if (!a || (a.duty && !this.isRevoked(a.duty.statusId))) return new Set();
+    return new Set(a.reads ?? []);
+  }
+
+  /** The overview for an assistant: what it may read of it. */
+  private overviewFor(o: Record<string, unknown>, reads: Set<Reads>) {
+    const out = { ...o };
+    if (!reads.has('records')) for (const k of ['holds', 'claims', 'record', 'pending', 'keys', 'rulesOwner', 'knocksToday', 'blockedToday']) delete out[k];
+    if (!reads.has('money')) delete out.earned;
+    return { ...out, reads: [...reads] };
   }
 
   private fullView(forAssistant: boolean) {
@@ -2193,11 +2248,11 @@ export class OwnerDesk {
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       connects: [...this.connects].filter(([, c]) => Date.now() - c.at < 15 * 60_000).map(([id, c]) => ({ id, app: c.app, from: c.from, number: c.number, at: new Date(c.at).toISOString() })),
-      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId, reads, duty }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, reads: duty ? [] : reads ?? [], ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
-      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
+      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
       seen: forAssistant ? undefined : this.chatSeen,
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: (n.from.key ? this.chatModes[n.from.key] : undefined) ?? (known && !n.from.web ? 'ai' : 'me') }; }),
       agenda: this.agenda,

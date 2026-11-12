@@ -931,7 +931,7 @@ function panelFor(x: {
     },
     // What the owner is looking for (SPEC §6.8): post, close, and buy one offer with their signature for its cart.
     wantsList: () => x.wants.all(),
-    async postWant(input, limit) { const w = await x.wants.post(input, limit); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
+    async postWant(input, limit, by) { const w = await x.wants.post(input, limit, by); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
     async closeWant(id) { const ok = await x.wants.close(id); if (ok) await x.recard(x.keeper().rules); return ok; },
     wantOffer: (wantId, offerId) => x.wants.find(wantId)?.offers.find((o) => o.id === offerId),
     deliveryAddress: () => x.deliveryAddress(),

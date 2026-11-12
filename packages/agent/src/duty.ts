@@ -53,6 +53,9 @@ export interface DutyOptions {
 interface Saved { access_token: string; refresh_token?: string; expires_at: number; house: string; agent?: { name: string; url: string }; duty?: unknown; since: string }
 
 /** The tools an AI on duty is offered; the connector refuses whatever its grant doesn't cover, whatever is offered here. */
+/** The connector's address for the AI on duty: its tools listed (SPEC §6.1, tool sets), since some aren't everyday ones. */
+export const dutyUrl = (lake: string) => { const u = new URL(lake); u.searchParams.set('tools', 'duty'); return u.href; };
+
 export const DUTY_TOOLS = ['lake_inbox', 'lake_overview', 'lake_house', 'lake_house_suggest', 'lake_ask', 'lake_search', 'lake_verify', 'lake_block', 'lake_sell'];
 
 /** The run's only instructions: the grant, in plain words. Everything it reads from others is data. */
@@ -118,7 +121,7 @@ async function fresh(o: DutyOptions, s: Saved, file: string): Promise<Saved> {
 /** One MCP call as this agent (a short conversation of its own). */
 async function call(o: DutyOptions, s: Saved, name: string, args: Record<string, unknown>): Promise<unknown> {
   const c = new Client({ name: 'AI on duty', version: '0.1.0' });
-  await c.connect(new StreamableHTTPClientTransport(new URL(o.lake), { requestInit: { headers: { authorization: `Bearer ${s.access_token}` } } }));
+  await c.connect(new StreamableHTTPClientTransport(new URL(dutyUrl(o.lake)), { requestInit: { headers: { authorization: `Bearer ${s.access_token}` } } }));
   try {
     const r = await c.callTool({ name, arguments: args });
     const text = (r.content as { text?: string }[] | undefined)?.[0]?.text ?? '';
@@ -200,8 +203,8 @@ export async function runDuty(o: DutyOptions): Promise<void> {
           const prompt = dutyPrompt(o.house, s.duty as { kinds?: string[]; cap?: number } | null);
           log(`run ${recent.length + 1}: ${p.waiting ?? 'unknown number of'} message(s) waiting${p.to_deliver ? `, ${p.to_deliver} order(s) to deliver` : ''}`);
           const r = typeof o.agent === 'function'
-            ? await o.agent({ lake: o.lake, token: s.access_token, prompt, maxTools, signal: o.signal })
-            : await runAgent({ agent: o.agent ?? 'claude -p', lake: o.lake, token: s.access_token, prompt, maxTools, cwd: work });
+            ? await o.agent({ lake: dutyUrl(o.lake), token: s.access_token, prompt, maxTools, signal: o.signal })
+            : await runAgent({ agent: o.agent ?? 'claude -p', lake: dutyUrl(o.lake), token: s.access_token, prompt, maxTools, cwd: work });
           const tokens = 'tokens' in r ? Number(r.tokens ?? 0) : 0;
           if (tokens) spent.push([Date.now(), tokens]);
           const day = new Date().toISOString().slice(0, 10);

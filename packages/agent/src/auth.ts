@@ -128,7 +128,8 @@ button{width:100%;padding:13px;border-radius:12px;font:600 16px system-ui;cursor
     this.asks.delete(ask);
     if (!a || a.exp < Date.now()) return { error: 'this sign-in page has expired: start again from your AI app' };
     // A token for another server (a federated Lake, say) isn't made here.
-    if (a.params.resource && a.params.resource.href.replace(/\/$/, '') !== this.o.resource) return { error: `this sign-in is for ${this.o.resource}, not ${a.params.resource.href}` };
+    // The connector's address may carry which tools to list (?tools=all): the resource is the address without it.
+    if (a.params.resource && `${a.params.resource.origin}${a.params.resource.pathname}`.replace(/\/$/, '') !== this.o.resource) return { error: `this sign-in is for ${this.o.resource}, not ${a.params.resource.href}` };
     const id = this.newPrincipal();
     if (!id) return { error: 'the sandbox has as many agents as it can keep: try again tomorrow' };
     const code = token();

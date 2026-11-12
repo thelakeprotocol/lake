@@ -3,11 +3,13 @@
 // Trade terms (SPEC §6.5): payments agents a seller also accepts besides its own (LAKE_ACCEPT_PAYMENTS), and the arbiters it
 // names in its carts and accepts in others' (LAKE_ARBITERS, its own first). A2A addresses, comma-separated, without /a2a.
 const list = (v?: string) => (v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+// `--tools all` (or groups, `--tools trade,together`): which tools the connector lists (SPEC §6.1); the everyday ones by default.
+const toolsArg = () => { const i = process.argv.indexOf('--tools'); return i > 0 ? process.argv[i + 1] : process.argv.find((x) => x.startsWith('--tools='))?.slice(8); };
 const trade = (env: NodeJS.ProcessEnv) => ({ acceptPayments: list(env.LAKE_ACCEPT_PAYMENTS), arbiters: list(env.LAKE_ARBITERS) });
 if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   // `lake mcp --http 4800 --public-url https://sandbox.example`: the connector over HTTP, one agent per conversation.
   const { parseArgs } = await import('node:util');
-  const { values: a } = parseArgs({ args: process.argv.slice(3), options: { http: { type: 'string', default: '4800' }, 'public-url': { type: 'string' } } });
+  const { values: a } = parseArgs({ args: process.argv.slice(3), options: { http: { type: 'string', default: '4800' }, 'public-url': { type: 'string' }, tools: { type: 'string' } } });
   const { lakeMcpHttpApp } = await import('./http.js');
   const env = process.env;
   const port = Number(a.http);
@@ -17,6 +19,8 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
     // A data folder turns sign-in on: an AI keeps one agent from chat to chat (and across restarts).
     data: env.LAKE_MCP_DATA, kek: env.LAKE_MCP_KEK,
+    // Which tools a conversation lists when its address doesn't say: the everyday ones unless --tools / LAKE_MCP_TOOLS ("all").
+    tools: a.tools ?? env.LAKE_MCP_TOOLS,
     // Play money in more than one currency ("USD:50,AUD:80"), for a sandbox whose shops price in more than dollars.
     ...(env.LAKE_PLAY_MONEY ? { playMoney: Object.fromEntries(env.LAKE_PLAY_MONEY.split(',').map((x) => x.split(':')).filter(([c, n]) => /^[A-Z]{3}$/.test(c ?? '') && Number(n) > 0).map(([c, n]) => [c!, Number(n)])) } : {}),
     log: (m) => console.log(m),
@@ -55,7 +59,7 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
     keyFile: env.LAKE_KEY_FILE,
     ethics: env.LAKE_ETHICS_URL, auditor: env.LAKE_AUDITOR_URL, payments: env.LAKE_PAYMENTS_URL, ...trade(env),
     allowanceUsd: Number(env.LAKE_ALLOWANCE_USD ?? 0), publicNode: env.LAKE_PUBLIC_NODE_URL,
-  });
+  }, {}, toolsArg() ?? env.LAKE_MCP_TOOLS);
   await server.connect(new StdioServerTransport());
 } else {
   await import('@thelakeprotocol/visitor/dist/cli.js');

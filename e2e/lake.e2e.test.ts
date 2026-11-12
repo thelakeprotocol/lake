@@ -518,7 +518,8 @@ describe('the owner', () => {
   });
 
   it("gives the owner's own AI agent a key that can look and suggest, never decide", async () => {
-    const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'my assistant' });
+    // Allowed to read the owner's records (activity at the door), chosen when the code is made (SPEC §6.1).
+    const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'my assistant', reads: ['records'] });
     const helper = await generateIdentity('helper');
     const connect = (c: string) => fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: helper.publicJwk, code: c, label: 'Atlas' }) });
     expect((await connect(code)).status).toBe(200);
@@ -1123,7 +1124,11 @@ describe('the open door', () => {
     });
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_ask_around', 'lake_block', 'lake_blueprints', 'lake_buy', 'lake_circle', 'lake_commit', 'lake_count', 'lake_deed', 'lake_dispatch_study', 'lake_draw', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_knock', 'lake_overview', 'lake_pay', 'lake_ping', 'lake_pledge', 'lake_publish_blueprint', 'lake_room', 'lake_search', 'lake_sell', 'lake_set_tags', 'lake_verify', 'lake_want']);
+    // The everyday tools are listed (SPEC §6.1, tool sets); a study's tool isn't, and answers all the same when called.
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_overview', 'lake_ping', 'lake_verify']);
+    const overview = JSON.parse(((await client.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text);
+    expect(overview.what_you_can_do).toBeUndefined();
+    expect(overview.more_tools).toMatchObject({ trade: expect.any(String), research: expect.any(String), how: expect.stringMatching(/tools=all/) });
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
     await client.close();
@@ -1162,7 +1167,8 @@ describe('the open door', () => {
     const tokenCall = async (body: Record<string, string>) => (await fetch(as.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: client.client_id, ...body }) })).json();
     // The code works once, and only with its verifier.
     expect(await tokenCall({ grant_type: 'authorization_code', code: back.searchParams.get('code')!, code_verifier: 'wrong'.repeat(9), redirect_uri: cb })).toMatchObject({ error: 'invalid_grant' });
-    const signInAgain = new URL((await signIn()).headers.get('location')!);
+    // A connector added with the tools it lists in its address (?tools=all) signs in for the same connector.
+    const signInAgain = new URL((await signIn(`${url}?tools=all`)).headers.get('location')!);
     const tokens = await tokenCall({ grant_type: 'authorization_code', code: signInAgain.searchParams.get('code')!, code_verifier: verifier, redirect_uri: cb });
     expect(tokens).toMatchObject({ token_type: expect.stringMatching(/bearer/i), access_token: expect.any(String), refresh_token: expect.any(String) });
     const chat = async (access: string) => {
@@ -1173,6 +1179,11 @@ describe('the open door', () => {
     };
     // Two chats at once (the phone and the web): the same agent, both working.
     const one = await chat(tokens.access_token), two = await chat(tokens.access_token);
+    expect((await one.c.listTools()).tools).toHaveLength(9);
+    const wide = new Client({ name: 'claude-ai', version: '0' });
+    await wide.connect(new StreamableHTTPClientTransport(new URL(`${url}?tools=all`), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } }));
+    expect((await wide.listTools()).tools).toHaveLength(28);
+    await wide.close();
     const me = (await one.call('lake_overview')).you;
     await one.call('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips.' });
     expect((await two.call('lake_overview')).you).toMatchObject({ name: me.name, url: me.url });
@@ -1208,7 +1219,7 @@ describe('the open door', () => {
     const port = String(await freePort());
     await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_ETHICS_URL: ethics, LAKE_AUDITOR_URL: auditor, LAKE_PAYMENTS_URL: payments, LAKE_ALLOWANCE_USD: '50', LAKE_PLAY_MONEY: 'USD:50,AUD:80', LAKE_MATCH_EVERY_MS: '500' });
     const client = new Client({ name: 'claude-ai', version: '0' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp`)));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${port}/mcp?tools=all`))); // all the tools: the overview says what each is for
     const text = async (name: string, args: Record<string, unknown> = {}) => {
       const r = await client.callTool({ name, arguments: args });
       expect(r.isError, JSON.stringify(r.content)).toBeFalsy();

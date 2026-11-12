@@ -156,7 +156,7 @@ export function WantPage({ arg }: { arg: string }) {
   const fits = open.filter((o) => !o.over), over = open.filter((o) => o.over);
   const buy = (o: WantOfferV) => async () => {
     const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.want.draft', want: w.want.id, offer: o.id });
-    await must({ kind: 'panel.want.buy', draft: d.id, credential: signDraft(d.draft) });
+    await must({ kind: 'panel.want.buy', draft: d.id, credential: await signDraft(d.draft) });
   };
   const card = (o: WantOfferV, canBuy: boolean) => {
     const del = o.items.find((i) => /^Delivery\b/.test(i.label));

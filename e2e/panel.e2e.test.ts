@@ -78,6 +78,15 @@ const lostKey = async (p: Page) => {
 let assistant: Identity;
 let nodeUrl = '';
 let specialists = '';
+// The phone whose key a test plants the old way, then signs as the owner with (the browser holds it, unreadable, after).
+let ownerSeed: { seed: Buffer; kid: string } | undefined;
+/** The kid of the key this browser holds in IndexedDB (non-extractable: only its kid can be read). */
+const keptKid = () => new Promise<string | null>((ok) => {
+  const o = indexedDB.open('lake', 1);
+  o.onupgradeneeded = () => o.result.createObjectStore('keys');
+  o.onsuccess = () => { const r = o.result.transaction('keys').objectStore('keys').get(`lake-owner-key:${location.host}`); r.onsuccess = () => ok((r.result as { kid?: string } | undefined)?.kid ?? null); r.onerror = () => ok(null); };
+  o.onerror = () => ok(null);
+});
 const asAssistant = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, assistant, { iss: 'assistant' })) })).json();
 
 beforeAll(async () => {
@@ -106,6 +115,8 @@ beforeAll(async () => {
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
   page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
+  // The app's content security policy refuses anything it doesn't load itself: a refusal here is a bug in the policy or the app.
+  page.on('console', (m) => { if (m.type() === 'error' && /Content Security Policy/i.test(m.text())) errors.push(m.text()); });
   if (process.env.LAKE_SHOTS) {
     page.on('request', (r) => { if (r.url().endsWith('/owner/api')) pending.set(r, { at: Date.now(), body: (r.postData() ?? '').slice(0, 300) }); });
     page.on('requestfinished', (r) => pending.delete(r));
@@ -275,6 +286,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('gives the owner\'s AI a key on the first tap, and shows it connected live', async () => {
     await tab('My AI');
     await page.getByRole('button', { name: 'Give my AI a key' }).click();
+    // What it may read besides the messages at the door: both off unless the owner switches them on.
+    for (const r of ['records', 'money']) expect(await sheet().locator(`.reads-${r} ion-toggle`).evaluate((t) => (t as HTMLInputElement).checked)).toBe(false);
     await sheet().getByRole('button', { name: 'Make the code' }).click();
     const box = sheet().locator('.copybox');
     await box.waitFor({ timeout: 3000 });
@@ -287,6 +300,18 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await box.waitFor({ state: 'detached', timeout: 3000 });
     await closeSheet();
     await tidy();
+    // The house refuses it the owner's records until the owner says otherwise, on the AI's own page.
+    expect(await asAssistant({ kind: 'panel.data' })).toMatchObject({ needs: 'records' });
+    const row = page.locator('ion-item.ai-row', { hasText: 'Nova' });
+    expect(await row.textContent()).toContain('Messages only');
+    await row.click();
+    await page.getByText('What it can read').waitFor();
+    await page.locator('.reads .reads-records ion-toggle').click();
+    await page.getByText('Messages, records').first().waitFor({ timeout: 4000 });
+    expect(await asAssistant({ kind: 'panel.data' })).not.toHaveProperty('needs');
+    expect(await asAssistant({ kind: 'panel.money' })).toMatchObject({ needs: 'money' });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await goBack();
   });
 
   it('signs spending money for it, and the AI sees it', async () => {
@@ -831,8 +856,18 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const phone3 = await ctx3.newPage();
     phone3.on('pageerror', (e) => errors.push(e.message));
     phone3.on('dialog', (d) => { errors.push(`a dialog box: ${d.message()}`); void d.dismiss(); });
+    // This phone has a key kept the old way (hex in localStorage): the app moves it into the browser, same key, no new pairing.
+    // The test keeps its seed, to sign as the owner from here later.
+    ownerSeed = { seed: randomBytes(32), kid: 'owner-legacy0001' };
+    await phone3.goto(`${house}/.well-known/agent-card.json`);
+    await phone3.evaluate((k) => localStorage.setItem(`lake-owner-key:${location.host}`, JSON.stringify(k)), { secret: ownerSeed.seed.toString('hex'), kid: ownerSeed.kid });
     await phone3.goto(link);
     await onTab('Chats', phone3);
+    expect(await phone3.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('lake-owner-key:')))).toBe(false);
+    expect(await phone3.evaluate(keptKid)).toBe(ownerSeed.kid);
+    await tab('You', phone3);
+    await phone3.locator('.key-store', { hasText: 'can\'t be copied out' }).waitFor();
+    expect((await fetch(`${house}/owner/`)).headers.get('content-security-policy')).toMatch(/script-src 'self';/);
     await lostKey(phone2);
     await ctx2.close();
     page = phone3;
@@ -842,8 +877,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('notifies the owner\'s devices by Web Push when something needs them: a note at the door (1 Nov)', async () => {
     // The owner's key as this browser keeps it, to sign as the owner from here (the panel's own calls do the same).
-    const saved = JSON.parse(await page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))![1]));
-    const seed = Buffer.from(saved.secret, 'hex');
+    const saved = { kid: ownerSeed!.kid }, seed = ownerSeed!.seed;
     const jwk = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' }).export({ format: 'jwk' });
     const owner = await importIdentity({ kid: saved.kid, privateJwk: { ...jwk, kid: saved.kid }, publicJwk: { kty: 'OKP', crv: 'Ed25519', x: jwk.x, kid: saved.kid } } as never);
     const asOwner = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: 'owner' })) })).json();
@@ -993,8 +1027,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('a promise circle on the phone: a person stamp, Sign this pledge, Ask my circle, Thanks, Yes I\'ll do it, and "You\'re square" (7 Nov)', async () => {
-    const saved = JSON.parse(await page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))![1]));
-    const seed = Buffer.from(saved.secret, 'hex');
+    const saved = { kid: ownerSeed!.kid }, seed = ownerSeed!.seed;
     const jwk = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]), format: 'der', type: 'pkcs8' }).export({ format: 'jwk' });
     const owner = await importIdentity({ kid: saved.kid, privateJwk: { ...jwk, kid: saved.kid }, publicJwk: { kty: 'OKP', crv: 'Ed25519', x: jwk.x, kid: saved.kid } } as never);
     const asOwner = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: 'owner' })) })).json();
@@ -1084,7 +1117,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('signs out on this device: back to the pairing screen', async () => {
-    const keyNow = () => page.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('lake-owner-key:'))?.[1] ?? null);
+    const keyNow = () => page.evaluate(keptKid);
     const before = await keyNow();
     await tab('You');
     // Asked on a sheet first.
