@@ -78,7 +78,9 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
       if (r.body.kind === 'noted') {
         const at = `${base()}/note/${r.body.note}/${r.body.key}`;
         const body = { kind: 'noted', note: r.body.note, answer_at: at, says: 'The owner (or their AI) sees it. Open answer_at to read what comes back (add ?wait=30 to wait up to 30 s for news): a quick reply may only say it reached them, so look again until status is answered (a person may take minutes or hours), then tell your human. If they ask you something, answer on the same note: open answer_at with ?text=… (URL-encoded). The link is private to whoever has it.' };
-        return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p style="overflow-wrap:anywhere"><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json(body));
+        // The owner's door note, if they wrote one: shown as theirs, sent by their house (SPEC §9.0).
+        const said = typeof r.body.door_note === 'string' ? r.body.door_note : '';
+        return void (html ? res.type('html').send(notePage('Note left', `<h1>Note left ✓</h1><p class="lead">The owner will see it. Their answer will appear at this private link; keep it:</p><p style="overflow-wrap:anywhere"><a href="${esc(at)}">${esc(at)}</a></p>${said ? `<h2>The owner's door note</h2><p class="door-note" style="white-space:pre-wrap">${esc(said)}</p><p class="small">Written by them for everyone writing for the first time, sent by their house.</p>` : ''}`)) : res.json({ ...body, ...(said ? { door_note: { text: said, auto: true } } : {}) }));
       }
       res.status(r.status);
       return void (html ? res.type('html').send(notePage('Not left', `<h1>Not left</h1><p class="lead">${esc(String(r.body.error ?? r.body.reason ?? 'The house didn\'t take it.'))}</p>`)) : res.json(r.body));

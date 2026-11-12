@@ -53,6 +53,10 @@ for (const define of [app, header, toolbar, title, buttons, button, content, foo
 // Only the icons used here, by their kebab-case names (the whole set would weigh a megabyte).
 const icons = { add, alertCircleOutline, arrowDown, arrowDownOutline, arrowUp, arrowUpOutline, atOutline, calendarOutline, chatbubbleOutline, chatbubbles, chatbubblesOutline, checkmark, checkmarkCircleOutline, checkmarkDoneOutline, chevronBack, chevronDown, chevronUp, close, closeCircle, closeCircleOutline, cloudOfflineOutline, copyOutline, downloadOutline, eyeOffOutline, eyeOutline, fileTray, fileTrayOutline, fingerPrintOutline, folderOpenOutline, gitNetworkOutline, globeOutline, handLeftOutline, homeOutline, hourglassOutline, informationCircleOutline, keyOutline, linkOutline, listOutline, lockClosedOutline, moonOutline, notificationsOffOutline, notificationsOutline, openOutline, peopleOutline, personAddOutline, personCircle, personCircleOutline, personOutline, phonePortraitOutline, pricetagsOutline, qrCodeOutline, search, searchOutline, shareOutline, shieldCheckmarkOutline, shieldOutline, sparkles, sparklesOutline, timeOutline, today, todayOutline, trashOutline, walletOutline, warningOutline };
 addIcons(Object.fromEntries(Object.entries(icons).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`), v])));
+// The logo, an arc over a dot, as Today's tab icon: filled when selected, outlined otherwise.
+// (Ionicons parses an svg data URL's text as it stands, so it isn't percent-encoded.)
+const LAKE = (dot: string) => `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' class='ionicon' viewBox='0 0 512 512'><path d='M88 304a168 168 0 0 1 336 0' fill='none' stroke='currentColor' stroke-width='40' stroke-linecap='round'/>${dot}</svg>`;
+addIcons({ lake: LAKE("<circle cx='256' cy='328' r='64' fill='currentColor'/>"), 'lake-outline': LAKE("<circle cx='256' cy='328' r='52' fill='none' stroke='currentColor' stroke-width='32'/>") });
 
 export type Child = ComponentChildren;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

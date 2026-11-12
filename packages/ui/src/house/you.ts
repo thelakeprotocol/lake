@@ -82,16 +82,21 @@ function InviteSheet() {
 export function DoorPage({ backTo }: { backTo: () => void }) {
   const door = useHouse<DoorState>({ kind: 'panel.door' });
   const d = door.data && !door.data.error ? door.data : null;
-  const [form, setForm] = useState<{ handle: string; name: string; about: string } | null>(null);
+  const [form, setForm] = useState<{ handle: string; name: string; about: string; note: string } | null>(null);
   if (!d) return h(Page, { title: 'Handle and public page', back: backTo, backLabel: 'You' }, h(Failed, { error: door.error }));
-  const f = form ?? { handle: d.handle ?? '', name: d.name ?? '', about: d.about ?? '' };
+  const f = form ?? { handle: d.handle ?? '', name: d.name ?? '', about: d.about ?? '', note: d.note ?? '' };
   const set = (k: keyof typeof f) => (e: CustomEvent) => setForm({ ...f, [k]: k === 'handle' ? String(e.detail.value ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '') : String(e.detail.value ?? '') });
-  const save = (open: boolean) => async () => { await must({ kind: 'panel.door.set', open, about: f.about, name: f.name, handle: f.handle.trim().toLowerCase() }); setForm(null); };
+  const save = (open: boolean) => async () => { await must({ kind: 'panel.door.set', open, about: f.about, name: f.name, handle: f.handle.trim().toLowerCase(), note: f.note.trim() }); setForm(null); };
   return h(Page, { title: 'Handle and public page', back: backTo, backLabel: 'You' },
     h(Section, {},
       h('ion-item', {}, h('ion-input', { label: 'Handle', labelPlacement: 'stacked', value: f.handle, placeholder: 'e.g. stan', maxlength: 30, autocapitalize: 'none', autocorrect: 'off', spellcheck: false, 'aria-label': 'Your handle', helperText: 'People ask their AI to "ping" it', onionInput: set('handle') })),
       h('ion-item', {}, h('ion-input', { label: 'Name (optional)', labelPlacement: 'stacked', value: f.name, maxlength: 60, 'aria-label': 'Name', onionInput: set('name') })),
       h('ion-item', { lines: 'none' }, h('ion-input', { label: 'A line people see (optional)', labelPlacement: 'stacked', value: f.about, maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', 'aria-label': 'A line people see', onionInput: set('about') }))),
+    // The door note (round 15): the owner's standing reply to people writing for the first time, sent once each by the house.
+    h(Section, { title: 'Door note', cls: 'door-note' },
+      h('ion-item', { lines: 'none' }, h('ion-textarea', { label: 'Sent once to each new person who writes', labelPlacement: 'stacked', value: f.note, maxlength: 500, counter: true, autoGrow: true, rows: 3, placeholder: 'e.g. Thanks for writing. I read these on Fridays. Bugs: https://…', 'aria-label': 'Door note', onionInput: set('note') })),
+      !f.note ? h('ion-item', { lines: 'none' }, h('ion-button', { fill: 'outline', size: 'small', onClick: () => setForm({ ...f, note: 'Thanks for writing. I read these about once a week; I\'ll answer if I can.' }) }, 'Use a suggested text')) : null,
+      h('ion-item', { lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, d.note_sent?.sent ? `Went to ${d.note_sent.sent} new ${d.note_sent.sent === 1 ? 'person' : 'people'} in 30 days; ${d.note_sent.wrote_again} wrote again.` : 'Your house sends it, marked as automatic. They stay new people until you answer them.')))),
     h('div', { class: 'pad' }, h(Btn, { label: d.open ? 'Save' : 'Save, and let people write to me', expand: 'block', run: save(true), done: 'Saved' })),
     d.open ? h(Section, {},
       h(Row, { icon: 'open-outline', tint: 'muted', label: 'Open my public page', onClick: () => window.open(d.address, '_blank', 'noopener') }),

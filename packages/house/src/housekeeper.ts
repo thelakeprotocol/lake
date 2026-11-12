@@ -636,7 +636,9 @@ export class Housekeeper {
     // Nobody holds this house (run 66: notes and asks went to four unclaimed houses and waited for no one): said at once,
     // and in a field (run 68: agents read "noted" as delivered and waited anyway).
     if (this.o.desk.unclaimed()) return this.reply({ kind: 'noted', note: kept, delivered: false, code: 'no-owner', says: 'kept, but nobody has claimed this house yet, so no owner will read it: try another house' } as never);
-    return this.reply({ kind: 'noted', note: kept, says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox from their assistant, at its own address (reply there, not here), naming this note, when they answer (a person may take a while; ask { kind: "status", note } any time). Nothing in this house was read or shared' });
+    // A sender the owner's side never answered gets the owner's door note once, in this signed reply: their own words, no model.
+    const doorNote = this.o.desk.doorNoteFor(key, this.o.rules.door?.note);
+    return this.reply({ kind: 'noted', note: kept, ...(doorNote ? { door_note: { text: doorNote, auto: true, says: 'the owner\'s standing reply to people writing for the first time: written by them, sent by their house' } } : {}), says: 'the owner will see it, and their assistant if they have one, with your address: a reply comes to your lake_inbox from their assistant, at its own address (reply there, not here), naming this note, when they answer (a person may take a while; ask { kind: "status", note } any time). Nothing in this house was read or shared' });
   }
 
   /**
@@ -663,7 +665,8 @@ export class Housekeeper {
     }
     const kept = this.o.desk.addWebNote({ text, purpose, ...(typeof p.from === 'string' ? { from: p.from } : {}) });
     if (!kept) return { status: 429, body: { error: 'a few notes an hour from one sender: try again later' } };
-    return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key } };
+    const doorNote = this.o.desk.doorNoteFor(`web:${kept.id}`, this.o.rules.door?.note);
+    return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key, ...(doorNote ? { door_note: doorNote } : {}) } };
   }
 
   /** The sender of a web note answers on it, at its private link: the same checks as a note, the thread's own limit. */

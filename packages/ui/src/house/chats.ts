@@ -17,17 +17,6 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const wants = (data?.wants ?? []).filter((w) => !w.closed);
   return h(Page, { title: 'Chats', big: true, status, footer: tabbar },
     !data ? h(Failed, { error: list.error }) : [
-      // No handle yet: nobody can reach you; the one thing to do, once, here.
-      // A new house: what it is, what it promises, and the one thing to do first (ChatGPT, round 3: a newcomer didn't get it).
-      door.data && !door.data.error && !door.data.handle ? h('ion-card', { class: 'lake-card hero-card welcome-card', key: 'handle' }, h('ion-card-content', {},
-        h('h2', {}, 'Welcome to your house'),
-        h('p', {}, 'Your own place online. People\'s AIs reach you here, and companies ask before they use anything of yours.'),
-        h('ul', { class: 'welcome-points' },
-          h('li', {}, h('ion-icon', { name: 'hand-left-outline' }), 'You decide what\'s shared'),
-          h('li', {}, h('ion-icon', { name: 'eye-off-outline' }), 'You can take anything back'),
-          h('li', {}, h('ion-icon', { name: 'shield-checkmark-outline' }), 'No AI can overrule your rules')),
-        h('ion-button', { shape: 'round', expand: 'block', onClick: () => push('#door') }, 'Pick your handle'),
-        h('p', { class: 'muted-line' }, 'Then anyone can ask their AI to ping you.'))) : null,
       wants.length ? h(Section, { title: 'Looking for', key: 'wants' }, ...wants.map((w) => h(WantRow, { key: w.want.id, w }))) : null,
       chats.length ? h(Section, { title: wants.length ? 'Messages' : undefined, key: 'chats', cls: 'chat-list' }, ...chats.map((c) => h(ChatRow, { key: c.key, c })))
         : h(Empty, { key: 'empty', icon: 'chatbubbles-outline', title: 'No messages yet', text: door.data?.handle ? `People reach you by asking their AI to ping ${door.data.handle}.` : 'Pick a handle, and anyone\'s AI can reach you.', action: h('ion-button', { shape: 'round', fill: 'outline', onClick: () => push('#you') }, 'How people reach you') }),
@@ -194,3 +183,20 @@ export function WantPage({ arg }: { arg: string }) {
 
 /** How many chats have something new, for the tab's badge. */
 export const unreadChats = (v?: ListView) => (v ? unseen(v.notes ?? [], { ...(v.seen ?? {}), ...seen.at }) : 0);
+
+/**
+ * A new house: what it is, what it promises, and the one thing to do first (ChatGPT, round 3: a newcomer didn't get it).
+ * On Today, where the app opens, until there's a handle: nobody can reach the owner before that.
+ */
+export function WelcomeCard({ door }: { door?: DoorState }) {
+  if (!door || door.error || door.handle) return null;
+  return h('ion-card', { class: 'lake-card hero-card welcome-card' }, h('ion-card-content', {},
+    h('h2', {}, 'Welcome to your house'),
+    h('p', {}, 'Your own place online. People\'s AIs reach you here, and companies ask before they use anything of yours.'),
+    h('ul', { class: 'welcome-points' },
+      h('li', {}, h('ion-icon', { name: 'hand-left-outline' }), 'You decide what\'s shared'),
+      h('li', {}, h('ion-icon', { name: 'eye-off-outline' }), 'You can take anything back'),
+      h('li', {}, h('ion-icon', { name: 'shield-checkmark-outline' }), 'No AI can overrule your rules')),
+    h('ion-button', { expand: 'block', onClick: () => push('#door') }, 'Pick your handle'),
+    h('p', { class: 'muted-line' }, 'Then anyone can ask their AI to ping you.')));
+}

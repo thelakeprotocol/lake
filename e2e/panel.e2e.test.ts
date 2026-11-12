@@ -50,8 +50,8 @@ async function tidy() {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 }
-// Four tabs (Chats, Inbox, My AI, You); everything else is a row under You (12 Nov: the redesign).
-const TABS = ['Chats', 'Today', 'My AI', 'You'];
+// Four tabs, Today first (it opens there); everything else is a row under You (12 Nov: the redesign, then Fable's design).
+const TABS = ['Today', 'Chats', 'My AI', 'You'];
 const tab = async (name: string, p: Page = page) => {
   if (TABS.includes(name)) {
     // On a page opened from a tab (a chat, a setting), the tab bar isn't there: Back first.
@@ -207,15 +207,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('button', { name: 'Use this phone' }).waitFor();
     expect(await page.locator('.welcome h1').textContent()).toMatch(/House|A house on the Lake/);
     await page.getByRole('button', { name: 'Use this phone' }).click();
-    // Four tabs, and Chats asks for the one setting that makes the house reachable.
+    // Four tabs, and Today asks for the one setting that makes the house reachable.
     await page.locator('ion-tab-button').first().waitFor();
     expect(await page.locator('ion-tab-button ion-label').allTextContents()).toEqual(TABS);
-    await onTab('Chats');
+    await onTab('Today');
     await page.getByRole('heading', { name: 'Welcome to your house' }).waitFor();
     await tidy();
   });
 
-  it('opens the door by picking a handle on Chats, says it saved, and the door page says how to knock', async () => {
+  it('opens the door by picking a handle on Today, says it saved, and the door page says how to knock', async () => {
     await page.getByRole('button', { name: 'Pick your handle' }).click();
     await page.getByLabel('Your handle').fill('Panel Owner');
     expect(await page.getByLabel('Your handle').inputValue()).toBe('panelowner');
@@ -223,7 +223,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByText('Saved').first().waitFor();
     // Back where it was opened from, and the card has gone; the handle heads You.
     await goBack();
-    await onTab('Chats');
+    await onTab('Today');
     await page.getByRole('heading', { name: 'Welcome to your house' }).waitFor({ state: 'detached', timeout: 10_000 });
     await tab('You');
     await page.locator('.profile .handle', { hasText: '@panelowner' }).waitFor({ timeout: 10_000 });
@@ -250,6 +250,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('lets a person leave a note themselves from the door page, and read the answer later', async () => {
+    // The owner's door note (round 15): written on Your door, sent once to each new person by the house.
+    await tab('Handle and public page');
+    await page.getByRole('button', { name: 'Use a suggested text' }).click();
+    await page.getByRole('button', { name: /^Save/ }).click();
+    await page.getByText('Saved').first().waitFor();
+    await goBack();
     const visitor = await ctx.newPage();
     await visitor.goto(house);
     await visitor.getByText('Leave a note yourself').click();
@@ -257,6 +263,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await visitor.locator('input[name=from]').fill('Sam');
     await visitor.getByRole('button', { name: 'Leave the note' }).click();
     await visitor.getByRole('heading', { name: 'Note left ✓' }).waitFor();
+    await visitor.getByText('I read these about once a week').waitFor();
+    // Today counts it, and says someone waits for an answer instead of "all clear".
+    await tab('Today');
+    await page.locator('.handled-row', { hasText: 'Your door note went to 1 new person' }).waitFor({ timeout: 8000 });
+    await page.locator('.wait-new', { hasText: /new person wrote|new people wrote/ }).waitFor();
+    await tab('Chats');
     const link = await visitor.locator('a').first().getAttribute('href');
     await visitor.goto(link!);
     await visitor.getByText(/with the owner/i).waitFor();
@@ -496,12 +508,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const card = page.locator('ion-card.warn-card', { hasText: 'Nova isn\'t reading' });
     await card.getByText(/3 messages waiting since .*open your AI app/).waitFor({ timeout: 5000 });
     await tidy();
-    // My AI's row says so too; the badge on its tab counts it.
+    // My AI's row says so too; the one badge, on Today, counts it.
+    const badge = async () => { const b = page.locator('ion-tab-button', { hasText: 'Today' }).locator('ion-badge'); return (await b.count()) ? Number(await b.textContent()) : 0; };
+    const withIt = await badge();
+    expect(withIt).toBeGreaterThan(0);
     await tab('My AI');
     await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/3 waiting/).waitFor();
-    expect(await page.locator('ion-tab-button', { hasText: 'My AI' }).locator('ion-badge').textContent()).toBe('1');
+    expect(await page.locator('ion-tab-button', { hasText: 'My AI' }).locator('ion-badge').count()).toBe(0);
     expect(await asAssistant({ kind: 'assistant.waiting', count: 0 })).toEqual({ ok: true });
     await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/waiting/).waitFor({ state: 'detached', timeout: 5000 });
+    await expect.poll(badge, { timeout: 5000 }).toBe(withIt - 1);
     await tidy();
   });
 
@@ -841,7 +857,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await phone2.getByRole('button', { name: 'Use this phone' }).count()).toBe(0);
     await phone2.getByLabel('Recovery code').fill(code.toLowerCase());
     await phone2.getByRole('button', { name: 'Use it' }).click();
-    await onTab('Chats', phone2);
+    await onTab('Today', phone2);
     // The old phone's next look: not the key any more, said plainly.
     // It may already know (the live stream refreshes it); otherwise its next tap finds out.
     await lostKey(page);
@@ -862,7 +878,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await phone3.goto(`${house}/.well-known/agent-card.json`);
     await phone3.evaluate((k) => localStorage.setItem(`lake-owner-key:${location.host}`, JSON.stringify(k)), { secret: ownerSeed.seed.toString('hex'), kid: ownerSeed.kid });
     await phone3.goto(link);
-    await onTab('Chats', phone3);
+    await onTab('Today', phone3);
     expect(await phone3.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('lake-owner-key:')))).toBe(false);
     expect(await phone3.evaluate(keptKid)).toBe(ownerSeed.kid);
     await tab('You', phone3);

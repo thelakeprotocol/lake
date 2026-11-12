@@ -7,7 +7,7 @@ export interface Request { id: string; offerId: string; visitor: { webId: string
 export type Decision = 'join' | 'ask' | 'decline';
 export interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
 export interface Rules { owner: string; device?: string; default: Decision; tags?: string[]; rules: Rule[]; negotiation?: { join_collectives?: boolean }; trust?: Record<string, string[]>; privacy?: { show_packs?: boolean }; availability?: { tz: string; free: string[]; meetings?: number } }
-export type DoorState = { open: boolean; about?: string; name?: string; handle?: string; address: string; error?: string };
+export type DoorState = { open: boolean; about?: string; name?: string; handle?: string; note?: string; note_sent?: { sent: number; wrote_again: number; new_people: number }; address: string; error?: string };
 export type Address = { '@type': 'PostalAddress'; name?: string; streetAddress: string; addressLocality: string; addressRegion?: string; postalCode: string; addressCountry: string };
 export const addressLine = (a: Address) => `${a.streetAddress}, ${[a.addressLocality, a.addressRegion, a.postalCode].filter(Boolean).join(' ')}`;
 export type FreeState = { set: boolean; tz?: string; meetings?: number; slots: unknown[] };
@@ -193,3 +193,10 @@ export function writeWindow(w: Win): string {
   return `${runs.join(',')} ${w.from}-${w.to === '23:59' ? '24:00' : w.to}`;
 }
 export const ZONES: string[] = (() => { try { return (Intl as unknown as { supportedValuesOf(k: string): string[] }).supportedValuesOf('timeZone'); } catch { return []; } })();
+
+/** People the owner's side knows whose newest note has no answer yet: they count on Today's badge. */
+export function knownWaiting(v?: ListView) {
+  const newest = new Map<string, DoorNote>();
+  for (const n of v?.notes ?? []) { const k = n.from.key ?? n.id, p = newest.get(k); if (!p || p.at < n.at) newest.set(k, n); }
+  return [...newest.values()].filter((n) => n.known && !n.answered).length;
+}

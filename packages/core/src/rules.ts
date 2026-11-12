@@ -33,7 +33,7 @@ export interface Rules {
    * reach them by. The address is the identifier; a name is only there if the owner adds one. Its page says how to reach
    * the owner through an agent. Without it, a house says nothing at its address.
    */
-  door?: { name?: string; about?: string; handle?: string };
+  door?: { name?: string; about?: string; handle?: string; /** A standing reply the house sends a new sender's first note (SPEC §9.0): up to 500 characters, up to 3 https links. */ note?: string };
   /** When the owner is free to meet (SPEC §9.0): their assistant offers these times, around their agenda. */
   availability?: Availability;
 }
@@ -103,12 +103,19 @@ export function parseRules(text: string): Rules {
   if (raw.privacy?.show_packs !== undefined && typeof raw.privacy.show_packs !== 'boolean') throw new RulesError('privacy.show_packs must be true or false');
   if ((raw.door as unknown) === true) raw.door = {};
   if (raw.door !== undefined) {
-    const d = raw.door as { name?: unknown; about?: unknown; handle?: unknown };
+    const d = raw.door as { name?: unknown; about?: unknown; handle?: unknown; note?: unknown };
     if (!d || typeof d !== 'object') throw new RulesError('door: true, or { about?, name?, handle? }');
     if (d.handle !== undefined && (typeof d.handle !== 'string' || !HANDLE.test(d.handle))) throw new RulesError('door.handle: 2 to 30 lowercase letters, digits or dashes, starting with a letter (people\'s AIs reach you by it: "ping stan")');
     if (d.name !== undefined && (typeof d.name !== 'string' || !d.name.trim() || d.name.length > 60)) throw new RulesError('door.name: a name to show, 1 to 60 characters (or leave it out: the address is enough)');
     if (d.about !== undefined && (typeof d.about !== 'string' || d.about.length > 200)) throw new RulesError('door.about: one line, up to 200 characters');
-    for (const k of Object.keys(d)) if (k !== 'name' && k !== 'about' && k !== 'handle') throw new RulesError(`door: unknown setting "${k}" (allowed: name, about, handle)`);
+    if (d.note !== undefined) {
+      if (typeof d.note !== 'string' || !d.note.trim() || d.note.length > 500) throw new RulesError('door.note: a reply for new senders, 1 to 500 characters (or leave it out)');
+      // Links are https only (the reply reaches other people's agents and pages), and few: it's a note, not a link list.
+      const schemes = d.note.match(/\b[a-z][a-z0-9+.-]*:\/\//gi) ?? [];
+      if (schemes.some((x) => x.toLowerCase() !== 'https://') || /\b(javascript|data|vbscript):/i.test(d.note)) throw new RulesError('door.note: links must start with https://');
+      if (schemes.length > 3) throw new RulesError('door.note: at most 3 links');
+    }
+    for (const k of Object.keys(d)) if (!['name', 'about', 'handle', 'note'].includes(k)) throw new RulesError(`door: unknown setting "${k}" (allowed: name, about, handle, note)`);
   }
   if (raw.availability !== undefined) {
     const problems = availabilityProblems(raw.availability);

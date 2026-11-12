@@ -18,7 +18,7 @@ export function parse(hash = location.hash): Route {
   const name = OLD[k!] ?? k;
   if (name === 'inbox' || name === 'ai' || name === 'you' || name === 'chats') return { tab: name };
   if ((YOU_PAGES as readonly string[]).includes(name!)) return { tab: 'you', page: name };
-  return { tab: 'chats' };
+  return { tab: 'inbox' };
 }
 
 const fire = () => dispatchEvent(new HashChangeEvent('hashchange'));

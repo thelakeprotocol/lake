@@ -55,9 +55,9 @@ export interface PanelProvider {
   rules(): Promise<{ text: string; rules: unknown }>;
   setRules(text: string): Promise<{ ok: true } | { ok: false; error: string }>;
   /** The house's door (SPEC §9.0): open or not, its line, the address to give out, and its A2A address. */
-  door?(): { open: boolean; about?: string; name?: string; handle?: string; address: string; a2a: string };
+  door?(): { open: boolean; about?: string; name?: string; handle?: string; note?: string; address: string; a2a: string };
   /** Opens or closes it, written into the owner's rules like any other setting. */
-  setDoor?(d: { open: boolean; about?: string; name?: string; handle?: string }): Promise<{ ok: true } | { ok: false; error: string }>;
+  setDoor?(d: { open: boolean; about?: string; name?: string; handle?: string; note?: string }): Promise<{ ok: true } | { ok: false; error: string }>;
   availability?(): Availability | null;
   setAvailability?(a: Availability | null): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Newest first; with `since` (a seq from an earlier look, or a time), only what came after it. */
@@ -327,6 +327,31 @@ export class OwnerDesk {
   private connectTimes: number[] = [];
   private invites = new Map<string, { label: string; until: number; duty?: Duty; reads?: Reads[] }>();
   private dutyDrafts = new Map<string, { statusId: string; draft: Record<string, unknown> }>();
+  /**
+   * Senders the owner's side had never answered, by key, the first time each wrote (SPEC §9.0): whether the door note
+   * went to them, and whether they wrote again within a week, which is what the note should change.
+   */
+  private firstContacts = new Map<string, { at: string; noted?: string; again?: boolean }>();
+  private saveFirstContacts = () => writeFile(join(this.o.dataDir, 'first-contacts.json'), JSON.stringify([...this.firstContacts].slice(-5000))).catch(() => {});
+  /** The door note for this sender's note, if it's their first and the owner has one; every first contact is counted. */
+  doorNoteFor(key: string | undefined, note: string | undefined): string | undefined {
+    if (!key || this.knownBy(key)) return undefined;
+    const seen = this.firstContacts.get(key);
+    if (seen) {
+      const since = Date.now() - Date.parse(seen.at);
+      if (!seen.again && since > 60_000 && since < 7 * 86_400_000) { seen.again = true; void this.saveFirstContacts(); }
+      return undefined;
+    }
+    this.firstContacts.set(key, { at: new Date().toISOString(), ...(note ? { noted: new Date().toISOString() } : {}) });
+    void this.saveFirstContacts();
+    return note;
+  }
+  /** The last 30 days: how many new people got the door note, and how many of those wrote again within a week. */
+  doorNoteStats() {
+    const month = [...this.firstContacts.values()].filter((c) => Date.parse(c.at) > Date.now() - 30 * 86_400_000);
+    const noted = month.filter((c) => c.noted);
+    return { sent: noted.length, wrote_again: noted.filter((c) => c.again).length, new_people: month.length, without_note_wrote_again: month.filter((c) => !c.noted && c.again).length };
+  }
   /** What the AI on duty did and was refused, newest last (the morning page). */
   dutyLog: DutyEntry[] = [];
   private dutyPushed = new Set<string>();
@@ -426,7 +451,7 @@ export class OwnerDesk {
     type Line = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string };
     const lines: Line[] = [];
     const panel = this.o.panel;
-    if (!panel) return { since: new Date(midnight).toISOString(), lines };
+    if (!panel) return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
     const events = (panel.activity(new Date(midnight).toISOString()) as unknown as { at: string; kind: string; subject?: string; data?: Record<string, unknown> }[]).filter((e) => after(e.at));
     const names = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? ` (${n.slice(0, 2).join(', ')}${n.length > 2 ? ` and ${n.length - 2} more` : ''})` : ''; };
     const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -459,8 +484,28 @@ export class OwnerDesk {
       const fresh = w.offers.filter((x) => after(x.at));
       if (fresh.length && !w.closed) lines.push({ by: 'shops', text: `${plural(fresh.length, 'shop')} offered on "${w.want.name}"`, at: fresh[fresh.length - 1]!.at, to: `#want=${encodeURIComponent(w.want.id)}` });
     }
+    // The door note: the house's own standing reply to new people.
+    const noted = [...this.firstContacts.values()].filter((c) => after(c.noted));
+    if (noted.length) lines.push({ by: 'house', text: `Your door note went to ${plural(noted.length, 'new person', 'new people')}`, at: noted.map((c) => c.noted!).sort().at(-1)!, to: '#door' });
     lines.sort((a, b) => b.at.localeCompare(a.at));
-    return { since: new Date(midnight).toISOString(), lines };
+    return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
+  }
+
+  /**
+   * People whose last note has no answer yet, from the owner or their AI on duty (round 15: Today said "You're all clear"
+   * while strangers' notes piled up in Chats). Counted by sender, the people the owner's side knows apart.
+   */
+  waitingPeople() {
+    const newest = new Map<string, { at: string; key?: string; answered: boolean }>();
+    for (const n of this.fullView(false).notes) {
+      const who = n.from.key ?? n.id, prev = newest.get(who);
+      if (prev && prev.at >= n.at) continue;
+      const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && e.to?.key === n.from.key && e.at >= n.at);
+      newest.set(who, { at: n.at, key: n.from.key, answered: !!n.answered || aiReplied });
+    }
+    const open = [...newest.values()].filter((x) => !x.answered);
+    const known = open.filter((x) => x.key && this.knownBy(x.key)).length;
+    return { people: open.length, known, ...(open.length ? { since: open.map((x) => x.at).sort()[0] } : {}), ...(this.notes.length >= 50 ? { more: true } : {}) };
   }
 
   async release() {
@@ -475,6 +520,8 @@ export class OwnerDesk {
     await this.saveSuggestions();
     this.dutyLog = [];
     this.contacts.clear();
+    this.firstContacts.clear();
+    await this.saveFirstContacts();
     await this.saveDuty();
     // The last owner's notes, mutes and agenda were theirs: the next one starts with none, and a new calendar address.
     this.notes = [];
@@ -520,6 +567,7 @@ export class OwnerDesk {
     setInterval(() => this.sweepErrands(), 60_000).unref();
     this.dutyLog = JSON.parse(await readFile(join(this.o.dataDir, 'duty-log.json'), 'utf8').catch(() => '[]'));
     this.contacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'contacts.json'), 'utf8').catch(() => '[]')));
+    this.firstContacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'first-contacts.json'), 'utf8').catch(() => '[]')));
     setInterval(() => this.morningPush(), 60_000).unref();
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
@@ -1925,7 +1973,7 @@ export class OwnerDesk {
         const answer = await ({
           'panel.overview': () => panel.overview(Number((q as { tz_offset?: number }).tz_offset)),
           'panel.rules': () => panel.rules(),
-          'panel.door': async () => panel.door?.() ?? { error: 'this house has no door' },
+          'panel.door': async () => { const d = panel.door?.(); return d ? { ...d, note_sent: this.doorNoteStats() } : { error: 'this house has no door' }; },
           // The owner's free slots, around what is already in their agenda: what their assistant may offer (runs 49-50).
           'panel.free': async () => {
             const av = panel.availability?.();
@@ -1938,7 +1986,7 @@ export class OwnerDesk {
             const problems = availabilityProblems(av);
             return problems.length ? { error: problems.join('; ') } : panel.setAvailability?.(av as Availability) ?? { error: 'this house has no availability' };
           },
-          'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}), ...(typeof (q as { handle?: unknown }).handle === 'string' ? { handle: String((q as { handle: string }).handle) } : {}) }) ?? { error: 'this house has no door' },
+          'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}), ...(typeof (q as { handle?: unknown }).handle === 'string' ? { handle: String((q as { handle: string }).handle) } : {}), ...(typeof (q as { note?: unknown }).note === 'string' ? { note: String((q as { note: string }).note) } : {}) }) ?? { error: 'this house has no door' },
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity((q as { since?: number | string }).since),
           'panel.today': async () => this.today(Number((q as { tz_offset?: number }).tz_offset) || 0),

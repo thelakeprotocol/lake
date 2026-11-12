@@ -8,9 +8,9 @@ import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { CACHE, Version, api, cached, call, houseBase, reachWatchers, reachable, remember, state } from './house/api';
 import { h, toast } from './house/ion';
-import { type ListView } from './house/logic';
+import { knownWaiting, type ListView } from './house/logic';
 import { back, goTab, parse, type Tab } from './house/nav';
-import { ChatPage, ChatsTab, WantPage, unreadChats } from './house/chats';
+import { ChatPage, ChatsTab, WantPage } from './house/chats';
 import { InboxTab, decisions } from './house/inbox';
 import { AiKeyPage, AiTab } from './house/ai';
 import { DoorPage, NotifyPage, YouTab } from './house/you';
@@ -22,8 +22,8 @@ import { ConnectAI, Pair, connecting } from './house/pair';
 // you're looking for), Inbox (what needs you), My AI, You (how you're reached, your data, this phone).
 
 const TABS: { tab: Tab; label: string; icon: string }[] = [
+  { tab: 'inbox', label: 'Today', icon: 'lake' },
   { tab: 'chats', label: 'Chats', icon: 'chatbubbles' },
-  { tab: 'inbox', label: 'Today', icon: 'today' },
   { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];
@@ -74,11 +74,13 @@ function App() {
       setList(v);
     }).catch(() => {});
   }, [version]);
-  const counts: Record<Tab, number> = { chats: unreadChats(list), inbox: decisions(list), ai: (list?.assistants ?? []).filter((a) => a.waiting).length, you: 0 };
+  // One badge, on Today (Fable's design, 12 Nov): what needs the owner, people they know waiting for an answer, and an AI
+  // of theirs that isn't reading while people wait for it.
+  const counts: Record<Tab, number> = { chats: 0, inbox: decisions(list) + knownWaiting(list) + (list?.assistants ?? []).filter((a) => a.waiting).length, ai: 0, you: 0 };
   const tabbar = h('ion-tab-bar', { id: 'tabbar', class: 'lake-tabbar', selectedTab: route.tab },
     ...TABS.map((t) => h('ion-tab-button', { key: t.tab, tab: t.tab, selected: route.tab === t.tab, onClick: () => { if (route.tab === t.tab && !route.page) document.querySelector('ion-content')?.scrollToTop(300); else goTab(t.tab); } },
       h('ion-icon', { name: route.tab === t.tab ? t.icon : `${t.icon}-outline` }), h('ion-label', {}, t.label),
-      counts[t.tab] ? h('ion-badge', { color: t.tab === 'inbox' ? 'warning' : 'primary' }, counts[t.tab] > 99 ? '99+' : String(counts[t.tab])) : null)));
+      counts[t.tab] ? h('ion-badge', { color: 'primary' }, counts[t.tab] > 99 ? '99+' : String(counts[t.tab])) : null)));
   const status = ok && live === true ? null : h('span', { class: `status-chip${ok ? '' : ' down'}`, role: 'status' }, h('span', { class: 'status-dot' }), ok ? 'Reconnecting' : 'Offline');
   const backTo = (t: Tab) => () => back(`#${t}`);
   const k = `${route.tab}/${route.page ?? ''}/${route.arg ?? ''}`;

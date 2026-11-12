@@ -1,7 +1,8 @@
 /*
- * The house app's look, on top of Ionic: deep navy and mint at night, paper and pine by day (follows the phone),
- * big titles, glass bars, rounded cards, colourful avatars. Ionic draws the components; this only sets tokens and
- * the few things of our own (bubbles, offers, stats, pills).
+ * The house app's look, on top of Ionic (follows the phone): paper and pine by day, navy and mint at night. One accent,
+ * for the one primary action on a screen, switches that are on, and the logo; amber says why something waits; red removes.
+ * Neutral outline icons, no tiles, no gradients. Ionic draws the components; this sets tokens and the few things of our
+ * own (bubbles, offers, stats, pills). Fable 5.2's design, 12 Nov: scratchpad fable52/design/APP-DESIGN.md.
  */
 
 :root, :root.ios, :root.md {
@@ -10,35 +11,35 @@
   --ion-font-family: var(--lake-font);
 
   /* by day */
-  --lake-bg: #f4f6fa;
-  --lake-bg-glow: radial-gradient(120% 60% at 100% 0%, rgba(16, 185, 129, 0.10), transparent 60%), radial-gradient(90% 50% at 0% 10%, rgba(99, 102, 241, 0.08), transparent 60%);
+  --lake-bg: #f6f7f5;
+  --lake-bg-glow: none;
   --lake-surface: #ffffff;
-  --lake-surface-2: #eef1f6;
-  --lake-line: rgba(15, 23, 42, 0.08);
-  --lake-text: #0b1220;
-  --lake-muted: #5b6577;
-  --lake-mint: #0ea56b;
-  --lake-mint-soft: rgba(14, 165, 107, 0.12);
-  --lake-amber: #c27803;
-  --lake-amber-soft: rgba(245, 158, 11, 0.14);
-  --lake-red: #e5384b;
-  --lake-red-soft: rgba(229, 56, 75, 0.12);
-  --lake-violet: #6d5cf6;
-  --lake-violet-soft: rgba(109, 92, 246, 0.12);
-  --lake-blue: #2f7cf6;
-  --lake-blue-soft: rgba(47, 124, 246, 0.12);
-  --lake-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06);
-  --lake-glass: rgba(244, 246, 250, 0.72);
+  --lake-surface-2: #eef0ec;
+  --lake-line: #e2e5e0;
+  --lake-text: #0d1512;
+  --lake-muted: #5a6660;
+  --lake-mint: #0a7f52;
+  --lake-mint-soft: #e3f4ec;
+  --lake-amber: #8a4b00;
+  --lake-amber-soft: #fff3dc;
+  --lake-red: #b93228;
+  --lake-red-soft: rgba(185, 50, 40, 0.10);
+  --lake-violet: #5a6660;
+  --lake-violet-soft: #eef0ec;
+  --lake-blue: #5a6660;
+  --lake-blue-soft: #eef0ec;
+  --lake-shadow: 0 1px 2px rgba(13, 21, 18, 0.05);
+  --lake-glass: rgba(246, 247, 245, 0.86);
   --lake-bubble-them: #ffffff;
-  --lake-bubble-me: linear-gradient(135deg, #10b981, #0ea56b);
+  --lake-bubble-me: #0a7f52;
   --lake-bubble-me-text: #ffffff;
 
-  --ion-color-primary: #0ea56b;
-  --ion-color-primary-rgb: 14, 165, 107;
+  --ion-color-primary: #0a7f52;
+  --ion-color-primary-rgb: 10, 127, 82;
   --ion-color-primary-contrast: #ffffff;
   --ion-color-primary-contrast-rgb: 255, 255, 255;
-  --ion-color-primary-shade: #0c915e;
-  --ion-color-primary-tint: #26ae7a;
+  --ion-color-primary-shade: #097048;
+  --ion-color-primary-tint: #238c63;
   --ion-color-secondary: #6d5cf6;
   --ion-color-secondary-rgb: 109, 92, 246;
   --ion-color-secondary-contrast: #ffffff;
@@ -51,37 +52,37 @@
   --ion-color-warning-contrast-rgb: 26, 18, 3;
   --ion-color-warning-shade: #d88b0a;
   --ion-color-warning-tint: #f6a823;
-  --ion-color-danger: #e5384b;
-  --ion-color-danger-rgb: 229, 56, 75;
+  --ion-color-danger: #b93228;
+  --ion-color-danger-rgb: 185, 50, 40;
   --ion-color-danger-contrast: #ffffff;
   --ion-color-danger-contrast-rgb: 255, 255, 255;
-  --ion-color-danger-shade: #ca3142;
-  --ion-color-danger-tint: #e84c5d;
-  --ion-color-medium: #5b6577;
-  --ion-color-medium-rgb: 91, 101, 119;
+  --ion-color-danger-shade: #a32c23;
+  --ion-color-danger-tint: #c0473e;
+  --ion-color-medium: #5a6660;
+  --ion-color-medium-rgb: 90, 102, 96;
   --ion-color-medium-contrast: #ffffff;
   --ion-color-medium-contrast-rgb: 255, 255, 255;
   --ion-color-medium-shade: #505969;
   --ion-color-medium-tint: #6b7485;
-  --ion-color-dark: #0b1220;
-  --ion-color-dark-rgb: 11, 18, 32;
+  --ion-color-dark: #0d1512;
+  --ion-color-dark-rgb: 13, 21, 18;
   --ion-color-dark-contrast: #ffffff;
   --ion-color-dark-contrast-rgb: 255, 255, 255;
   --ion-color-dark-shade: #0a101c;
   --ion-color-dark-tint: #232a36;
 
   --ion-background-color: var(--lake-bg);
-  --ion-background-color-rgb: 244, 246, 250;
+  --ion-background-color-rgb: 246, 247, 245;
   --ion-text-color: var(--lake-text);
-  --ion-text-color-rgb: 11, 18, 32;
+  --ion-text-color-rgb: 13, 21, 18;
   --ion-item-background: var(--lake-surface);
   --ion-card-background: var(--lake-surface);
   --ion-toolbar-background: var(--lake-glass);
   --ion-tab-bar-background: var(--lake-glass);
-  --ion-tab-bar-color: #8a93a3;
+  --ion-tab-bar-color: #5a6660;
   --ion-tab-bar-color-selected: var(--lake-mint);
   --ion-border-color: var(--lake-line);
-  --ion-placeholder-color: #8a93a3;
+  --ion-placeholder-color: #8a948f;
 }
 
 /* at night (the phone's dark mode): Ionic's dark steps, then our navy and mint */
@@ -89,43 +90,43 @@
   /* .ios/.md: Ionic's dark palette sets its own on those, which would win over plain :root */
   :root, :root.ios, :root.md {
     --lake-bg: #070b12;
-    --lake-bg-glow: radial-gradient(120% 55% at 100% 0%, rgba(61, 220, 151, 0.13), transparent 60%), radial-gradient(90% 45% at 0% 8%, rgba(124, 108, 255, 0.12), transparent 62%);
-    --lake-surface: #0f1622;
-    --lake-surface-2: #151e2d;
-    --lake-line: rgba(255, 255, 255, 0.07);
-    --lake-text: #eef2f8;
-    --lake-muted: #8a95a8;
+    --lake-bg-glow: none;
+    --lake-surface: #0f151e;
+    --lake-surface-2: #17202b;
+    --lake-line: #1f2a36;
+    --lake-text: #eef2f0;
+    --lake-muted: #94a19b;
     --lake-mint: #3ddc97;
-    --lake-mint-soft: rgba(61, 220, 151, 0.14);
-    --lake-amber: #ffbf5a;
-    --lake-amber-soft: rgba(255, 181, 71, 0.14);
-    --lake-red: #ff6b7a;
-    --lake-red-soft: rgba(255, 92, 108, 0.14);
-    --lake-violet: #a497ff;
-    --lake-violet-soft: rgba(139, 124, 255, 0.16);
-    --lake-blue: #6aa8ff;
-    --lake-blue-soft: rgba(106, 168, 255, 0.14);
-    --lake-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 32px rgba(0, 0, 0, 0.35);
-    --lake-glass: rgba(9, 14, 22, 0.72);
-    --lake-bubble-them: #151e2d;
-    --lake-bubble-me: linear-gradient(135deg, #3ddc97, #23c18a);
-    --lake-bubble-me-text: #04140d;
+    --lake-mint-soft: #11301f;
+    --lake-amber: #f2b35a;
+    --lake-amber-soft: #2e2412;
+    --lake-red: #ff7a6e;
+    --lake-red-soft: rgba(255, 122, 110, 0.14);
+    --lake-violet: #94a19b;
+    --lake-violet-soft: #17202b;
+    --lake-blue: #94a19b;
+    --lake-blue-soft: #17202b;
+    --lake-shadow: none;
+    --lake-glass: rgba(7, 11, 18, 0.86);
+    --lake-bubble-them: #17202b;
+    --lake-bubble-me: #3ddc97;
+    --lake-bubble-me-text: #06281a;
 
     --ion-color-primary: #3ddc97;
     --ion-color-primary-rgb: 61, 220, 151;
-    --ion-color-primary-contrast: #04140d;
-    --ion-color-primary-contrast-rgb: 4, 20, 13;
+    --ion-color-primary-contrast: #06281a;
+    --ion-color-primary-contrast-rgb: 6, 40, 26;
     --ion-color-primary-shade: #36c285;
     --ion-color-primary-tint: #50e0a1;
     --ion-color-secondary: #8b7cff;
     --ion-color-secondary-rgb: 139, 124, 255;
     --ion-color-warning: #ffb547;
     --ion-color-warning-rgb: 255, 181, 71;
-    --ion-color-danger: #ff5c6c;
-    --ion-color-danger-rgb: 255, 92, 108;
+    --ion-color-danger: #ff7a6e;
+    --ion-color-danger-rgb: 255, 122, 110;
     --ion-color-danger-contrast: #ffffff;
-    --ion-color-medium: #8a95a8;
-    --ion-color-medium-rgb: 138, 149, 168;
+    --ion-color-medium: #94a19b;
+    --ion-color-medium-rgb: 148, 161, 155;
     --ion-color-medium-contrast: #0b1220;
     --ion-color-dark: #1c2638;
     --ion-color-dark-rgb: 28, 38, 56;
@@ -137,12 +138,12 @@
     --ion-background-color: var(--lake-bg);
     --ion-background-color-rgb: 7, 11, 18;
     --ion-text-color: var(--lake-text);
-    --ion-text-color-rgb: 238, 242, 248;
+    --ion-text-color-rgb: 238, 242, 240;
     --ion-item-background: var(--lake-surface);
     --ion-card-background: var(--lake-surface);
     --ion-toolbar-background: var(--lake-glass);
     --ion-tab-bar-background: var(--lake-glass);
-    --ion-tab-bar-color: #6b7689;
+    --ion-tab-bar-color: #94a19b;
     --ion-tab-bar-color-selected: var(--lake-mint);
     --ion-border-color: var(--lake-line);
     --ion-placeholder-color: #5f6a7d;
@@ -160,7 +161,7 @@ body { -webkit-font-smoothing: antialiased; font-feature-settings: 'cv11', 'ss01
 .lake-header ion-toolbar { --border-width: 0; --padding-start: 8px; --padding-end: 8px; }
 .lake-header.header-translucent ion-toolbar { --background: var(--lake-glass); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); }
 ion-header.header-collapse-condense ion-toolbar { --background: transparent !important; --border-width: 0; }
-ion-title.title-large { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; }
+ion-title.title-large { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
 ion-title { font-weight: 650; letter-spacing: -0.01em; }
 .lake-header ion-button { --box-shadow: none; --background: transparent; --background-hover: transparent; min-height: 36px; }
 .lake-header ion-button.back { --color: var(--lake-mint); font-weight: 500; }
@@ -183,7 +184,7 @@ ion-title { font-weight: 650; letter-spacing: -0.01em; }
 @keyframes lake-pulse { 50% { opacity: 0.35; } }
 
 /* ---- lists and rows ---- */
-.lake-list { border-radius: 18px; box-shadow: var(--lake-shadow); margin: 14px 16px; background: var(--lake-surface); }
+.lake-list { border-radius: 16px; border: 1px solid var(--lake-line); box-shadow: var(--lake-shadow); margin: 14px 16px; background: var(--lake-surface); }
 .lake-list.flat { box-shadow: none; margin: 8px 0; background: transparent; }
 .lake-list.flat ion-item { --background: transparent; --padding-start: 0; --inner-padding-end: 0; }
 .lake-list ion-list-header { --background: var(--lake-surface); font-size: 12px; font-weight: 700; color: var(--lake-muted); text-transform: uppercase; letter-spacing: 0.07em; min-height: 0; height: 34px; padding-top: 0; align-items: flex-end; margin: 0; }
@@ -496,3 +497,15 @@ ion-toggle::part(label) { white-space: normal; flex: 1 1 auto; }
 .welcome-reads { text-align: left; width: 100%; }
 .welcome-reads .reads-list { margin-left: 0; margin-right: 0; }
 .lake-card .reads-list { margin: 10px 0; }
+
+
+/* Fable's design tokens (12 Nov): icons are outline in the text colour, without tiles; colour only where it means
+   something (on, waiting, remove). Buttons are 12 px rounded rectangles; a secondary one is outlined at 1.5 px. */
+.row-icon, .row-icon.tint-mint, .row-icon.tint-violet, .row-icon.tint-blue, .row-icon.tint-muted { background: transparent; color: var(--lake-text); width: 26px; margin-right: 10px; font-size: 21px; }
+.row-icon.tint-amber { background: transparent; color: var(--lake-amber); width: 26px; margin-right: 10px; font-size: 21px; }
+.row-icon.tint-red { background: transparent; color: var(--lake-red); width: 26px; margin-right: 10px; font-size: 21px; }
+.button-round { --border-radius: 12px; }
+ion-button { --border-radius: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+ion-button.button-outline { --border-width: 1.5px; --border-color: var(--lake-line); --color: var(--lake-text); }
+ion-button.button-outline.ion-color-danger { --border-color: var(--lake-red); }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }

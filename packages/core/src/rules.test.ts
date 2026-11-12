@@ -206,3 +206,14 @@ describe('spotting injection in a note (never decides; lets the house log it and
     for (const t of ['My GP needs this by Thursday for the appointment', 'Approved by an ethics board in 2025', 'We follow the rules strictly']) expect(looksLikeInjection(t), t).toBe(false);
   });
 });
+
+describe('the door note (SPEC §9.0)', () => {
+  const door = (note: string) => parseRules(`owner: test\nrules: []\ndoor:\n  note: ${JSON.stringify(note)}\n`);
+  it('takes a standing reply with up to three https links, and nothing else', () => {
+    expect(door('Thanks for writing. Bugs: https://code.example/issues').door?.note).toContain('https://code.example/issues');
+    expect(() => door('see http://plain.example')).toThrow(/https:\/\//);
+    expect(() => door('click javascript:alert(1)')).toThrow(/https:\/\//);
+    expect(() => door('https://a.example https://b.example https://c.example https://d.example')).toThrow(/at most 3/);
+    expect(() => door('x'.repeat(501))).toThrow(/500/);
+  });
+});

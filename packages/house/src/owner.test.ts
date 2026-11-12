@@ -432,3 +432,25 @@ describe('what an assistant reads (SPEC §6.1)', () => {
     server.close();
   });
 });
+
+describe('new people (round 15)', () => {
+  it('the door note goes once to each sender the owner never answered; Today counts it and who still waits', async () => {
+    const d = await leasedDesk();
+    const phone = await generateIdentity('phone');
+    await d.post('/pair', { publicJwk: phone.publicJwk });
+    const note = 'Thanks for writing. I read these on Fridays.';
+    const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
+    d.desk.addNote({ from: from('sam'), text: 'Coffee next week?' });
+    expect(d.desk.doorNoteFor(from('sam').key, note)).toBe(note);
+    // Once per sender: the second note gets none, and counts as writing again only after a minute.
+    expect(d.desk.doorNoteFor(from('sam').key, note)).toBeUndefined();
+    expect(d.desk.doorNoteStats()).toMatchObject({ sent: 1, wrote_again: 0, new_people: 1 });
+    // No note set: nothing goes, but the first contact is still counted (the baseline the note is measured against).
+    expect(d.desk.doorNoteFor(from('ana').key, undefined)).toBeUndefined();
+    d.desk.addNote({ from: from('ana'), text: 'Hello' });
+    expect(d.desk.doorNoteStats()).toMatchObject({ sent: 1, new_people: 2 });
+    const today = await d.desk.today(0);
+    expect(today.waiting).toMatchObject({ people: 2, known: 0 });
+    d.close();
+  });
+});

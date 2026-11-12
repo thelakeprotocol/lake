@@ -733,7 +733,7 @@ function panelFor(x: {
     },
     door() {
       const d = x.keeper().rules.door;
-      return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), ...(d?.handle ? { handle: d.handle } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
+      return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), ...(d?.handle ? { handle: d.handle } : {}), ...(d?.note ? { note: d.note } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
     },
     // Written into the owner's rules (comments and all kept): the door is one of their settings, saved in their pod.
     // When the owner is free to meet, in their rules like the door (null takes it out).
@@ -780,9 +780,11 @@ function panelFor(x: {
     standing: standingRules,
     async setDoor(d) {
       const doc = parseDocument(x.keeper().rulesText);
+      // The door note is kept unless this call sets it ("" takes it out): saving the handle mustn't drop it.
+      d = { ...d, note: d.note ?? x.keeper().rules.door?.note };
       if (!d.open) doc.delete('door');
-      else doc.set('door', { ...(d.about?.trim() ? { about: d.about.trim() } : {}), ...(d.name?.trim() ? { name: d.name.trim() } : {}), ...(d.handle?.trim() ? { handle: d.handle.trim().toLowerCase() } : {}) });
-      if (d.open && !d.about?.trim() && !d.name?.trim() && !d.handle?.trim()) doc.set('door', true);
+      else doc.set('door', { ...(d.about?.trim() ? { about: d.about.trim() } : {}), ...(d.name?.trim() ? { name: d.name.trim() } : {}), ...(d.handle?.trim() ? { handle: d.handle.trim().toLowerCase() } : {}), ...(d.note?.trim() ? { note: d.note.trim() } : {}) });
+      if (d.open && !d.about?.trim() && !d.name?.trim() && !d.handle?.trim() && !d.note?.trim()) doc.set('door', true);
       // A handle is one house's on its Lake: ask the node first, so the owner hears now that it's taken, not never.
       if (d.open && d.handle?.trim()) {
         const h = d.handle.trim().toLowerCase();
