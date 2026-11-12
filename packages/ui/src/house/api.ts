@@ -23,7 +23,8 @@ export async function call<T = any>(payload: Record<string, unknown>): Promise<T
   try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signEnvelope({ ...payload, aud: houseBase() }, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
   reached(true);
   if (!res.ok) {
-    const error = (await res.json().catch(() => ({}))).error ?? String(res.status);
+    // No words from the house (it threw, or the proxy in front answered for it): say so, never a bare number.
+    const error = (await res.json().catch(() => ({}))).error ?? (res.status >= 500 ? `Your house couldn't do that just now (${res.status}). Try again in a moment.` : `Your house said no (${res.status}).`);
     // Two keys on this device (an earlier version's slip) and the house knows the other one: that one moves in, once.
     if (res.status === 403 && spare && /^no key \S+ for /.test(String(error))) { spare = false; if (await settleSpare(key, false)) { location.reload(); return new Promise<T>(() => {}); } }
     // This device's key isn't the house's any more (moved to another device, or recovered there): back to pairing.

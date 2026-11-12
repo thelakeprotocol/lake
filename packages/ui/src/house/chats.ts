@@ -58,15 +58,17 @@ function ChatRow({ c }: { c: Chat }) {
 
 const wantState = (w: WantV) => {
   const b = w.offers.find((o) => o.id === w.bought);
-  if (b) return b.state === 'arrived' ? `Arrived · ${shortShop(b.seller.name)} is paid` : b.state === 'shipped' ? `On its way from ${shortShop(b.seller.name)}` : `Bought from ${shortShop(b.seller.name)} · held until it arrives`;
-  const open = w.offers.filter((o) => o.state === 'open' && !o.over);
+  if (b) return b.state === 'arrived' ? `Arrived · ${shortShop(b.seller.name)} is paid` : b.problem ? `You reported a problem · waiting for ${shortShop(b.seller.name)}` : b.state === 'shipped' ? `${b.shipped?.again ? 'Sent again by' : 'On its way from'} ${shortShop(b.seller.name)}` : `Bought from ${shortShop(b.seller.name)} · held until it arrives`;
+  const open = w.offers.filter((o) => o.state === 'open' && !o.over && !ranOut(o));
   // Paid for and refunded (the shop couldn't send it): the money is back, and the want is open again while its date holds.
   const back = w.offers.find((o) => o.state === 'refunded');
   if (!open.length) return Date.parse(w.want.availabilityEnds) < Date.now() ? (back ? `Refunded by ${shortShop(back.seller.name)}` : 'Closed: no offers') : back ? `Refunded by ${shortShop(back.seller.name)} · open again` : 'Waiting for offers';
   return `${open.length} offer${open.length === 1 ? '' : 's'} · from ${money(open.map((o) => o.total).sort((a, b) => a.value - b.value)[0]!)}`;
 };
+/** A shop's cart is good for a day or so: after that it can't be bought, until the shop sends it again. */
+const ranOut = (o: WantOfferV) => Date.parse(o.expires) < Date.now();
 /** A want needs the owner while an offer waits for a yes, or what they bought is on its way (their "It arrived" pays the shop). */
-export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : w.offers.some((o) => o.state === 'open' && !o.over)); };
+export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
 
 export function WantRow({ w }: { w: WantV }) {
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow want-row${wantNeedsYou(w) ? ' unread' : ''}`, onClick: () => push(`#want=${encodeURIComponent(w.want.id)}`) },
@@ -245,7 +247,10 @@ export function WantPage({ arg }: { arg: string }) {
   const w = list.data?.wants?.find((x) => x.want.id === arg && !x.closed);
   if (!w) return h(Page, { title: 'Looking for', back: () => back('#inbox'), backLabel: 'Today' }, list.data ? h(Empty, { icon: 'search-outline', title: 'Not looking for this any more' }) : h(Failed, { error: list.error }));
   const bought = w.offers.find((o) => o.id === w.bought);
-  const open = w.offers.filter((o) => o.state === 'open').sort((a, b) => a.total.value - b.total.value);
+  const shop = bought ? shortShop(bought.seller.name) : '';
+  // An offer whose cart has run out can't be bought (round 21: it was shown with a Buy button that failed on the tap).
+  const open = w.offers.filter((o) => o.state === 'open' && !ranOut(o)).sort((a, b) => a.total.value - b.total.value);
+  const gone = w.offers.filter((o) => o.state === 'open' && ranOut(o) && !o.over).length;
   const refunded = w.offers.find((o) => o.state === 'refunded');
   const fits = open.filter((o) => !o.over), over = open.filter((o) => o.over);
   const buy = (o: WantOfferV) => async () => {
@@ -274,15 +279,22 @@ export function WantPage({ arg }: { arg: string }) {
       h('div', { class: 'spec-chips' }, ...w.want.itemOffered.additionalProperty.map((p) => h('span', { key: p.name, class: 'field-tag' }, h('span', { class: 'tag-k' }, `${p.name} `), p.value))),
       h('p', { class: 'spec-limit' }, [addr.data?.address ? `To ${addressLine(addr.data.address)}` : w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
     bought ? [
-      h('h3', { class: 'section-h', key: 'bh' }, bought.state === 'arrived' ? 'Arrived' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
+      h('h3', { class: 'section-h', key: 'bh' }, bought.state === 'arrived' ? 'Arrived' : bought.problem ? 'Problem reported' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
       card(bought, false),
-      h('p', { class: 'muted-line pad', key: 'bs' }, bought.state === 'arrived' ? `${shortShop(bought.seller.name)} is paid${bought.ended ? `: ${bought.ended}` : ''}.` : bought.shipped ? `${shortShop(bought.seller.name)}: “${bought.shipped.note}”` : `Paid by your house, held until you say it arrived.`),
-      bought.state === 'shipped' ? h('div', { class: 'pad', key: 'arr' }, h(Btn, { label: 'It arrived', icon: 'checkmark', expand: 'block', run: () => must({ kind: 'panel.want.arrived', want: w.want.id }), done: `${shortShop(bought.seller.name)} is paid` })) : null,
+      h('p', { class: 'muted-line pad', key: 'bs' }, bought.state === 'arrived' ? `${shop} is paid${bought.ended ? `: ${bought.ended}` : ''}.` : bought.shipped ? `${shop}${bought.shipped.again ? ' sent it again' : ''}: “${bought.shipped.note}”` : `Paid by your house, held until you say it arrived.`),
+      // What the owner said is wrong, and what holds the money now: nobody rules on a parcel, so it waits for the shop or for them.
+      bought.problem && bought.state === 'shipped' ? h('p', { class: 'muted-line pad want-problem', key: 'pr' }, `On ${day(bought.problem.at)} you told ${shop} ${bought.problem.code === 'not_arrived' ? 'it hasn\'t arrived' : 'it came damaged or wrong'}. ${bought.problem.held ? `Your ${money(bought.total)} stays held until ${shop} sends it again or refunds you.` : `${shop} can send it again or refund you.`}`) : null,
+      bought.state === 'shipped' ? h('div', { class: 'pad', key: 'arr' }, h(Btn, { label: bought.problem ? 'It arrived after all' : 'It arrived', icon: 'checkmark', expand: 'block', fill: bought.problem ? 'outline' : 'solid', run: () => must({ kind: 'panel.want.arrived', want: w.want.id }), done: `${shop} is paid` })) : null,
+      bought.state === 'shipped' && !bought.problem ? h('div', { class: 'pad want-report', key: 'rep' },
+        h(Btn, { label: 'Report a problem', fill: 'clear', color: 'medium', expand: 'block', pick: { header: 'What went wrong?', sub: `${shop} is told, and your ${money(bought.total)} stays held until it sends it again or refunds you.`, options: [{ text: 'It hasn\'t arrived', value: 'not_arrived' }, { text: 'It came damaged or wrong', value: 'not_right' }] },
+          run: (problem?: string) => must({ kind: 'panel.want.problem', want: w.want.id, problem }), done: `${shop} was told` }),
+        bought.payBy ? h('p', { class: 'muted-line', key: 'by' }, `If you say nothing, ${shop} is paid on ${day(bought.payBy)}.`) : null) : null,
     ] : [
       refunded ? h('p', { class: 'muted-line pad', key: 'rf' }, `Your ${money(refunded.total)} came back from ${shortShop(refunded.seller.name)}${refunded.ended ? `: ${refunded.ended}` : ''}.`) : null,
       h('h3', { class: 'section-h', key: 'oh' }, fits.length ? `Offers (${fits.length})` : 'Offers'),
       fits.length ? fits.map((o) => card(o, true)) : over.length ? h('p', { class: 'muted-line pad', key: 'none' }, `None within the most you'd pay yet. Shops look every few minutes.`)
-        : h(Empty, { key: 'none', icon: 'hourglass-outline', title: 'No offers yet', text: 'Shops look every few minutes. You get a notification when one offers.' }),
+        : gone ? null : h(Empty, { key: 'none', icon: 'hourglass-outline', title: 'No offers yet', text: 'Shops look every few minutes. You get a notification when one offers.' }),
+      gone ? h('p', { class: 'muted-line pad offers-gone', key: 'gone' }, `${gone} offer${gone === 1 ? '' : 's'} ran out: a shop's price holds for about a day. It can send it again.`) : null,
       over.length ? h('ion-accordion-group', { key: 'over', class: 'lake-accordion' }, h('ion-accordion', { value: 'over' }, h('ion-item', { slot: 'header' }, h('ion-label', {}, `${over.length} over the most you'd pay`)), h('div', { slot: 'content' }, ...over.map((o) => card(o, true))))) : null,
       h('div', { class: 'pad', key: 'stop' }, h(Btn, { label: 'Stop looking', fill: 'clear', color: 'medium', expand: 'block', run: async () => { await must({ kind: 'panel.want.close', id: w.want.id }); back('#inbox'); }, ask: { header: 'Stop looking?', sub: 'Shops stop offering.', button: 'Stop looking' } })),
     ]);

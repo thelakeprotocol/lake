@@ -382,6 +382,9 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .spec-desc { margin-top: 10px !important; }
 .spec-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
 .spec-limit { color: var(--lake-muted); font-size: 13px !important; margin-top: 8px !important; }
+.want-report { padding-top: 0; }
+.want-report .muted-line { text-align: center; font-size: 13.5px; margin: 2px 0 0; }
+.want-problem { color: var(--ion-text-color); }
 .offer-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
 .offer-shop { margin: 0 !important; }
 .offer-total { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--lake-text); }

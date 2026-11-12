@@ -6,7 +6,7 @@ import express from 'express';
 import type { WantOfferRecord, WantRecord } from './wants.js';
 import type { HouseRunner } from './duty-runner.js';
 import {
-  allowanceDraft, dutyDraft, postalAddress, postalAddressProblems, type PostalAddress, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
+  allowanceDraft, cartTerms, type CartMandate, dutyDraft, postalAddress, postalAddressProblems, type PostalAddress, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
 } from '@thelakeprotocol/core';
 
@@ -104,6 +104,8 @@ export interface PanelProvider {
   deliveryAddress?(): Promise<PostalAddress | null>;
   setDeliveryAddress?(a: PostalAddress | null): Promise<void>;
   wantArrived?(wantId: string): Promise<Record<string, any>>;
+  /** The owner says what was sent hasn't come, or came wrong: the money stays held and the shop is told. */
+  wantProblem?(wantId: string, code: string): Promise<Record<string, any>>;
   /** Answer a circle's vote on its rules, privately (SPEC §11.4c). */
   voteCircle?(tally: string, id: string, vote: string, yes: boolean): Promise<Record<string, any>>;
   fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
@@ -294,6 +296,15 @@ export const replyTo = (v: unknown): ReplyTo | null => {
   const digits = s.replace(/\D/g, '');
   if (/^\+?\(?[0-9][0-9 ().-]{4,22}[0-9]$/.test(s) && digits.length >= 7 && digits.length <= 15) return { kind: 'phone', value: `${s.startsWith('+') ? '+' : ''}${digits}` };
   return null;
+};
+
+/**
+ * When the shop is paid if the owner says nothing: the cart's time to answer, from when the shop said it sent it. Not while
+ * a problem is open: a disputed delivery isn't released by the clock.
+ */
+const payBy = (o: Pick<WantOfferRecord, 'state' | 'shipped' | 'problem'>, cart: CartMandate): { payBy?: string } => {
+  const hours = cartTerms(cart.contents).delivery?.review_hours;
+  return o.state === 'shipped' && o.shipped && !o.problem && hours ? { payBy: new Date(Date.parse(o.shipped.at) + hours * 3_600_000).toISOString() } : {};
 };
 
 /** A contact address from someone else's message: kept only if it's a web address (round 8). */
@@ -2516,6 +2527,7 @@ export class OwnerDesk {
             return { ok: true, address: tidy };
           },
           'panel.want.arrived': async () => panel.wantArrived?.(String((q as { want?: string }).want ?? '')) ?? { error: 'this house can\'t' },
+          'panel.want.problem': async () => panel.wantProblem?.(String((q as { want?: string }).want ?? ''), String((q as { problem?: string }).problem ?? '')) ?? { error: 'this house can\'t' },
           'panel.favour.pass': async () => panel.passFavour?.() ?? { kind: 'refused', problems: ['this house can\'t pass favours on'] },
           'panel.circle.dispute': async () => {
             const sug = this.suggestions.find((x) => x.id === String((q as { note?: string }).note ?? '') && (x.circle?.role === 'caller' || (x.circle?.role === 'ask' && x.circle.state === 'accepted')));
@@ -2688,7 +2700,7 @@ export class OwnerDesk {
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
-      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
+      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
       seen: forAssistant ? undefined : this.chatSeen,
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from) }; }),
       agenda: this.agenda,

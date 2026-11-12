@@ -206,13 +206,31 @@ async function sessionFetch(baseUrl: string, c: { clientId: string; clientSecret
     return session;
   };
   let session = await login();
-  return async (input, init) => {
+  return sentAgain(async (input, init) => {
     let res = await session.fetch(input as string, init);
     if (res.status === 401) {
       session = await login();
       res = await session.fetch(input as string, init);
     }
     return res;
+  });
+}
+
+/**
+ * A house reaches its pod over the network: a kept connection the other side has closed, a sign-in that didn't get
+ * through or a connection that didn't open in time throws before any answer comes. What is safe to send twice (anything
+ * but POST and PATCH) is sent again, twice at most, a moment apart (sandbox, 13 Nov: the owner signed a time on duty,
+ * the house's write of its status list threw "fetch failed", and the phone said "500").
+ */
+export function sentAgain(f: typeof fetch, waits = [300, 1500]): typeof fetch {
+  return async (input, init) => {
+    const safe = !/^(POST|PATCH)$/i.test(init?.method ?? 'GET');
+    for (let i = 0; ; i++) {
+      try { return await f(input, init); } catch (e) {
+        if (!safe || i >= waits.length) throw e;
+        await new Promise((r) => setTimeout(r, waits[i]));
+      }
+    }
   };
 }
 

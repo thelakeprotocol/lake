@@ -113,7 +113,6 @@ export function wantFit(w: Want, item: { label: string; props?: Record<string, s
   return { score: named < 0.5 ? 0 : Math.round((0.5 * named + 0.5 * (props ? matched.length / props : 1)) * 100) / 100, matched };
 }
 
-/** What an offer for a want says beside its signed cart: which want, the fit, the delivery, a picture if the seller has one. */
 /** A demo shop a pack brings (SPEC §6.8): it reads the Lake's wants and offers what fits from its catalogue. Invented. */
 export interface ShopExample {
   name: string;
@@ -126,6 +125,14 @@ export interface ShopExample {
   items: { sku: string; label: string; price: number; props?: Record<string, string>; keywords?: string[] }[];
 }
 
+/**
+ * What a buyer can say went wrong with something a shop said it sent (SPEC §6.8): it hasn't come, or what came is damaged
+ * or isn't what was offered. A choice, never free text: nothing a person typed decides anything.
+ */
+export const WANT_PROBLEMS = ['not_arrived', 'not_right'] as const;
+export type WantProblem = (typeof WANT_PROBLEMS)[number];
+
+/** What an offer for a want says beside its signed cart: which want, the fit, the delivery, a picture if the seller has one. */
 export interface WantOffer { want: string; cart: unknown; matched?: string[]; delivery?: string; note?: string; image?: string; menu?: MenuItem[] }
 
 /**

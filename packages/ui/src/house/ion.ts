@@ -84,11 +84,20 @@ export async function confirm(o: { header: string; button: string; sub?: string;
   return r.data === true;
 }
 
+/** One of a few answers, on a sheet from the bottom; nothing when it's cancelled. */
+export async function choose(o: { header: string; sub?: string; options: { text: string; value: string }[] }): Promise<string | undefined> {
+  const s = await actionSheetController.create({ header: o.header, subHeader: o.sub, buttons: [...o.options.map((x) => ({ text: x.text, data: x.value })), { text: 'Cancel', role: 'cancel' }] });
+  await s.present();
+  const r = await s.onDidDismiss();
+  return typeof r.data === 'string' ? r.data : undefined;
+}
+
 /**
  * A button that does something at the house: a spinner while it runs (the label stays, so it doesn't jump), an error as a
- * toast, and everything fetched again after. With `ask`, a confirm sheet first.
+ * toast, and everything fetched again after. With `ask`, a confirm sheet first; with `pick`, a sheet of answers, and the
+ * one chosen is given to `run`.
  */
-export function Btn(p: { label: Child; run: () => Promise<unknown>; fill?: 'solid' | 'outline' | 'clear'; color?: string; expand?: 'block' | 'full'; size?: 'small' | 'default' | 'large'; icon?: string; ask?: { header: string; button: string; sub?: string; destructive?: boolean }; done?: string; cls?: string; disabled?: boolean; label2?: string }) {
+export function Btn(p: { label: Child; run: (picked?: string) => Promise<unknown>; pick?: Parameters<typeof choose>[0]; fill?: 'solid' | 'outline' | 'clear'; color?: string; expand?: 'block' | 'full'; size?: 'small' | 'default' | 'large'; icon?: string; ask?: { header: string; button: string; sub?: string; destructive?: boolean }; done?: string; cls?: string; disabled?: boolean; label2?: string }) {
   const bump = useBump();
   const [busy, setBusy] = useState(false);
   return h('ion-button', {
@@ -99,8 +108,10 @@ export function Btn(p: { label: Child; run: () => Promise<unknown>; fill?: 'soli
     onClick: async () => {
       if (busy) return;
       if (p.ask && !(await confirm(p.ask))) return;
+      const picked = p.pick ? await choose(p.pick) : undefined;
+      if (p.pick && !picked) return;
       setBusy(true);
-      try { await p.run(); if (p.done) void toast(p.done); } catch (e) { void toast((e as Error).message, { color: 'danger', duration: 5000 }); } finally { setBusy(false); bump(); }
+      try { await p.run(picked); if (p.done) void toast(p.done); } catch (e) { void toast((e as Error).message, { color: 'danger', duration: 5000 }); } finally { setBusy(false); bump(); }
     },
   }, busy ? h('ion-spinner', { name: 'crescent', slot: 'start', class: 'btn-spin' }) : p.icon ? h('ion-icon', { name: p.icon, slot: 'start' }) : null, p.label);
 }

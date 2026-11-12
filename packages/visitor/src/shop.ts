@@ -10,7 +10,8 @@ import { ask, type Visitor } from './knock.js';
  * A demo shop that answers wants (SPEC §6.8). Every little while it reads the Lake's open wants; for each it hasn't
  * answered, it offers its closest item, if one fits well enough, as a cart it signs for that house, with its delivery.
  * Paid (held until the owner says it arrived), it "posts" it: a dispatch note to the house, filed with the payments
- * agent so the hold can release. It never sees what the person would pay; it offers its own price.
+ * agent so the hold can release. Told it hasn't arrived, it sends it again, once; told it came wrong, or that it hasn't
+ * arrived a second time, it refunds. It never sees what the person would pay; it offers its own price.
  */
 export interface ShopOptions {
   example: ShopExample;
@@ -31,6 +32,8 @@ export interface Shop { card: AgentCard; webId: string; offered: () => number; l
 
 /** How well an item must fit a want before the shop offers it. */
 const MIN_FIT = 0.5;
+/** How long its price for a want holds: a day, as most shops' agents sign. */
+const CART_MINUTES = 24 * 60;
 
 export async function startShop(o: ShopOptions): Promise<Shop> {
   const ex = o.example;
@@ -45,11 +48,13 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   const log = o.log ?? (() => {});
   const reply = async (body: Record<string, unknown>): Promise<LakeData> => ({ lake: '0.1', card, envelope: (await signMessage(body, id, { iss: webId })) as LakeData['envelope'] });
   const replay = new ReplayGuard();
-  // Wants answered (house + want), and carts sold, waiting to be paid.
-  const answered = new Set<string>();
-  const sold = new Map<string, { house: string; want: string; label: string }>();
-  // Carts paid for and held: where each is held, to give the money back if it can't be sent after all.
-  const paid = new Map<string, { holder: string; hold: string }>();
+  // Wants answered (house + want), each until our cart for it runs out, and carts sold, waiting to be paid.
+  const answered = new Map<string, number>();
+  type Sale = { house: string; buyer: string; want: string; label: string };
+  const sold = new Map<string, Sale>();
+  // Carts paid for: where each is held (to give the money back if it can't be sent after all), where it goes, and how
+  // often it was sent again after the buyer said it hadn't arrived.
+  const paid = new Map<string, Sale & { holder: string; hold: string; to?: PostalAddress; again: number; problemAt?: string }>();
   let count = 0;
 
   async function cartParties(): Promise<CartParty[]> {
@@ -72,9 +77,9 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     const qty = w.eligibleQuantity?.value ?? 1;
     const label = `${qty} × ${best.item.label}`;
     const items = [{ label, amount: { currency: ex.currency, value: Math.round(best.item.price * qty * 100) / 100 } }, ...(ex.delivery.fee > 0 ? [{ label: `Delivery, ${ex.delivery.days} day${ex.delivery.days === 1 ? '' : 's'}`, amount: { currency: ex.currency, value: ex.delivery.fee } }] : [])];
-    const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: ex.name, buyerWebId: house.webId, items, minutes: 24 * 60, payments: await cartParties(), delivery: { within_hours: Math.max(24, ex.delivery.days * 24), review_hours: 168 } });
+    const cart = await signCart({ seller: id, sellerWebId: webId, sellerName: ex.name, buyerWebId: house.webId, items, minutes: CART_MINUTES, payments: await cartParties(), delivery: { within_hours: Math.max(24, ex.delivery.days * 24), review_hours: 168 } });
     const { reply: r } = await ask(house.url, me, { kind: 'want.offer', want: w.id, cart, matched: best.matched, delivery: ex.delivery.days === 1 ? 'next day' : `${ex.delivery.days} days${ex.delivery.fee ? '' : ', free'}` });
-    if (r.kind === 'want.received') { sold.set(cart.contents.id, { house: house.url, want: w.id, label }); count++; log(`${ex.name}: offered ${label} for "${w.name}"`); return true; }
+    if (r.kind === 'want.received') { sold.set(cart.contents.id, { house: house.url, buyer: house.webId, want: w.id, label }); count++; log(`${ex.name}: offered ${label} for "${w.name}"`); return true; }
     log(`${ex.name}: offer for "${w.name}" refused: ${(r.problems ?? [r.why ?? r.kind]).join('; ')}`);
     return false;
   }
@@ -85,28 +90,41 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     let n = 0;
     for (const { want, house } of wants) {
       const key = `${house.webId}|${want.id}`;
-      if (answered.has(key) || !house.url) continue;
-      answered.add(key);
+      // Once per cart: when ours has nearly run out and the want is still open, we offer again (round 21: after a day every
+      // offer on a want had run out, and no shop came back).
+      if ((answered.get(key) ?? 0) > Date.now() || !house.url) continue;
+      answered.set(key, Date.now() + (CART_MINUTES - 60) * 60_000);
       if (await offer(want, house).catch((e: Error) => { answered.delete(key); log(`${ex.name}: ${e.message}`); return false; })) n++;
     }
     return n;
   }
 
-  /** Paid, held: we post it, tell the house with a dispatch note, and file the note's digest with the payments agent. */
-  async function ship(cartId: string, s: { house: string; want: string; label: string }, receipt: string, to?: PostalAddress) {
+  /** Paid: where the money is held, from the receipt, kept with where it goes. */
+  async function takePaid(cartId: string, s: Sale, receipt: string, to?: PostalAddress) {
     const vc = JSON.parse(Buffer.from(receipt.split('.')[1] ?? '', 'base64url').toString()) as { iss?: string; issuer?: string | { id?: string }; credentialSubject?: { settlement?: string; settlementId?: string } };
     const issuer = typeof vc.issuer === 'string' ? vc.issuer : (vc.issuer?.id ?? vc.iss);
-    const tracking = `DEMO-${createHash('sha256').update(cartId).digest('hex').slice(0, 8).toUpperCase()}`;
-    const note = `Posted${to ? ` to ${[to.addressLocality, to.addressRegion, to.postalCode].filter(Boolean).join(' ')}` : ''}: ${s.label}. Tracking ${tracking} (a demo: nothing is really sent). About ${ex.delivery.days === 1 ? 'a day' : `${ex.delivery.days} days`}.`;
+    const held = vc.credentialSubject?.settlement === 'held' && vc.credentialSubject.settlementId ? vc.credentialSubject.settlementId : '';
+    const holder = held ? ((await cartParties()).find((x) => x.webId === issuer)?.url ?? `${o.payments}/a2a`) : '';
+    paid.set(cartId, { ...s, holder, hold: held, ...(to ? { to } : {}), again: 0 });
+  }
+
+  /**
+   * We post it, tell the house with a dispatch note, and file the note's digest with the payments agent. Sent again after
+   * the buyer said it hadn't arrived, it is a new delivery there (a revision): that ends the buyer's dispute and starts
+   * their time to answer again.
+   */
+  async function ship(cartId: string) {
+    const p = paid.get(cartId);
+    if (!p) return;
+    const tracking = `DEMO-${createHash('sha256').update(`${cartId}${p.again || ''}`).digest('hex').slice(0, 8).toUpperCase()}`;
+    const where = p.to ? ` to ${[p.to.addressLocality, p.to.addressRegion, p.to.postalCode].filter(Boolean).join(' ')}` : '';
+    const note = p.again ? `Sorry about that. Sent again${where}: ${p.label}. New tracking ${tracking} (a demo: nothing is really sent).`
+      : `Posted${where}: ${p.label}. Tracking ${tracking} (a demo: nothing is really sent). About ${ex.delivery.days === 1 ? 'a day' : `${ex.delivery.days} days`}.`;
     const sha256 = createHash('sha256').update(note).digest('hex');
     // Filed with the payments agent first, then the house told: a house that can't be reached doesn't cost the delivery.
-    if (vc.credentialSubject?.settlement === 'held' && vc.credentialSubject.settlementId) {
-      const holder = (await cartParties()).find((x) => x.webId === issuer)?.url ?? `${o.payments}/a2a`;
-      paid.set(cartId, { holder, hold: vc.credentialSubject.settlementId });
-      await ask(holder, me, { kind: 'delivered', hold: vc.credentialSubject.settlementId, sha256 });
-    }
-    await ask(s.house, me, { kind: 'want.shipped', want: s.want, cart: cartId, note, sha256 }).catch((e: Error) => log(`${ex.name}: shipped, but the house wasn't reached: ${e.message}`));
-    sold.delete(cartId);
+    if (p.hold) await ask(p.holder, me, { kind: 'delivered', hold: p.hold, sha256 });
+    await ask(p.house, me, { kind: 'want.shipped', want: p.want, cart: cartId, note, sha256 }).catch((e: Error) => log(`${ex.name}: shipped, but the house wasn't reached: ${e.message}`));
+    log(`${ex.name}: ${p.again ? 'sent again' : 'posted'} ${p.label}`);
   }
 
   const app = lakeAgentApp(card, async (data) => {
@@ -119,8 +137,26 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
       // Where to send it comes with the purchase, for this order only (a real shop would keep it only as long as the law asks).
       const to = postalAddressProblems(m.deliverTo).length ? undefined : (m.deliverTo as PostalAddress);
       if (s && credential && !to) return reply({ kind: 'received', note: 'thank you: we need a delivery address to post it (send it with the purchase)' });
-      if (s && credential) setTimeout(() => void ship(String(m.cart), s, credential, to).catch((e: Error) => log(`${ex.name}: could not post it: ${e.message}`)), 500);
+      // Taken once: a house sends its receipt until it lands, and the same one twice is one purchase.
+      if (s && credential) {
+        sold.delete(String(m.cart));
+        setTimeout(() => void takePaid(String(m.cart), s, credential, to).then(() => ship(String(m.cart))).catch((e: Error) => log(`${ex.name}: could not post it: ${e.message}`)), 500);
+      }
       return reply({ kind: 'received', note: s ? 'thank you: it goes in the post today' : 'thank you' });
+    }
+    // The buyer's house says something is wrong with what we sent (only that house, about a cart it paid us for). It hasn't
+    // arrived: we send it again, once. It came wrong, or still hasn't arrived: the money goes back.
+    if (m.kind === 'want.problem') {
+      const cartId = String(m.cart ?? ''), p = paid.get(cartId);
+      if (!p || p.buyer !== v.profile.webId) return reply({ kind: 'refused', problems: ['no purchase of yours with that cart is held for us'] });
+      const at = String(m.at ?? '');
+      if (p.problemAt === at) return reply({ kind: 'received', note: 'we have this one already' });
+      p.problemAt = at;
+      const again = m.problem === 'not_arrived' && !p.again;
+      if (again) p.again = 1;
+      // A few seconds on: the owner sees that the shop was told before they see its answer.
+      setTimeout(() => void (again ? ship(cartId) : refund(cartId)).catch((e: Error) => log(`${ex.name}: could not answer a problem: ${e.message}`)), 4000);
+      return reply({ kind: 'received', note: again ? 'sorry about that: we are sending it again today' : 'sorry about that: we are refunding it' });
     }
     return reply({ kind: 'rejected', code: 'malformed', why: 'we answer wants: tell your human\'s house what you are looking for (lake_want), and we offer if we have it' });
   }, id, { replay });
@@ -128,7 +164,7 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   // The whole of it back, by the payments agent that holds it: the buyer's house hears from that agent, with a signed receipt.
   async function refund(cartId = [...paid.keys()].at(-1)) {
     const x = cartId ? paid.get(cartId) : undefined;
-    if (!x) return false;
+    if (!x?.hold) return false;
     const { reply: r } = await ask(x.holder, me, { kind: 'void', hold: x.hold });
     if (r.kind !== 'voided') { log(`${ex.name}: could not refund ${cartId}: ${(r.problems ?? [r.kind]).join('; ')}`); return false; }
     paid.delete(cartId!);

@@ -383,8 +383,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       if (p.kind === 'want.status') return wants.statusFor(String(p.want ?? ''), profile.webId);
       const r = await wants.shippedIn(p, profile);
       if (!r.ok) return { kind: 'refused', problems: [r.why] };
-      note('want.shipped', `${r.offer.seller.name} sent "${r.want.name}": ${r.offer.shipped?.note ?? ''}`);
-      desk.notifyOwner('want', `${r.offer.seller.name.slice(0, 40)} sent your "${r.want.name.slice(0, 50)}".`, `./#want=${r.want.id}`);
+      if ('same' in r) return { kind: 'want.noted', want: r.want.id };
+      note('want.shipped', `${r.offer.seller.name} ${r.newer ? 'wrote more about' : 'sent'} "${r.want.name}"${r.again ? ' again' : ''}: ${r.offer.shipped?.note ?? ''}`);
+      if (!r.newer) desk.notifyOwner('want', `${r.offer.seller.name.slice(0, 40)} sent your "${r.want.name.slice(0, 50)}"${r.again ? ' again' : ''}.`, `./#want=${r.want.id}`);
       desk.touch();
       return { kind: 'want.noted', want: r.want.id };
     },
@@ -1003,6 +1004,16 @@ function panelFor(x: {
       const out = await x.wants.arrived(wantId, { payments, send });
       if (!('error' in out)) x.note('want.arrived', `"${r!.want.name}" arrived: ${offer.seller.name} is paid`);
       return out;
+    },
+    async wantProblem(wantId, code) {
+      const r = x.wants.find(wantId), offer = r?.offers.find((o) => o.id === r.bought);
+      if (!offer) return { error: 'nothing bought for that want' };
+      const payments = await paymentsFor(offer.cart);
+      if (!payments) return { error: 'no payments agent on this Lake' };
+      const out = await x.wants.problem(wantId, code, { payments, send });
+      if ('error' in out) return out;
+      x.note('want.problem', `You told ${offer.seller.name} that "${r!.want.name}" ${code === 'not_arrived' ? 'hasn\'t arrived' : 'came damaged or wrong'}${out.offer.problem?.held ? ': your money stays held until it sends it again or refunds you' : ''}`);
+      return { ok: true, want: r!.want.id, held: !!out.offer.problem?.held };
     },
     async passFavour() {
       const dir = `${owner.podRoot}wallet/favours/`;

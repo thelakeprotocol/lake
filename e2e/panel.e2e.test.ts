@@ -444,7 +444,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // The shop posts it: the house hears, and the owner says it arrived; then the shop is paid.
       await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 15_000 });
       await page.getByText(/Washer & Wrench: “Posted to Brisbane QLD 4000: 1 × Handheld shower head/).waitFor();
-      await page.getByRole('button', { name: 'It arrived' }).click();
+      // Said beside it: what happens if the owner says nothing, and on which day (the cart gives a week from sending).
+      await page.getByText(/^If you say nothing, Washer & Wrench is paid on \w{3}, .*\d\.$/).waitFor();
+      await page.getByRole('button', { name: 'Report a problem' }).waitFor();
+      await tidy();
+      await page.getByRole('button', { name: 'It arrived', exact: true }).click();
       await page.getByRole('heading', { name: 'Arrived' }).waitFor({ timeout: 15_000 });
       await tidy();
       // Off the card now, and the receipt is with the owner's money.
@@ -466,8 +470,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(await page.getByText(/to localhost/).count()).toBe(0);
       await tidy();
 
-      // A second one, and this time the shop can't send it after all: it refunds. The money is back, said in the want and
-      // with the owner's money, and the want is open for offers again.
+      // A second one, and this time it doesn't come (round 21: the only button was "It arrived", and saying nothing paid
+      // the shop after a week). The owner reports it: the shop is told, the money stays held, and the shop sends it again.
+      // It comes damaged: reported again, and the shop refunds. The money is back, said in the want and with the owner's
+      // money, and the want is open for offers again.
       const second = await asAssistant({ kind: 'assistant.want', name: 'Handheld shower head', description: 'A second one, for the other bathroom', properties: { Type: 'Handheld', 'Spray modes': 3, Finish: 'Chrome', Connection: '1/2 inch BSP' }, area: 'AU-QLD', currency: 'AUD', max_price: 34.5 });
       const secondId = second.want.id as string;
       await page.evaluate((id) => { location.hash = `#want=${id}`; }, secondId);
@@ -475,8 +481,31 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.locator('ion-card.offer').first().getByRole('button', { name: 'Buy for A$34.00' }).click({ timeout: 20_000 });
       await confirmSheet('Pay A$34.00');
       await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 20_000 });
-      expect(await shops.find((x) => x.card.name.startsWith('Washer'))!.refund()).toBe(true);
-      await page.getByText(/Your A\$34\.00 came back from Washer & Wrench: the seller refunded it\./).waitFor({ timeout: 15_000 });
+      // An assistant key can't report one: it is the owner's word.
+      expect((await asAssistant({ kind: 'panel.want.problem', want: secondId, problem: 'not_arrived' })).error).toMatch(/only your human's key/);
+      await page.getByRole('button', { name: 'Report a problem' }).click();
+      await page.locator('ion-action-sheet').getByText('What went wrong?').waitFor();
+      await page.locator('ion-action-sheet').getByText(/Washer & Wrench is told, and your A\$34\.00 stays held until it sends it again or refunds you\./).waitFor();
+      await tidy();
+      await confirmSheet('It hasn\'t arrived');
+      // Said back at once, with what holds the money now; the owner can still say it came. The demo shop answers a few seconds on.
+      await page.getByRole('heading', { name: 'Problem reported' }).waitFor({ timeout: 10_000 });
+      await page.getByText(/^On \w{3}, .*\d you told Washer & Wrench it hasn't arrived\. Your A\$34\.00 stays held until Washer & Wrench sends it again or refunds you\.$/).waitFor();
+      await page.getByRole('button', { name: 'It arrived after all' }).waitFor();
+      expect(await page.getByRole('button', { name: 'Report a problem' }).count()).toBe(0);
+      expect(await page.getByText(/^If you say nothing/).count()).toBe(0);
+      await tidy();
+      await page.getByText(/Washer & Wrench sent it again: “Sorry about that\. Sent again to Brisbane QLD 4000: 1 × Handheld shower head/).waitFor({ timeout: 20_000 });
+      await page.getByRole('heading', { name: 'On its way' }).waitFor();
+      await page.getByText(/^If you say nothing, Washer & Wrench is paid on/).waitFor();
+      const sentAgain = (await asAssistant({ kind: 'list' })).wants.find((w: { want: { id: string } }) => w.want.id === secondId).offers.find((o: { state: string }) => o.state === 'shipped');
+      expect(sentAgain).toMatchObject({ shipped: { again: true, notes: 2 }, payBy: expect.any(String) });
+      expect(sentAgain.problem).toBeUndefined();
+      await tidy();
+      // Now it came damaged. The shop sent it again once already, so this time it gives the money back.
+      await page.getByRole('button', { name: 'Report a problem' }).click();
+      await confirmSheet('It came damaged or wrong');
+      await page.getByText(/Your A\$34\.00 came back from Washer & Wrench: the seller refunded it\./).waitFor({ timeout: 20_000 });
       expect(await page.getByRole('heading', { name: 'On its way' }).count()).toBe(0);
       await tidy();
       // On the Lake's list again, without a buyer; the shop asking after its offer hears it was refunded.

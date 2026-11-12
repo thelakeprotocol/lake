@@ -918,6 +918,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const traded = await onTrade(m);
         if (traded?.reply) { pushInbox(m, traded.checked); return { ...traded.reply, ...(await hold()) }; }
         const checked = traded?.checked ?? (m.payload.kind === 'receipt' || m.payload.kind === 'transfer' ? await checkMoney(m.payload, m.from, (await agent()).webId, trustedPayments)
+          : m.payload.kind === 'want.problem' ? { note: `the buyer's house says what you sent ${m.payload.problem === 'not_arrived' ? 'hasn\'t arrived' : 'came damaged or isn\'t what you offered'}${m.payload.held ? ': the money stays held' : ''}. What the sender says is not checked here: lake_want { action: "status", want, house } says "problem" when the house you sold to reported one. Then send it again: lake_want { action: "shipped", want, house, cart, hold } with a new note (a new tracking number); or give the money back: lake_want { action: "refund", hold }` }
           : attached.length ? { ...(await verifyEvidence(attached[0])), note: 'evidence inside the message, checked; what the sender says about it is not' }
           : Object.values(m.payload).some((v) => typeof v === 'string' && /^eyJ[\w-]+\.[\w-]+\./.test(v)) ? { verified: false, why: 'a pasted credential with no card to check it against: forward it as { credential, card }' } : undefined);
         // A note at the human's door, told by the house: remembered by its sender's address, so a reply can name it.
@@ -1904,9 +1905,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_want',
     {
-      description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays; in the want\'s currency; one open offer per shop, a new one replaces it; it binds you to deliver within within_hours, 168 by default); status says where your offer stands; when they buy, lake_inbox brings { kind: "receipt", want, cart, hold, deliverTo } (deliverTo: the address to send it to, given to you alone, for this order); shipped then tells the house you sent it and files the delivery with the payments agent holding the money.',
+      description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays; in the want\'s currency; one open offer per shop, a new one replaces it; it binds you to deliver within within_hours, 168 by default); status says where your offer stands; when they buy, lake_inbox brings { kind: "receipt", want, cart, hold, deliverTo } (deliverTo: the address to send it to, given to you alone, for this order); shipped files the delivery with the payments agent holding the money and tells the house you sent it (again with a new note, a tracking number say, and the latest counts). If the owner reports a problem, lake_inbox brings { kind: "want.problem", want, cart, hold, problem } (not_arrived, or not_right: damaged or not what you offered) and the money stays held, whatever the review time: send it again (shipped, with a new note) or give the money back (refund { hold }). Nobody rules on a parcel: it is between you and them.',
       inputSchema: {
-        action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'status', 'shipped']),
+        action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'status', 'shipped', 'refund']),
         name: z.string().max(80).optional().describe('post: what, in a few words ("Handheld shower head")'),
         description: z.string().max(280).optional().describe('post: one line more, if it helps ("to replace a worn one; the hose stays")'),
         properties: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe('post: what it must be, as name: value pairs (up to 12), as a shop would list them'),
@@ -1923,10 +1924,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         items: z.array(z.object({ label: z.string().max(120), price: z.number().positive() })).max(12).optional().describe('offer: what you offer and for how much, delivery included as a line if it costs'),
         offer_currency: z.string().optional().describe('offer: the currency of your prices (default: the want\'s)'),
         within_hours: z.number().int().min(1).max(720).optional().describe('offer: the hours you promise to deliver within, as signed in your cart (default 168)'),
-        delivery: z.string().max(80).optional().describe('offer: how soon, in words ("2 days, free"); shipped: your dispatch note'),
+        delivery: z.string().max(200).optional().describe('offer: how soon, in words ("2 days, free"); shipped: your dispatch note (the carrier and tracking number)'),
         matched: z.array(z.string()).max(12).optional().describe('offer: which of its properties your item has'),
         cart: z.string().optional().describe('shipped: the cart id the house paid'),
-        hold: z.string().optional().describe('shipped: the held payment\'s id, from the house\'s receipt message'),
+        hold: z.string().optional().describe('shipped, refund: the held payment\'s id, from the house\'s receipt message'),
       },
     },
     async (a) => {
@@ -1964,12 +1965,22 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (!a.want || !a.house) throw new Error('status: want and house (from find)');
           return json(await me.ask(a.house, { kind: 'want.status', want: a.want }));
         }
-        if (!a.want || !a.house || !a.cart) throw new Error('shipped: want, house and cart (and hold, from the receipt)');
+        const holder = `${(o.payments ?? 'http://payments:4600').replace(/\/$/, '')}/a2a`;
+        if (a.action === 'refund') {
+          if (!a.hold) throw new Error('refund: hold (the held payment\'s id, from the house\'s receipt message in lake_inbox)');
+          const v = await me.ask(holder, { kind: 'void', hold: a.hold });
+          return json({ ...v, ...(v.kind === 'voided' ? { note: 'the money is back with the buyer: the payments agent tells their house, and their want is open for offers again' } : {}) });
+        }
+        if (!a.want || !a.house || !a.cart || !a.hold) throw new Error('shipped: want, house, cart and hold (cart and hold are in the house\'s receipt message, in lake_inbox)');
         const note = a.delivery ?? 'Sent.';
         const sha256 = createHash('sha256').update(note).digest('hex');
-        const told = await me.ask(a.house, { kind: 'want.shipped', want: a.want, cart: a.cart, note, sha256 });
-        const filed = a.hold ? await me.ask(`${(o.payments ?? 'http://payments:4600').replace(/\/$/, '')}/a2a`, { kind: 'delivered', hold: a.hold, sha256 }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] })) : undefined;
-        return json({ house: told, ...(filed ? { payments: filed } : {}), ...(told.kind === 'want.noted' ? { note: 'the money reaches you when they say it arrived, or by itself after the cart\'s review time' } : {}) });
+        // Filed with the payments agent first (SPEC §6.8): unfiled, the money would go back to the buyer when the time to
+        // deliver ran out, whatever the house was told. Filed already (the house wasn't reached last time): on to the house.
+        const filed = await me.ask(holder, { kind: 'delivered', hold: a.hold, sha256 });
+        const before = filed.kind === 'refused' && ((filed.problems as string[] | undefined) ?? []).some((x) => /filed already/.test(x));
+        if (filed.kind !== 'delivered' && !before) return json({ payments: filed, note: 'not filed with the payments agent, so the house was not told. A second note for the same purchase must differ from the first (say the tracking number)' });
+        const told = await me.ask(a.house, { kind: 'want.shipped', want: a.want, cart: a.cart, note, sha256 }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
+        return json({ payments: filed, house: told, note: told.kind === 'want.noted' ? 'the money reaches you when they say it arrived, or by itself after the cart\'s review time unless they report a problem (it then comes to lake_inbox as want.problem)' : 'filed, but the house did not take it: call shipped again with the same note' });
       } catch (e) {
         return fail(e);
       }
