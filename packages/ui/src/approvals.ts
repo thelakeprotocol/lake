@@ -23,7 +23,7 @@ import { ConnectAI, Pair, connecting } from './house/pair';
 
 const TABS: { tab: Tab; label: string; icon: string }[] = [
   { tab: 'chats', label: 'Chats', icon: 'chatbubbles' },
-  { tab: 'inbox', label: 'Inbox', icon: 'file-tray' },
+  { tab: 'inbox', label: 'Today', icon: 'today' },
   { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];

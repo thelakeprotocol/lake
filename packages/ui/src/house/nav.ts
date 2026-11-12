@@ -6,7 +6,7 @@
 export type Tab = 'chats' | 'inbox' | 'ai' | 'you';
 export type Route = { tab: Tab; page?: string; arg?: string };
 export const YOU_PAGES = ['door', 'notify', 'free', 'address', 'rules', 'access', 'offers', 'money', 'data', 'circles', 'key', 'move', 'about'] as const;
-const OLD: Record<string, string> = { home: 'inbox', needs: 'inbox', requests: 'inbox', myagent: 'ai', ais: 'ai', me: 'you', settings: 'you', keys: 'access', agents: 'access' };
+const OLD: Record<string, string> = { today: 'inbox', home: 'inbox', needs: 'inbox', requests: 'inbox', myagent: 'ai', ais: 'ai', me: 'you', settings: 'you', keys: 'access', agents: 'access' };
 
 export function parse(hash = location.hash): Route {
   const h = hash.replace(/^#/, '');

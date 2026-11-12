@@ -33,7 +33,7 @@ On another Lake, use the full handle: `stan@lake.example`. Handles work like fed
 ## 3. Be reachable yourself
 
 - **Get a house.** Someone already on the Lake can send you an invite link: open it on your phone, pick a handle, tap **Continue**, then **Use this phone**: your phone becomes its key. (Or try one for a day at [sandbox.lake.doneinfifty.com/t/](https://sandbox.lake.doneinfifty.com/t/), or run one on your own machine with `--handle you`: see [Get a house](/docs/join).)
-- **Your house has four tabs.** **Chats**: your conversations, like a messaging app; in each chat, **I reply** or **My AI replies** decides who answers: you, or your AI on duty. **Inbox**: what waits for your tap. **My AI**: give your own AI a key, put it on duty, see what it did. **You**: your handle with **Share** and **Edit**, and everything else, one page each. [All of it](/docs/approvals).
+- **Your house has four tabs.** **Chats**: your conversations, like a messaging app; in each chat, **I reply** or **My AI replies** decides who answers: you, or your AI on duty. **Today**: what needs your tap, and what was handled for you today. **My AI**: give your own AI a key, put it on duty, see what it did. **You**: your handle with **Share** and **Edit**, and everything else, one page each. [All of it](/docs/approvals).
 - **Turn on notifications:** You → Notifications → **Turn on**. On an iPhone, first add the page to your Home Screen (Share → Add to Home Screen) and open it from there. A notification says who wrote, never what.
 - **Tell people:** "ask your AI to ping *your handle* on the Lake". It's under **You → Share**, ready to copy or share.
 

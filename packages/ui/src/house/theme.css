@@ -480,3 +480,10 @@ ion-checkbox::part(label) { white-space: normal; }
 .notes .clear-notes { margin: 4px 8px 8px; }
 .sug-text.clamp { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
 .more-link { font-size: 14px; margin-top: 2px; }
+
+/* Today (12 Nov): all clear, and what was handled for you */
+.all-clear { display: flex; gap: 12px; align-items: center; margin: 6px 16px 4px; padding: 14px 16px; border-radius: 18px; background: var(--lake-mint-soft); }
+.all-clear > ion-icon { font-size: 26px; color: var(--lake-mint); flex: none; }
+.all-clear b { display: block; font-size: 16px; }
+.all-clear p { margin: 2px 0 0; color: var(--lake-muted); font-size: 13.5px; }
+.handled-row h3 { white-space: normal !important; font-weight: 600 !important; }

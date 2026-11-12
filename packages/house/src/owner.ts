@@ -401,6 +401,53 @@ export class OwnerDesk {
   }
 
   /** Back to nobody's: keys revoked, requests dropped, owner forgotten, house reset. Anyone can claim it again. */
+  /**
+   * What was handled for the owner since their local midnight, one line per kind, from facts the house holds (its own
+   * events, the AI on duty's log, receipts, shops' offers): no model writes any of it. Who did it is always said.
+   */
+  async today(tzOffset: number) {
+    const midnight = (() => { const d = new Date(Date.now() - tzOffset * 60_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() + tzOffset * 60_000; })();
+    const after = (iso?: string) => !!iso && Date.parse(iso) >= midnight;
+    type Line = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string };
+    const lines: Line[] = [];
+    const panel = this.o.panel;
+    if (!panel) return { since: new Date(midnight).toISOString(), lines };
+    const events = (panel.activity(new Date(midnight).toISOString()) as unknown as { at: string; kind: string; subject?: string; data?: Record<string, unknown> }[]).filter((e) => after(e.at));
+    const names = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? ` (${n.slice(0, 2).join(', ')}${n.length > 2 ? ` and ${n.length - 2} more` : ''})` : ''; };
+    const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+    for (const [d, word] of [['decline', 'no'], ['join', 'yes']] as const) {
+      const es = events.filter((e) => e.kind === 'decision' && e.data?.decision === d);
+      if (es.length) lines.push({ by: 'rules', text: `Said ${word} to ${plural(es.length, 'request')}${names(es)}`, at: es[0]!.at, to: '#access' });
+    }
+    const studies = events.filter((e) => e.kind === 'compute.done');
+    if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')}, as unreadable shares`, at: studies[0]!.at, to: '#money' });
+    const blocked = events.filter((e) => e.kind === 'attack.blocked');
+    if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that weren't what they claimed`, at: blocked[0]!.at, to: '#about' });
+    // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
+    for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
+      const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';
+      const what = e.action === 'reply' ? `Replied to ${who}` : e.action === 'book' ? `Booked ${e.text ? `"${e.text.slice(0, 60)}"` : 'a time'}${e.to?.name ? ` with ${who}` : ''}` : e.action === 'deliver' ? `Delivered an order to ${who}` : e.action === 'block' ? `Blocked ${e.to?.url ?? 'a sender'}` : `Left you a note`;
+      lines.push({ by: 'ai', text: `${what}${e.undone ? ' (undone)' : ''}`, at: e.at, to: '#ai', ...(e.undo && !e.undone ? { undo: e.id } : {}) });
+    }
+    // Money in: amounts by currency, held ones said so.
+    const money = (await panel.money().catch(() => null)) as { receipts?: { amount: number; currency: string; at: string; settlement?: string }[] } | null;
+    const inToday = (money?.receipts ?? []).filter((r) => after(r.at) && r.settlement !== 'voided');
+    if (inToday.length) {
+      const by = new Map<string, number>();
+      for (const r of inToday) by.set(r.currency, Math.round(((by.get(r.currency) ?? 0) + r.amount) * 100) / 100);
+      const sums = [...by].map(([c, v]) => (c === 'USD' ? `$${v}` : c === 'AUD' ? `A$${v}` : `${c} ${v}`)).join(' and ');
+      const held = inToday.filter((r) => r.settlement === 'held').length;
+      lines.push({ by: 'money', text: `${sums} came in (${plural(inToday.length, 'payment')}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money' });
+    }
+    // Shops: offers for what the owner is looking for.
+    for (const w of panel.wantsList?.() ?? []) {
+      const fresh = w.offers.filter((x) => after(x.at));
+      if (fresh.length && !w.closed) lines.push({ by: 'shops', text: `${plural(fresh.length, 'shop')} offered on "${w.want.name}"`, at: fresh[fresh.length - 1]!.at, to: `#want=${encodeURIComponent(w.want.id)}` });
+    }
+    lines.sort((a, b) => b.at.localeCompare(a.at));
+    return { since: new Date(midnight).toISOString(), lines };
+  }
+
   async release() {
     // The next claimant gets none of this one's model key, AI on duty or its counts (round 8: a key outlived its tenancy).
     await this.o.dutyRunner?.forget();
@@ -1830,6 +1877,7 @@ export class OwnerDesk {
           'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}), ...(typeof (q as { handle?: unknown }).handle === 'string' ? { handle: String((q as { handle: string }).handle) } : {}) }) ?? { error: 'this house has no door' },
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity((q as { since?: number | string }).since),
+          'panel.today': async () => this.today(Number((q as { tz_offset?: number }).tz_offset) || 0),
           'panel.agents': async () => panel.agents(),
           'panel.money': () => panel.money(),
           'panel.consents': () => panel.consents(),

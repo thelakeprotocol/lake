@@ -1,8 +1,8 @@
 import { useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { adviceOf, doorOf, duration, grantFor, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type Note, type Request } from './logic';
-import { goTab, push } from './nav';
+import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type Note, type Request } from './logic';
+import { push } from './nav';
 
 // Inbox: everything that waits for your tap, newest first. Data requests your rules left to you, your AI's questions and
 // suggestions, app sign-ins, your circle's calls; and what's coming up.
@@ -10,19 +10,31 @@ import { goTab, push } from './nav';
 /** What the last sign-in answer did, kept past the refetch that takes the request away. */
 let connectedNote = '';
 
+type TodayLine = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string };
+const BY: Record<TodayLine['by'], { label: string; icon: string; tint: string }> = {
+  rules: { label: 'Your rules', icon: 'list-outline', tint: 'mint' },
+  ai: { label: 'Your AI', icon: 'sparkles-outline', tint: 'violet' },
+  house: { label: 'Your house', icon: 'shield-checkmark-outline', tint: 'blue' },
+  money: { label: 'Money', icon: 'wallet-outline', tint: 'mint' },
+  shops: { label: 'Shops', icon: 'pricetags-outline', tint: 'amber' },
+};
+
+/**
+ * Today: what needs you, on top, and what was handled for you since this morning, one line each, saying who did it
+ * (your rules, your AI, your house) and when, with Undo where it can be undone (12 Nov: outcomes, not screens).
+ */
 export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const list = useHouse<ListView>({ kind: 'list' });
-  const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  const today = useHouse<{ since: string; lines: TodayLine[] }>({ kind: 'panel.today', tz_offset: new Date().getTimezoneOffset() });
   const v = list.data;
-  if (!v) return h(Page, { title: 'Inbox', big: true, status, footer: tabbar }, h(Failed, { error: list.error }));
+  if (!v) return h(Page, { title: 'Today', big: true, status, footer: tabbar }, h(Failed, { error: list.error }));
   const groups = sameAsks(v.requests);
   const decide = v.suggestions.filter(needsDecision), notes = v.suggestions.filter((x) => !needsDecision(x));
   const waiting = v.assistants.filter((a) => a.waiting);
   const any = groups.length || decide.length || (v.connects ?? []).length || waiting.length || connectedNote;
-  // The morning: what your AI on duty did is on My AI; here, one line that it did something.
-  const handled = (duty.data?.duties ?? []).reduce((t, d) => t + d.summary.handled, 0);
-  return h(Page, { title: 'Inbox', big: true, status, footer: tabbar },
-    handled ? h(Section, { key: 'night' }, h(Row, { icon: 'moon-outline', tint: 'violet', label: `Your AI handled ${plural(handled, 'thing')} while you were away`, sub: 'See what, with Undo', onClick: () => goTab('ai') })) : null,
+  const lines = today.data?.lines ?? [];
+  return h(Page, { title: 'Today', big: true, status, footer: tabbar },
+    h('h3', { class: 'section-h', key: 'nh' }, 'Needs your attention'),
     connectedNote ? h('ion-card', { class: 'lake-card ok-card', key: 'cn' }, h('ion-card-content', {}, h('p', {}, connectedNote), h('ion-button', { size: 'small', fill: 'clear', onClick: () => { connectedNote = ''; } }, 'OK'))) : null,
     ...(v.connects ?? []).map((c) => h(ConnectCard, { key: `c-${c.id}`, c })),
     ...waiting.map((a) => h('ion-card', { key: `w-${a.kid}`, class: 'lake-card warn-card' }, h('ion-card-content', {},
@@ -30,10 +42,14 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       h('p', {}, waitingLine(a))))),
     ...groups.map((all) => h(RequestCard, { key: all[0]!.id, all })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
+    !any ? h('div', { class: 'all-clear', key: 'clear' }, h('ion-icon', { name: 'checkmark-done-outline' }), h('div', {}, h('b', {}, 'You\'re all clear'), h('p', {}, 'Nothing needs your attention. Your house is keeping an eye on things.'))) : null,
+    h(Section, { title: 'Handled for you', key: 'handled', cls: 'handled' },
+      ...(lines.length ? lines.map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => push(l.to), cls: 'handled-row',
+        below: l.undo ? h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: l.undo }), done: 'Undone' }) : undefined }))
+        : [h('ion-item', { key: 'none', lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, today.data ? 'Nothing handled yet today.' : 'Looking…')))])),
     // Notes that need nothing from you: one short line each, the newest few; the whole note opens in a sheet (12 Nov: a
     // wall of long notes drowned the few that need you).
     notes.length ? h(Notes, { key: 'notes', notes }) : null,
-    !any && !notes.length ? h(Empty, { key: 'e', icon: 'checkmark-done-outline', title: 'Nothing needs you', text: 'Your rules answered everything.' }) : null,
     v.agenda?.length ? h(Section, { title: 'Coming up', key: 'ag' }, ...v.agenda.map((a) => h(AgendaRow, { key: a.id, a }))) : null);
 }
 

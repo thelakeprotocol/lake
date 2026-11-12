@@ -51,7 +51,7 @@ async function tidy() {
   expect(errors).toEqual([]);
 }
 // Four tabs (Chats, Inbox, My AI, You); everything else is a row under You (12 Nov: the redesign).
-const TABS = ['Chats', 'Inbox', 'My AI', 'You'];
+const TABS = ['Chats', 'Today', 'My AI', 'You'];
 const tab = async (name: string, p: Page = page) => {
   if (TABS.includes(name)) {
     // On a page opened from a tab (a chat, a setting), the tab bar isn't there: Back first.
@@ -320,7 +320,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('gives the allowance its AI asks for, signed in one tap (run 66: "raise it" was answered and nothing changed)', async () => {
     expect(await asAssistant({ kind: 'assistant.suggest', text: 'The sitter costs more than I may spend: may I have $60 for 3 days?', allowance: { amount: 60, currency: 'USD', days: 3 } })).toMatchObject({ ok: true });
-    await tab('Inbox');
+    await tab('Today');
     await page.getByRole('button', { name: 'Give $60 for 3 days' }).click();
     await page.getByRole('button', { name: 'Give $60 for 3 days' }).waitFor({ state: 'detached', timeout: 5000 });
     await tab('My AI');
@@ -456,7 +456,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('says when people wait for the owner\'s AI and it isn\'t reading, and stops saying it once it reads', async () => {
     // The AI's connector reports it (run 58: four buyers waited for an AI whose chat had ended; its human never knew).
     expect(await asAssistant({ kind: 'assistant.waiting', count: 3, senders: 2, since: new Date(Date.now() - 300_000).toISOString() })).toEqual({ ok: true });
-    await tab('Inbox');
+    await tab('Today');
     const card = page.locator('ion-card.warn-card', { hasText: 'Nova isn\'t reading' });
     await card.getByText(/3 messages waiting since .*open your AI app/).waitFor({ timeout: 5000 });
     await tidy();
@@ -470,7 +470,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('keeps notes from its AI to short lines, newest few first: the whole note a tap away, Clear all with a sheet', async () => {
-    await tab('Inbox');
+    await tab('Today');
     for (let i = 0; i < 23; i++) await asAssistant({ kind: 'assistant.suggest', text: `Suggestion number ${i + 1}` });
     const rows = page.locator('ion-item.note-row');
     await page.locator('ion-list.notes', { hasText: 'From your AI (' }).waitFor({ timeout: 5000 });
@@ -615,7 +615,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await app.getByRole('link', { name: 'Open it here' }).getAttribute('href')).toMatch(/\/owner\/#connect=/);
     // On the owner's phone, Inbox asks, showing the same number.
     await page.goto(`${house}/owner/`);
-    await tab('Inbox');
+    await tab('Today');
     const asked = page.locator('ion-card', { hasText: 'Claude wants to connect to your house' });
     await asked.waitFor({ timeout: 10_000 });
     expect((await asked.locator('.connect-number').textContent())!.trim()).toBe(number);
@@ -669,7 +669,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const aiName = me.name.split(' (')[0];
     await page.locator('ion-item.ai-row', { hasText: aiName }).getByText(/Here now/).waitFor({ timeout: 5000 });
     // Its chats are closed and the buyer's messages sit unread: its connector tells the house, and the owner is told.
-    await tab('Inbox');
+    await tab('Today');
     await page.locator('ion-card.warn-card', { hasText: `${aiName} isn't reading` }).getByText(/waiting since .*open your AI app/).waitFor({ timeout: 15_000 });
     await tidy();
     // Money says what it was for and who paid, held until the buyer accepts; a tap opens the receipt.
@@ -712,7 +712,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await one.call('lake_house_suggest', { text: 'The buyer paid for a summary: send them the brief now?', ask: { choices: ['Send the brief', 'Not yet'] }, then: [{ to: shopperUrl0, text: 'Brief: 3 bullets on the Lake, plain words.' }, null] });
     // Until the owner answers, the AI's inbox says it is still waiting on them (run 72: four AIs left with questions open).
     expect((await one.call('lake_inbox', { wait_seconds: 0 })).your_human_has_not_answered).toEqual([expect.objectContaining({ question: expect.stringContaining('send them the brief') })]);
-    await tab('Inbox');
+    await tab('Today');
     const q = page.locator('ion-card.sug', { hasText: 'send them the brief now?' });
     await q.getByRole('button', { name: 'Send the brief' }).click();
     let briefed: { message?: { text?: string } }[] = [];
@@ -729,7 +729,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.waitForTimeout(3500);
     const answer = JSON.parse(((await shopper.callTool({ name: 'lake_ask', arguments: { to: me.url, kind: 'message', text: 'Yes, 9am, I will leave it by the gate.' } })).content as { text: string }[])[0]!.text);
     expect(answer.held).toMatch(/kept for its owner.*take it as a no/);
-    await tab('Inbox');
+    await tab('Today');
     const ladder = page.locator('ion-card.sug', { hasText: 'a ladder on Saturday' });
     await ladder.getByText('Yes, 9am, I will leave it by the gate.').waitFor({ timeout: 5000 });
     expect(await ladder.getByRole('button', { name: 'Block them' }).count()).toBe(0); // the one it asked is no stranger
@@ -749,16 +749,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await one.call('lake_set_tags', { tags: ['seeking:lift-to-cool-room'] });
     await page.waitForTimeout(3500);
     await shopper.callTool({ name: 'lake_set_tags', arguments: { tags: ['offering:lift-to-cool-room'] } });
-    await tab('Inbox');
+    await tab('Today');
     // A suggestion, or a chat the house kept for its AI while it was away.
     const match = page.locator('ion-card.sug, ion-item.note-row, .chatrow', { hasText: 'offering:lift-to-cool-room' });
-    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); if (i % 2) await tab(i % 4 === 1 ? 'Chats' : 'Inbox'); }
+    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); if (i % 2) await tab(i % 4 === 1 ? 'Chats' : 'Today'); }
     expect(await match.count()).toBeGreaterThan(0);
     await one.call('lake_set_tags', { tags: [] });
     // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).
     const shopperUrl = shopperUrl0;
     await one.call('lake_house_suggest', { text: `${shopperName} keeps sending "fees": looks like a scam.`, advice: 'dont', sender: shopperUrl });
-    await tab('Inbox');
+    await tab('Today');
     const warning = page.locator('ion-card.sug', { hasText: 'looks like a scam' });
     await warning.getByRole('button', { name: 'Block them' }).click();
     await confirmSheet('Block');
@@ -862,7 +862,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const clinic = await makeVisitor(await generateIdentity(), 'clinic.example');
     const terms = { purpose: 'care', fields: ['medications'], priceUsd: 0, retention: 'none', credentials: { ethicsApproved: false, sponsorVerified: false, auditCertified: false } };
     expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'ask' });
-    await tab('Inbox');
+    await tab('Today');
     const card = page.locator('ion-card.req', { hasText: 'clinic.example' });
     await card.getByRole('button', { name: 'Allow', exact: true }).click();
     // When the house advises no (sensitive data outside a certified study), Allow asks once more.
@@ -877,7 +877,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Another agent with the same name but its own key gets no standing yes (a name is not a key).
     const lookalike = await makeVisitor(await generateIdentity(), 'clinic.example');
     expect((await knock(house, lookalike, terms)).reply).toMatchObject({ decision: 'ask' });
-    await tab('Inbox');
+    await tab('Today');
     // The wider ask and the lookalike's: each a card (or one, grouped); deny whatever is there.
     for (let i = 0; i < 4 && (await page.locator('ion-card.req', { hasText: 'clinic.example' }).count()); i++) {
       const n = await page.locator('ion-card.req', { hasText: 'clinic.example' }).count();
@@ -898,7 +898,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await always.waitFor({ state: 'detached', timeout: 10_000 });
     expect((await knock(house, clinic, terms)).reply).toMatchObject({ decision: 'ask' });
     // Declined, and "Always decline": that agent is turned away at the door from then on.
-    await tab('Inbox');
+    await tab('Today');
     await page.locator('ion-card.req', { hasText: 'clinic.example' }).first().getByRole('button', { name: /^Deny/ }).click();
     await page.getByText('Declined clinic.example').last().waitFor({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Always decline' }).last().click();
@@ -948,9 +948,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
     // The morning: Inbox says it in one line, and My AI shows what it did, in order, with Undo; what it was stopped
     // from, counted.
-    await tab('Inbox');
-    await page.locator('ion-item.lake-row', { hasText: 'Your AI handled 2 things while you were away' }).click();
-    await onTab('My AI');
+    await tab('Today');
+    // Handled for you: each thing it did, saying it was your AI, with Undo where the house can undo it.
+    const handled = page.locator('ion-list.handled');
+    await handled.locator('ion-item.handled-row', { hasText: "Replied to Sam's AI" }).getByText(/Your AI · /).waitFor({ timeout: 10_000 });
+    await handled.locator('ion-item.handled-row', { hasText: 'Booked "Call on Monday at 10:00"' }).getByRole('button', { name: 'Undo', exact: true }).waitFor();
+    await tab('My AI');
     expect(await page.locator('.stat-row .stat b').allTextContents()).toEqual(['2', '0', '0']);
     await page.getByText('Replied to Sam\'s AI: Yes, Monday works.').waitFor();
     await page.getByText('Stopped 1 thing it may not do.').waitFor();
@@ -1025,7 +1028,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const nbAsk = async (call?: string) => { for (let i = 0; i < 30; i++) { const n = ((await asNb({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string } }[]).find((x) => x.circle?.role === 'ask' && x.circle.state === 'open' && (!call || x.circle.call === call)); if (n) return n; await page.waitForTimeout(500); } throw new Error('no ask'); };
     expect(await asNb({ kind: 'panel.circle.answer', note: (await nbAsk()).id, accept: true })).toMatchObject({ kind: 'circle.matched' });
     await goBack();
-    await tab('Inbox');
+    await tab('Today');
     await page.getByText('Someone said yes. Reach them at their house:').waitFor({ timeout: 15_000 });
     await page.getByRole('button', { name: 'Thanks', exact: true }).click();
     await page.getByText('Thanked: you owe one favour.').waitFor({ timeout: 10_000 });
