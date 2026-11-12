@@ -1,11 +1,13 @@
 import { createContext } from 'preact';
 import { useContext, useEffect, useState } from 'preact/hooks';
-import { forgetKey, loadKey, signEnvelope } from '../owner-crypto';
+import { forgetKey, loadKey, settleSpare, signEnvelope, spareKey } from '../owner-crypto';
 
 // Talking to the house. Every call is signed on this device with the owner's key, which never leaves it; the house only
 // checks. Screens are functions of what the house said, fetched again when it says something changed.
 
 export const key = await loadKey();
+// A second, readable key beside the device's own: settled by the house's first answer (see call).
+let spare = !!spareKey(key);
 export const api = new URL('./', location.href).href; // served at /owner/
 export const state = { webId: '', leaseUntil: null as string | null };
 export const houseBase = () => location.origin + location.pathname.replace(/\/owner\/.*$/, '');
@@ -18,15 +20,18 @@ const reached = (ok: boolean) => { if (ok !== reachable) { reachable = ok; for (
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
-  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signEnvelope(payload, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
+  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signEnvelope({ ...payload, aud: houseBase() }, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
   reached(true);
   if (!res.ok) {
     const error = (await res.json().catch(() => ({}))).error ?? String(res.status);
+    // Two keys on this device (an earlier version's slip) and the house knows the other one: that one moves in, once.
+    if (res.status === 403 && spare && /^no key \S+ for /.test(String(error))) { spare = false; if (await settleSpare(key, false)) { location.reload(); return new Promise<T>(() => {}); } }
     // This device's key isn't the house's any more (moved to another device, or recovered there): back to pairing.
     // Only that answer ("no key … for …"): an expired or replayed signature, or a phone's clock off, is not a lost key.
     if (res.status === 403 && state.webId && /^no key \S+ for /.test(String(error))) dispatchEvent(new CustomEvent('lake:not-the-key', { detail: error }));
     throw new Error(error);
   }
+  if (spare) { spare = false; void settleSpare(key, true); }
   return res.json();
 }
 

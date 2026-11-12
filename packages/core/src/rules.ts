@@ -3,6 +3,7 @@ import { DEFAULT_GRANT_HOURS } from './lake.js';
 import { offerPrice, type Offer } from './offer.js';
 import { isPurpose, PURPOSES, purposeWithin } from './purpose.js';
 import { availabilityProblems, type Availability } from './availability.js';
+import { looksLikeInjection } from './injection.js';
 
 /** A door's handle (SPEC §9.0): what people's AIs ask for ("ping stan"). */
 export const HANDLE = /^[a-z][a-z0-9-]{1,29}$/;
@@ -112,8 +113,10 @@ export function parseRules(text: string): Rules {
       if (typeof d.note !== 'string' || !d.note.trim() || d.note.length > 500) throw new RulesError('door.note: a reply for new senders, 1 to 500 characters (or leave it out)');
       // Links are https only (the reply reaches other people's agents and pages), and few: it's a note, not a link list.
       const schemes = d.note.match(/\b[a-z][a-z0-9+.-]*:\/\//gi) ?? [];
-      if (schemes.some((x) => x.toLowerCase() !== 'https://') || /\b(javascript|data|vbscript):/i.test(d.note)) throw new RulesError('door.note: links must start with https://');
+      if (schemes.some((x) => x.toLowerCase() !== 'https://') || /\b(javascript|vbscript):|\bdata:[a-z]+\/[a-z0-9.+-]+[;,]/i.test(d.note)) throw new RulesError('door.note: links must start with https://');
       if (schemes.length > 3) throw new RulesError('door.note: at most 3 links');
+      // It's read by other people's AIs, inside this house's signed reply: words for a person, never orders to a model.
+      if (looksLikeInjection(d.note)) throw new RulesError('door.note: it reads like instructions to an AI; say it as plain words for the person writing to you');
     }
     for (const k of Object.keys(d)) if (!['name', 'about', 'handle', 'note'].includes(k)) throw new RulesError(`door: unknown setting "${k}" (allowed: name, about, handle, note)`);
   }

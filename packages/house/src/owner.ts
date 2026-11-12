@@ -1,4 +1,4 @@
-import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import webpush from 'web-push';
 import { join } from 'node:path';
@@ -184,7 +184,7 @@ export interface DutyEntry { id: string; /** The assistant's key. */ by: string;
 export type Reads = 'records' | 'money';
 const READS: readonly Reads[] = ['records', 'money'];
 const asReads = (v: unknown): Reads[] => (Array.isArray(v) ? READS.filter((r) => v.includes(r)) : []);
-export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; /** What else it may read (none: notes, its errands, the agenda and free hours only). */ reads?: Reads[]; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
+export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; /** What else it may read (none: notes, its errands, the agenda and free hours only). */ reads?: Reads[]; /** Its `money` came with a spending allowance, not the owner's switch: it lasts as long as the allowance. */ moneyWithAllowance?: true; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
@@ -265,10 +265,13 @@ const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); retur
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
 // What each look needs beyond the base: the owner turns these on per assistant; the house refuses the rest (SPEC §6.1).
 const NEEDS: Record<string, Reads> = { 'panel.rules': 'records', 'panel.activity': 'records', 'panel.agents': 'records', 'panel.consents': 'records', 'panel.access': 'records', 'panel.data': 'records', 'panel.money': 'money', 'panel.market': 'money' };
-const NEEDS_SAID: Record<Reads, string> = { records: 'records (data, consents, requests, activity, rules)', money: 'money (what they earned and spent, offers priced for them, the most they\'d pay)' };
+const NEEDS_SAID: Record<Reads, string> = { records: 'records (data, consents, requests, activity, rules, who is in their circles and the favours owed)', money: 'money (what they earned and spent, offers priced for them, the most they\'d pay)' };
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
 const MAX_ALLOWANCE = 1000;
+// Names the house itself signs things with: an assistant labelled one of these would read as the owner or the house in a
+// chat and in "who answered" (round 16).
+const RESERVED_LABELS = new Set(['you', 'me', 'owner', 'the owner', 'house', 'the house', 'your house', 'your promise circle', 'sender', 'rules']);
 const MAX_ALLOWANCE_DAYS = 31;
 
 /**
@@ -289,6 +292,16 @@ export class OwnerDesk {
   private saveCircleRules = () => writeFile(join(this.o.dataDir, 'circle-rules.json'), JSON.stringify(this.circleRules)).catch(() => {});
   /** Who answers each conversation, by the sender's key (8 Nov): 'ai' (the owner's AI on duty may reply) or 'me'. Unset: AI for someone known, the owner for someone new. */
   chatModes: Record<string, 'ai' | 'me'> = {};
+  /**
+   * Who answers a sender, as the panel shows it: the owner's choice for that conversation, else their AI for someone their
+   * side knows and the owner for anyone new or from the web. "me" also means no AI gets the words (SPEC §6.1): one answer
+   * for the news, the assistants' view and the duty's novelty rule (round 16: the three had disagreed).
+   */
+  modeOf(from: { key?: string; web?: boolean; webId?: string }): 'ai' | 'me' {
+    // Someone from the web has no key: their thread's own name stands in, so the owner can hand that one over too.
+    const k = from.key ?? (from.web ? from.webId : undefined);
+    return (k ? this.chatModes[k] : undefined) ?? (!from.web && this.knownBy(from.key) ? 'ai' : 'me');
+  }
   private buyDrafts = new Map<string, { want: string; offer: string; draft: ReturnType<typeof purchaseDraft> }>();
   private saveChatModes = () => writeFile(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes)).catch(() => {});
   /** How far the owner has read each conversation (the newest message's time when they last opened it), on every device. */
@@ -332,7 +345,19 @@ export class OwnerDesk {
    * went to them, and whether they wrote again within a week, which is what the note should change.
    */
   private firstContacts = new Map<string, { at: string; noted?: string; again?: boolean }>();
-  private saveFirstContacts = () => writeFile(join(this.o.dataDir, 'first-contacts.json'), JSON.stringify([...this.firstContacts].slice(-5000))).catch(() => {});
+  private saveFirstContacts = () => {
+    // Thirty days is all the counts look at, and five thousand senders all a house keeps: the rest goes, here and on disk.
+    const fresh = [...this.firstContacts].filter(([, c]) => Date.parse(c.at) > Date.now() - 30 * 86_400_000).slice(-5000);
+    if (fresh.length !== this.firstContacts.size) this.firstContacts = new Map(fresh);
+    return writeFile(join(this.o.dataDir, 'first-contacts.json'), JSON.stringify(fresh)).catch(() => {});
+  };
+  /** A web sender for the door note's counts: its address, hashed with a salt that changes daily and is never kept. */
+  private webSalt = { day: '', salt: '' };
+  webSender(ip: string): string {
+    const day = new Date().toISOString().slice(0, 10);
+    if (this.webSalt.day !== day) this.webSalt = { day, salt: randomBytes(16).toString('hex') };
+    return `web:${createHash('sha256').update(`${this.webSalt.salt}|${ip}`).digest('base64url').slice(0, 16)}`;
+  }
   /** The door note for this sender's note, if it's their first and the owner has one; every first contact is counted. */
   doorNoteFor(key: string | undefined, note: string | undefined): string | undefined {
     if (!key || this.knownBy(key)) return undefined;
@@ -370,6 +395,8 @@ export class OwnerDesk {
       dutyRunner?: HouseRunner;
       /** The house's own address (a sign-in that asks to connect an AI must come from its own Lake's site). */
       publicUrl?: string;
+      /** Where the owner opens the panel, when that's another address. */
+      ownerUrl?: string;
       actor: string;
       openPairing: boolean;
       emit: (e: LakeEvent) => void;
@@ -500,7 +527,7 @@ export class OwnerDesk {
     for (const n of this.fullView(false).notes) {
       const who = n.from.key ?? n.id, prev = newest.get(who);
       if (prev && prev.at >= n.at) continue;
-      const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && e.to?.key === n.from.key && e.at >= n.at);
+      const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && e.to?.key === n.from.key && e.at >= n.at);
       newest.set(who, { at: n.at, key: n.from.key, answered: !!n.answered || aiReplied });
     }
     const open = [...newest.values()].filter((x) => !x.answered);
@@ -575,6 +602,11 @@ export class OwnerDesk {
     for (const [id, i] of Object.entries((await this.o.loadStatus?.().catch(() => ({}))) ?? {})) this.statusIndexes.set(id, Number(i));
     // Assistants connected before the owner chose what each reads keep what they had (everything), until the owner changes it.
     for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a.reads || a.duty ? a : { ...a, reads: [...READS] });
+    // Kept from before round 16: an answer signed "you" is the owner's unless an AI here took that name; then every AI
+    // gets a name of its own that isn't the owner's or the house's.
+    const posed = [...this.assistants.values()].some((x) => RESERVED_LABELS.has(x.label.trim().toLowerCase()));
+    if (!posed) for (const n of this.notes) if (n.answered?.by === 'you' && !n.from.web) n.answered.own = true;
+    for (const x of this.assistants.values()) x.label = this.labelFor(x.label, x.kid);
     // Allowances saved before they had a currency were in dollars.
     for (const a of (await this.o.loadAllowances?.().catch(() => [])) ?? []) this.allowances.set(a.kid, { ...a, amount: a.amount ?? (a as unknown as { amountUsd: number }).amountUsd, currency: a.currency ?? 'USD' });
     return { paired: !!this.ownerJwk, token: this.token };
@@ -820,7 +852,7 @@ export class OwnerDesk {
     const c = this.contacts.get(key);
     if (c) return `your human's side has written to ${c.name || 'it'} before`;
     // Answered by the owner themselves, from their phone (before such answers were kept as contacts too).
-    if (this.notes.some((n) => n.from.key === key && n.answered?.by === 'you')) return 'your human has answered it before';
+    if (this.notes.some((n) => n.from.key === key && n.answered?.own)) return 'your human has answered it before';
     const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
     return st ? `a standing yes names it (${st.domain})` : undefined;
   }
@@ -1028,7 +1060,7 @@ export class OwnerDesk {
   }
 
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string } }[] = [];
+  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string } }): string | null {
     this.touch();
@@ -1037,16 +1069,40 @@ export class OwnerDesk {
     if (again) return again.id;
     if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
-    // The newest fifty wait for the owner; one pushed out says so to its sender, rather than vanishing.
-    for (const old of this.notes.slice(49)) this.closedNotes.set(old.id, { by: old.from.webId, state: 'not read: too many notes came at once; send it again if it still matters' });
-    this.notes = [note, ...this.notes].slice(0, 50);
+    this.notes = [note, ...this.notes];
+    this.evictNotes();
     void this.saveNotes();
     const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from);
     // An invitation to sign: a card with the tally's own terms and a Sign button, from this sender, for the owner's tap.
     if (n.pledge) void this.invite(note.id, n.from, n.pledge, !!known);
-    const mine = !!n.from.key && this.chatModes[n.from.key] === 'me';
-    this.news({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true } : {}) }, ...(mine ? { text_hidden: 'your human answers this conversation themselves: its words stay with them' } : { text: n.text }), ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
+    const mine = this.modeOf(n.from) === 'me';
+    this.news({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true } : {}) }, ...(mine ? { text_hidden: 'your human answers this conversation themselves, as with anyone new until they hand you the chat: its words stay with them' } : { text: n.text }), ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
     return note.id;
+  }
+
+  /**
+   * Fifty notes wait for the owner. When more come, the one that goes is never the last word of someone the owner's side
+   * knows that still has no answer (round 16: twenty web notes an hour pushed a friend's question out within hours). First
+   * the oldest note of whoever new has the most here, then the oldest already answered; past two hundred, the oldest of
+   * all. One pushed out says so to its sender, rather than vanishing.
+   */
+  private evictNotes() {
+    const who = (n: OwnerDesk['notes'][number]) => n.from.key ?? n.from.webId;
+    const known = new Map<string, boolean>();
+    const isKnown = (n: OwnerDesk['notes'][number]) => { const k = who(n); if (!known.has(k)) known.set(k, !!this.knownBy(n.from.key)); return known.get(k)!; };
+    while (this.notes.length > 50) {
+      const strangers = this.notes.filter((n) => !isKnown(n));
+      let out: OwnerDesk['notes'][number] | undefined;
+      if (strangers.length) {
+        const count = new Map<string, number>();
+        for (const n of strangers) count.set(who(n), (count.get(who(n)) ?? 0) + 1);
+        const most = Math.max(...count.values());
+        out = strangers.filter((n) => count.get(who(n)) === most).at(-1);
+      } else out = this.notes.filter((n) => n.answered).at(-1) ?? (this.notes.length > 200 ? this.notes.at(-1) : undefined);
+      if (!out) break;
+      this.closedNotes.set(out.id, { by: out.from.webId, state: 'not read: too many notes came at once; send it again if it still matters' });
+      this.notes = this.notes.filter((n) => n !== out);
+    }
   }
 
   /** A pledge someone invited the owner to sign (a note with `pledge`): put to them as a card, the terms from the tally itself. */
@@ -1193,7 +1249,7 @@ export class OwnerDesk {
       this.invites.delete(String(code));
       const kid = String(publicJwk.kid);
       if (kid === this.ownerJwk?.kid) return void res.status(400).json({ error: 'that is the owner\'s own key' });
-      const a: AssistantKey = { ...(invite.duty ? { duty: invite.duty } : {}), reads: invite.duty ? [] : invite.reads ?? [], kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: String(label ?? invite.label).slice(0, 60), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
+      const a: AssistantKey = { ...(invite.duty ? { duty: invite.duty } : {}), reads: invite.duty ? [] : invite.reads ?? [], kid, jwk: { kty: 'OKP', crv: 'Ed25519', x: publicJwk.x, kid, alg: 'EdDSA' } as JWK, label: this.labelFor(String(label ?? invite.label), kid), addedAt: new Date().toISOString(), seenAt: new Date().toISOString(), ...(typeof webId === 'string' && /^https?:\/\//.test(webId) ? { webId: webId.slice(0, 300) } : {}), ...(typeof url === 'string' && /^https?:\/\//.test(url) ? { url: url.slice(0, 300) } : {}) };
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       const badge = await this.assistantBadge(a).catch(() => undefined);
@@ -1235,6 +1291,10 @@ export class OwnerDesk {
       } catch (e) {
         return void res.status(403).json({ error: (e as Error).message });
       }
+      // A call names the house it's for; one signed for another house on this host (a browser keeps one key per host, so
+      // an owner of two houses here signs both with it) isn't this house's to act on.
+      const aud = (p as { aud?: unknown }).aud;
+      if (aud !== undefined && !this.isThisHouse(aud)) return void res.status(403).json({ error: 'this call was signed for another house' });
       const assistant = signer !== this.ownerJwk.kid ? this.assistants.get(signer) : undefined;
       // The owner's own key only: an assistant reading the panel isn't the owner looking.
       if (!assistant) this.seen();
@@ -1261,7 +1321,7 @@ export class OwnerDesk {
           const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown }; rules?: unknown };
           const text = String(q.text ?? '').trim().slice(0, 1500);
           // An assistant that got something wrong takes its own note back; an empty text with replaces just withdraws it.
-          const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && x.from === assistant.label) : undefined;
+          const old = q.replaces ? this.suggestions.find((x) => x.id === q.replaces && (x.by ? x.by === assistant.kid : x.from === assistant.label)) : undefined;
           if (q.replaces && !old) return void res.status(404).json({ error: 'no note of yours with that id' });
           // An answered question stays answered (run 41 asked the owner twice): ask a new one if something changed.
           if (old?.errand?.state === 'held') return void res.status(409).json({ error: 'something came in on that errand and it is with your human now: they answer it (you hear as house.news)' });
@@ -1471,7 +1531,10 @@ export class OwnerDesk {
           } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
         }
         if (p.kind === 'assistant.want.close') {
-          const ok = await this.o.panel?.closeWant?.(String((p as { id?: string }).id ?? ''));
+          // Its own want only: another AI's, or one the owner posted, isn't its to close.
+          const id = String((p as { id?: string }).id ?? '');
+          if ((this.o.panel?.wantsList?.() ?? []).some((w) => w.want.id === id && w.by !== assistant.kid)) return void res.status(403).json({ error: 'that want isn\'t one you posted: your human closes it in their panel' });
+          const ok = await this.o.panel?.closeWant?.(id);
           if (ok) this.touch();
           return void res.json(ok ? { ok: true } : { error: 'no want with that id' });
         }
@@ -1481,6 +1544,8 @@ export class OwnerDesk {
           const q = p as unknown as { note?: string; text?: string };
           const n = this.notes.find((x) => x.id === String(q.note ?? '') && !x.from.web);
           if (!n) return void res.status(404).json({ error: 'no note from an agent with that id' });
+          // Marking a note answered takes it off the owner's waiting list: only in a conversation their AI may answer.
+          if (this.modeOf(n.from) !== 'ai') return void res.status(403).json({ error: 'your human answers this conversation themselves: the note stays with them as unanswered' });
           n.answered = { text: String(q.text ?? '').trim().slice(0, 1000), by: assistant.label, at: new Date().toISOString() };
           void this.saveNotes();
           this.touch();
@@ -1488,6 +1553,8 @@ export class OwnerDesk {
         }
         if (p.kind === 'assistant.reply') {
           const q = p as unknown as { note?: string; text?: string; final?: boolean };
+          const about = this.notes.find((x) => x.id === String(q.note ?? ''));
+          if (about && this.modeOf(about.from) !== 'ai') return void res.status(403).json({ error: 'your human answers this conversation themselves: its words stay with them, and so does the answer' });
           const r = this.answerWebNote(String(q.note ?? ''), String(q.text ?? ''), assistant.label, q.final !== false);
           return void res.status('error' in r ? 400 : 200).json('error' in r ? r : { ...r, note: 'they read it at the link they were given; your human sees it with the note' });
         }
@@ -1592,9 +1659,9 @@ export class OwnerDesk {
           // names it. Having received from it isn't enough: a stranger who writes twice is still a stranger.
           const key = String((p as unknown as { key?: string }).key ?? '');
           // The owner's own say for this conversation comes first: "I reply" keeps their AI out of it; "My AI replies" lets it in.
-          if (this.chatModes[key] === 'me') return void res.json({ known: false, why: 'your human answers this conversation themselves' });
-          const why = this.knownBy(key) ?? (this.chatModes[key] === 'ai' ? 'your human said you may reply in this conversation' : undefined);
-          return void res.json(why ? { known: true, why } : { known: false, why: 'first contact: your human hears of it first' });
+          if (this.modeOf({ key }) === 'me') return void res.json({ known: false, why: this.chatModes[key] === 'me' ? 'your human answers this conversation themselves' : 'first contact: your human hears of it first' });
+          const why = this.knownBy(key) ?? 'your human said you may reply in this conversation';
+          return void res.json({ known: true, why });
         }
         if (p.kind === 'assistant.badge') {
           const badge = await this.assistantBadge(assistant);
@@ -1635,6 +1702,7 @@ export class OwnerDesk {
         const a = this.assistants.get(String(q.kid ?? ''));
         if (!a) return void res.status(404).json({ error: 'no such assistant' });
         a.reads = asReads(q.reads);
+        delete a.moneyWithAllowance;
         await this.o.saveAssistants?.([...this.assistants.values()]);
         this.news({ about: 'reads', reads: a.reads, note: a.reads.length ? `your human lets you read their ${a.reads.map((r) => NEEDS_SAID[r]).join(' and ')}, besides the notes at their door` : 'your human lets you read the notes at their door, your own errands, their agenda and free hours: nothing else' }, a.kid);
         return void res.json({ ok: true, reads: a.reads });
@@ -1777,6 +1845,7 @@ export class OwnerDesk {
         const payer = this.assistants.get(d.kid);
         if (payer && !payer.duty && !payer.reads?.includes('money')) {
           payer.reads = [...(payer.reads ?? []), 'money'];
+          payer.moneyWithAllowance = true;
           await this.o.saveAssistants?.([...this.assistants.values()]);
         }
         this.allowanceDrafts.delete(d.statusId);
@@ -1813,8 +1882,9 @@ export class OwnerDesk {
           if (q.choice === 'Block' && blockUrl) this.news({ about: 'block', url: blockUrl, note: 'your human tapped Block on what came in on your errand: your connector turns its messages away from now on' }, sug.by);
         }
         await this.saveSuggestions();
-        if (sug.ask?.private) this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), private: true, note: 'your human answered privately: the answer stays in their house. Send it into the secret count with lake_count { action: "answer", from_question: this id }: your connector sends it as the two shares, and you never see it' });
-        else this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}), ...(er ? { errand: this.errandNews(sug) } : {}) });
+        // To the assistant that asked, not to every AI with a key here (round 16: the owner's words to one went to all).
+        if (sug.ask?.private) this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), private: true, note: 'your human answered privately: the answer stays in their house. Send it into the secret count with lake_count { action: "answer", from_question: this id }: your connector sends it as the two shares, and you never see it' }, sug.by);
+        else this.news({ about: 'question.answered', suggestion: sug.id, question: sug.text.slice(0, 300), ...(q.choice !== undefined ? { answer: String(q.choice) } : {}), ...(text ? { text, words: 'your human\'s own words' } : {}), ...(er ? { errand: this.errandNews(sug) } : {}) }, sug.by);
         return void res.json({ ok: true, ...(q.choice !== undefined ? { answered: String(q.choice) } : {}), ...(text ? { text } : {}) });
       }
       // Your key: a recovery code to write down, and a one-use link to move to another device.
@@ -1919,7 +1989,7 @@ export class OwnerDesk {
           if (!lakeNote.from.url) return void res.status(400).json({ error: 'that note came with no address to answer' });
           const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'note.reply', note: lakeNote.id, text, re: lakeNote.text.slice(0, 200) }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
           if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their agent didn't take it: ${JSON.stringify(sent?.problems ?? sent?.why ?? 'no answer')}` });
-          lakeNote.answered = { text, by: 'you', at: new Date().toISOString() };
+          lakeNote.answered = { text, by: 'you', own: true, at: new Date().toISOString() };
           if (lakeNote.from.key && !this.contacts.has(lakeNote.from.key)) { this.contacts.set(lakeNote.from.key, { name: lakeNote.from.name.slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
           void this.saveNotes();
           this.touch();
@@ -2233,6 +2303,11 @@ export class OwnerDesk {
             : 'your human accepted this offer themselves, on their phone: pay it with lake_pay, naming the order. When you tell them, be exact: it pays outright (an accepted offer is no cart, so nothing holds the money until delivery), and the delivery happens outside the Lake.' });
         }
         if (answer !== undefined && assistant && p.kind === 'panel.overview' && !(answer as { error?: string }).error) return void res.json(this.overviewFor(answer as Record<string, unknown>, this.readsOf(assistant)));
+        // An assistant without records gets which circles its human is in and what each is for, enough to put a need or a
+        // change to the right one; who is in it, the favours owed and the votes stay with the owner (round 16).
+        if (Array.isArray(answer) && assistant && p.kind === 'panel.circles' && !this.readsOf(assistant).has('records')) {
+          return void res.json((answer as { url: string; id: string; view?: Record<string, unknown> }[]).map((c) => ({ url: c.url, id: c.id, view: { text: c.view?.text, promise: c.view?.promise, open: c.view?.open, ...(c.view?.kinds ? { kinds: c.view.kinds } : {}) }, limited: true })));
+        }
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }
       res.status(400).json({ error: 'unknown request' });
@@ -2258,9 +2333,12 @@ export class OwnerDesk {
    */
   view(who: false | string | 'duty' = false) {
     const forAssistant = who !== false;
-    const hidden = (key?: string) => forAssistant && !!key && this.chatModes[key] === 'me';
+    const hidden = (from: { key?: string; web?: boolean; webId?: string }) => forAssistant && this.modeOf(from) === 'me';
     const full = this.fullView(forAssistant);
-    const notes = full.notes.map((n) => (hidden(n.from.key) ? { ...n, text: '(your human answers this conversation themselves)', hidden: true } : n));
+    // A standing yes is a consent: its domain is said only to an assistant that reads records.
+    const seesConsents = who !== 'duty' && this.readsOf(this.assistants.get(who || '')).has('records');
+    const why = (n: object) => (!seesConsents && (n as { known_why?: string }).known_why?.startsWith('a standing yes') ? { known_why: 'your human\'s side has dealt with it before' } : {});
+    const notes = full.notes.map((n) => (hidden(n.from) ? { ...n, ...why(n), text: '(your human answers this conversation themselves)', ...(n.answered ? { answered: { ...n.answered, text: '(theirs)' } } : {}), hidden: true } : { ...n, ...why(n) }));
     if (!forAssistant) return full;
     if (who === 'duty') return { webId: full.webId, until: full.until, requests: [], suggestions: full.suggestions.filter((x) => (x as { errand?: unknown }).errand), notes, wants: [], agenda: [], keys: [], assistants: [], connects: [], seen: undefined };
     const reads = this.readsOf(this.assistants.get(who)), records = reads.has('records'), money = reads.has('money');
@@ -2276,18 +2354,38 @@ export class OwnerDesk {
     };
   }
 
+  /** Whether a call's `aud` is this house: its path on the host (hosts differ by how the owner reaches it; paths don't). */
+  private isThisHouse(aud: unknown): boolean {
+    const path = (u: string) => new URL(u).pathname.replace(/\/+$/, '');
+    const mine = [this.o.publicUrl, this.o.ownerUrl].filter((u): u is string => !!u);
+    if (!mine.length) return true;
+    try { const said = path(String(aud)); return mine.some((u) => path(u) === said); } catch { return false; }
+  }
+
+  /**
+   * An assistant's name in this house: never one the house or the owner signs with, and never another assistant's (its
+   * notes and agenda entries are told apart by it): a second "Claude" is "Claude 2".
+   */
+  private labelFor(asked: string, kid: string): string {
+    const clean = asked.replace(/\s+/g, ' ').trim().slice(0, 60);
+    const base = !clean || RESERVED_LABELS.has(clean.toLowerCase()) ? 'AI' : clean;
+    const taken = new Set([...this.assistants.values()].filter((a) => a.kid !== kid).map((a) => a.label.toLowerCase()));
+    if (!taken.has(base.toLowerCase())) return base;
+    for (let i = 2; ; i++) if (!taken.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
+  }
+
   /** What an assistant may read beyond the base: nothing while it's on duty, else what the owner chose. */
   private readsOf(a?: AssistantKey): Set<Reads> {
     if (!a || (a.duty && !this.isRevoked(a.duty.statusId))) return new Set();
-    return new Set(a.reads ?? []);
+    // Money that came with an allowance (to see the offers it pays) goes when the allowance does.
+    return new Set((a.reads ?? []).filter((r) => !(r === 'money' && a.moneyWithAllowance && !this.allowanceFor(a.kid))));
   }
 
   /** The overview for an assistant: what it may read of it. */
   private overviewFor(o: Record<string, unknown>, reads: Set<Reads>) {
-    const out = { ...o };
-    if (!reads.has('records')) for (const k of ['holds', 'claims', 'record', 'pending', 'keys', 'rulesOwner', 'knocksToday', 'blockedToday']) delete out[k];
-    if (!reads.has('money')) delete out.earned;
-    return { ...out, reads: [...reads] };
+    // Named one by one: a field added to the overview later is the owner's alone until it's put on a list here.
+    const may = ['name', 'handle', 'shown', 'webId', 'reachedAt', 'relayed', ...(reads.has('records') ? ['podRoot', 'nodes', 'holds', 'claims', 'record', 'pending', 'keys', 'rulesOwner', 'knocksToday', 'blockedToday', 'person'] : []), ...(reads.has('money') ? ['earned'] : [])];
+    return { ...Object.fromEntries(may.filter((k) => k in o).map((k) => [k, o[k]])), reads: [...reads] };
   }
 
   private fullView(forAssistant: boolean) {
@@ -2296,13 +2394,13 @@ export class OwnerDesk {
       until: this.leaseUntil()?.toISOString() ?? null,
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       connects: [...this.connects].filter(([, c]) => Date.now() - c.at < 15 * 60_000).map(([id, c]) => ({ id, app: c.app, from: c.from, number: c.number, at: new Date(c.at).toISOString() })),
-      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId, reads, duty }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, reads: duty ? [] : reads ?? [], ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId, reads, duty }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid); return { kid, label, addedAt, seenAt, reads: duty ? [] : (reads ?? []).filter((r) => !(r === 'money' && this.assistants.get(kid)?.moneyWithAllowance && !a)), ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
       wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
       seen: forAssistant ? undefined : this.chatSeen,
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: (n.from.key ? this.chatModes[n.from.key] : undefined) ?? (known && !n.from.web ? 'ai' : 'me') }; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: this.modeOf(n.from) }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

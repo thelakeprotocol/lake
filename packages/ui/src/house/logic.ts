@@ -82,7 +82,7 @@ export const chatsOf = (notes: DoorNote[]): Chat[] => {
       key: k, notes: sorted, name: f.as ?? agent, agent, vendor, forwarded, web: !!f.web,
       via: f.web ? 'From your public page' : forwarded ? 'Passed on by your AI' : f.as ? `via ${agent}${vendor ? ` · ${vendor}` : ''}` : vendor ? `${vendor} agent` : 'AI agent',
       trust: (last.known || byYou ? 'known' : last.lookalike ? 'lookalike' : 'new') as Chat['trust'], why: last.known_why ?? (byYou ? 'You\'ve answered them before.' : undefined),
-      mode: last.mode ?? 'me', canMode: !!f.key && !f.web,
+      mode: last.mode ?? 'me', canMode: !!(f.key ?? (f.web && f.webId)),
       last: answeredLast ? last.answered!.text : last.text, lastBy: (answeredLast ? (last.answered!.by === 'you' ? 'you' : 'ai') : '') as Chat['lastBy'],
       at: answeredLast && last.answered!.at ? last.answered!.at : last.at, unread: unseen(ns),
     };

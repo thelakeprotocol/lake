@@ -302,7 +302,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   setTimeout(() => void dutyRunner.resume(), 30_000).unref();
   const desk = new OwnerDesk({
     panel, dutyRunner,
-    dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl,
+    dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl, ownerUrl: o.ownerUrl,
     readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
     saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),
     writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),

@@ -451,7 +451,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   const contacted = new Set<string>();
   const reportContact = (name: string, a: Record<string, unknown>) => {
     const url = name === 'lake_ask' ? a.agent_url ?? a.to : name === 'lake_buy' ? a.seller_url : name === 'lake_sell' || name === 'lake_pay' ? a.to : undefined;
-    if (typeof url !== 'string' || !url || contacted.has(url) || (house && url.startsWith(house))) return;
+    // Its own human's house is no contact; told apart by the whole address (a prefix also matched a neighbour at
+    // /t/ab2 for a house at /t/ab, and every agent of a connector served beside a house at its site's root).
+    if (typeof url !== 'string' || !url || contacted.has(url) || (house && url.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === house)) return;
     contacted.add(url);
     void whoIs(url).then((w) => houseCall({ kind: 'assistant.contact', key: w.key, name: w.name, webId: w.webId })).catch(() => contacted.delete(url));
   };
@@ -1033,7 +1035,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   };
   const houseCall = async (payload: Record<string, unknown> & { kind: string }) => {
     if (!house) throw new Error(`not connected to a house: ask your human for a code from their control panel (My AI tab), then lake_house_connect. No house yet? An invite link from someone on the Lake gives them one, or a hosted one for a day at ${o.publicNode ?? o.node.split(',')[0]!.trim()}/t/. Meanwhile, lake_set_tags { tags: ["seeking:<thing>"] } lets sellers find you`);
-    const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, await key, { iss: 'assistant' })) });
+    const res = await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ ...payload, aud: house }, await key, { iss: 'assistant' })) });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? `the house said ${res.status}`);
     return body;
@@ -1940,7 +1942,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
         // Which house is your human's is theirs to tell (run 40: assistants told strangers "Tom's agent (sb-1)"). A message
         // to anyone but the house itself that names it waits for a second, deliberate send.
-        const named = !a.reveal_house && !(house && a.agent_url.startsWith(house)) ? namesHouse(a.message) : null;
+        const named = !a.reveal_house && !(house && a.agent_url.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === house) ? namesHouse(a.message) : null;
         // Run 60: told only "leave it out", an assistant asking neighbours a favour for its human sent its words bare, and
         // both neighbours' assistants (rightly) called it unverified: nobody took the parcel in. Say what each choice costs.
         if (named) throw new Error(`this names your human's house (${named}), which tells ${a.agent_url} which house is theirs. If they know your human (a neighbour, a friend) and you're asking on your human's behalf, send it with reveal_house: true: it carries the house's own word that you speak for it, which their side checks; sent without it, you are only words to them, and an owner is likely to say no. To a stranger, leave the house out`);
@@ -2488,7 +2490,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (a.action === 'mine') {
           // Your human's circles, from their house (on any Lake's tally): what each promises, how it keeps its promises,
           // the favours owed to and by them, votes open, and what they could do next. They act on their phone.
-          const mine = (await houseCall({ kind: 'panel.circles' })) as { url: string; id: string; view: Record<string, any> }[];
+          const mine = (await houseCall({ kind: 'panel.circles' })) as { url: string; id: string; view: Record<string, any>; limited?: boolean }[];
+          const limited = Array.isArray(mine) && mine.some((c) => c.limited);
           const circles = (Array.isArray(mine) ? mine : []).map((c) => {
             const v = c.view ?? {};
             return { id: c.id, tally: c.url, text: v.text, promise: v.promise, open: v.open, members: v.members, kept: v.kept, of: v.of, limit: v.limit, ...(v.kinds ? { kinds: v.kinds } : {}), ...(v.sisters ? { sisters: v.sisters } : {}),
@@ -2500,6 +2503,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             circles.some((c) => (c.votes as { result?: unknown }[] | undefined)?.some((x) => !x.result)) ? 'a vote on a circle\'s rules is open: they answer Yes or No on their phone, in secret (you can explain it, not answer it)' : '',
             circles.some((c) => c.open) ? 'need something? lake_circle { action: "need", need } puts it to the circle that covers it, with one tap from them' : '',
           ].filter(Boolean);
+          if (limited) return json({ circles, not_shown: 'who is in each circle, the favours owed and the votes: your human hasn\'t let you read their records. If you need them, ask (lake_house_suggest, saying why): they turn it on in My AI, under your name, What it can read.', ...(next.length ? { next } : {}) });
           return json({ circles, favours: { owed_to_you: sum('owed_to_you'), you_owe: sum('you_owe') }, ...(next.length ? { next } : {}) });
         }
         if (a.action === 'propose') {

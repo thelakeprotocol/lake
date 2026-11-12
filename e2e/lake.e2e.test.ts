@@ -2884,7 +2884,7 @@ describe('the weekly shop, priced inside the house', () => {
     const c = new Client({ name: 'mine', version: '0' });
     await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
     const tool = async (name: string, args: Record<string, unknown> = {}) => JSON.parse(((await c.callTool({ name, arguments: args })).content as { text: string }[])[0]!.text);
-    const { code } = await b0.call({ kind: 'panel.assistant.invite', label: 'circles test' });
+    const { code } = await b0.call({ kind: 'panel.assistant.invite', label: 'circles test', reads: ['records'] });
     expect(await tool('lake_house_connect', { code, house_url: b0.url })).toMatchObject({ paired: true });
     const mine = await tool('lake_circle', { action: 'mine' });
     expect(mine.circles).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'meal-circle', limit: 1, votes: [expect.objectContaining({ result: expect.objectContaining({ yes: 2, no: 1, passed: true }) })], you: expect.objectContaining({ you_owe: expect.any(Number) }) })]));

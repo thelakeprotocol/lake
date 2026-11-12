@@ -45,6 +45,15 @@ export function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) 
         h(Btn, { label: 'Use it', fill: 'outline', expand: 'block', disabled: !code.trim(), run: () => pair(code.trim()) })))))));
 }
 
+/** The browser's key store didn't answer: no key is made in its place (it would be a second key). Nothing is lost. */
+export function NoKey() {
+  return h('div', { class: 'ion-page lake-page welcome' }, h('ion-content', { class: 'lake-content' }, h('div', { class: 'welcome-inner' },
+    h('h1', {}, 'Your key didn\'t open'),
+    h('p', { class: 'welcome-text', role: 'alert' }, 'This browser didn\'t open the place it keeps your house\'s key. That happens in some private windows, when storage is blocked for this site, or while another tab is updating. Nothing is lost.'),
+    h('p', { class: 'welcome-text' }, 'Close other tabs of this house and try again, or open it in a normal window.'),
+    h(Btn, { label: 'Try again', expand: 'block', size: 'large', run: async () => location.reload() }))));
+}
+
 /**
  * An AI app signing in through this house (the connector's sign-in page sent the person here): read once, before
  * pairing (which may clear the address), so it survives it.

@@ -6,7 +6,7 @@ import '@ionic/core/css/palettes/dark.system.css';
 import './house/theme.css';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { CACHE, Version, api, cached, call, houseBase, reachWatchers, reachable, remember, state } from './house/api';
+import { CACHE, Version, api, cached, call, houseBase, key, reachWatchers, reachable, remember, state } from './house/api';
 import { h, toast } from './house/ion';
 import { knownWaiting, type ListView } from './house/logic';
 import { back, goTab, parse, type Tab } from './house/nav';
@@ -15,7 +15,7 @@ import { InboxTab, decisions } from './house/inbox';
 import { AiKeyPage, AiTab } from './house/ai';
 import { DoorPage, NotifyPage, YouTab } from './house/you';
 import { AboutPage, AccessPage, AddressPage, CirclesPage, DataPage, FreePage, KeyPage, MoneyPage, MovePage, OffersPage, RulesPage } from './house/pages';
-import { ConnectAI, Pair, connecting } from './house/pair';
+import { ConnectAI, NoKey, Pair, connecting } from './house/pair';
 
 // The control panel that comes with every house (open source). Served by the house at /owner/; every call is signed on
 // this device with the owner's key, which never leaves it. Four tabs, each thing in one place: Chats (people and what
@@ -118,6 +118,7 @@ function Root() {
     try { const all = (JSON.parse(localStorage.getItem('lake-houses') ?? '[]') as string[]).filter((x) => x !== houseBase()); localStorage.setItem('lake-houses', JSON.stringify([...all, houseBase()].slice(-5))); } catch { /* not kept */ }
   }, [s]);
   const [connect, setConnect] = useState(connecting);
+  if (key.store === 'none') return h(NoKey, {});
   if (s === 'checking') return h('div', { class: 'boot' }, h('ion-spinner', { name: 'crescent' }));
   if (s === 'paired' && connect) return h(ConnectAI, { c: connect, done: () => setConnect(null) });
   return s === 'paired' ? h(App, {}) : h(Pair, { onPaired: () => setS('paired'), why });

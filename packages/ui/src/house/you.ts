@@ -42,7 +42,7 @@ export function YouTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     circles.data?.length ? h(Section, { title: 'Circles' }, h(Row, { icon: 'people-outline', tint: 'violet', label: 'Your promise circles', note: String(circles.data.length), onClick: () => push('#circles') })) : null,
     h(Section, { title: 'This phone' },
       // Where this phone keeps your key (SPEC §6.1): said plainly, since over plain HTTP the page itself can read it.
-      h(Row, { icon: 'key-outline', tint: key.store === 'device' ? 'mint' : 'amber', label: 'Your key', cls: 'key-store', detail: false, sub: key.store === 'device' ? 'Held by this browser: it signs here and can\'t be copied out' : 'Kept where this page can read it (opened without https)' }),
+      h(Row, { icon: 'key-outline', tint: key.store === 'device' ? 'mint' : 'amber', label: 'Your key', cls: 'key-store', detail: false, sub: key.store === 'device' ? 'Held by this browser: it signs here and can\'t be copied out' : location.protocol === 'https:' ? 'Kept where this page can read it: this browser\'s key store didn\'t open' : 'Kept where this page can read it (opened without https)' }),
       h(Row, { icon: 'phone-portrait-outline', tint: 'blue', label: 'New or lost phone', onClick: () => push('#key') }),
       h(Row, { icon: 'download-outline', tint: 'muted', label: 'Download everything', onClick: () => push('#move') }),
       h(Row, { icon: 'information-circle-outline', tint: 'muted', label: 'About this house', onClick: () => push('#about') })),

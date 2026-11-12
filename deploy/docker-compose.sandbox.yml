@@ -3,7 +3,7 @@
 # something misbehaves Docker restarts it rather than starving whatever else runs on the machine. Keep the caps'
 # sum below the machine's RAM with room for the OS: on 1 GB, ten houses plus the grocers didn't fit (the host
 # swapped until it stopped answering). Each cap is an env var (LAKE_<SERVICE>_MEM, LAKE_HOUSES_HEAP, LAKE_MCP_HEAP);
-# on a 2 GB server: houses 700m (heap 448), mcp 260m (heap 200), specialists 240m, node 180m, sponsor 120m,
+# on a 2 GB server: houses 780m (heap 448: the pod server alone settles near 520 MB with ten pods), mcp 300m (heap 200), specialists 240m, node 180m, sponsor 120m,
 # grocers 110m, swarm 100m.
 #
 #   LAKE_DOMAIN=sandbox.lake.example docker compose -f deploy/docker-compose.sandbox.yml up -d

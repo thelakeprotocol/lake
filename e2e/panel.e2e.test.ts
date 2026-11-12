@@ -452,6 +452,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await row.click();
     await page.locator('.bubble.them', { hasText: 'coffee next week' }).waitFor();
     expect(await page.locator('ion-tab-bar').count()).toBe(0);
+    // Someone new: the owner's AI is told that someone wrote, never the words, until the owner hands it this chat
+    // (round 16: the panel said "I reply" while every connected AI got the text).
+    const forAi = async () => ((await asAssistant({ kind: 'list' })).notes as { id: string; text: string; hidden?: boolean }[]).find((n) => n.id === left.note);
+    expect(await forAi()).toMatchObject({ hidden: true, text: expect.not.stringContaining('coffee') });
+    expect(await asAssistant({ kind: 'assistant.reply', note: left.note, text: 'Sure!' })).toMatchObject({ error: expect.any(String) });
+    const who = page.locator('.modebar ion-segment');
+    expect(await who.evaluate((e) => (e as HTMLElement & { value: string }).value)).toBe('me');
+    await who.locator('ion-segment-button', { hasText: 'My AI replies' }).click();
+    await page.locator('.mode-note', { hasText: 'An AI you\'ve connected can read this chat' }).waitFor({ timeout: 6000 });
+    expect(await forAi()).toMatchObject({ text: 'Hi, Ana here: coffee next week?' });
+    await who.locator('ion-segment-button', { hasText: 'I reply' }).click();
+    await page.locator('.mode-note').waitFor({ state: 'detached', timeout: 6000 });
+    expect((await forAi())?.hidden).toBe(true);
     await page.getByLabel('Message').fill('Yes: Tuesday 10:00?');
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await page.locator('.bubble.me:not(.sending)', { hasText: 'Yes: Tuesday 10:00?' }).waitFor({ timeout: 4000 });

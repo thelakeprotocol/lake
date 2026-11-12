@@ -74,7 +74,7 @@ function ChatView({ c, all }: { c: Chat; all: Chat[] }) {
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, sending]);
   // Open is seen: its badge goes (the house keeps how far you read, for every device).
   useEffect(() => { const at = latest.at; if ((seen.at[c.key] ?? '') < at) { seen.at = { ...seen.at, [c.key]: at }; void call({ kind: 'panel.chat.seen', key: c.key, at }).then(bump); } }, [c.notes.length]);
-  const setTo = async (m: 'ai' | 'me') => { setMode(m); try { await must({ kind: 'panel.chat.mode', key: latest.from.key, mode: m }); void toast(m === 'ai' ? `Your AI replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
+  const setTo = async (m: 'ai' | 'me') => { setMode(m); try { await must({ kind: 'panel.chat.mode', key: latest.from.key ?? latest.from.webId, mode: m }); void toast(m === 'ai' ? `Your AI replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
   const send = async () => {
     const t = draft.trim(); if (!t) return;
     // Shown at once, sending; then the house's answer redraws it as sent (or says why not).
@@ -97,7 +97,7 @@ function ChatView({ c, all }: { c: Chat; all: Chat[] }) {
       h('ion-segment', { value: mode, onionChange: (e: CustomEvent) => void setTo(e.detail.value as 'ai' | 'me'), 'aria-label': 'Who replies' },
         h('ion-segment-button', { value: 'me' }, h('ion-label', {}, 'I reply')),
         h('ion-segment-button', { value: 'ai' }, h('ion-label', {}, 'My AI replies'))),
-      mode === 'ai' && !onDuty ? h('p', { class: 'mode-note' }, 'Your AI replies once it\'s on duty (My AI).') : null) : null,
+      mode === 'ai' && c.web ? h('p', { class: 'mode-note' }, 'An AI you\'ve connected can read this chat and answer it.') : mode === 'ai' && !onDuty ? h('p', { class: 'mode-note' }, 'Your AI replies once it\'s on duty (My AI).') : null) : null,
     h('div', { class: 'composer-row' },
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
       h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: send, 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
@@ -125,7 +125,7 @@ function ChatInfo({ c, all, mode, setTo, onDuty, latest, close }: { c: Chat; all
       namesakes.length ? h(Row, { icon: 'people-outline', tint: 'amber', label: `Also called ${c.name}`, sub: `${namesakes.length} other chat${namesakes.length === 1 ? '' : 's'}, through ${namesakes.map((x) => x.agent).join(', ')}: maybe not the same person` }) : null),
     c.canMode ? h(Section, {},
       h('ion-item', { lines: 'none' }, h('ion-toggle', { checked: mode === 'ai', onionChange: (e: CustomEvent) => void setTo(e.detail.checked ? 'ai' : 'me') }, 'Let my AI reply')),
-      onDuty ? null : h('ion-item', { lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, 'Needs AI on duty, which is off now.')))) : null,
+      onDuty || c.web ? null : h('ion-item', { lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, 'Needs AI on duty, which is off now.')))) : null,
     h(Section, {},
       h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirmMute())) return; await call({ kind: 'panel.note.mute', id: latest.id }); close(); void toast(`${c.name} muted`); back('#chats'); } }, h('ion-icon', { name: 'notifications-off-outline', slot: 'start' }), h('ion-label', {}, 'Mute')),
       h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { if (!(await confirmClear())) return; for (const n of c.notes) await call({ kind: 'panel.note.dismiss', id: n.id }); close(); back('#chats'); } }, h('ion-icon', { name: 'trash-outline', slot: 'start', color: 'danger' }), h('ion-label', { color: 'danger' }, 'Clear chat'))),
