@@ -1873,7 +1873,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (a.action === 'post') {
           if (!a.name) throw new Error('post: name (what), and properties if you can tell them');
           const r = await houseCall({ kind: 'assistant.want', name: a.name, description: a.description, properties: a.properties ?? {}, quantity: a.quantity, area: a.area, currency: a.currency?.toUpperCase(), days: a.days, max_price: a.max_price });
-          return json({ ...r, next: 'Tell your human, briefly: it\'s listed; offers will reach their phone (Chats), and they buy with a tap. Not the id. Check back with mine if they ask how it\'s going.' });
+          return json({ ...r, next: 'Tell your human, briefly: it\'s listed; offers will reach their phone (Today), and they buy with a tap. Not the id. Check back with mine if they ask how it\'s going.' });
         }
         if (a.action === 'mine') {
           const v = await houseCall({ kind: 'list' }) as { wants?: { want: { id: string; name: string; availabilityEnds: string }; closed?: string; bought?: string; offers: { seller: { name: string }; total: { currency: string; value: number }; delivery?: string; matched?: string[]; state: string; over?: boolean }[] }[] };

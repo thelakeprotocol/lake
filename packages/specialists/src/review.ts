@@ -568,7 +568,7 @@ export async function createPayments(o: SpecialistOptions & {
       h.amount -= part;
       spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - part));
       await save();
-      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: agreementOf(h), cart: h.cart, seller: h.seller ?? h.payee, intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
+      const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: agreementOf(h), cart: h.cart, seller: h.seller ?? h.payee, ...(h.about?.seller_name ? { seller_name: h.about.seller_name } : {}), intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
       const logged = o.log ? await o.log(credential, 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;
       const envelope = { kind: 'receipt', receipt: { credential, card: s.card }, amount: part / 100, currency: h.currency, cart: h.cart!.id, order: h.cart!.id, hold: h.id, memo: `part refunded: ${h.currency} ${part / 100}; ${h.currency} ${h.amount / 100} still held` };
       for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {

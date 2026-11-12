@@ -45,13 +45,15 @@ function start(args: string[], ready: RegExp, env: Record<string, string> = {}):
   });
 }
 
-/** The page is never wider than the phone, and nothing threw. */
+/** The page is never wider than the phone, and nothing threw. LAKE_LOOK=<dir>: a screenshot of each screen checked, to look at the whole flow. */
+let looks = 0;
 async function tidy() {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
+  if (process.env.LAKE_LOOK) await page.screenshot({ path: join(process.env.LAKE_LOOK, `${String(++looks).padStart(3, '0')}-${(expect.getState().currentTestName ?? '').split(' > ').pop()!.slice(0, 40).replace(/[^\w]+/g, '-')}.png`) }).catch(() => {});
 }
 // Four tabs, Today first (it opens there); everything else is a row under You (12 Nov: the redesign, then Fable's design).
-const TABS = ['Today', 'Chats', 'My AI', 'You'];
+const TABS = ['Today', 'People', 'My AI', 'You'];
 const tab = async (name: string, p: Page = page) => {
   if (TABS.includes(name)) {
     // On a page opened from a tab (a chat, a setting), the tab bar isn't there: Back first.
@@ -72,7 +74,7 @@ const closeSheet = async () => { await sheet().getByRole('button', { name: 'Clos
 
 const lostKey = async (p: Page) => {
   const said = p.getByText(/isn't your house's key any more/);
-  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('ion-tab-button', { hasText: 'Chats' }).click(); await said.waitFor({ timeout: 5000 }); });
+  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('ion-tab-button', { hasText: 'People' }).click(); await said.waitFor({ timeout: 5000 }); });
 };
 
 let assistant: Identity;
@@ -201,7 +203,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await (await fetch(`${house}/owner/status`)).json()).toMatchObject({ claimed: false, unclaimed: true });
   });
 
-  it('pairs a fresh device: the house name, one button, then Chats with one thing to do', async () => {
+  it('pairs a fresh device: the house name, one button, then Today with one thing to do', async () => {
     await page.goto(`${house}/owner/`);
     // Not claimed yet: what it is, and the one thing to do.
     await page.getByRole('button', { name: 'Use this phone' }).waitFor();
@@ -227,7 +229,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('heading', { name: 'Welcome to your house' }).waitFor({ state: 'detached', timeout: 10_000 });
     await tab('You');
     await page.locator('.profile .handle', { hasText: '@panelowner' }).waitFor({ timeout: 10_000 });
-    await tab('Chats');
+    await tab('People');
     const door = await (await fetch(house, { headers: { accept: 'text/html' } })).text();
     expect(door).toMatch(/Knock, knock[\s\S]*Ping <code>panelowner<\/code> on the Lake/);
     await tidy();
@@ -246,7 +248,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await sheet().locator('img.qr').waitFor();
     await tidy();
     await closeSheet();
-    await tab('Chats');
+    await tab('People');
   });
 
   it('lets a person leave a note themselves from the door page, and read the answer later', async () => {
@@ -268,7 +270,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Today');
     await page.locator('.handled-row', { hasText: 'Your door note went to 1 new person' }).waitFor({ timeout: 8000 });
     await page.locator('.wait-new', { hasText: /new person wrote|new people wrote/ }).waitFor();
-    await tab('Chats');
+    await tab('People');
     const link = await visitor.locator('a').first().getAttribute('href');
     await visitor.goto(link!);
     await visitor.getByText(/with the owner/i).waitFor();
@@ -391,8 +393,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(polled.headers.get('access-control-allow-origin')).toBe('*');
       expect((await fetch(`${nodeUrl}/wants?currency=AUD`, { headers: { 'if-none-match': polled.headers.get('etag')! } })).status).toBe(304);
       expect(await (await fetch(`${nodeUrl}/wants/${wantId}`)).json()).toMatchObject({ want: { id: wantId }, status: 'open' });
-      // Chats: a "Looking for" thread; the offers come in by themselves.
-      await tab('Chats');
+      // Today: a "Looking for" row while an offer waits for the owner's yes; the offers come in by themselves.
+      await tab('Today');
       const row = page.locator('.chatrow.want-row', { hasText: 'Handheld shower head' });
       // Two shops offer; one is over the most they'd pay, so the row counts one.
       await row.locator('.chatlast', { hasText: /1 offer · from A\$34\.00/ }).waitFor({ timeout: 20_000 });
@@ -433,8 +435,47 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect((await fetch(`${nodeUrl}/wants/${wantId}`)).status).toBe(404);
       const v = await asAssistant({ kind: 'list' });
       expect(v.wants.find((w: { want: { id: string } }) => w.want.id === wantId)).toMatchObject({ bought: expect.any(String), offers: expect.arrayContaining([expect.objectContaining({ state: 'arrived', total: { currency: 'AUD', value: 34 } })]) });
+      // Nothing left for the owner to do: it leaves Today, and stays listed with their money.
       await goBack();
-      await page.locator('.chatrow', { hasText: 'Arrived · Washer & Wrench is paid' }).waitFor({ timeout: 10_000 });
+      await onTab('Today');
+      await page.locator('.chatrow.want-row', { hasText: 'Handheld shower head' }).waitFor({ state: 'detached', timeout: 10_000 });
+      await tab('Money');
+      await page.locator('.chatrow.want-row', { hasText: 'Arrived · Washer & Wrench is paid' }).waitFor({ timeout: 10_000 });
+      // What was spent names the shop and the thing, and is paid once it arrived: the payments agent's release, made out to
+      // the shop, is filed over the held receipt (12 Nov: it read "A$34 to localhost · held" under "No payments yet").
+      const spentRows = page.locator('ion-item.pay', { hasText: 'A$34 to Washer & Wrench' });
+      await spentRows.filter({ hasText: 'Handheld shower head' }).locator('.lake-pill', { hasText: 'paid' }).waitFor({ timeout: 15_000 });
+      expect(await page.getByText('No payments yet').count()).toBe(0);
+      expect(await page.getByText(/to localhost/).count()).toBe(0);
+      await tidy();
+
+      // A second one, and this time the shop can't send it after all: it refunds. The money is back, said in the want and
+      // with the owner's money, and the want is open for offers again.
+      const second = await asAssistant({ kind: 'assistant.want', name: 'Handheld shower head', description: 'A second one, for the other bathroom', properties: { Type: 'Handheld', 'Spray modes': 3, Finish: 'Chrome', Connection: '1/2 inch BSP' }, area: 'AU-QLD', currency: 'AUD', max_price: 34.5 });
+      const secondId = second.want.id as string;
+      await page.evaluate((id) => { location.hash = `#want=${id}`; }, secondId);
+      await page.getByText('A second one, for the other bathroom').waitFor({ timeout: 10_000 });
+      await page.locator('ion-card.offer').first().getByRole('button', { name: 'Buy for A$34.00' }).click({ timeout: 20_000 });
+      await confirmSheet('Pay A$34.00');
+      await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 20_000 });
+      expect(await shops.find((x) => x.card.name.startsWith('Washer'))!.refund()).toBe(true);
+      await page.getByText(/Your A\$34\.00 came back from Washer & Wrench: the seller refunded it\./).waitFor({ timeout: 15_000 });
+      expect(await page.getByRole('heading', { name: 'On its way' }).count()).toBe(0);
+      await tidy();
+      // On the Lake's list again, without a buyer; the shop asking after its offer hears it was refunded.
+      let back: { want: { id: string } }[] = [];
+      for (let i = 0; i < 20 && !back.some((x) => x.want.id === secondId); i++) { back = await (await fetch(`${nodeUrl}/wants?q=shower`)).json(); if (!back.some((x) => x.want.id === secondId)) await page.waitForTimeout(500); }
+      expect(back.some((x) => x.want.id === secondId)).toBe(true);
+      const after = (await asAssistant({ kind: 'list' })).wants.find((w: { want: { id: string } }) => w.want.id === secondId);
+      expect(after.bought).toBeUndefined();
+      expect(after.offers).toEqual(expect.arrayContaining([expect.objectContaining({ state: 'refunded', ended: 'the seller refunded it' })]));
+      await goBack();
+      await tab('Money');
+      await page.locator('.chatrow.want-row', { hasText: 'Refunded by Washer & Wrench' }).waitFor({ timeout: 10_000 });
+      await page.locator('ion-item.pay', { hasText: 'A$34 back from Washer & Wrench' }).locator('.lake-pill', { hasText: 'returned' }).waitFor({ timeout: 10_000 });
+      expect(await spentRows.count()).toBe(1);
+      // Only what stayed spent is counted.
+      expect(await page.locator('.stat', { hasText: 'Spent' }).locator('b').textContent()).toBe('A$34');
       await tidy();
     } finally {
       await Promise.all(shops.map((x) => x.close()));
@@ -443,7 +484,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('shows a note from the web the moment it arrives, and the owner answers it', async () => {
-    await tab('Chats');
+    await tab('People');
     const left = await (await fetch(`${house}/note?text=${encodeURIComponent('Hi, Ana here: coffee next week?')}&from=Ana`)).json();
     expect(left.kind).toBe('noted');
     // A chat row, as messaging apps show it; tapped, the conversation full screen without the tab bar.
@@ -508,10 +549,86 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // A link to a chat that's gone (cleared, say) says so, with the way back.
       await page.goto(`${house}/owner/#note=gone-for-good`);
       await page.getByText('This chat isn\'t here any more').waitFor();
-      await page.locator('.lake-empty').getByRole('button', { name: 'Back to Chats' }).click();
-      await onTab('Chats');
+      await page.locator('.lake-empty').getByRole('button', { name: 'Back to People' }).click();
+      await onTab('People');
       await tidy();
     } finally { await alex.close(); }
+  });
+
+  it('People: the ones you know on top, new people folded to three, and cleared in one tap with Undo', async () => {
+    // Three more people write, each through their own AI (the web form takes three notes an hour from one address).
+    for (const who of ['Bea', 'Cy', 'Di']) {
+      const ai = await joinLake({ name: `${who} (Claude)`, domain: `${who.toLowerCase()}.example`, node: nodeUrl, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+      try { expect(await ai.ask(`${house}/a2a`, { kind: 'note', text: `Hi, ${who} here: hello from the fence` })).toMatchObject({ kind: 'noted' }); } finally { await ai.close(); }
+    }
+    await tab('People');
+    // Ana and Alex were answered: they're people the owner knows, above everyone new, without a label saying so.
+    const known = page.locator('.people-known .chatrow'), fresh = page.locator('.people-new .chatrow');
+    await known.filter({ hasText: 'Thursday 4pm works.' }).waitFor({ timeout: 8000 });
+    await known.filter({ hasText: 'Yes: Tuesday 10:00?' }).waitFor();
+    expect(await page.locator('.chatrow ion-chip, .chatrow .lake-pill').count()).toBe(0);
+    // New people: the three newest, and how many there are.
+    await page.locator('.people-new ion-list-header', { hasText: /^New people · \d+$/ }).waitFor();
+    await fresh.filter({ hasText: 'Di here' }).waitFor({ timeout: 8000 });
+    expect(await fresh.count()).toBe(3);
+    await tidy();
+    await page.locator('.show-all').click();
+    const all = await fresh.count();
+    expect(all).toBeGreaterThan(3);
+    await fresh.filter({ hasText: 'would love a coffee' }).waitFor();
+    // All of them cleared in one tap; the people the owner knows stay. Undo puts every chat back.
+    const knownBefore = await known.count();
+    await page.locator('.clear-new').click();
+    await page.locator('.people-new').waitFor({ state: 'detached', timeout: 8000 });
+    expect(await known.count()).toBe(knownBefore);
+    await tidy();
+    await page.locator('ion-toast').getByRole('button', { name: 'Undo' }).click();
+    await fresh.filter({ hasText: 'would love a coffee' }).waitFor({ timeout: 8000 });
+    expect(await fresh.count()).toBe(all);
+    await page.locator('.show-all', { hasText: 'Show fewer' }).click();
+    expect(await fresh.count()).toBe(3);
+    await page.locator('ion-toast').waitFor({ state: 'detached', timeout: 12_000 }).catch(() => {});
+    await tidy();
+  });
+
+  it('a known name on a new key stays under New people until the owner says "This is Alex"; then it is one row, and can be parted', async () => {
+    const again = await joinLake({ name: 'Alex (Claude)', domain: 'alex-new-phone.example', node: nodeUrl, port: await freePort(), onMessage: async () => ({ kind: 'received' }) });
+    try {
+      expect(await again.ask(`${house}/a2a`, { kind: 'note', text: 'Alex again, on a new phone: still on for Thursday?' })).toMatchObject({ kind: 'noted' });
+      await tab('People');
+      const row = page.locator('.people-new .chatrow', { hasText: 'still on for Thursday' });
+      await row.locator('.row-via.careful', { hasText: 'Says they\'re Alex, with a different key' }).waitFor({ timeout: 8000 });
+      await tidy();
+      await row.click();
+      // Said plainly in the chat, with the one tap that files it with Alex (asked first: it makes their AI answer it too).
+      await page.locator('.newstrip.threat', { hasText: 'A new phone or AI app does that; so does someone pretending.' }).waitFor();
+      await tidy();
+      await page.locator('.same-person').click();
+      await page.locator('ion-action-sheet').getByText('File this with Alex?').waitFor();
+      await confirmSheet('This is Alex');
+      // One chat: what Alex wrote with either key, and no warning.
+      await page.locator('.newstrip').waitFor({ state: 'detached', timeout: 8000 });
+      await page.locator('.bubble.them', { hasText: 'free for a call Thursday' }).waitFor({ timeout: 8000 });
+      await page.locator('.bubble.them', { hasText: 'still on for Thursday' }).waitFor();
+      await goBack();
+      await onTab('People');
+      await page.locator('.people-known .chatrow', { hasText: 'still on for Thursday' }).waitFor({ timeout: 8000 });
+      expect(await page.locator('.chatrow', { hasText: 'Alex' }).count()).toBe(1);
+      // The chat's details say it's two keys, and part them again: the new key is back under New people, with its warning.
+      await page.locator('.people-known .chatrow', { hasText: 'still on for Thursday' }).click();
+      await page.locator('.chatwho').click();
+      await sheet().locator('.joined', { hasText: 'Writes with 2 keys' }).waitFor();
+      // Why they're known is said to the owner as the owner (it read "your human said it is someone they know": words for an AI).
+      await sheet().getByText('You said they\'re someone you know, writing with another key').waitFor();
+      expect(await sheet().getByText(/your human/).count()).toBe(0);
+      await tidy();
+      await sheet().getByRole('button', { name: 'Separate them' }).click();
+      await sheet().locator('.joined').waitFor({ state: 'detached', timeout: 8000 });
+      await page.goto(`${house}/owner/#chats`);
+      await page.locator('.people-new .chatrow .row-via.careful').waitFor({ timeout: 8000 });
+      expect(await page.locator('.chatrow', { hasText: 'Alex' }).count()).toBe(2);
+      await tidy();
+    } finally { await again.close(); }
   });
 
   it('says when people wait for the owner\'s AI and it isn\'t reading, and stops saying it once it reads', async () => {
@@ -615,7 +732,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   });
 
   it('opens at once with what it showed last time, even when the house is slow', async () => {
-    await tab('Chats');
+    await tab('People');
     await page.locator('.chatrow').first().waitFor();
     await page.route('**/owner/api', async (route) => { await new Promise((r) => setTimeout(r, 2500)); await route.continue().catch(() => {}); });
     const t = Date.now();
@@ -633,7 +750,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('ion-tab-button', { hasText: 'You' }).click();
     await page.locator('.status-chip.down', { hasText: 'Offline' }).first().waitFor({ timeout: 5000 });
     await ctx.setOffline(false);
-    await page.locator('ion-tab-button', { hasText: 'Chats' }).click();
+    await page.locator('ion-tab-button', { hasText: 'People' }).click();
     await page.locator('.status-chip').first().waitFor({ state: 'detached', timeout: 15_000 });
     await tidy();
   });
@@ -817,7 +934,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Today');
     // A suggestion, or a chat the house kept for its AI while it was away.
     const match = page.locator('ion-card.sug, ion-item.note-row, .chatrow', { hasText: 'offering:lift-to-cool-room' });
-    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); if (i % 2) await tab(i % 4 === 1 ? 'Chats' : 'Today'); }
+    for (let i = 0; i < 20 && !(await match.count()); i++) { await page.waitForTimeout(500); if (i % 2) await tab(i % 4 === 1 ? 'People' : 'Today'); }
     expect(await match.count()).toBeGreaterThan(0);
     await one.call('lake_set_tags', { tags: [] });
     // A warning with the sender's address: the owner blocks it in one tap, and the AI's connector turns it away (run 65).

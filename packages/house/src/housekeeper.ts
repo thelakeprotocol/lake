@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, pledgeReceiptPath, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cartReceiptPath, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, pledgeReceiptPath, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, keyThumbprint, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -31,6 +31,8 @@ export interface HousekeeperOptions {
   signals?: () => { blocklist: Set<string>; reputation: Record<string, number> };
   /** A receipt was filed at this path (a release replaces a held one there): whoever keeps a copy reads it again. */
   onReceiptFiled?: (path: string) => void;
+  /** A cart this house paid for has ended at the payments agent: its money went to the shop, or came back. */
+  onCartSettled?: (x: { hold: string; to: 'captured' | 'voided'; how: string; why: string; amount: number; currency: string; seller?: string }) => void | Promise<void>;
   emit: (e: LakeEvent) => void;
   say?: (msg: string) => void;
   /** In the owner's own activity: what happened to their money in a pledge. */
@@ -692,16 +694,22 @@ export class Housekeeper {
     let given = false;
     if (!check.ok) {
       const claimed = (() => { try { return JSON.parse(Buffer.from(String(p.receipt?.credential ?? '').split('.')[1] ?? '', 'base64url').toString()).credentialSubject as Record<string, any>; } catch { return undefined; } })();
-      if (claimed?.pledge && !claimed.pledge.bond && claimed.payer === this.o.webId && typeof claimed.id === 'string') {
+      // A cart this house paid for (SPEC §6.8): its release is made out to the shop, and is filed here over the held one.
+      if (claimed && (claimed.pledge ? !claimed.pledge.bond : typeof claimed.cart?.id === 'string') && claimed.payer === this.o.webId && typeof claimed.id === 'string') {
         const again = await checkAttachment(p.receipt, { trusted: this.o.trust.payments, type: 'LakeReceipt', subject: claimed.id, sandbox: this.o.sandbox });
         if (again.ok && (again.vc.credentialSubject as Record<string, any>).payer === this.o.webId) { check = again; given = true; }
       }
     }
     if (!check.ok) return this.reply({ kind: 'rejected', code: 'receipt', why: check.why });
     const sub = check.vc.credentialSubject as Record<string, any>;
-    if (sub.pledge && !sub.pledge.bond && sub.payer === this.o.webId) given = true;
+    // Money of this house's that came back (a pledge that lapsed, a cart the shop couldn't send) is made out to the house
+    // itself: it is how something it spent ended, never money earned.
+    if ((sub.pledge ? !sub.pledge.bond : typeof sub.cart?.id === 'string') && sub.payer === this.o.webId) given = true;
     const agreement = String(sub.agreement ?? 'unknown').split(':').slice(-2).join('-').replace(/[^a-zA-Z0-9-]/g, '');
-    const path = given ? pledgeReceiptPath(String(sub.agreement)) : `receipts/${agreement}.receipt.jwt`;
+    // Part of a cart's money back (the shop and the buyer settled on less) is a receipt of its own beside the held one: the
+    // rest is still held, and its release replaces that one when it comes.
+    const part = given && !sub.pledge && sub.partial ? `-part-${String(sub.settlementId ?? '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12)}` : '';
+    const path = !given ? `receipts/${agreement}.receipt.jwt` : sub.pledge ? pledgeReceiptPath(String(sub.agreement)) : cartReceiptPath(String(sub.cart.id)).replace(/\.receipt\.jwt$/, `${part}.receipt.jwt`);
     // One file an order: a later receipt (released, refunded) replaces the held one, never the other way round (a held
     // one sent again, late, after a failed try, mustn't undo a release).
     const filed = await this.read(path.replace(/^receipts\//, 'receipts/')).catch(() => '');
@@ -719,6 +727,13 @@ export class Housekeeper {
         : `Your ${amount} for the pledge "${sub.pledge.id}" went on to ${String(sub.payee_name ?? sub.id)}: it filled`;
       this.o.desk.news({ about: 'pledge.money', pledge: String(sub.pledge.id), amount: Number(sub.amount?.value ?? 0), currency: String(sub.amount?.currency ?? ''), how: String(sub.how ?? ''), note: story });
       this.o.note?.('pledge.money', story);
+      return this.reply({ kind: 'filed', receipt: agreement });
+    }
+    if (given) {
+      // What the house bought: the held receipt it filed when it paid is now how that ended.
+      const hold = String(sub.captures ?? sub.voids ?? '');
+      if (part) this.o.note?.('want.refunded', `${sub.amount?.currency ?? ''} ${Number(sub.amount?.value ?? 0).toFixed(2)} of what you paid ${String(sub.seller_name ?? 'a shop')} came back; ${sub.amount?.currency ?? ''} ${Number(sub.still_held ?? 0).toFixed(2)} is still held`);
+      else if (hold) await this.o.onCartSettled?.({ hold, to: sub.voids ? 'voided' : 'captured', how: String(sub.how ?? ''), why: String(sub.why ?? ''), amount: Number(sub.amount?.value ?? 0), currency: String(sub.amount?.currency ?? ''), ...(sub.seller_name ? { seller: String(sub.seller_name) } : {}) });
       return this.reply({ kind: 'filed', receipt: agreement });
     }
     // The owner's assistant hears of money in as it lands (run 62: one told its human "In: A$0" with $10 earned).

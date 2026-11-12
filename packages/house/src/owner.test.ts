@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -572,6 +572,80 @@ describe('what an attacker tried (round 16)', () => {
     fc.set('old-key', { at: new Date(Date.now() - 40 * 86_400_000).toISOString() });
     h.desk.doorNoteFor('another-key-0123456789', undefined);
     expect((h.desk as unknown as { firstContacts: Map<string, unknown> }).firstContacts.has('old-key')).toBe(false);
+    h.close();
+  });
+});
+
+describe('people (step 3 of the app design)', () => {
+  async function house() {
+    let key: JWK | null = null;
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [],
+      tell: async () => {},
+      panel: { activity: () => [], money: async () => ({}) },
+    } as never);
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    return { desk, owner, dir: desk['o'].dataDir as string, close: () => server.close() };
+  }
+  // Key thumbprints are 43 characters; a lookalike is only told apart by one.
+  const from = (name: string, n = 1) => ({ name: `${name}'s AI`, domain: `${name}${n}.example`, webId: `https://${name}${n}.example/#a`, url: `https://${name}${n}.example/a2a`, key: `${name}${n}-key-0123456789abcdefghijklmnopqrstuvwxyz`.slice(0, 43).padEnd(43, 'x'), checked: false });
+
+  it('a known name with a new key stays apart until the owner says "This is Alex"; then it is one person, and can be parted', async () => {
+    const h = await house();
+    const alex = from('alex'), again = from('alex', 2), sam = from('sam');
+    (h.desk as unknown as { contacts: Map<string, unknown> }).contacts.set(alex.key, { name: alex.name, webId: alex.webId, at: new Date().toISOString() });
+    h.desk.addNote({ from: alex, text: 'Lunch on Friday?' });
+    h.desk.addNote({ from: again, text: 'New phone, same me' });
+    h.desk.addNote({ from: sam, text: 'Hello' });
+    const row = async (key: string) => ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; twin?: { key: string; name: string }; person?: string; lookalike?: boolean; mode?: string }[]).find((n) => n.from.key === key)!;
+    expect(await row(again.key)).toMatchObject({ lookalike: true, twin: { key: alex.key, name: alex.name }, mode: 'me' });
+    expect((await row(again.key)).person).toBeUndefined();
+    expect(h.desk.knownBy(again.key)).toBeUndefined();
+    expect((await h.desk.today(0)).waiting).toMatchObject({ people: 3, known: 1 });
+
+    // Only someone the owner's side knows can be joined to, and only a sender here; never a key to itself.
+    expect(await h.owner({ kind: 'panel.person.same', key: again.key, as: sam.key })).toMatchObject({ error: expect.stringContaining('someone your side knows') });
+    expect(await h.owner({ kind: 'panel.person.same', key: 'nobody', as: alex.key })).toMatchObject({ error: expect.stringContaining('sender of a note') });
+    expect(await h.owner({ kind: 'panel.person.same', key: alex.key, as: alex.key })).toMatchObject({ error: expect.stringContaining('itself') });
+
+    await h.owner({ kind: 'panel.chat.mode', key: alex.key, mode: 'ai' });
+    expect(await h.owner({ kind: 'panel.person.same', key: again.key, as: alex.key })).toMatchObject({ ok: true, same: alex.key });
+    // One person now: known, answered as Alex is, no longer a lookalike, and counted once among who waits.
+    expect(await row(again.key)).toMatchObject({ person: alex.key, mode: 'ai' });
+    expect((await row(again.key)).lookalike).toBeFalsy();
+    expect(h.desk.knownBy(again.key)).toContain('another key');
+    expect((await h.desk.today(0)).waiting).toMatchObject({ people: 2, known: 1 });
+    // It survives a restart.
+    expect(JSON.parse(await readFile(join(h.dir, 'same-as.json'), 'utf8'))).toEqual({ [again.key]: alex.key });
+
+    expect(await h.owner({ kind: 'panel.person.same', key: again.key, as: '' })).toMatchObject({ ok: true, parted: true });
+    expect(await row(again.key)).toMatchObject({ lookalike: true, mode: 'me' });
+    expect(h.desk.knownBy(again.key)).toBeUndefined();
+    h.close();
+  });
+
+  it('clearing many chats at once can be undone for ten minutes; the senders are told what happened to their notes', async () => {
+    const h = await house();
+    const ids = ['a', 'b', 'c'].map((n) => h.desk.addNote({ from: from(n), text: `hello from ${n}` })!);
+    const first = await h.owner({ kind: 'panel.notes.clear', ids: ids.slice(0, 2) });
+    expect(first).toMatchObject({ ok: true, cleared: 2, undo: expect.any(String) });
+    expect(h.desk.notes.map((n) => n.id)).toEqual([ids[2]]);
+    expect(h.desk.noteState(ids[0]!, from('a').webId)).toContain('set aside by the owner, unread');
+    expect(await h.owner({ kind: 'panel.notes.clear', ids: ['nothing'] })).toMatchObject({ ok: true, cleared: 0 });
+
+    expect(await h.owner({ kind: 'panel.notes.restore', undo: first.undo })).toMatchObject({ ok: true, restored: 2 });
+    expect(h.desk.notes.map((n) => n.id).sort()).toEqual([...ids].sort());
+    expect(h.desk.noteState(ids[0]!, from('a').webId)).not.toContain('set aside');
+    // Once only, and not for a code the house doesn't hold.
+    expect(await h.owner({ kind: 'panel.notes.restore', undo: first.undo })).toMatchObject({ status: 410, error: expect.stringContaining('too late') });
+    expect(await h.owner({ kind: 'panel.notes.restore', undo: 'made-up' })).toMatchObject({ status: 410 });
     h.close();
   });
 });

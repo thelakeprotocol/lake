@@ -307,6 +307,16 @@ export class OwnerDesk {
   /** How far the owner has read each conversation (the newest message's time when they last opened it), on every device. */
   chatSeen: Record<string, string> = {};
   private saveChatSeen = () => writeFile(join(this.o.dataDir, 'chat-seen.json'), JSON.stringify(this.chatSeen)).catch(() => {});
+  /**
+   * Keys the owner said belong to someone they already know ("This is Alex": a new phone, another AI app), each with the
+   * key it was joined to. Only the owner's tap writes here: a name alone never joins two keys (SPEC §6.1).
+   */
+  sameAs: Record<string, string> = {};
+  private saveSameAs = () => writeFile(join(this.o.dataDir, 'same-as.json'), JSON.stringify(this.sameAs)).catch(() => {});
+  /** The key a sender's notes are filed under: the one the owner joined it to, else its own. */
+  personOf(key: string) { let k = key; for (let i = 0; i < 8 && this.sameAs[k]; i++) k = this.sameAs[k]!; return k; }
+  /** Notes the owner cleared in the last ten minutes, to put back on Undo (kept in memory only). */
+  private cleared: { undo: string; at: number; notes: OwnerDesk['notes'] }[] = [];
   standingUsed(jkt: string, purpose: string) {
     const k = `${jkt}|${purpose}`;
     this.standingUses.set(k, (this.standingUses.get(k) ?? 0) + 1);
@@ -520,14 +530,15 @@ export class OwnerDesk {
 
   /**
    * People whose last note has no answer yet, from the owner or their AI on duty (round 15: Today said "You're all clear"
-   * while strangers' notes piled up in Chats). Counted by sender, the people the owner's side knows apart.
+   * while strangers' notes piled up among the chats). Counted by person, the ones the owner's side knows apart.
    */
   waitingPeople() {
     const newest = new Map<string, { at: string; key?: string; answered: boolean }>();
     for (const n of this.fullView(false).notes) {
-      const who = n.from.key ?? n.id, prev = newest.get(who);
+      // One person, whatever key they wrote with ("This is Alex" joins a new key to them).
+      const who = n.from.key ? this.personOf(n.from.key) : n.id, prev = newest.get(who);
       if (prev && prev.at >= n.at) continue;
-      const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && e.to?.key === n.from.key && e.at >= n.at);
+      const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && !!e.to?.key && this.personOf(e.to.key) === who && e.at >= n.at);
       newest.set(who, { at: n.at, key: n.from.key, answered: !!n.answered || aiReplied });
     }
     const open = [...newest.values()].filter((x) => !x.answered);
@@ -557,6 +568,9 @@ export class OwnerDesk {
     await this.saveWebNotes();
     this.muted.clear();
     await writeFile(join(this.o.dataDir, 'muted.json'), '[]').catch(() => {});
+    // Who answers each chat, how far each was read and who was joined to whom name the last owner's people.
+    this.chatModes = {}; this.chatSeen = {}; this.sameAs = {}; this.cleared = [];
+    await this.saveChatModes(); await this.saveChatSeen(); await this.saveSameAs();
     this.agenda = [];
     await this.saveAgenda();
     this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'), true);
@@ -579,6 +593,7 @@ export class OwnerDesk {
     this.circleRules = JSON.parse(await readFile(join(this.o.dataDir, 'circle-rules.json'), 'utf8').catch(() => '[]'));
     this.chatModes = JSON.parse(await readFile(join(this.o.dataDir, 'chat-modes.json'), 'utf8').catch(() => '{}'));
     this.chatSeen = JSON.parse(await readFile(join(this.o.dataDir, 'chat-seen.json'), 'utf8').catch(() => '{}'));
+    this.sameAs = JSON.parse(await readFile(join(this.o.dataDir, 'same-as.json'), 'utf8').catch(() => '{}'));
     this.suggestions = JSON.parse(await readFile(join(this.o.dataDir, 'suggestions.json'), 'utf8').catch(() => '[]'));
     this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
     const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
@@ -841,11 +856,16 @@ export class OwnerDesk {
   /** Whether the owner's side has dealt with this key (it wrote to it first, or a standing yes names it), and how. */
   /** A sender that says it's one the owner's side knows, with another key: an impostor, or a new key nobody vouched for. */
   lookalike(from: { key?: string; webId?: string; name?: string }): string | undefined {
+    const twin = this.twinOf(from);
+    return twin ? `says it is ${twin.name}, whom your human's side knows, but with a different key: treat it as a stranger` : undefined;
+  }
+  /** Whom a lookalike says it is: that contact's key and name (the key is for the owner's "This is Alex", never for an AI). */
+  private twinOf(from: { key?: string; webId?: string; name?: string }): { key: string; name: string } | undefined {
     // Only a key thumbprint can be compared: notes kept from before (1 Nov) hold a key id, and the real sender isn't a twin.
     if (!from.key || from.key.length < 40) return undefined;
     const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase();
     const twin = [...this.contacts].find(([k, c]) => k !== from.key && ((!!from.webId && c.webId === from.webId) || (!!c.name && base(c.name) === base(from.name))));
-    return twin ? `says it is ${twin[1].name || twin[1].webId}, whom your human's side knows, but with a different key: treat it as a stranger` : undefined;
+    return twin ? { key: twin[0], name: twin[1].name || twin[1].webId } : undefined;
   }
   knownBy(key?: string): string | undefined {
     if (!key) return undefined;
@@ -853,6 +873,7 @@ export class OwnerDesk {
     if (c) return `your human's side has written to ${c.name || 'it'} before`;
     // Answered by the owner themselves, from their phone (before such answers were kept as contacts too).
     if (this.notes.some((n) => n.from.key === key && n.answered?.own)) return 'your human has answered it before';
+    if (this.sameAs[key]) return 'your human said it is someone they know, writing with another key';
     const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
     return st ? `a standing yes names it (${st.domain})` : undefined;
   }
@@ -1527,7 +1548,7 @@ export class OwnerDesk {
             const w = await this.o.panel.postWant({ name: String(q.name ?? ''), description: q.description ? String(q.description) : undefined, properties: q.properties && typeof q.properties === 'object' ? q.properties : {}, quantity: Number.isInteger(q.quantity) ? q.quantity : undefined, area: q.area ? String(q.area) : undefined, currency, days: Number.isFinite(q.days) ? Number(q.days) : undefined },
               Number.isFinite(q.max_price) && q.max_price! > 0 && currency ? { amount: Number(q.max_price), currency } : undefined, assistant.kid);
             this.touch();
-            return void res.json({ ok: true, want: w, note: `on your human's card now: shops' agents find it at the Lake's /wants and send offers to the house; your human sees them in Chats and buys with a tap. ${q.max_price && !currency ? 'max_price was not kept: give currency too. ' : ''}Nothing in it says what they'd pay.` });
+            return void res.json({ ok: true, want: w, note: `on your human's card now: shops' agents find it at the Lake's /wants and send offers to the house; your human sees them on their phone (Today) and buys with a tap. ${q.max_price && !currency ? 'max_price was not kept: give currency too. ' : ''}Nothing in it says what they'd pay.` });
           } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
         }
         if (p.kind === 'assistant.want.close') {
@@ -2006,6 +2027,37 @@ export class OwnerDesk {
         void this.saveNotes();
         return void res.json({ ok: true });
       }
+      // Clearing a chat, or many at once (new people older than a week): gone from every device at once, and back with one
+      // tap for ten minutes. A sender asking after one is told whether it was read first.
+      if (p.kind === 'panel.notes.clear') {
+        const raw = (p as unknown as { ids?: unknown }).ids;
+        const ids = new Set((Array.isArray(raw) ? raw : []).slice(0, 500).map(String));
+        const gone = this.notes.filter((x) => ids.has(x.id));
+        if (!gone.length) return void res.json({ ok: true, cleared: 0 });
+        for (const g of gone) {
+          const read = (this.chatSeen[g.from.key ?? g.from.webId] ?? '') >= g.at || !!g.answered;
+          this.closedNotes.set(g.id, { by: g.from.webId, state: read ? 'seen and set aside by the owner' : 'set aside by the owner, unread' });
+        }
+        this.notes = this.notes.filter((x) => !ids.has(x.id));
+        const undo = randomBytes(6).toString('hex');
+        this.cleared = [...this.cleared.filter((c) => Date.now() - c.at < 600_000).slice(-4), { undo, at: Date.now(), notes: gone }];
+        void this.saveNotes();
+        this.touch();
+        return void res.json({ ok: true, cleared: gone.length, undo });
+      }
+      if (p.kind === 'panel.notes.restore') {
+        const c = this.cleared.find((x) => x.undo === String((p as unknown as { undo?: string }).undo ?? '') && Date.now() - x.at < 600_000);
+        if (!c) return void res.status(410).json({ error: 'too late to undo: that was cleared more than ten minutes ago' });
+        this.cleared = this.cleared.filter((x) => x !== c);
+        const here = new Set(this.notes.map((n) => n.id));
+        const back = c.notes.filter((n) => !here.has(n.id) && !(n.from.key && this.muted.has(n.from.key)));
+        this.notes = [...this.notes, ...back].sort((a, b) => b.at.localeCompare(a.at));
+        for (const n of back) this.closedNotes.delete(n.id);
+        this.evictNotes();
+        void this.saveNotes();
+        this.touch();
+        return void res.json({ ok: true, restored: back.length });
+      }
       // The owner's one tap on a warning (run 65: an assistant warned, and its human had no way to act on it): the
       // assistant's connector is told, by this house, to turn that agent's messages away from now on.
       if (p.kind === 'panel.assistant.block') {
@@ -2197,6 +2249,25 @@ export class OwnerDesk {
             if (!key || !Number.isFinite(Date.parse(at))) return { error: 'chat.seen: { key, at }' };
             if ((this.chatSeen[key] ?? '') < at) { this.chatSeen[key] = at; const keys = Object.keys(this.chatSeen); if (keys.length > 2000) delete this.chatSeen[keys[0]!]; await this.saveChatSeen(); }
             return { ok: true };
+          },
+          // "This is Alex": a new key that gives the name of someone the owner knows is filed with them from now on, and
+          // answered as they are. Only this call joins two keys; { key, as: "" } parts them again.
+          'panel.person.same': async () => {
+            const w = q as { key?: string; as?: string };
+            const key = String(w.key ?? ''), as = String(w.as ?? '');
+            if (!key || !this.notes.some((n) => n.from.key === key)) return { error: 'person.same: { key, as }: key is the sender of a note at your door' };
+            if (!as) { delete this.sameAs[key]; delete this.chatModes[key]; await this.saveSameAs(); await this.saveChatModes(); this.touch(); return { ok: true, parted: true }; }
+            const root = this.personOf(as);
+            if (root === key || as === key) return { error: 'person.same: a key can\'t be joined to itself' };
+            if (!this.knownBy(root)) return { error: 'person.same: as is the key of someone your side knows' };
+            this.sameAs[key] = root;
+            const keys = Object.keys(this.sameAs);
+            if (keys.length > 500) delete this.sameAs[keys[0]!];
+            // Answered as that person is: by the owner, or by their AI.
+            this.chatModes[key] = this.modeOf({ key: root });
+            await this.saveSameAs(); await this.saveChatModes();
+            this.touch();
+            return { ok: true, same: root };
           },
           'panel.chat.mode': async () => {
             const w = q as { key?: string; mode?: string };
@@ -2400,7 +2471,7 @@ export class OwnerDesk {
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
       wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
       seen: forAssistant ? undefined : this.chatSeen,
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true } : {}), mode: this.modeOf(n.from) }; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from) }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

@@ -1,48 +1,74 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
-import { addressLine, chatsOf, day, dutyLive, money, seen, shortName, shortShop, signDraft, time, unseen, when, type Address, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type WantOfferV, type WantV } from './logic';
+import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type WantOfferV, type WantV } from './logic';
 import { back, focusNote, push } from './nav';
 
-// Chats: conversations, as messaging apps show them, and what you're looking for, each a thread of shops' offers.
+// People: one row per person, the ones you know above the new ones, and a chat with each. What you're looking for (a
+// thread of shops' offers each) shows on Today while it needs you, and under Money.
 
 const trustPill = (c: Chat) => h(Pill, { text: c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New', tone: c.trust === 'known' ? 'mint' : c.trust === 'lookalike' ? 'red' : 'amber' });
 
+/** How many new people show before "Show all". */
+const FEW = 3;
+
+/** Clears chats at once, on every device; Undo puts them back (the house keeps them ten minutes). */
+export async function clearChats(chats: Chat[], bump: () => void, said?: string) {
+  const ids = chats.flatMap((c) => c.notes.map((n) => n.id));
+  if (!ids.length) return;
+  const r = await must<{ cleared: number; undo?: string }>({ kind: 'panel.notes.clear', ids });
+  bump();
+  void toast(said ?? `Cleared ${plural(chats.length, 'chat')}`, { duration: 8000, buttons: r.undo ? [{ text: 'Undo', handler: () => { void call<{ error?: string }>({ kind: 'panel.notes.restore', undo: r.undo }).then((x) => { if (x.error) void toast(x.error, { color: 'danger' }); bump(); }); } }] : [] });
+}
+
 export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
+  const bump = useBump();
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
+  const [all, setAll] = useState(false);
   const data = list.data;
   if (data) seen.at = { ...(data.seen ?? {}), ...seen.at };
-  const chats = data ? chatsOf(data.notes ?? []) : [];
-  const wants = (data?.wants ?? []).filter((w) => !w.closed);
-  return h(Page, { title: 'Chats', big: true, status, footer: tabbar },
+  const { known, fresh } = peopleOf(data ? chatsOf(data.notes ?? []) : []);
+  const old = stale(fresh);
+  const more = fresh.length > FEW;
+  return h(Page, { title: 'People', big: true, status, footer: tabbar },
     !data ? h(Failed, { error: list.error }) : [
-      wants.length ? h(Section, { title: 'Looking for', key: 'wants' }, ...wants.map((w) => h(WantRow, { key: w.want.id, w }))) : null,
-      chats.length ? h(Section, { title: wants.length ? 'Messages' : undefined, key: 'chats', cls: 'chat-list' }, ...chats.map((c) => h(ChatRow, { key: c.key, c })))
-        : h(Empty, { key: 'empty', icon: 'chatbubbles-outline', title: 'No messages yet', text: door.data?.handle ? `People reach you by asking their AI to ping ${door.data.handle}.` : 'Pick a handle, and anyone\'s AI can reach you.', action: h('ion-button', { shape: 'round', fill: 'outline', onClick: () => push('#you') }, 'How people reach you') }),
+      known.length ? h(Section, { title: 'People you know', key: 'known', cls: 'chat-list people-known' }, ...known.map((c) => h(ChatRow, { key: c.key, c }))) : null,
+      fresh.length ? h(Section, { title: `New people · ${fresh.length}`, key: 'new', cls: 'chat-list people-new' },
+        ...(all ? fresh : fresh.slice(0, FEW)).map((c) => h(ChatRow, { key: c.key, c })),
+        more || old.length ? h('div', { class: 'people-more', key: 'more' },
+          more ? h('ion-button', { fill: 'clear', size: 'small', class: 'show-all', onClick: () => setAll(!all) }, all ? 'Show fewer' : `Show all ${fresh.length}`) : null,
+          old.length ? h(Btn, { label: `Clear older than 7 days (${old.length})`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-old', run: () => clearChats(old, bump) })
+            : more && all ? h(Btn, { label: `Clear all ${fresh.length}`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-new', run: () => clearChats(fresh, bump) }) : null) : null) : null,
+      known.length || fresh.length ? null
+        : h(Empty, { key: 'empty', icon: 'people-outline', title: 'Nobody has written yet', text: door.data?.handle ? `People reach you by asking their AI to ping ${door.data.handle}.` : 'Pick a handle, and anyone\'s AI can reach you.', action: h('ion-button', { shape: 'round', fill: 'outline', onClick: () => push('#door') }, door.data?.handle ? 'Share your handle' : 'Pick your handle') }),
     ]);
 }
 
 function ChatRow({ c }: { c: Chat }) {
+  const ai = c.lastBy === 'ai' ? shortName(c.notes.at(-1)?.answered?.by ?? '') || 'Your AI' : '';
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow${c.unread ? ' unread' : ''}`, onClick: () => push(`#chat=${encodeURIComponent(c.key)}`) },
-    h('div', { slot: 'start' }, h(Avatar, { name: c.name, ring: c.trust })),
+    h('div', { slot: 'start' }, h(Avatar, { name: c.name, ring: c.trust === 'lookalike' ? 'lookalike' : undefined })),
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
-      h('div', { class: 'row-via' }, h('span', {}, c.via), trustPill(c), c.mode === 'ai' && c.canMode ? h(Pill, { text: 'AI', tone: 'violet' }) : null),
-      h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : c.lastBy === 'ai' ? 'Your AI: ' : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));
+      c.trust === 'lookalike' ? h('div', { class: 'row-via careful' }, `Says they're ${shortName(c.twin?.name ?? c.name)}, with a different key`) : null,
+      h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : ai ? `${ai}: ` : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));
 }
 
 const wantState = (w: WantV) => {
   const b = w.offers.find((o) => o.id === w.bought);
   if (b) return b.state === 'arrived' ? `Arrived · ${shortShop(b.seller.name)} is paid` : b.state === 'shipped' ? `On its way from ${shortShop(b.seller.name)}` : `Bought from ${shortShop(b.seller.name)} · held until it arrives`;
   const open = w.offers.filter((o) => o.state === 'open' && !o.over);
-  if (!open.length) return Date.parse(w.want.availabilityEnds) < Date.now() ? 'Closed: no offers' : 'Waiting for offers';
+  // Paid for and refunded (the shop couldn't send it): the money is back, and the want is open again while its date holds.
+  const back = w.offers.find((o) => o.state === 'refunded');
+  if (!open.length) return Date.parse(w.want.availabilityEnds) < Date.now() ? (back ? `Refunded by ${shortShop(back.seller.name)}` : 'Closed: no offers') : back ? `Refunded by ${shortShop(back.seller.name)} · open again` : 'Waiting for offers';
   return `${open.length} offer${open.length === 1 ? '' : 's'} · from ${money(open.map((o) => o.total).sort((a, b) => a.value - b.value)[0]!)}`;
 };
+/** A want needs the owner while an offer waits for a yes, or what they bought is on its way (their "It arrived" pays the shop). */
+export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : w.offers.some((o) => o.state === 'open' && !o.over)); };
 
-function WantRow({ w }: { w: WantV }) {
-  const fresh = !w.bought && w.offers.some((o) => o.state === 'open' && !o.over);
-  return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow want-row${fresh ? ' unread' : ''}`, onClick: () => push(`#want=${encodeURIComponent(w.want.id)}`) },
+export function WantRow({ w }: { w: WantV }) {
+  return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow want-row${wantNeedsYou(w) ? ' unread' : ''}`, onClick: () => push(`#want=${encodeURIComponent(w.want.id)}`) },
     h('div', { slot: 'start' }, h(Avatar, { name: w.want.name, iconName: 'search' })),
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, w.want.name), h('span', { class: 'row-time' }, when(w.offers.at(-1)?.at ?? w.at))),
@@ -52,11 +78,11 @@ function WantRow({ w }: { w: WantV }) {
 /** One conversation, full screen: the messages as bubbles, who replies, and a reply bar. Tap the name for its details. */
 export function ChatPage({ arg }: { arg: string }) {
   const list = useHouse<ListView>({ kind: 'list' });
-  if (!list.data) return h(Page, { title: '', back: () => back('#chats'), backLabel: 'Chats' }, h(Failed, { error: list.error }));
+  if (!list.data) return h(Page, { title: '', back: () => back('#chats'), backLabel: 'People' }, h(Failed, { error: list.error }));
   const chats = chatsOf(list.data.notes ?? []);
-  const c = chats.find((x) => x.key === arg || x.notes.some((n) => n.id === arg));
+  const c = chats.find((x) => x.key === arg || x.keys.includes(arg) || x.notes.some((n) => n.id === arg));
   // A link to a chat that's gone (cleared, say): back to the list.
-  if (!c) return h(Page, { title: 'Chat', back: () => back('#chats'), backLabel: 'Chats' }, h(Empty, { icon: 'chatbubble-outline', title: 'This chat isn\'t here any more', action: h('ion-button', { shape: 'round', onClick: () => back('#chats') }, 'Back to Chats') }));
+  if (!c) return h(Page, { title: 'Chat', back: () => back('#chats'), backLabel: 'People' }, h(Empty, { icon: 'chatbubble-outline', title: 'This chat isn\'t here any more', action: h('ion-button', { shape: 'round', onClick: () => back('#chats') }, 'Back to People') }));
   return h(ChatView, { c, all: chats });
 }
 
@@ -73,8 +99,13 @@ function ChatView({ c, all }: { c: Chat; all: Chat[] }) {
   useEffect(() => { setMode(c.mode); }, [c.mode]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, sending]);
   // Open is seen: its badge goes (the house keeps how far you read, for every device).
-  useEffect(() => { const at = latest.at; if ((seen.at[c.key] ?? '') < at) { seen.at = { ...seen.at, [c.key]: at }; void call({ kind: 'panel.chat.seen', key: c.key, at }).then(bump); } }, [c.notes.length]);
-  const setTo = async (m: 'ai' | 'me') => { setMode(m); try { await must({ kind: 'panel.chat.mode', key: latest.from.key ?? latest.from.webId, mode: m }); void toast(m === 'ai' ? `Your AI replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
+  useEffect(() => {
+    for (const k of c.keys) {
+      const at = c.notes.filter((n) => chatKeyOf(n) === k).at(-1)!.at;
+      if ((seen.at[k] ?? '') < at) { seen.at = { ...seen.at, [k]: at }; void call({ kind: 'panel.chat.seen', key: k, at }).then(bump); }
+    }
+  }, [c.notes.length]);
+  const setTo = async (m: 'ai' | 'me') => { setMode(m); try { for (const k of c.keys) await must({ kind: 'panel.chat.mode', key: k, mode: m }); void toast(m === 'ai' ? `Your AI replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
   const send = async () => {
     const t = draft.trim(); if (!t) return;
     // Shown at once, sending; then the house's answer redraws it as sent (or says why not).
@@ -102,16 +133,37 @@ function ChatView({ c, all }: { c: Chat; all: Chat[] }) {
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
       h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: send, 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
   return h(Page, { title: c.name, titleNode, back: () => back('#chats'), cls: 'chat-page', footer: composer },
-    c.trust === 'new' && !c.web ? h('p', { class: 'sysline' }, 'First message from this AI. Its key is checked; the name is the one it gives.') : null,
-    c.trust === 'lookalike' ? h('p', { class: 'sysline threat' }, `Careful: ${c.why ?? 'a name like someone you know, with a different key'}.`) : null,
+    h(NewStrip, { c, latest }),
     h('div', { class: 'bubbles' }, ...bubbles,
       sending ? h('div', { class: 'bubble me sending' }, h('p', {}, sending), h('time', {}, h('ion-spinner', { name: 'dots' }))) : null,
       h('div', { ref: end })),
     h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, mode, setTo, onDuty, latest, close: () => setInfo(false) })));
 }
 
+/**
+ * On top of a new person's chat: that they're new and whether your door note went to them, and the ways out. A new key
+ * that gives a known name says so, with "This is Alex" for when it really is them (a new phone, another AI app).
+ */
+function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
+  const bump = useBump();
+  if (c.trust === 'known') return null;
+  const twin = c.trust === 'lookalike' ? c.twin : undefined, name = shortName(twin?.name ?? '');
+  const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Mute', fill: 'outline', color: 'medium', size: 'small', run: async () => { await must({ kind: 'panel.note.mute', id: latest.id }); void toast(`${c.name} muted`); back('#chats'); }, ask: { header: 'Mute this sender?', sub: 'Their messages are turned away.', button: 'Mute' } }) : null;
+  if (c.trust === 'lookalike') return h('div', { class: 'newstrip threat', role: 'note' },
+    h('p', {}, h('b', {}, `Says they're ${name || c.name}, with a different key.`), ' A new phone or AI app does that; so does someone pretending.'),
+    h('div', { class: 'newstrip-acts' },
+      twin && latest.from.key ? h(Btn, { key: 'same', label: `This is ${name}`, fill: 'outline', size: 'small', cls: 'same-person',
+        run: async () => { await must({ kind: 'panel.person.same', key: latest.from.key, as: twin.key }); void toast(`Filed with ${name}`); bump(); },
+        ask: { header: `File this with ${name}?`, sub: `These messages join ${name}'s chat, and your AI answers them as it answers ${name}. Do it only if you're sure, for example they told you in person.`, button: `This is ${name}`, destructive: false } }) : null,
+      mute));
+  return h('div', { class: 'newstrip', role: 'note' },
+    h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : `New.${c.doorNote ? ` Got your door note ${when(c.doorNote)}.` : ''} The key is checked; the name is the one their AI gives.`),
+    mute ? h('div', { class: 'newstrip-acts' }, mute) : null);
+}
+
 /** About a conversation (a tap on its name): what's checked and what isn't, who replies, mute and clear. */
 function ChatInfo({ c, all, mode, setTo, onDuty, latest, close }: { c: Chat; all: Chat[]; mode: 'ai' | 'me'; setTo: (m: 'ai' | 'me') => Promise<void>; onDuty: boolean; latest: DoorNote; close: () => void }) {
+  const bump = useBump();
   const f = latest.from;
   const namesakes = all.filter((x) => x.key !== c.key && x.name.toLowerCase() === c.name.toLowerCase());
   return h('div', { class: 'chatinfo' },
@@ -122,26 +174,28 @@ function ChatInfo({ c, all, mode, setTo, onDuty, latest, close }: { c: Chat; all
       c.name !== c.agent && !c.web ? h(Row, { icon: 'person-outline', tint: 'amber', label: `"${c.name}"`, sub: 'The name its AI gives. Not checked.' }) : null,
       f.speaks_for ? h(Row, { icon: 'home-outline', label: 'Speaks for a house', sub: `${f.speaks_for.house}${f.speaks_for.checked ? ' (checked)' : ' (not checked)'}` }) : null,
       h(Row, { icon: c.trust === 'known' ? 'checkmark-circle-outline' : 'sparkles-outline', tint: c.trust === 'known' ? 'mint' : 'amber', label: c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New', sub: c.trust === 'known' ? (c.why ?? 'You\'ve answered before') : c.trust === 'lookalike' ? (c.why ?? 'A name like someone you know') : 'Becomes known once you answer' }),
+      c.keys.length > 1 ? h(Row, { icon: 'link-outline', label: `Writes with ${c.keys.length} keys`, sub: 'You said they\'re the same person', cls: 'joined',
+        below: h(Btn, { label: 'Separate them', size: 'small', fill: 'outline', color: 'medium', run: async () => { for (const k of c.keys) if (k !== c.key) await must({ kind: 'panel.person.same', key: k, as: '' }); close(); bump(); }, done: 'Separated' }) }) : null,
       namesakes.length ? h(Row, { icon: 'people-outline', tint: 'amber', label: `Also called ${c.name}`, sub: `${namesakes.length} other chat${namesakes.length === 1 ? '' : 's'}, through ${namesakes.map((x) => x.agent).join(', ')}: maybe not the same person` }) : null),
     c.canMode ? h(Section, {},
       h('ion-item', { lines: 'none' }, h('ion-toggle', { checked: mode === 'ai', onionChange: (e: CustomEvent) => void setTo(e.detail.checked ? 'ai' : 'me') }, 'Let my AI reply')),
       onDuty || c.web ? null : h('ion-item', { lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, 'Needs AI on duty, which is off now.')))) : null,
     h(Section, {},
       h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirmMute())) return; await call({ kind: 'panel.note.mute', id: latest.id }); close(); void toast(`${c.name} muted`); back('#chats'); } }, h('ion-icon', { name: 'notifications-off-outline', slot: 'start' }), h('ion-label', {}, 'Mute')),
-      h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { if (!(await confirmClear())) return; for (const n of c.notes) await call({ kind: 'panel.note.dismiss', id: n.id }); close(); back('#chats'); } }, h('ion-icon', { name: 'trash-outline', slot: 'start', color: 'danger' }), h('ion-label', { color: 'danger' }, 'Clear chat'))),
+      h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { close(); await clearChats([c], bump, 'Chat cleared').catch((e: Error) => void toast(e.message, { color: 'danger' })); back('#chats'); } }, h('ion-icon', { name: 'trash-outline', slot: 'start', color: 'danger' }), h('ion-label', { color: 'danger' }, 'Clear chat'))),
     f.key ? h(Info, {}, h('p', {}, 'Its key: ', h('code', {}, f.key))) : null);
 }
 const confirmMute = () => confirm({ header: 'Mute this sender?', sub: 'Their messages are turned away.', button: 'Mute' });
-const confirmClear = () => confirm({ header: 'Clear this chat?', sub: 'The messages go.', button: 'Clear chat' });
 
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
 export function WantPage({ arg }: { arg: string }) {
   const list = useHouse<ListView>({ kind: 'list' });
   const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
   const w = list.data?.wants?.find((x) => x.want.id === arg && !x.closed);
-  if (!w) return h(Page, { title: 'Looking for', back: () => back('#chats'), backLabel: 'Chats' }, list.data ? h(Empty, { icon: 'search-outline', title: 'Not looking for this any more' }) : h(Failed, { error: list.error }));
+  if (!w) return h(Page, { title: 'Looking for', back: () => back('#inbox'), backLabel: 'Today' }, list.data ? h(Empty, { icon: 'search-outline', title: 'Not looking for this any more' }) : h(Failed, { error: list.error }));
   const bought = w.offers.find((o) => o.id === w.bought);
   const open = w.offers.filter((o) => o.state === 'open').sort((a, b) => a.total.value - b.total.value);
+  const refunded = w.offers.find((o) => o.state === 'refunded');
   const fits = open.filter((o) => !o.over), over = open.filter((o) => o.over);
   const buy = (o: WantOfferV) => async () => {
     const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.want.draft', want: w.want.id, offer: o.id });
@@ -162,7 +216,7 @@ export function WantPage({ arg }: { arg: string }) {
         ? h(Btn, { label: `Buy for ${money(o.total)}`, expand: 'block', run: buy(o), ask: { header: `Pay ${money(o.total)} to ${shortShop(o.seller.name)}?`, sub: `Your house pays; the money is held until you say it arrived. ${shortShop(o.seller.name)} gets your address: ${addressLine(addr.data.address)}.`, button: `Pay ${money(o.total)}`, destructive: false }, done: 'Paid, held until it arrives' })
         : h('ion-button', { expand: 'block', shape: 'round', fill: 'outline', onClick: () => push('#address') }, h('ion-icon', { name: 'home-outline', slot: 'start' }), 'Add your delivery address to buy')) : null));
   };
-  return h(Page, { title: w.want.name, back: () => back('#chats'), backLabel: 'Chats', cls: 'want-page' },
+  return h(Page, { title: w.want.name, back: () => back('#inbox'), backLabel: 'Today', cls: 'want-page' },
     h('ion-card', { class: 'lake-card spec-card' }, h('ion-card-content', {},
       h('div', { class: 'spec-head' }, h(Avatar, { name: w.want.name, iconName: 'search', size: 40 }), h('div', {}, h('h2', {}, w.want.name), h('p', {}, bought ? 'What you asked for' : `Open until ${day(w.want.availabilityEnds)}`))),
       w.want.description ? h('p', { class: 'spec-desc' }, w.want.description) : null,
@@ -171,13 +225,14 @@ export function WantPage({ arg }: { arg: string }) {
     bought ? [
       h('h3', { class: 'section-h', key: 'bh' }, bought.state === 'arrived' ? 'Arrived' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
       card(bought, false),
-      h('p', { class: 'muted-line pad', key: 'bs' }, bought.state === 'arrived' ? `${shortShop(bought.seller.name)} is paid.` : bought.shipped ? `${shortShop(bought.seller.name)}: “${bought.shipped.note}”` : `Paid by your house, held until you say it arrived.`),
+      h('p', { class: 'muted-line pad', key: 'bs' }, bought.state === 'arrived' ? `${shortShop(bought.seller.name)} is paid${bought.ended ? `: ${bought.ended}` : ''}.` : bought.shipped ? `${shortShop(bought.seller.name)}: “${bought.shipped.note}”` : `Paid by your house, held until you say it arrived.`),
       bought.state === 'shipped' ? h('div', { class: 'pad', key: 'arr' }, h(Btn, { label: 'It arrived', icon: 'checkmark', expand: 'block', run: () => must({ kind: 'panel.want.arrived', want: w.want.id }), done: `${shortShop(bought.seller.name)} is paid` })) : null,
     ] : [
+      refunded ? h('p', { class: 'muted-line pad', key: 'rf' }, `Your ${money(refunded.total)} came back from ${shortShop(refunded.seller.name)}${refunded.ended ? `: ${refunded.ended}` : ''}.`) : null,
       h('h3', { class: 'section-h', key: 'oh' }, fits.length ? `Offers (${fits.length})` : 'Offers'),
       fits.length ? fits.map((o) => card(o, true)) : h(Empty, { key: 'none', icon: 'hourglass-outline', title: 'No offers yet', text: 'Shops look every few minutes. You get a notification when one offers.' }),
       over.length ? h('ion-accordion-group', { key: 'over', class: 'lake-accordion' }, h('ion-accordion', { value: 'over' }, h('ion-item', { slot: 'header' }, h('ion-label', {}, `${over.length} over the most you'd pay`)), h('div', { slot: 'content' }, ...over.map((o) => card(o, true))))) : null,
-      h('div', { class: 'pad', key: 'stop' }, h(Btn, { label: 'Stop looking', fill: 'clear', color: 'medium', expand: 'block', run: async () => { await must({ kind: 'panel.want.close', id: w.want.id }); back('#chats'); }, ask: { header: 'Stop looking?', sub: 'Shops stop offering.', button: 'Stop looking' } })),
+      h('div', { class: 'pad', key: 'stop' }, h(Btn, { label: 'Stop looking', fill: 'clear', color: 'medium', expand: 'block', run: async () => { await must({ kind: 'panel.want.close', id: w.want.id }); back('#inbox'); }, ask: { header: 'Stop looking?', sub: 'Shops stop offering.', button: 'Stop looking' } })),
     ]);
 }
 

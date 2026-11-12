@@ -18,12 +18,12 @@ import { AboutPage, AccessPage, AddressPage, CirclesPage, DataPage, FreePage, Ke
 import { ConnectAI, NoKey, Pair, connecting } from './house/pair';
 
 // The control panel that comes with every house (open source). Served by the house at /owner/; every call is signed on
-// this device with the owner's key, which never leaves it. Four tabs, each thing in one place: Chats (people and what
-// you're looking for), Inbox (what needs you), My AI, You (how you're reached, your data, this phone).
+// this device with the owner's key, which never leaves it. Four tabs, each thing in one place: Today (what needs you and
+// what was handled), People (one row per person, and a chat with each), My AI, You (how you're reached, your data, this phone).
 
 const TABS: { tab: Tab; label: string; icon: string }[] = [
   { tab: 'inbox', label: 'Today', icon: 'lake' },
-  { tab: 'chats', label: 'Chats', icon: 'chatbubbles' },
+  { tab: 'chats', label: 'People', icon: 'people' },
   { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];

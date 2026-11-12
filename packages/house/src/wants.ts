@@ -15,7 +15,10 @@ export interface WantOfferRecord {
   note?: string;
   /** Over what the owner said they'd pay: kept, folded away, never told to the shop. */
   over?: boolean;
-  state: 'open' | 'paid' | 'shipped' | 'arrived';
+  /** `refunded`: paid, and the money came back (the shop couldn't send it, or a ruling went the buyer's way). */
+  state: 'open' | 'paid' | 'shipped' | 'arrived' | 'refunded';
+  /** Why the payments agent said it ended, when it wasn't the owner's "it arrived". */
+  ended?: string;
   hold?: string;
   receipt?: string;
   shipped?: { note: string; sha256?: string; at: string };
@@ -100,11 +103,11 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
     statusFor(wantId: string, sellerWebId: string): Record<string, unknown> {
       const r = find(wantId);
       if (!r) return { kind: 'refused', problems: ['this house has no want with that id'] };
-      const mine = r.offers.find((x) => x.seller.webId === sellerWebId && (x.id === r.bought || x.state === 'open'));
+      const mine = r.offers.find((x) => x.seller.webId === sellerWebId && (x.id === r.bought || x.state === 'open')) ?? r.offers.find((x) => x.seller.webId === sellerWebId && x.state === 'refunded');
       const open = live(r);
       if (!mine) return { kind: 'want.status', want: wantId, offer: null, want_open: open, says: open ? 'no offer of yours is open on it' : 'no offer of yours, and it is no longer open' };
-      const state = mine.id === r.bought ? mine.state : !open ? 'not_bought' : Date.parse(mine.expires) < Date.now() ? 'expired' : 'open';
-      const says = { open: 'open: the owner sees it on their phone; you hear if they buy', expired: 'your cart has run out: send a new offer to stay in', not_bought: 'the want closed without buying yours', paid: `bought, held until they say it arrived: send it to the address in the receipt, then lake_want shipped`, shipped: 'sent: paid when they say it arrived, or after the cart\'s review time', arrived: 'arrived: the payment is released to you' }[state as string] ?? state;
+      const state = mine.id === r.bought || mine.state === 'refunded' ? mine.state : !open ? 'not_bought' : Date.parse(mine.expires) < Date.now() ? 'expired' : 'open';
+      const says = { open: 'open: the owner sees it on their phone; you hear if they buy', expired: 'your cart has run out: send a new offer to stay in', not_bought: 'the want closed without buying yours', paid: `bought, held until they say it arrived: send it to the address in the receipt, then lake_want shipped`, shipped: 'sent: paid when they say it arrived, or after the cart\'s review time', arrived: 'arrived: the payment is released to you', refunded: `the money went back to the buyer${mine.ended ? ` (${mine.ended})` : ''}: nothing is owed either way` }[state as string] ?? state;
       return { kind: 'want.status', want: wantId, offer: mine.id, cart: mine.cart.contents.id, state, total: mine.total, expires: mine.expires, says };
     },
     /** The shop says it sent it: from the shop that was paid, about that cart. */
@@ -151,6 +154,21 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       offer.state = 'arrived';
       await save();
       return { ok: true, offer };
+    },
+    /**
+     * The payments agent says how a bought offer's held money ended (its signed receipt, checked by the housekeeper): gone to
+     * the shop without the owner's tap (their time to answer ran out, a ruling), or back to the house. A refund opens the
+     * want again while its date holds: the other shops' offers are still there to buy.
+     */
+    async settled(hold: string, to: 'captured' | 'voided', why: string) {
+      const r = list.find((w) => w.offers.some((o) => o.hold === hold));
+      const offer = r?.offers.find((o) => o.hold === hold);
+      if (!r || !offer || offer.state === 'refunded' || (to === 'captured' && offer.state === 'arrived')) return null;
+      offer.state = to === 'captured' ? 'arrived' : 'refunded';
+      if (why) offer.ended = short(why, 200);
+      if (to === 'voided' && r.bought === offer.id) delete r.bought;
+      await save();
+      return { want: r.want, offer, open: live(r) };
     },
   };
 }

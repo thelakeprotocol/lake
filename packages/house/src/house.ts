@@ -6,7 +6,7 @@ import { houseRunner } from './duty-runner.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, cartReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type PostalAddress, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -391,6 +391,19 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     // Run 58 and 59: a release replaced the held receipt in the pod, but Money kept its five-minute copy of the held one,
     // so Earned missed it.
     onReceiptFiled: (path) => panel.forgetReceipt?.(path),
+    // How something the house bought ended, when it wasn't the owner's own "it arrived": the owner reads it, and a refund
+    // puts the want back on the card while its date holds.
+    async onCartSettled(e) {
+      const r = await wants.settled(e.hold, e.to, e.why);
+      if (!r) return;
+      const sum = `${e.currency} ${e.amount.toFixed(2)}`, shop = r.offer.seller.name;
+      if (e.to === 'voided') {
+        await recard(keeperRef!.rules).catch(() => {});
+        note('want.refunded', `Your ${sum} for "${r.want.name}" came back from ${shop}${e.why ? ` (${e.why})` : ''}${r.open ? ': it is open for offers again' : ''}`);
+        desk.notifyOwner('want', `Your ${sum} for "${r.want.name.slice(0, 50)}" came back${r.open ? ': it\'s open for offers again' : ''}.`, `./#want=${r.want.id}`);
+      } else if (e.how !== 'accepted') note('want.arrived', `${shop} is paid ${sum} for "${r.want.name}"${e.why ? ` (${e.why})` : ''}`);
+      desk.touch();
+    },
   });
   keeperRef = keeper;
   const check = await keeper.verifyOwnRecord();
@@ -552,10 +565,12 @@ function panelFor(x: {
     const since = x.desk().claimedAt();
     if (since) receipts.splice(0, receipts.length, ...receipts.filter((r) => Date.parse(r.at) >= since));
     receipts.sort((a, b) => (a.at < b.at ? 1 : -1));
+    // What went out: to whom by name where the receipt says, and, for money that came back, from which shop (a refund is
+    // made out to the house itself).
     const spent = spentFiles.map((f) => {
       const vc = receiptCache.get(f)?.vc;
       const s = vc?.credentialSubject;
-      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String(s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.how ? { how: String(s.how) } : {}) } : null;
+      return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String((s.settlement === 'voided' ? s.seller : undefined) ?? s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.how ? { how: String(s.how) } : {}), ...(s.seller_name ? { toName: String(s.seller_name) } : {}), ...(Array.isArray(s.items) ? { items: s.items } : {}) } : null;
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
     // What a payment for an agreement (a study, a key to some fields) was for: its consent record (who, which fields, what
     // for) and, for a study, its question, filed beside it when it ran. The owner saw only "urn:lake:agreement:d4ed…".
@@ -947,7 +962,7 @@ function panelFor(x: {
       if (!payments) return { error: 'no payments agent on this Lake that the shop takes: nothing was paid' };
       const r = await x.wants.buy(wantId, offerId, signed, { id: x.id, webId: owner.webId, card: x.card, payments, deliverTo, send });
       if ('error' in r) return r;
-      if (r.receipt) await put(owner, `receipts/spent-cart-${createHash('sha256').update(offer.cart.contents.id).digest('hex').slice(0, 16)}.receipt.jwt`, r.receipt, 'text/plain').catch(() => {});
+      if (r.receipt) await put(owner, cartReceiptPath(offer.cart.contents.id), r.receipt, 'text/plain').catch(() => {});
       await x.recard(x.keeper().rules);
       x.note('want.bought', `You bought "${r.want.name}" from ${offer.seller.name} for ${offer.total.currency} ${offer.total.value.toFixed(2)}: paid, held until you say it arrived`);
       return { ok: true, want: r.want.id, offer: offer.id };

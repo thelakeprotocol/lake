@@ -3,7 +3,7 @@ import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
 import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
 import { ReadsToggles } from './ai';
-import { WelcomeCard } from './chats';
+import { WantRow, WelcomeCard, wantNeedsYou } from './chats';
 import { push } from './nav';
 
 // Inbox: everything that waits for your tap, newest first. Data requests your rules left to you, your AI's questions and
@@ -34,9 +34,11 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const groups = sameAsks(v.requests);
   const decide = v.suggestions.filter(needsDecision), notes = v.suggestions.filter((x) => !needsDecision(x));
   const waiting = v.assistants.filter((a) => a.waiting);
-  // People waiting for an answer in Chats: Today never says all clear while they wait (round 15).
+  // What you're looking for shows here while it needs you: an offer to say yes to, or a parcel to say arrived (the rest is under Money).
+  const wants = (v.wants ?? []).filter(wantNeedsYou);
+  // People waiting for an answer in People: Today never says all clear while they wait (round 15).
   const w = today.data?.waiting, knownN = w?.known ?? 0, newN = (w?.people ?? 0) - knownN;
-  const any = groups.length || decide.length || (v.connects ?? []).length || waiting.length || connectedNote || w?.people;
+  const any = groups.length || decide.length || (v.connects ?? []).length || waiting.length || connectedNote || w?.people || wants.length;
   const lines = today.data?.lines ?? [];
   return h(Page, { title: 'Today', big: true, status, footer: tabbar },
     h(WelcomeCard, { door: door.data, key: 'welcome' }),
@@ -48,8 +50,9 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       h('p', {}, waitingLine(a))))),
     ...groups.map((all) => h(RequestCard, { key: all[0]!.id, all })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
+    wants.length ? h(Section, { title: 'Looking for', key: 'wants', cls: 'chat-list wants' }, ...wants.map((x) => h(WantRow, { key: x.want.id, w: x }))) : null,
     w?.people ? h(Section, { key: 'wait', cls: 'waiting' },
-      knownN ? h(Row, { icon: 'chatbubbles-outline', tint: 'amber', label: `${plural(knownN, 'person', 'people')} you know ${knownN === 1 ? 'is' : 'are'} waiting`, sub: 'For your answer, in Chats', onClick: () => push('#chats'), cls: 'wait-known' }) : null,
+      knownN ? h(Row, { icon: 'chatbubbles-outline', tint: 'amber', label: `${plural(knownN, 'person', 'people')} you know ${knownN === 1 ? 'is' : 'are'} waiting`, sub: 'For your answer, in People', onClick: () => push('#chats'), cls: 'wait-known' }) : null,
       newN ? h(Row, { icon: 'people-outline', label: `${newN}${w.more ? '+' : ''} new ${newN === 1 ? 'person' : 'people'} wrote${w.since ? ` since ${new Date(w.since).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}`, sub: newN === 1 ? 'No answer yet' : 'None has an answer yet', onClick: () => push('#chats'), cls: 'wait-new' }) : null) : null,
     !any ? h('div', { class: 'all-clear', key: 'clear' }, h('ion-icon', { name: 'checkmark-done-outline' }), h('div', {}, h('b', {}, 'You\'re all clear'), h('p', {}, 'Nothing needs your attention. Your house is keeping an eye on things.'))) : null,
     h(Section, { title: 'Handled for you', key: 'handled', cls: 'handled' },
@@ -201,4 +204,4 @@ function CircleNote({ x, c }: { x: Note; c: CircleItem }) {
 }
 
 /** How many things wait for a decision, for the tab's badge. */
-export const decisions = (v?: ListView) => (v ? v.requests.length + v.suggestions.filter(needsDecision).length + (v.connects ?? []).length : 0);
+export const decisions = (v?: ListView) => (v ? v.requests.length + v.suggestions.filter(needsDecision).length + (v.connects ?? []).length + (v.wants ?? []).filter(wantNeedsYou).length : 0);

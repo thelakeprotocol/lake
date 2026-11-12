@@ -233,8 +233,17 @@ async function hosted(n: number) {
     await writeFile(invitesFile, JSON.stringify(invites));
     return { link: `${baseUrl}/t/join/${code}`, left: each - mine - 1 };
   };
-  await pool(names, at, async (name) => { await startOne(name); });
-  app.get('/health', (_req, res) => void res.json({ ok: true, houses: houses.length }));
+  // The door opens before the houses do: each answers as soon as it's up, and one still starting says so (503 with
+  // Retry-After) where a proxy in front would say "bad gateway" (12 Nov: fifteen houses took 340 s on the sandbox's one
+  // core, and nobody's house answered until the last was up).
+  const starting = new Set(names), failed = new Set<string>();
+  app.use('/t/:name', (req, res, next) => {
+    const name = String(req.params.name);
+    if (failed.has(name)) return void res.status(503).json({ error: 'this house could not start; whoever runs this server can see why in its log' });
+    if (starting.has(name)) return void res.status(503).set('Retry-After', '20').json({ error: 'this house is starting; try again in a moment' });
+    next();
+  });
+  app.get('/health', (_req, res) => void res.json({ ok: !starting.size && !failed.size, houses: houses.length, starting: starting.size, failed: failed.size }));
   // An invite's link: pick a handle, and a house of your own starts for you (yours to pair, kept, no lease).
   // Who sent it, as they're known on the Lake: their door's name, else their handle.
   const inviterOf = (by: string) => { const d = houses.find((x) => x.name === by)?.keeper.rules.door; return d?.name ?? d?.handle ?? ''; };
@@ -294,8 +303,29 @@ ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
   });
 
   const server = app.listen(port, async () => {
-    await pool(houses, at * 2, (h) => h.join());
-    log(`${houses.length} houses joined in ${((Date.now() - t0) / 1000).toFixed(1)}s${warnings ? ` (${warnings} warnings)` : ''}; each at ${baseUrl}/t/<name>/a2a`);
+    // Houses that are someone's come first (kept or invited: a person is waiting on them), then the ones free to claim.
+    const order = [...names.filter((x) => kept.has(x)), ...names.filter((x) => !kept.has(x))];
+    let mine = 0;
+    const took: number[] = [];
+    await pool(order, at, async (name) => {
+      const t = Date.now();
+      try {
+        const house = await startOne(name);
+        starting.delete(name);
+        took.push(Date.now() - t);
+        await house.join();
+      } catch (e) {
+        // One house that can't start (its pod didn't answer) doesn't keep the others shut.
+        starting.delete(name);
+        failed.add(name);
+        warnings++;
+        log(`${name}: could not start: ${(e as Error).message}`);
+      }
+      if (kept.has(name) && ++mine === kept.size) log(`${mine} kept houses up after ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    });
+    took.sort((x, y) => x - y);
+    const secs = (ms: number) => (ms / 1000).toFixed(1);
+    log(`${houses.length} houses joined in ${secs(Date.now() - t0)}s${took.length ? ` (a house took ${secs(took[took.length >> 1]!)}s to start, the slowest ${secs(took[took.length - 1]!)}s, ${at} at a time)` : ''}${warnings ? ` (${warnings} warnings)` : ''}; each at ${baseUrl}/t/<name>/a2a`);
   });
   keepAliveBehindProxy(server);
   const stop = async () => {

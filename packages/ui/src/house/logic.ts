@@ -16,14 +16,14 @@ export type CircleItem = { tally: string; id: string; call: string; need: string
 export type PledgeQuorum = { text: string; options: string[]; closes: string; least: number; answered?: boolean };
 export type Note = { id: string; from: string; text: string; at: string; invitedBy?: { name: string; known: boolean }; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; circleVote?: { sent?: boolean }; favourPay?: { paid?: boolean; sellerName?: string }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string };
 export type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
-export type DoorNote = { id: string; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; from: { web?: boolean; as?: string; key?: string; webId?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string } };
+export type DoorNote = { id: string; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; twin?: { key: string; name: string }; person?: string; door_note?: string; from: { web?: boolean; as?: string; key?: string; webId?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string } };
 /** What else an AI may read besides the notes at your door (SPEC §6.1). */
 export type Reads = 'records' | 'money';
 /** "Messages only", "Messages, records", …: what an AI reads, in a row's few words. */
 export const readsLine = (r?: Reads[]) => ['Messages', ...(r?.includes('records') ? ['records'] : []), ...(r?.includes('money') ? ['money'] : [])].join(', ').replace(/^Messages$/, 'Messages only');
 export interface Assistant { kid: string; label: string; addedAt: string; reads?: Reads[]; seenAt?: string; waiting?: { count: number; senders: number; since: string }; canHaveAllowance?: boolean; allowance?: { amount: number; currency: string; until: string } }
 export interface Connect { id: string; app: string; from: string; number: string; at: string }
-export type WantOfferV = { id: string; at: string; seller: { name: string; domain: string }; total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string; matched?: string[]; delivery?: string; note?: string; over?: boolean; state: 'open' | 'paid' | 'shipped' | 'arrived'; shipped?: { note: string; at: string } };
+export type WantOfferV = { id: string; at: string; seller: { name: string; domain: string }; total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string; matched?: string[]; delivery?: string; note?: string; over?: boolean; state: 'open' | 'paid' | 'shipped' | 'arrived' | 'refunded'; shipped?: { note: string; at: string }; ended?: string };
 export type WantV = { want: { id: string; name: string; description?: string; areaServed?: string; availabilityEnds: string; eligibleQuantity?: { value: number }; itemOffered: { additionalProperty: { name: string; value: string }[] } }; limit?: { amount: number; currency: string }; closed?: string; bought?: string; at: string; offers: WantOfferV[] };
 export interface ListView { seen?: Record<string, string>; wants?: WantV[]; connects?: Connect[]; webId: string; until?: string; requests: Request[]; suggestions: Note[]; assistants: Assistant[]; notes: DoorNote[]; agenda?: AgendaItem[] }
 export interface Consent { id: string; visitor: string; fields: { name: string; label: string }[]; purpose: string; purposeLabel: string; given: string; until: string; retention: string; how: { live?: true; rule?: number | null }; status: 'active' | 'withdrawn' | 'used' | 'ended'; withdrawnAt?: string }
@@ -61,16 +61,24 @@ export const said = (d: string) => (d === 'join' ? 'said yes' : d === 'decline' 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 // ---- chats ----
-export type Chat = { key: string; notes: DoorNote[]; name: string; agent: string; vendor: string; via: string; trust: 'known' | 'new' | 'lookalike'; why?: string; mode: 'ai' | 'me'; last: string; lastBy: '' | 'you' | 'ai'; at: string; unread: number; canMode: boolean; forwarded: boolean; web: boolean };
+export type Chat = { key: string; keys: string[]; twin?: { key: string; name: string }; doorNote?: string; notes: DoorNote[]; name: string; agent: string; vendor: string; via: string; trust: 'known' | 'new' | 'lookalike'; why?: string; mode: 'ai' | 'me'; last: string; lastBy: '' | 'you' | 'ai'; at: string; unread: number; canMode: boolean; forwarded: boolean; web: boolean };
 /** Whose AI an agent is, from its card's name: "Pike (connectors-manager, via MCP)" is Grok's; "Rook (Claude, via MCP)" Claude's. */
 export const vendorOf = (name: string) => { const m = /\(([^,)]+)/.exec(name)?.[1]?.trim() ?? ''; return /claude|anthropic/i.test(m) ? 'Claude' : /connectors|grok|xai/i.test(m) ? 'Grok' : /openai|chatgpt|gpt/i.test(m) ? 'ChatGPT' : /gemini|google/i.test(m) ? 'Gemini' : ''; };
 /** How far the owner has read each conversation, kept by the house (every device agrees). */
 export const seen = { at: {} as Record<string, string> };
 export const chatKeyOf = (n: { id: string; from: { key?: string; webId?: string } }) => n.from.key ?? n.from.webId ?? n.id;
 export const unseen = (notes: { id: string; at: string; answered?: unknown; from: { key?: string; webId?: string } }[], at = seen.at) => notes.filter((n) => !n.answered && n.at > (at[chatKeyOf(n)] ?? '')).length;
+/** One conversation per person: a key the owner joined to someone they know ("This is Alex") is filed with them. */
+/** The house words why someone is known for an AI ("your human has answered it before"); the owner reads it as their own. */
+export const forOwner = (why: string) => why
+  .replace(/^your human's side has written to (.+) before$/, (_, who: string) => `You've written to ${who === 'it' ? 'them' : who} before`)
+  .replace(/^your human has answered it before$/, 'You\'ve answered them before')
+  .replace(/^your human said it is someone they know, writing with another key$/, 'You said they\'re someone you know, writing with another key')
+  .replace(/^a standing yes names it/, 'A standing yes of yours names them');
+
 export const chatsOf = (notes: DoorNote[]): Chat[] => {
   const by = new Map<string, DoorNote[]>();
-  for (const n of notes) { const k = chatKeyOf(n); by.set(k, [...(by.get(k) ?? []), n]); }
+  for (const n of notes) { const k = n.person ?? chatKeyOf(n); by.set(k, [...(by.get(k) ?? []), n]); }
   return [...by].map(([k, ns]) => {
     const sorted = [...ns].sort((a, b) => a.at.localeCompare(b.at)), last = sorted[sorted.length - 1]!, f = last.from;
     const forwarded = / \(to your assistant, while it was away\)$/.test(f.name);
@@ -78,16 +86,24 @@ export const chatsOf = (notes: DoorNote[]): Chat[] => {
     const vendor = vendorOf(f.name);
     const answeredLast = !!last.answered && (!last.answered.at || last.answered.at >= last.at);
     const byYou = ns.some((n) => n.answered?.by === 'you');
+    // The name of the key the others were joined to, where it has a note here; else the newest note's.
+    const own = sorted.filter((n) => chatKeyOf(n) === k).at(-1)?.from ?? f;
     return {
-      key: k, notes: sorted, name: f.as ?? agent, agent, vendor, forwarded, web: !!f.web,
+      key: k, keys: [...new Set(sorted.map(chatKeyOf))], twin: last.twin, doorNote: sorted.find((n) => n.door_note)?.door_note,
+      notes: sorted, name: own.as ?? own.name.replace(/ \(to your assistant, while it was away\)$/, '').replace(/ \(.*\)$/, ''), agent, vendor, forwarded, web: !!f.web,
       via: f.web ? 'From your public page' : forwarded ? 'Passed on by your AI' : f.as ? `via ${agent}${vendor ? ` · ${vendor}` : ''}` : vendor ? `${vendor} agent` : 'AI agent',
-      trust: (last.known || byYou ? 'known' : last.lookalike ? 'lookalike' : 'new') as Chat['trust'], why: last.known_why ?? (byYou ? 'You\'ve answered them before.' : undefined),
+      trust: (last.known || byYou ? 'known' : last.lookalike ? 'lookalike' : 'new') as Chat['trust'], why: last.known_why ? forOwner(last.known_why) : byYou ? 'You\'ve answered them before' : undefined,
       mode: last.mode ?? 'me', canMode: !!(f.key ?? (f.web && f.webId)),
       last: answeredLast ? last.answered!.text : last.text, lastBy: (answeredLast ? (last.answered!.by === 'you' ? 'you' : 'ai') : '') as Chat['lastBy'],
       at: answeredLast && last.answered!.at ? last.answered!.at : last.at, unread: unseen(ns),
     };
   }).sort((a, b) => b.at.localeCompare(a.at));
 };
+
+/** People you know, and new people (a lookalike is new until you say otherwise), each newest first. */
+export const peopleOf = (chats: Chat[]) => ({ known: chats.filter((c) => c.trust === 'known'), fresh: chats.filter((c) => c.trust !== 'known') });
+/** New people whose last word is older than a week: what "Clear older than 7 days" takes. */
+export const stale = (chats: Chat[], now = Date.now()) => chats.filter((c) => Date.parse(c.at) < now - 7 * 86_400_000);
 
 // ---- inbox ----
 /** What needs a decision: a question, a pledge, an offer, a circle's call, a payment… not a plain note from your AI. */
@@ -197,6 +213,6 @@ export const ZONES: string[] = (() => { try { return (Intl as unknown as { suppo
 /** People the owner's side knows whose newest note has no answer yet: they count on Today's badge. */
 export function knownWaiting(v?: ListView) {
   const newest = new Map<string, DoorNote>();
-  for (const n of v?.notes ?? []) { const k = n.from.key ?? n.id, p = newest.get(k); if (!p || p.at < n.at) newest.set(k, n); }
+  for (const n of v?.notes ?? []) { const k = n.person ?? n.from.key ?? n.id, p = newest.get(k); if (!p || p.at < n.at) newest.set(k, n); }
   return [...newest.values()].filter((n) => n.known && !n.answered).length;
 }

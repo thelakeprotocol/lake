@@ -44,6 +44,8 @@ Houses run in two modes that look identical on the map:
 
 Every multi-mode house is still its own WebID, pod, wallet, card and rules file. Only the process is shared.
 
+A multi-mode process answers from the moment it starts, and its houses open one after another: the ones that are someone's first (claimed or invited), then the ones free to claim. A house that is still starting answers `503` with `Retry-After`; `GET /health` says how many are up, starting or failed, and the log says how long a house took.
+
 ```bash
 docker compose --profile scale up -d --scale house-multi=4   # about 1,000 houses
 ```

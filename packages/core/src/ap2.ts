@@ -112,6 +112,8 @@ export const allowanceDraft = (houseWebId: string, assistantWebId: string, amoun
 export const pledgeAgreement = (tally: string, id: string, bond = false) => `urn:lake:pledge:${tally}|${id}${bond ? '|bond' : ''}`;
 /** Where a house files what it put into a pledge (its held receipt, then how it ended): beside what its assistant spent. */
 export const pledgeReceiptPath = (agreement: string) => `receipts/spent-pledge-${createHash('sha256').update(agreement).digest('hex').slice(0, 16)}.receipt.jwt`;
+/** Where a house files what it paid for a cart (its held receipt, then how it ended: released to the shop, or back). */
+export const cartReceiptPath = (cartId: string) => `receipts/spent-cart-${createHash('sha256').update(cartId).digest('hex').slice(0, 16)}.receipt.jwt`;
 
 /**
  * A contribution the owner signs on their device for one pledge: exactly its amount, to be held for that pledge and

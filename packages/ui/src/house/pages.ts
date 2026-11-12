@@ -3,7 +3,8 @@ import { stringify } from 'yaml';
 import { useRef, useState } from 'preact/hooks';
 import { call, key, must, state, useBump, useHouse, useRedraw } from './api';
 import { Btn, CopyBtn, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, said, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
+import { WantRow } from './chats';
+import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, said, shortShop, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
 import { signEnvelope } from '../owner-crypto';
 
 // The pages under You. Each is one job, with its back to You.
@@ -214,19 +215,24 @@ function PackOffers({ p, m }: { p: Market['packs'][number]; m: Market }) {
 
 // ---- money ----
 export function MoneyPage({ backTo }: P) {
-  const m = useHouse<{ total: number; held?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; at: string; settlement?: string }[] }>({ kind: 'panel.money' });
+  const m = useHouse<{ total: number; held?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; toName?: string; items?: { label: string }[]; at: string; settlement?: string }[] }>({ kind: 'panel.money' });
   const [open, setOpen] = useState<string | null>(null);
+  // What you're looking for, each a thread of shops' offers (the ones that need you are on Today too).
+  const wants = (useHouse<ListView>({ kind: 'list' }).data?.wants ?? []).filter((w) => !w.closed);
   if (!m.data) return page('Money', backTo, h(Failed, { error: m.error }));
   const status = (r: Receipt) => (r.settlement === 'held' ? 'held' : r.settlement === 'voided' ? 'refunded' : 'paid');
   // The same thing paid by the same payer is one row (a study pays every house each round: 36 rows said one thing).
   const groups = new Map<string, Receipt[]>();
   for (const r of m.data.receipts) { const k = `${forWhat(r)}|${named(r.payerName, r.payer)}|${status(r)}|${r.currency}`; groups.set(k, [...(groups.get(k) ?? []), r]); }
   const spent = m.data.spent ?? [];
-  const spentIn = new Set(spent.map((r) => r.currency));
+  // Money that came back (a pledge that lapsed, a refund) is listed, and isn't counted as spent.
+  const gone = spent.filter((r) => r.settlement !== 'voided');
+  const spentIn = new Set(gone.map((r) => r.currency));
   return page('Money', backTo,
     h('div', { class: 'stat-row' }, h('div', { class: 'stat mint' }, h('b', {}, `$${m.data.total}`), h('span', {}, 'Earned')),
       m.data.held ? h('div', { class: 'stat' }, h('b', {}, `$${m.data.held}`), h('span', {}, 'Held')) : null,
-      spent.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(spent.reduce((t, r) => t + r.amount, 0) * 100) / 100, spent[0]!.currency) : String(spent.length)), h('span', {}, 'Spent')) : null),
+      gone.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(gone.reduce((t, r) => t + r.amount, 0) * 100) / 100, gone[0]!.currency) : String(gone.length)), h('span', {}, 'Spent')) : null),
+    wants.length ? h(Section, { title: 'Looking for', cls: 'chat-list wants' }, ...wants.map((w) => h(WantRow, { key: w.want.id, w }))) : null,
     groups.size ? h(Section, { title: 'Received' }, ...[...groups].slice(0, 50).map(([k, rs]) => {
       const r = rs[0]!, n = rs.length, sum = Math.round(rs.reduce((t, x) => t + x.amount, 0) * 100) / 100;
       return [
@@ -238,10 +244,10 @@ export function MoneyPage({ backTo }: P) {
         open === k ? h('div', { key: `${k}x`, class: 'access-more' }, ...rs.slice(0, 20).map((x, i) => h('div', { key: i },
           h('p', { class: 'more-line muted' }, `${n > 1 ? `${money$(x.amount, x.currency)} · ${dayTime(x.at)} · ` : ''}Signed by ${who(x.from)}`),
           x.heldUntil ? h('p', { class: 'more-line muted' }, `Held until the buyer accepts, ${dayTime(x.heldUntil)} at the latest`) : null))) : null];
-    }).flat()) : h(Empty, { icon: 'wallet-outline', title: 'No payments yet' }),
+    }).flat()) : spent.length || wants.length ? null : h(Empty, { icon: 'wallet-outline', title: 'No payments yet' }),
     m.data.spent?.length ? h(Section, { title: 'What you spent' }, ...m.data.spent.slice(0, 50).map((r, i) => h('ion-item', { key: `s${i}`, lines: 'full', class: 'pay' },
-      h('div', { slot: 'start', class: 'row-icon tint-amber' }, h('ion-icon', { name: 'arrow-up-outline' })),
-      h('ion-label', {}, h('h3', {}, pledgeOf(r.agreement) ? `${money$(r.amount, r.currency)} for "${pledgeOf(r.agreement)!.id}"` : `${money$(r.amount, r.currency)} to ${who(r.to)}`), h('p', {}, dayTime(r.at))),
+      h('div', { slot: 'start', class: `row-icon tint-${r.settlement === 'voided' ? 'mint' : 'amber'}` }, h('ion-icon', { name: r.settlement === 'voided' ? 'arrow-undo-outline' : 'arrow-up-outline' })),
+      h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, pledgeOf(r.agreement) ? `${money$(r.amount, r.currency)} for "${pledgeOf(r.agreement)!.id}"` : `${money$(r.amount, r.currency)} ${r.settlement === 'voided' ? 'back from' : 'to'} ${r.toName ? shortShop(r.toName) : named(undefined, r.to)}`), h('p', {}, [r.items?.length ? r.items.filter((i) => !/^Delivery\b/.test(i.label)).map((i) => i.label.replace(/^1 × /, '')).join(', ') : '', dayTime(r.at)].filter(Boolean).join(' · '))),
       h(Pill, { text: r.settlement === 'held' ? 'held' : r.settlement === 'voided' ? 'returned' : 'paid', tone: r.settlement === 'held' ? 'amber' : 'muted' })))) : null);
 }
 

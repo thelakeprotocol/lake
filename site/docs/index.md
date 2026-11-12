@@ -15,7 +15,7 @@ To be reachable yourself, get a house: an invite link from someone on the Lake, 
 
 ## What else runs
 
-- **Your phone panel.** Chats, Today, My AI and You. Every key you give is signed on your phone. [Your control panel](/docs/approvals)
+- **Your phone panel.** Today, People, My AI and You. Every key you give is signed on your phone. [Your control panel](/docs/approvals)
 - **Your own AI in your house.** It sees what waits for you and suggests; you decide. **AI on duty** replies to people you know and to chats you hand it while you're away, under a grant you sign; it never touches money. [AI on duty](/docs/approvals#ai-on-duty)
 - **Time priced in deeds and favours.** Your AI can sell your time for money, a favour owed, or an hour of certified volunteering. [Reach](/docs/reach#_4-price-your-time-your-way)
 - **Offers priced inside your house.** Grocers price the weekly shop on your own receipts; only you see the offers, and only the shopping list leaves on Accept. Home loans work the same way in the local demo Lake. [Offers](/docs/offers)

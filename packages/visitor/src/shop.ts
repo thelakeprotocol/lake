@@ -27,7 +27,7 @@ export interface ShopOptions {
   everyMs?: number;
   log?: (msg: string) => void;
 }
-export interface Shop { card: AgentCard; webId: string; offered: () => number; look: () => Promise<number>; close: () => Promise<void> }
+export interface Shop { card: AgentCard; webId: string; offered: () => number; look: () => Promise<number>; /** Gives the money of a cart it was paid for back (the last one, or the one named): it can't send it after all. */ refund: (cartId?: string) => Promise<boolean>; close: () => Promise<void> }
 
 /** How well an item must fit a want before the shop offers it. */
 const MIN_FIT = 0.5;
@@ -48,6 +48,8 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   // Wants answered (house + want), and carts sold, waiting to be paid.
   const answered = new Set<string>();
   const sold = new Map<string, { house: string; want: string; label: string }>();
+  // Carts paid for and held: where each is held, to give the money back if it can't be sent after all.
+  const paid = new Map<string, { holder: string; hold: string }>();
   let count = 0;
 
   async function cartParties(): Promise<CartParty[]> {
@@ -100,6 +102,7 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     // Filed with the payments agent first, then the house told: a house that can't be reached doesn't cost the delivery.
     if (vc.credentialSubject?.settlement === 'held' && vc.credentialSubject.settlementId) {
       const holder = (await cartParties()).find((x) => x.webId === issuer)?.url ?? `${o.payments}/a2a`;
+      paid.set(cartId, { holder, hold: vc.credentialSubject.settlementId });
       await ask(holder, me, { kind: 'delivered', hold: vc.credentialSubject.settlementId, sha256 });
     }
     await ask(s.house, me, { kind: 'want.shipped', want: s.want, cart: cartId, note, sha256 }).catch((e: Error) => log(`${ex.name}: shipped, but the house wasn't reached: ${e.message}`));
@@ -122,6 +125,17 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     return reply({ kind: 'rejected', code: 'malformed', why: 'we answer wants: tell your human\'s house what you are looking for (lake_want), and we offer if we have it' });
   }, id, { replay });
 
+  // The whole of it back, by the payments agent that holds it: the buyer's house hears from that agent, with a signed receipt.
+  async function refund(cartId = [...paid.keys()].at(-1)) {
+    const x = cartId ? paid.get(cartId) : undefined;
+    if (!x) return false;
+    const { reply: r } = await ask(x.holder, me, { kind: 'void', hold: x.hold });
+    if (r.kind !== 'voided') { log(`${ex.name}: could not refund ${cartId}: ${(r.problems ?? [r.kind]).join('; ')}`); return false; }
+    paid.delete(cartId!);
+    log(`${ex.name}: refunded ${cartId}`);
+    return true;
+  }
+
   let server: Server | undefined;
   if (o.mount) o.mount(app);
   else server = app.listen(o.port ?? 0);
@@ -131,5 +145,5 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
   link.keepAlive(15_000);
   const timer = setInterval(() => void look().catch(() => {}), o.everyMs ?? 20_000);
   timer.unref();
-  return { card, webId, offered: () => count, look, close: async () => { clearInterval(timer); link.stop(); await new Promise<void>((ok) => (server ? server.close(() => ok()) : ok())); } };
+  return { card, webId, offered: () => count, look, refund, close: async () => { clearInterval(timer); link.stop(); await new Promise<void>((ok) => (server ? server.close(() => ok()) : ok())); } };
 }
