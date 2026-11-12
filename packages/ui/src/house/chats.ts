@@ -195,8 +195,16 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
         ask: { header: `File this with ${name}?`, sub: `These messages join ${name}'s chat, and your AI answers them as it answers ${name}. Do it only if you're sure, for example they told you in person.`, button: `This is ${name}`, destructive: false } }) : null,
       mute));
   return h('div', { class: 'newstrip', role: 'note' },
+    c.replyTo ? h('p', { class: 'reach' }, `Left ${c.replyTo.kind === 'email' ? 'an email address' : 'a phone number'} for your answer: `, h(ReachLinks, { r: c.replyTo })) : null,
     h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : `New.${c.doorNote ? ` Got your door note ${when(c.doorNote)}.` : ''} The key is checked; the name is the one their AI gives.`),
     mute ? h('div', { class: 'newstrip-acts' }, mute) : null);
+}
+
+/** Where a web sender asked to be answered, as links the phone opens: its own mail app, dialler or messages. */
+function ReachLinks({ r, plain }: { r: NonNullable<Chat['replyTo']>; plain?: boolean }) {
+  const a = (href: string, label: string) => h('a', { class: 'link-btn reach-link', href, rel: 'noreferrer' }, label);
+  return h('span', { class: 'reach-links' }, plain ? null : h('b', {}, r.value), ' ',
+    ...(r.kind === 'email' ? [a(`mailto:${encodeURIComponent(r.value).replace('%40', '@')}`, 'Email')] : [a(`tel:${r.value}`, 'Call'), ' ', a(`sms:${r.value}`, 'Text')]));
 }
 
 /** About a conversation (a tap on its name): what's checked and what isn't, who replies, mute and clear. */
@@ -210,6 +218,7 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
       c.web ? h(Row, { icon: 'globe-outline', tint: 'muted', label: 'From your public page', sub: 'Nothing checked about who wrote it' })
         : h(Row, { icon: 'shield-checkmark-outline', label: `${c.agent}${c.vendor ? ` · ${c.vendor}` : ''}`, sub: 'Its key is checked on every message' }),
       c.name !== c.agent && !c.web ? h(Row, { icon: 'person-outline', tint: 'amber', label: `"${c.name}"`, sub: 'The name its AI gives. Not checked.' }) : null,
+      c.replyTo ? h(Row, { icon: c.replyTo.kind === 'email' ? 'mail-outline' : 'call-outline', tint: 'muted', label: c.replyTo.value, sub: 'Where they asked to be answered. Not checked; your AI doesn\'t get it.', cls: 'reach-row', below: h(ReachLinks, { r: c.replyTo, plain: true }) }) : null,
       f.speaks_for ? h(Row, { icon: 'home-outline', label: 'Speaks for a house', sub: `${f.speaks_for.house}${f.speaks_for.checked ? ' (checked)' : ' (not checked)'}` }) : null,
       h(Row, { icon: c.trust === 'known' ? 'checkmark-circle-outline' : 'sparkles-outline', tint: c.trust === 'known' ? 'mint' : 'amber', label: c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New', sub: c.trust === 'known' ? (c.why ?? 'You\'ve answered before') : c.trust === 'lookalike' ? (c.why ?? 'A name like someone you know') : 'Becomes known once you answer' }),
       c.keys.length > 1 ? h(Row, { icon: 'link-outline', label: `Writes with ${c.keys.length} keys`, sub: 'You said they\'re the same person', cls: 'joined',

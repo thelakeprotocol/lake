@@ -273,6 +273,20 @@ export type Advice = (typeof ADVICE)[number];
  */
 const oneTimeCode = (): string => { for (;;) { const c = randomBytes(9).toString('base64url'); if (/^[A-Za-z0-9]/.test(c)) return c; } };
 
+/**
+ * Where a sender from the web asks to be answered: an email address or a phone number and nothing else, since it
+ * becomes a link on the owner's phone. Not checked to be theirs.
+ */
+export type ReplyTo = { kind: 'email' | 'phone'; value: string };
+export const replyTo = (v: unknown): ReplyTo | null => {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s || s.length > 254) return null;
+  if (/^[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,24}$/.test(s)) return { kind: 'email', value: s };
+  const digits = s.replace(/\D/g, '');
+  if (/^\+?\(?[0-9][0-9 ().-]{4,22}[0-9]$/.test(s) && digits.length >= 7 && digits.length <= 15) return { kind: 'phone', value: `${s.startsWith('+') ? '+' : ''}${digits}` };
+  return null;
+};
+
 /** A contact address from someone else's message: kept only if it's a web address (round 8). */
 const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; } };
 
@@ -1107,7 +1121,7 @@ export class OwnerDesk {
    * Notes left over plain web (an AI that can only open links, SPEC §9.0): each has a private link where its sender reads
    * the answer. The secret in that link is all it takes to read it, so it's only ever given to whoever left the note.
    */
-  private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[]; from?: NoteSender; thread?: string }>();
+  private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[]; from?: NoteSender; thread?: string; reply_to?: ReplyTo }>();
   /** Kept on disk: a restart mustn't break every answer link given out. */
   private saveWebNotes = () => writeFile(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes])).catch(() => {});
   /** Notes and what became of them, kept on disk: a restart (a deploy) lost both, for the owner and for every sender. */
@@ -1131,12 +1145,13 @@ export class OwnerDesk {
     const n = key ? this.ownerNos.get(`${key}|${purpose}`) : undefined;
     return n && n.until > Date.now() ? n : null;
   }
-  addWebNote(n: { text: string; from?: string; purpose: string }): { id: string; key: string } | null {
+  addWebNote(n: { text: string; from?: string; purpose: string; replyTo?: ReplyTo }): { id: string; key: string } | null {
     const from: NoteSender = { web: true, name: (n.from ?? '').trim().slice(0, 80) || 'Someone on the web', domain: 'web', webId: `web:${randomBytes(8).toString('hex')}`, checked: false };
     const id = this.addNote({ from, text: n.text, purpose: n.purpose });
     if (!id) return null;
     const key = this.webNotes.get(id)?.key ?? randomBytes(12).toString('base64url');
-    this.webNotes.set(id, { from, ...this.webNotes.get(id), key });
+    // Where they'd like the answer: kept beside the note, for the owner alone (never on the sender, which assistants get).
+    this.webNotes.set(id, { from, ...this.webNotes.get(id), key, ...(n.replyTo ? { reply_to: n.replyTo } : {}) });
     void this.saveWebNotes();
     return { id, key };
   }
@@ -2665,7 +2680,7 @@ export class OwnerDesk {
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
       wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id })) })),
       seen: forAssistant ? undefined : this.chatSeen,
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id); const a = this.webNotes.get(w?.thread ?? n.id)?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from) }; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from) }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

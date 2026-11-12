@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import express from 'express';
 import { describe, expect, it } from 'vitest';
 import { generateIdentity, issueCredential, signMessage, type JWK } from '@thelakeprotocol/core';
-import { agendaIcs, OwnerDesk } from './owner.js';
+import { agendaIcs, OwnerDesk, replyTo } from './owner.js';
 
 // A sandbox house anyone can claim: the claim is a lease, and the house resets when it ends.
 async function leasedDesk(stored: JWK | null = null, dir?: string, told: Record<string, unknown>[] = []) {
@@ -372,6 +372,53 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(await asAi({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', refused: 'no money on duty' })).toMatchObject({ on: false, refusals: 3, off_at: 3 });
     server.close();
   }, 20_000);
+});
+
+describe('where a sender from the web asks to be answered (round 17)', () => {
+  it('takes an email address or a phone number and nothing else', () => {
+    expect(replyTo('ana@example.com')).toEqual({ kind: 'email', value: 'ana@example.com' });
+    expect(replyTo('  ana.b+lake@mail.example.org ')).toEqual({ kind: 'email', value: 'ana.b+lake@mail.example.org' });
+    expect(replyTo('+61 491 570 006')).toEqual({ kind: 'phone', value: '+61491570006' });
+    expect(replyTo('(07) 5550 0100')).toEqual({ kind: 'phone', value: '0755500100' });
+    for (const bad of ['', 'ana', 'ana@', 'ana@example', '@example.com', 'ana@exa mple.com', 'javascript:alert(1)', 'https://example.com/me', 'tel:+61491570006', '12345', '+61 491 570 006 ext 9', '0491 570 006; rm -rf', '1'.repeat(16), 'a@b.c', `${'a'.repeat(65)}@example.com`, 'ana@example.com?subject=hi', 'ana@example.com,eve@example.com', null, 7, {}]) expect(replyTo(bad)).toBeNull();
+  });
+
+  it('is kept beside the note for the owner alone: no AI of theirs gets it, in the list or in the news', async () => {
+    const told: Record<string, any>[] = [];
+    let key: JWK | null = null;
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [],
+      statusUrl: () => 'http://h/status', tell: async (_u, p) => { told.push(p); }, panel: {} as never,
+    });
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    const ai = await generateIdentity('ai');
+    await post('/assistant', { publicJwk: ai.publicJwk, code: (await owner({ kind: 'panel.assistant.invite', label: 'Day AI', reads: ['records', 'money'] })).code, label: 'Day AI', url: 'https://day.example/a2a' });
+    const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    const web = desk.addWebNote({ text: 'Could you ring me about the fence?', from: 'Pat', purpose: 'contact', replyTo: replyTo('0491 570 006')! })!;
+    const more = desk.followUpWebNote(web.id, web.key, 'Any time after four.') as { id: string };
+    const plain = desk.addWebNote({ text: 'No address left.', from: 'Kim', purpose: 'contact' })!;
+    const mine = (await owner({ kind: 'list' })).notes as { id: string; reply_to?: unknown; from: { webId: string } }[];
+    expect(mine.find((n) => n.id === web.id)).toMatchObject({ reply_to: { kind: 'phone', value: '0491570006' } });
+    expect(mine.find((n) => n.id === more.id)).toMatchObject({ reply_to: { kind: 'phone', value: '0491570006' } });
+    expect(mine.find((n) => n.id === plain.id)).not.toHaveProperty('reply_to');
+    // Handed to the AI, the chat's words are its to read; where to reach Pat still isn't.
+    expect(await owner({ kind: 'panel.chat.mode', key: mine.find((n) => n.id === web.id)!.from.webId, mode: 'ai' })).toMatchObject({ ok: true });
+    const theirs = (await asAi({ kind: 'list' })).notes as { id: string; text: string }[];
+    expect(theirs.find((n) => n.id === web.id)).toMatchObject({ text: 'Could you ring me about the fence?' });
+    expect(JSON.stringify(theirs)).not.toContain('0491570006');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.some((t) => t.about === 'note')).toBe(true);
+    expect(JSON.stringify(told)).not.toContain('0491570006');
+    expect(desk.webNoteState(web.id, web.key)).not.toHaveProperty('reply_to');
+    server.close();
+  });
 });
 
 describe('the morning after a night on duty', () => {

@@ -358,6 +358,10 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .people-more ion-button { --padding-start: 8px; --padding-end: 8px; font-weight: 600; text-transform: none; letter-spacing: 0; }
 .newstrip { margin: 10px 14px 0; padding: 10px 14px; border-radius: 16px; background: var(--lake-surface-2); font-size: 13.5px; line-height: 1.4; color: var(--lake-muted); }
 .newstrip p { margin: 0; }
+.newstrip .reach { color: var(--lake-text); margin-bottom: 6px; overflow-wrap: anywhere; }
+.reach-links { overflow-wrap: anywhere; }
+.reach-link { text-decoration: none; display: inline-block; min-height: 24px; padding: 2px 6px; margin: -2px 0; }
+.reach-row .row-below { margin-top: 4px; }
 .newstrip.threat { background: var(--lake-red-soft); color: var(--lake-text); }
 .newstrip.threat b { color: var(--lake-red); }
 .newstrip-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

@@ -6,7 +6,7 @@ import {
 } from '@thelakeprotocol/core';
 import { Market } from './market.js';
 import { checkRecord, quickCheck, type RecordCheck, type RecordPaths, type Trust } from './record.js';
-import type { OwnerActive, OwnerDesk } from './owner.js';
+import { replyTo, type OwnerActive, type OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
 
 export interface HousekeeperOptions {
@@ -648,13 +648,16 @@ export class Housekeeper {
    * the owner's rules about who and why apply as to any note (its requester is `web`), and a few an hour per address.
    */
   private webCount = new Map<string, number[]>();
-  webNote(p: { text?: unknown; from?: unknown; purpose?: unknown }, ip: string): { status: number; body: Record<string, unknown> } {
+  webNote(p: { text?: unknown; from?: unknown; purpose?: unknown; reply_to?: unknown }, ip: string): { status: number; body: Record<string, unknown> } {
     if (!this.o.rules.door) return { status: 404, body: { error: 'this house\'s door is closed' } };
     const text = typeof p.text === 'string' ? p.text.trim() : '';
     if (!text || text.length > 1000) return { status: 400, body: { error: 'text: your note for the owner, 1 to 1000 characters (say who you are and why)' } };
     if (looksLikeInjection(text)) return { status: 400, body: { error: 'a note is for the owner to read, not instructions' } };
     const purpose = typeof p.purpose === 'string' && p.purpose ? p.purpose : 'contact';
     if (!isPurpose(purpose)) return { status: 400, body: { error: `purpose: one of ${Object.keys(PURPOSES).join(', ')}` } };
+    // Where they'd like the answer, if they say: an email address or a phone number, for the owner's eyes only.
+    const given = typeof p.reply_to === 'string' && p.reply_to.trim() ? p.reply_to : undefined, reach = given ? replyTo(given) : null;
+    if (given && !reach) return { status: 400, body: { error: 'reply_to: an email address or a phone number where the owner can answer you (or leave it out: the answer comes to your link either way)' } };
     // A few an hour from one address, and a few dozen in all: a link anyone can open is a link anyone can flood.
     const now = Date.now(), hour = (k: string) => (this.webCount.get(k) ?? []).filter((t) => now - t < 3_600_000);
     if (hour(`ip:${ip}`).length >= 3 || hour('all').length >= 20) return { status: 429, body: { error: 'this door has taken enough notes from the web this hour: try again later' } };
@@ -665,13 +668,13 @@ export class Housekeeper {
       this.o.emit(makeEvent('decision', this.actor, 'agent:web', { decision: 'decline', reason: `a ${purpose} note from the web: ${said.reason}` }));
       return { status: 200, body: { kind: 'declined', reason: said.reason } };
     }
-    const kept = this.o.desk.addWebNote({ text, purpose, ...(typeof p.from === 'string' ? { from: p.from } : {}) });
+    const kept = this.o.desk.addWebNote({ text, purpose, ...(typeof p.from === 'string' ? { from: p.from } : {}), ...(reach ? { replyTo: reach } : {}) });
     if (!kept) return { status: 429, body: { error: 'a few notes an hour from one sender: try again later' } };
     // The page shows the owner's note each time; the count is by address (hashed, a day at a time), so twenty notes from
     // one place are one new person, not twenty (round 16).
     const doorNote = this.o.rules.door?.note;
     this.o.desk.doorNoteFor(this.o.desk.webSender(ip), doorNote);
-    return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key, ...(doorNote ? { door_note: doorNote } : {}) } };
+    return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key, ...(doorNote ? { door_note: doorNote } : {}), ...(reach ? { reply_to: reach.kind } : {}) } };
   }
 
   /** The sender of a web note answers on it, at its private link: the same checks as a note, the thread's own limit. */

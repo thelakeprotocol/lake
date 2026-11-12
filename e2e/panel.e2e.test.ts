@@ -487,7 +487,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('shows a note from the web the moment it arrives, and the owner answers it', async () => {
     await tab('People');
-    const left = await (await fetch(`${house}/note?text=${encodeURIComponent('Hi, Ana here: coffee next week?')}&from=Ana`)).json();
+    const left = await (await fetch(`${house}/note?text=${encodeURIComponent('Hi, Ana here: coffee next week?')}&from=Ana&reply_to=${encodeURIComponent('ana@example.com')}`)).json();
     expect(left.kind).toBe('noted');
     // A chat row, as messaging apps show it; tapped, the conversation full screen without the tab bar.
     const row = page.locator('.chatrow', { hasText: 'coffee next week' });
@@ -500,6 +500,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const forAi = async () => ((await asAssistant({ kind: 'list' })).notes as { id: string; text: string; hidden?: boolean }[]).find((n) => n.id === left.note);
     expect(await forAi()).toMatchObject({ hidden: true, text: expect.not.stringContaining('coffee') });
     expect(await asAssistant({ kind: 'assistant.reply', note: left.note, text: 'Sure!' })).toMatchObject({ error: expect.any(String) });
+    // Where Ana asked to be answered: on top of the chat for the owner, as a link the phone's mail app opens, and in
+    // her details; no AI of the owner's gets it.
+    await page.locator('.newstrip .reach', { hasText: 'ana@example.com' }).locator('a[href="mailto:ana@example.com"]', { hasText: 'Email' }).waitFor();
+    expect(await forAi()).not.toHaveProperty('reply_to');
+    await page.locator('.chatwho').click();
+    await sheet().locator('.reach-row', { hasText: 'ana@example.com' }).locator('a[href="mailto:ana@example.com"]').waitFor();
+    await sheet().locator('.reach-row', { hasText: 'Where they asked to be answered' }).waitFor();
+    await tidy();
+    await closeSheet();
     // Who replies is one control at the top of the chat: it says who does now, and a tap gives the choice of two.
     await page.locator('.replymode.me', { hasText: 'I reply' }).waitFor();
     expect(await page.locator('.modebar').count()).toBe(0);
@@ -510,6 +519,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByText(/replies to .+ now$/).waitFor({ timeout: 6000 });
     await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor();
     expect(await forAi()).toMatchObject({ text: 'Hi, Ana here: coffee next week?' });
+    expect(await forAi()).not.toHaveProperty('reply_to');
     await replyMode('me');
     await page.getByText('You reply from now on').waitFor({ timeout: 6000 });
     await page.locator('.replymode.me').waitFor();

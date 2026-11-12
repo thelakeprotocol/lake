@@ -411,8 +411,11 @@ describe('the owner', () => {
     expect(await page()).toMatch(/Ask my agent about talks\.[\s\S]*Send your AI over[\s\S]*Knock on the door at /);
     expect(await (await fetch(houses.strict!, { headers: { accept: 'application/json' } })).json()).toMatchObject({ door: { about: 'Ask my agent about talks.' } });
     // Over plain web, for an AI without the connector: a note by opening one link, the answer at a private one.
-    const left = await (await fetch(`${houses.strict}/note?text=${encodeURIComponent('Hi, Ana here: a short call about your talk?')}&from=Ana`)).json();
-    expect(left).toMatchObject({ kind: 'noted', answer_at: expect.stringMatching(/\/note\/\w+\/[\w-]+$/) });
+    // Where she'd like the answer is hers to add: a phone number or an email address, nothing else, for the owner alone.
+    expect((await fetch(`${houses.strict}/note?text=hello&reply_to=${encodeURIComponent('javascript:alert(1)')}`)).status).toBe(400);
+    expect((await fetch(`${houses.strict}/note?text=hello&reply_to=${encodeURIComponent('call me on 12')}`)).status).toBe(400);
+    const left = await (await fetch(`${houses.strict}/note?text=${encodeURIComponent('Hi, Ana here: a short call about your talk?')}&from=Ana&reply_to=${encodeURIComponent('+61 491 570 006')}`)).json();
+    expect(left).toMatchObject({ kind: 'noted', answer_at: expect.stringMatching(/\/note\/\w+\/[\w-]+$/), reply_to: expect.stringContaining('phone number') });
     const answerPage = await fetch(left.answer_at);
     expect(answerPage.headers.get('referrer-policy')).toBe('no-referrer');
     expect(answerPage.headers.get('cache-control')).toBe('no-store');
@@ -423,7 +426,7 @@ describe('the owner', () => {
     expect((await fetch(`${houses.strict}/note?text=${encodeURIComponent('Preview of a pasted link')}`, { headers: { 'user-agent': 'facebookexternalhit/1.1' } })).status).toBe(403);
     expect((await fetch(`${houses.strict}/note?text=prefetched`, { headers: { 'sec-purpose': 'prefetch' } })).status).toBe(403);
     expect((await ownerCall({ kind: 'list' })).notes).toHaveLength(notesNow);
-    expect((await ownerCall({ kind: 'list' })).notes.find((x: { id: string }) => x.id === left.note).from).toMatchObject({ web: true, checked: false });
+    expect((await ownerCall({ kind: 'list' })).notes.find((x: { id: string }) => x.id === left.note)).toMatchObject({ from: { web: true, checked: false }, reply_to: { kind: 'phone', value: '+61491570006' } });
     expect(await ownerCall({ kind: 'panel.note.reply', id: left.note, text: 'Yes: Tuesday 10:00?' })).toEqual({ ok: true });
     expect(await (await fetch(left.answer_at)).json()).toMatchObject({ status: 'answered', answer: { text: 'Yes: Tuesday 10:00?' } });
     // The sender answers on the same note (run 56: asked a question, the web AI had no way to say): it reaches the owner
@@ -432,6 +435,7 @@ describe('the owner', () => {
     const notes = (await ownerCall({ kind: 'list' })).notes as { id: string; text: string; from: { webId: string } }[];
     const followUp = notes.find((x) => x.text === 'Tuesday 10:00 works, thanks!')!;
     expect(followUp.from.webId).toBe(notes.find((x) => x.id === left.note)!.from.webId);
+    expect(followUp).toMatchObject({ reply_to: { kind: 'phone', value: '+61491570006' } });
     // Waiting on the link (long polling) returns as soon as there's news.
     const t0 = Date.now();
     const waited = fetch(`${left.answer_at}?wait=20`).then((r) => r.json());
