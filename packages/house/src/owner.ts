@@ -275,6 +275,13 @@ export type Advice = (typeof ADVICE)[number];
  */
 const oneTimeCode = (): string => { for (;;) { const c = randomBytes(9).toString('base64url'); if (/^[A-Za-z0-9]/.test(c)) return c; } };
 
+/** Which of the house's log entries "what left" shows, newest first: the latest 60, and the latest 20 that an offer or a purchase sent, so a study that runs every hour never pushes those off the list. */
+export function leftWindow(files: string[]): string[] {
+  const newest = files.filter((f) => f.endsWith('.json')).sort().reverse();
+  const sent = newest.filter((f) => /-(accept|address)\.json$/.test(f)).slice(0, 20);
+  return [...new Set([...newest.slice(0, 60), ...sent])].sort().reverse();
+}
+
 /**
  * Where a sender from the web asks to be answered: an email address or a phone number and nothing else, since it
  * becomes a link on the owner's phone. Not checked to be theirs.

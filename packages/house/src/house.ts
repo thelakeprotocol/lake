@@ -11,7 +11,7 @@ import {
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
-import { OwnerDesk, type PanelProvider } from './owner.js';
+import { leftWindow, OwnerDesk, type PanelProvider } from './owner.js';
 import { openWants, type Wants } from './wants.js';
 import { Parser } from 'n3';
 import { parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
@@ -904,9 +904,9 @@ function panelFor(x: {
     // What left this house, newest first, from the pod's /audit/ log: each study answered (as shares), what an accepted
     // offer sent, an address that went with a payment. An entry never changes, so each is read once.
     async left() {
-      const files = (await listContainer(owner, 'audit/')).filter((f) => f.endsWith('.json')).sort().reverse();
+      const files = (await listContainer(owner, 'audit/')).filter((f) => f.endsWith('.json'));
       const domains = new Map((await consents()).map((c) => [c.visitorWebId, c.visitor] as const));
-      const recent = files.slice(0, 60);
+      const recent = leftWindow(files);
       await pool(recent.filter((f) => !leftCache.has(f)), 8, async (f) => {
         const e = await owner.fetch(owner.podRoot + f).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Record<string, unknown> | null;
         if (e) leftCache.set(f, leftRow(e, domains));

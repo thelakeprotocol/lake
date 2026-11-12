@@ -70,7 +70,7 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
         h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, shortShop(x.to)), h('p', {}, leftLine(x)), h('p', {}, n > 1 ? `${n} times, last ${dayTime(x.at)}` : dayTime(x.at)))))
         : [h('ion-item', { key: 'none', lines: 'none', class: 'left-none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, left.data ? 'Nothing has left your house yet. A study answered, or what an offer you accept sends, is listed here.' : 'Looking…')))]),
       !all && out.length > 4 ? h(Row, { icon: 'chevron-down', tint: 'muted', label: `Show all ${out.length}`, detail: false, onClick: () => setAll(true) }) : null,
-      left.data && left.data.total > left.data.left.length ? h('p', { class: 'muted-line pad' }, `The last ${left.data.left.length} of ${left.data.total}. Download everything has them all.`) : null),
+      left.data && left.data.total > left.data.left.length ? h('p', { class: 'muted-line pad' }, `The latest ${left.data.left.length} of ${left.data.total}. Download everything has them all.`) : null),
     h(Section, { title: 'Kept here' },
       h(Row, { icon: rec && !rec.ok ? 'alert-circle-outline' : 'folder-open-outline', tint: rec && !rec.ok ? 'red' : 'violet', label: 'What your house holds', sub: rec && !rec.ok ? 'Your record failed its check' : over.data ? `${plural(over.data.claims, 'fact')} about you · signed and unchanged` : undefined, onClick: () => push('#data') }),
       h(Row, { icon: 'download-outline', tint: 'muted', label: 'Download everything', onClick: () => push('#move') })));

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import express from 'express';
 import { describe, expect, it } from 'vitest';
 import { generateIdentity, issueCredential, signMessage, type JWK } from '@thelakeprotocol/core';
-import { agendaIcs, OwnerDesk, replyTo } from './owner.js';
+import { agendaIcs, leftWindow, OwnerDesk, replyTo } from './owner.js';
 
 // A sandbox house anyone can claim: the claim is a lease, and the house resets when it ends.
 async function leasedDesk(stored: JWK | null = null, dir?: string, told: Record<string, unknown>[] = []) {
@@ -548,6 +548,12 @@ describe('what an assistant reads (SPEC §6.1)', () => {
     // What left the house is its owner's to read: not an assistant's, even one that reads the records.
     expect((await asAi({ kind: 'panel.left' })).left).toBeUndefined();
     expect(await owner({ kind: 'panel.left' })).toEqual({ total: 0, left: [] });
+    // A study answered every hour doesn't push what a purchase sent off the list.
+    const log = [...Array.from({ length: 90 }, (_, i) => `audit/${1700000001000 + i}-ab12.json`), 'audit/1700000000500-address.json', 'audit/1700000000400-accept.json', 'audit/readme.txt'];
+    const shown = leftWindow(log);
+    expect(shown).toHaveLength(62);
+    expect(shown[0]).toBe('audit/1700000001089-ab12.json');
+    expect(shown.slice(-2)).toEqual(['audit/1700000000500-address.json', 'audit/1700000000400-accept.json']);
     desk.news({ about: 'request.waiting', request: 'r2' });
     await new Promise((r) => setTimeout(r, 20));
     expect(told.some((t) => t.about === 'request.waiting' && t.request === 'r2')).toBe(true);
