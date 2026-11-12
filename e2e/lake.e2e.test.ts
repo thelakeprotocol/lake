@@ -1085,6 +1085,13 @@ describe('money', () => {
     expect(rows.map((r) => r.given)).toEqual(rows.map((r) => r.given).sort().reverse());
     // The study the bloc just joined: research, by Stan's research rule, its one-use key used.
     expect(rows).toContainEqual(expect.objectContaining({ visitor: 'uni.example', purpose: 'research', how: { rule: 2 }, status: 'used', fields: expect.arrayContaining([{ name: 'readmissions', label: 'hospital readmissions' }]) }));
+    // What left the house, in one list for its owner (SPEC §6.1): that study's answer, to whom, which fields it used.
+    // Nothing here but studies: no record went anywhere.
+    const left = await call({ kind: 'panel.left' }) as { total: number; left: { kind: string; to: string; at: string; fields?: string[]; question?: string }[] };
+    expect(left.left).toContainEqual(expect.objectContaining({ kind: 'study', to: 'uni.example', fields: expect.arrayContaining(['hospital readmissions']), question: expect.any(String) }));
+    expect(left.left.map((x) => x.kind).filter((k) => k !== 'study')).toEqual([]);
+    expect(left.left.map((x) => x.at)).toEqual(left.left.map((x) => x.at).sort().reverse());
+    expect(left.total).toBeGreaterThanOrEqual(left.left.length);
     // The GP's key from the first knock: care (DPV calls care and a service you asked for the same thing; the key says which), still live.
     const gp = rows.find((r) => r.visitor === 'gp.example' && r.status === 'active')!;
     expect(gp).toMatchObject({ purpose: 'care', purposeLabel: 'care (someone looking after you)', how: { rule: 4 }, fields: [{ name: 'medications', label: 'medications' }] });
@@ -2325,6 +2332,9 @@ describe('mortgage offers, priced inside the house', () => {
     const audit = await readdir(join(dir, 'houses', b.name, 'pod', b.name, 'audit'));
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
     expect(entry).toMatchObject({ to: best.quoter.webId, released: ['finance/original/statements.json', 'finance/original/statements.vc.jwt'], consent: 'owner, live' });
+    // It doesn't count as a study's records out (that stays 0 for studies), and the owner's list says what went and to whom.
+    expect(entry.recordsOut).toBeUndefined();
+    expect((await b.call({ kind: 'panel.left' })).left[0]).toMatchObject({ kind: 'offer', to: best.quoter.name, title: best.title, released: { files: ['statements.json', 'statements.vc.jwt'] } });
     const money = await b.call({ kind: 'panel.money' });
     expect(money.receipts.some((r: any) => r.amount === accepted.answer.feePaid)).toBe(true);
     expect((await (await fetch(`${node}/state`)).json()).counters.recordsMoved).toBe(0);
@@ -2402,6 +2412,10 @@ describe('the weekly shop, priced inside the house', () => {
     const entry = JSON.parse(await readFile(join(dir, 'houses', b.name, 'pod', b.name, 'audit', audit.find((f) => f.includes('accept'))!), 'utf8'));
     // Not eight weeks of receipts: the list.
     expect(entry).toMatchObject({ to: best.quoter.webId, released: ['claims: household_size, dietary_needs, staples'], consent: 'owner, live' });
+    const went = (await b.call({ kind: 'panel.left' })).left.find((x: { title?: string }) => x.title === best.title);
+    expect(went).toMatchObject({ kind: 'offer', to: best.quoter.name });
+    expect(went.released.facts).toHaveLength(3);
+    expect(went.released.files).toBeUndefined();
   });
 
   it('a grocer sells single things from its signed menu, and says plainly what it doesn\'t stock (run 67)', async () => {

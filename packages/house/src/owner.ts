@@ -71,6 +71,8 @@ export interface PanelProvider {
   /** Who has access: agents that can see something now, what they asked, what the house said (one source per number). */
   access?(tzOffset?: number): Promise<unknown>;
   data(): Promise<unknown>;
+  /** What left the house, newest first: studies answered, what accepted offers and purchases sent (from the pod's /audit/). */
+  left?(): Promise<unknown>;
   exportAll(): Promise<unknown>;
   /** What the owner is looking for, and the offers priced for them in this house. */
   market(): Promise<unknown>;
@@ -2306,6 +2308,7 @@ export class OwnerDesk {
           'panel.consents': () => panel.consents(),
           'panel.access': async () => panel.access?.(Number((q as { tz_offset?: number }).tz_offset)) ?? { error: 'this house can\'t list access' },
           'panel.data': () => panel.data(),
+          'panel.left': async () => (await panel.left?.()) ?? { total: 0, left: [] },
           'panel.export': () => panel.exportAll(),
           'panel.market': () => panel.market(),
           'panel.intent.open': () => panel.openIntent(String(q.pack ?? ''), q.terms ?? {}),

@@ -16,7 +16,7 @@ Your bank signs your transactions as a Verifiable Credential (in the demo, a ban
 
 ## 2. Say what you're looking for
 
-In your [control panel](/docs/approvals), **You → Offers for you**: a state, a price band, a term, first home buyer or not. Or leave the price as **What I can afford**, and your house works it out from your own numbers, without telling anyone how. You can also keep a standing intent in [`rules.yaml`](/docs/rules):
+In your [control panel](/docs/approvals), **You → Money → Offers for you**: a state, a price band, a term, first home buyer or not. Or leave the price as **What I can afford**, and your house works it out from your own numbers, without telling anyone how. You can also keep a standing intent in [`rules.yaml`](/docs/rules):
 
 ```yaml
 intents:

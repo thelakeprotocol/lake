@@ -195,6 +195,9 @@ ion-title { font-weight: 650; letter-spacing: -0.01em; }
 .lake-list ion-item p { font-size: 13.5px; color: var(--lake-muted); margin: 2px 0; line-height: 1.35; }
 .lake-row.danger h3, ion-item.danger ion-label { color: var(--lake-red); }
 .lake-row [slot='start'] { margin-inline-end: 12px; }
+/* A row under You whose state wants a look says so in its colour. */
+.you-row.tone-amber ion-label p { color: var(--lake-amber); }
+.you-row.tone-red ion-label p { color: var(--lake-red); }
 .row-icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; margin-right: 12px; font-size: 18px; flex: none; }
 .row-icon.tint-mint { background: var(--lake-mint-soft); color: var(--lake-mint); }
 .row-icon.tint-amber { background: var(--lake-amber-soft); color: var(--lake-amber); }
@@ -438,7 +441,6 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .profile .lake-avatar { box-shadow: 0 0 0 4px var(--lake-bg), 0 0 0 6px color-mix(in srgb, var(--lake-mint) 50%, transparent), 0 16px 40px rgba(var(--ion-color-primary-rgb), 0.25); }
 .profile-text h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 6px 0 2px; }
 .profile-text p { margin: 0; color: var(--lake-muted); font-size: 14.5px; }
-.profile-actions { display: flex; gap: 8px; margin-top: 6px; }
 
 /* ---- settings pages ---- */
 .savebar { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 10px 16px calc(10px + var(--ion-safe-area-bottom, 0px)); background: var(--lake-glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-top: 1px solid var(--lake-line); }

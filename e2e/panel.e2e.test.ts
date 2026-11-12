@@ -52,8 +52,10 @@ async function tidy() {
   expect(errors).toEqual([]);
   if (process.env.LAKE_LOOK) await page.screenshot({ path: join(process.env.LAKE_LOOK, `${String(++looks).padStart(3, '0')}-${(expect.getState().currentTestName ?? '').split(' > ').pop()!.slice(0, 40).replace(/[^\w]+/g, '-')}.png`) }).catch(() => {});
 }
-// Four tabs, Today first (it opens there); everything else is a row under You (12 Nov: the redesign, then Fable's design).
+// Four tabs, Today first (it opens there). You has five rows that each say how they stand, and every other page sits
+// one tap under one of them (12 Nov: the redesign, then Fable's design; 13 Nov: fourteen rows became five).
 const TABS = ['Today', 'People', 'My AI', 'You'];
+const UNDER: Record<string, string> = { 'When you can meet': 'Your door', 'Who has access': 'My data', 'What your house holds': 'My data', 'Download everything': 'My data', 'Offers for you': 'Money', 'Delivery address': 'Money', 'Your promise circles': 'Money', Notifications: 'This phone', 'New or lost phone': 'This phone', 'About this house': 'This phone' };
 const tab = async (name: string, p: Page = page) => {
   if (TABS.includes(name)) {
     // On a page opened from a tab (a chat, a setting), the tab bar isn't there: Back first.
@@ -61,7 +63,7 @@ const tab = async (name: string, p: Page = page) => {
     await p.locator('ion-tab-button', { hasText: name }).click();
   } else {
     await tab('You', p);
-    await p.locator('ion-item.lake-row', { hasText: name }).first().click();
+    for (const row of UNDER[name] ? [UNDER[name]!, name] : [name]) { await p.locator('ion-item.lake-row', { hasText: row }).first().click(); await p.waitForTimeout(300); }
   }
   await p.waitForTimeout(300);
 };
@@ -237,25 +239,25 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
-  it('shares how to reach you from You: the handle on top, the line to tell people, the address, Copy, and a QR code a tap away', async () => {
+  it('shares how to reach you from Your door: the handle to edit, the line to tell people, the address, Copy, and a QR code a tap away', async () => {
+    // You says how the door stands; the handle is edited, and shared, one tap in.
     await tab('You');
-    // The handle is edited in one tap from the top of You.
-    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.locator('.you-row.door', { hasText: 'panelowner · open' }).click();
     expect(await page.getByLabel('Your handle').inputValue()).toBe('panelowner');
-    await goBack();
-    await page.getByRole('button', { name: 'Share', exact: true }).click();
+    await page.locator('ion-item.share-row').click();
     await sheet().getByText('Ask your AI to "ping panelowner" on the Lake').waitFor();
     await sheet().getByText(house, { exact: true }).waitFor();
     await sheet().getByRole('button', { name: 'QR code' }).click();
     await sheet().locator('img.qr').waitFor();
     await tidy();
     await closeSheet();
+    await goBack();
     await tab('People');
   });
 
   it('lets a person leave a note themselves from the door page, and read the answer later', async () => {
     // The owner's door note (round 15): written on Your door, sent once to each new person by the house.
-    await tab('Handle and public page');
+    await tab('Your door');
     await page.getByRole('button', { name: 'Use a suggested text' }).click();
     await page.getByRole('button', { name: /^Save/ }).click();
     await page.getByText('Saved').first().waitFor();
@@ -491,6 +493,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(await spentRows.count()).toBe(1);
       // Only what stayed spent is counted.
       expect(await page.locator('.stat', { hasText: 'Spent' }).locator('b').textContent()).toBe('A$34');
+      await tidy();
+      // What left the house for it is listed under My data: the shop got the delivery address, and nothing else.
+      await tab('My data');
+      await page.locator('ion-item.left-row', { hasText: 'Washer & Wrench' }).first().getByText('You bought from it: it got your delivery address.').waitFor({ timeout: 10_000 });
       await tidy();
     } finally {
       await Promise.all(shops.map((x) => x.close()));
@@ -770,13 +776,32 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
-  it('opens every page under You, each with a way back, without an error or a page wider than the phone', async () => {
-    for (const name of ['Handle and public page', 'Notifications', 'When you can meet', 'Rules', 'Who has access', 'Money', 'What your house holds', 'New or lost phone', 'Download everything', 'About this house']) {
-      await tab(name);
+  it('You is five rows that each say how they stand, and every page under them opens with a way back, without an error or a page wider than the phone', async () => {
+    await tab('You');
+    await page.locator('.you-row.door', { hasText: 'panelowner · open' }).waitFor({ timeout: 10_000 });
+    await page.locator('.you-row.rules', { hasText: /otherwise|No rules/ }).waitFor({ timeout: 10_000 });
+    await page.locator('.you-row.mydata', { hasText: /your yes/ }).waitFor({ timeout: 10_000 });
+    await page.locator('.you-row.money', { hasText: /spent|held|earned|Nothing yet/ }).waitFor({ timeout: 10_000 });
+    await page.locator('.you-row.phone', { hasText: /recovery code|Notifications off|can read it/ }).waitFor({ timeout: 10_000 });
+    expect(await page.locator('ion-item.you-row').count()).toBe(5);
+    await tidy();
+    const fine = async (backTo: string) => {
       await page.waitForTimeout(600);
       expect(await page.locator('.lake-empty', { hasText: 'Can\'t reach your house' }).count()).toBe(0);
-      expect(await page.getByRole('button', { name: 'Back to You' }).count()).toBe(1);
+      expect(await page.getByRole('button', { name: `Back to ${backTo}`, exact: true }).count()).toBe(1);
       await tidy();
+    };
+    const under: Record<string, string[]> = { 'Your door': ['When you can meet'], Rules: [], 'My data': ['Who has access', 'What your house holds', 'Download everything'], Money: ['Delivery address'], 'This phone': ['Notifications', 'New or lost phone', 'About this house'] };
+    for (const [hub, pages] of Object.entries(under)) {
+      await tab(hub);
+      await fine('You');
+      for (const name of pages) {
+        // One tap further, and Back says where it returns to.
+        await page.locator('ion-item.lake-row', { hasText: name }).first().click();
+        await fine(hub);
+        await goBack();
+        await page.getByRole('button', { name: 'Back to You', exact: true }).waitFor({ timeout: 10_000 });
+      }
       await goBack();
       await onTab('You');
     }
@@ -1062,7 +1087,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await onTab('Today', phone3);
     expect(await phone3.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('lake-owner-key:')))).toBe(false);
     expect(await phone3.evaluate(keptKid)).toBe(ownerSeed.kid);
-    await tab('You', phone3);
+    await tab('This phone', phone3);
     await phone3.locator('.key-store', { hasText: 'can\'t be copied out' }).waitFor();
     expect((await fetch(`${house}/owner/`)).headers.get('content-security-policy')).toMatch(/script-src 'self';/);
     await lostKey(phone2);
@@ -1127,8 +1152,13 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       for (let j = 0; j < 20 && (await page.locator('ion-card.req', { hasText: 'clinic.example' }).count()) >= n; j++) await page.waitForTimeout(250);
     }
     await page.waitForTimeout(6500); // the toasts go by themselves: nothing was set for next time
+    // You says how My data stands; My data says who has a yes and what it lets them do (a study may use it: nobody sees it).
+    await tab('You');
+    await page.locator('.you-row.mydata', { hasText: /agents? ha(s|ve) your yes · (next )?ends in/ }).click();
+    await page.locator('ion-item.holder', { hasText: 'clinic.example' }).first().getByText(/May use medications in a study · .+ left/).waitFor({ timeout: 10_000 });
+    await tidy();
     // Listed in Who has access, with how often it was used; removed, it asks again.
-    await tab('Who has access');
+    await page.locator('ion-item.lake-row', { hasText: 'Who has access' }).click();
     await page.locator('ion-segment-button', { hasText: 'Everyone' }).click();
     const rows = page.locator('ion-item.access-row', { hasText: 'clinic.example' });
     await rows.first().waitFor({ timeout: 10_000 });
@@ -1321,7 +1351,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
     await page.getByPlaceholder('pledge id').fill('street-circle');
     await page.getByRole('button', { name: 'Sign this pledge' }).click();
-    await page.getByText(/Get a person stamp first: You, then About this house\./).waitFor({ timeout: 15_000 });
+    await page.getByText(/Get a person stamp first: You, This phone, then About this house\./).waitFor({ timeout: 15_000 });
     // The owner gets a person stamp from About this house.
     await page.getByRole('button', { name: 'Get a person stamp' }).click();
     await page.getByText('One person, one house: stamped').waitFor({ timeout: 15_000 });
@@ -1373,7 +1403,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     procs.pop()!.kill('SIGTERM');
   });
 
-  it('turns notifications on, off or tests them from You → Notifications (7 Nov)', async () => {
+  it('turns notifications on, off or tests them from This phone, then Notifications (7 Nov)', async () => {
     await tab('Notifications');
     await page.getByRole('heading', { name: /for this phone/ }).waitFor();
     expect(await page.getByText(/A notification says who wrote\. What they wrote stays in your house\./).count()).toBe(1);
@@ -1383,7 +1413,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('signs out on this device: back to the pairing screen', async () => {
     const keyNow = () => page.evaluate(keptKid);
     const before = await keyNow();
-    await tab('You');
+    await tab('This phone');
     // Asked on a sheet first.
     await page.locator('ion-item', { hasText: 'Sign out on this device' }).click();
     await confirmSheet('Sign out');

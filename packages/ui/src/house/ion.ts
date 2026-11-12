@@ -114,10 +114,12 @@ export function CopyBtn({ text, label = 'Copy', fill = 'outline' }: { text: stri
 export function Page(p: { title: string; big?: boolean; back?: () => void; backLabel?: string; end?: Child; status?: Child; children: Child; footer?: Child; cls?: string; titleNode?: Child }) {
   const bump = useBump();
   const label = p.titleNode ? undefined : backLabel(p.backLabel);
+  // The title is centred, so a long one leaves no room for Back's word at phone width: the chevron stays, as on a phone's own apps.
+  const fits = !!label && label.length * 2 + p.title.length <= 30;
   return h('div', { class: `ion-page lake-page ${p.cls ?? ''}` },
     h('ion-header', { translucent: true, class: 'lake-header' },
       h('ion-toolbar', {},
-        p.back ? h('ion-buttons', { slot: 'start' }, h('ion-button', { class: 'back', fill: 'clear', onClick: p.back, 'aria-label': `Back${label ? ` to ${label}` : ''}` }, h('ion-icon', { name: 'chevron-back', slot: 'start' }), label ?? '')) : null,
+        p.back ? h('ion-buttons', { slot: 'start' }, h('ion-button', { class: 'back', fill: 'clear', onClick: p.back, 'aria-label': `Back${label ? ` to ${label}` : ''}` }, h('ion-icon', { name: 'chevron-back', slot: 'start' }), fits ? label : '')) : null,
         p.titleNode ?? h('ion-title', {}, p.title),
         p.end || p.status ? h('ion-buttons', { slot: 'end' }, p.status, p.end) : null)),
     h('ion-content', { fullscreen: true, class: 'lake-content' },

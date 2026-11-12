@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, houseBase, must, useHouse, useRedraw } from './api';
 import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { CURRENCIES, DUTY_KINDS, dutyLine, dutyLive, lastHere, money$, readsLine, receiptWords, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads } from './logic';
+import { CURRENCIES, DUTY_KINDS, dayTime, dutyLine, dutyLive, lastHere, money$, readsLine, receiptWords, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads } from './logic';
 import { back, push } from './nav';
 
 // My AI: your own AI with a key to your house. Your AIs first, then AI on duty, then what it did while you were away.
@@ -152,7 +152,7 @@ export function AiKeyPage({ arg }: { arg: string }) {
   return h(Page, { title: shortName(a.label), back: () => back('#ai'), backLabel: 'My AI' },
     h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(a.label), size: 72 }), h('h2', {}, shortName(a.label)), a.waiting ? h(Pill, { text: 'Not reading', tone: 'amber' }) : h(Pill, { text: lastHere(a.seenAt).text, tone: lastHere(a.seenAt).now ? 'mint' : 'muted' })),
     a.waiting ? h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {}, h('p', {}, waitingLine(a)))) : null,
-    h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${time(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: 'Replies and bookings only, never money' }) : null),
+    h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${dayTime(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: 'Replies and bookings only, never money' }) : null),
     // On duty it reads the notes and its errands only, whatever is switched on here.
     onDuty ? null : h(Section, { title: 'What it can read', cls: 'reads' },
       h(Row, { icon: 'chatbubbles-outline', label: 'Messages at your door', sub: 'Always: notes, its own errands, your agenda and free hours', detail: false }),

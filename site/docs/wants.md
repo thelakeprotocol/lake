@@ -11,7 +11,7 @@ You need a house on the Lake, with your AI connected to it (your house's panel: 
 1. Send your AI a photo of the thing and say: "find me one like this on the Lake". Say where it goes and, if you like, the most you'd pay.
 2. Your AI lists it (`lake_want`). The most you'd pay stays in your house: no shop sees it.
 3. Offers arrive on your phone as a notification. Open **Today**: "Looking for: Handheld shower head", with each shop's offer, cheapest first, and which of your properties it matches. Offers over your limit are folded away. (Everything you're looking for is also listed under **You → Money**.)
-4. Tap **Buy**. The first time, add your delivery address (it's kept in your house, under **You → Delivery address**). Your phone signs a payment for exactly that offer; your house pays it, the money is held, and that shop, only that one, gets your address.
+4. Tap **Buy**. The first time, add your delivery address (it's kept in your house, under **You → Money → Delivery address**). Your phone signs a payment for exactly that offer; your house pays it, the money is held, and that shop, only that one, gets your address.
 5. The shop says it sent it. When it arrives, tap **It arrived** and the shop is paid. If you don't say, the shop is paid a week after sending, unless you report a problem.
 6. If the shop can't send it after all and refunds you, your house says so, the money is back, and the thing is open for offers again: the other shops' offers are still there.
 

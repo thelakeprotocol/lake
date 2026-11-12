@@ -9,17 +9,18 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { CACHE, Version, api, cached, call, houseBase, key, reachWatchers, reachable, remember, state } from './house/api';
 import { h, toast } from './house/ion';
 import { knownWaiting, type ListView } from './house/logic';
-import { back, goTab, parse, type Tab } from './house/nav';
+import { back, goTab, parse, UNDER, type Tab } from './house/nav';
 import { ChatPage, ChatsTab, WantPage } from './house/chats';
 import { InboxTab, decisions } from './house/inbox';
 import { AiKeyPage, AiTab } from './house/ai';
-import { DoorPage, NotifyPage, YouTab } from './house/you';
+import { DoorPage, MyDataPage, NotifyPage, PhonePage, YouTab } from './house/you';
 import { AboutPage, AccessPage, AddressPage, CirclesPage, DataPage, FreePage, KeyPage, MoneyPage, MovePage, OffersPage, RulesPage } from './house/pages';
 import { ConnectAI, NoKey, Pair, connecting } from './house/pair';
 
 // The control panel that comes with every house (open source). Served by the house at /owner/; every call is signed on
 // this device with the owner's key, which never leaves it. Four tabs, each thing in one place: Today (what needs you and
-// what was handled), People (one row per person, and a chat with each), My AI, You (how you're reached, your data, this phone).
+// what was handled), People (one row per person, and a chat with each), My AI, You (five rows, each saying how it stands:
+// your door, rules, your data, money, this phone).
 
 const TABS: { tab: Tab; label: string; icon: string }[] = [
   { tab: 'inbox', label: 'Today', icon: 'lake' },
@@ -27,7 +28,7 @@ const TABS: { tab: Tab; label: string; icon: string }[] = [
   { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];
-const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, address: AddressPage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage };
+const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, address: AddressPage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage, mydata: MyDataPage, phone: PhonePage };
 
 function App() {
   const [route, setRoute] = useState(parse());
@@ -88,7 +89,7 @@ function App() {
   if (route.page === 'chat') view = h(ChatPage, { key: k, arg: route.arg ?? '' });
   else if (route.page === 'want') view = h(WantPage, { key: k, arg: route.arg ?? '' });
   else if (route.page === 'aikey') view = h(AiKeyPage, { key: k, arg: route.arg ?? '' });
-  else if (route.page && YOU[route.page]) view = h(YOU[route.page], { key: k, backTo: backTo('you') });
+  else if (route.page && YOU[route.page]) view = h(YOU[route.page], { key: k, backTo: () => back(`#${UNDER[route.page!] ?? 'you'}`) });
   else view = h({ chats: ChatsTab, inbox: InboxTab, ai: AiTab, you: YouTab }[route.tab], { key: k, tabbar, status });
   return h(Version.Provider, { value: { version, bump } }, view);
 }

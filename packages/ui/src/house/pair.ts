@@ -34,7 +34,7 @@ export function Pair({ onPaired, why }: { onPaired: () => void; why?: string }) 
     h('p', { class: 'welcome-kicker' }, handle && !owned ? 'Your house, almost ready' : 'A house on the Lake'),
     h('h1', {}, handle || (name ? `House ${name}` : 'A house on the Lake')),
     h('p', { class: 'welcome-text' }, owned
-      ? 'This house already has a key. Open a pairing link from the phone that has it (You → New or lost phone), or use your recovery code.'
+      ? 'This house already has a key. Open a pairing link from the phone that has it (You, This phone, then New or lost phone), or use your recovery code.'
       : 'This phone becomes the only thing that can answer for you. The key is made here and never leaves it.'),
     owned ? null : h(Btn, { label: 'Use this phone', expand: 'block', size: 'large', disabled: open === null, run: () => pair() }),
     msg ? h('p', { class: 'welcome-msg', role: 'alert' }, msg) : null,

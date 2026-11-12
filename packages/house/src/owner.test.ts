@@ -545,6 +545,9 @@ describe('what an assistant reads (SPEC §6.1)', () => {
     expect(await asAi({ kind: 'panel.data' })).toMatchObject({ claims: [] });
     expect(await asAi({ kind: 'panel.money' })).toMatchObject({ needs: 'money' });
     expect(await asAi({ kind: 'panel.overview' })).toMatchObject({ holds: ['age_band'], pending: 1 });
+    // What left the house is its owner's to read: not an assistant's, even one that reads the records.
+    expect((await asAi({ kind: 'panel.left' })).left).toBeUndefined();
+    expect(await owner({ kind: 'panel.left' })).toEqual({ total: 0, left: [] });
     desk.news({ about: 'request.waiting', request: 'r2' });
     await new Promise((r) => setTimeout(r, 20));
     expect(told.some((t) => t.about === 'request.waiting' && t.request === 'r2')).toBe(true);

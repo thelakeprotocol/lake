@@ -143,6 +143,44 @@ export const signDraft = (draft: Record<string, unknown>) => signCredential({ ..
 // Only a web address is a door (round 8: a hostile tally could have sent a javascript: link).
 export const doorOf = (url?: string) => (url && /^https?:\/\//i.test(url) ? url.replace(/\/a2a\/?$/, '') : '');
 
+// ---- you: what each row says about how it stands, the worst first ----
+export type RowState = { text: string; tone?: 'amber' | 'red' };
+export const doorState = (d?: DoorState | null): RowState => (!d ? { text: '' } : !d.handle ? { text: 'No handle yet', tone: 'amber' } : d.open ? { text: `${d.handle} · open` } : { text: `${d.handle} · closed: nobody can write to you`, tone: 'amber' });
+export const rulesState = (r?: Rules): RowState => {
+  if (!r) return { text: '' };
+  // What happens when no rule fits: a yes by default is the one to look at twice.
+  const rest = { join: 'yes', ask: 'ask me', decline: 'no' }[r.default];
+  return { text: r.rules.length ? `${plural(r.rules.length, 'rule')} · otherwise ${rest}` : { join: 'No rules: every request gets a yes', ask: 'No rules: every request asks you', decline: 'No rules: every request is declined' }[r.default], ...(r.default === 'join' ? { tone: 'amber' as const } : {}) };
+};
+/** What a yes lets an agent do: have its study use these fields here. It never sees them (SPEC §7). */
+export const useLine = (open: Consent[]) => `May use ${[...new Set(open.flatMap((c) => c.fields.map((f) => f.label)))].join(', ').toLowerCase() || 'nothing'} in a study`;
+/** Agents with a yes that still stands, and when the first of them is left with none. */
+export const yesNow = (agents: AccessRow[] = []) => { const ends = agents.filter((r) => r.canSee).map((r) => r.yeses.filter((c) => c.status === 'active').map((c) => c.until).sort().pop()).filter((u): u is string => !!u); return { agents: agents.filter((r) => r.canSee).length, next: ends.sort()[0] }; };
+export const dataState = (a?: { agents: AccessRow[] }, record?: { ok: boolean }): RowState => {
+  if (record && !record.ok) return { text: 'Your record failed its check', tone: 'red' };
+  if (!a) return { text: '' };
+  const y = yesNow(a.agents);
+  return { text: y.agents ? `${y.agents === 1 ? '1 agent has' : `${y.agents} agents have`} your yes${y.next ? ` · ${y.agents === 1 ? 'ends' : 'next ends'} in ${hoursLeft(y.next)}` : ''}` : 'No agent has your yes now' };
+};
+export const sumsOf = (rs: { amount: number; currency: string }[]) => { const by = new Map<string, number>(); for (const r of rs) by.set(r.currency, (by.get(r.currency) ?? 0) + r.amount); return [...by].map(([c, n]) => money$(Math.round(n * 100) / 100, c)).join(' + '); };
+export const moneyState = (m?: { receipts: { amount: number; currency: string; settlement?: string }[]; spent?: { amount: number; currency: string; settlement?: string }[] }): RowState => {
+  if (!m) return { text: '' };
+  const held = sumsOf(m.receipts.filter((r) => r.settlement === 'held')), earned = sumsOf(m.receipts.filter((r) => r.settlement !== 'held')), spent = sumsOf((m.spent ?? []).filter((r) => r.settlement !== 'voided'));
+  return { text: [held && `${held} held`, earned && `${earned} earned`, spent && `${spent} spent`].filter(Boolean).join(' · ') || 'Nothing yet' };
+};
+export const phoneState = (p: { keyInDevice: boolean; recovery?: { at: string } | null; notify: boolean }): RowState =>
+  (!p.keyInDevice ? { text: 'Your key is kept where this page can read it', tone: 'amber' }
+    : p.recovery === null ? { text: 'No recovery code yet', tone: 'amber' }
+    : !p.notify ? { text: 'Notifications off' }
+    : { text: `Key held by this browser${p.recovery ? ` · recovery code made ${new Date(p.recovery.at).toLocaleDateString([], { day: 'numeric', month: 'short' })}` : ''}` });
+/** One thing that left the house (panel.left), in a sentence about the one who got it. */
+export type Left = { at: string; kind: 'study' | 'offer' | 'address'; to: string; fields?: string[]; question?: string; title?: string; released?: { facts?: string[]; files?: string[]; address?: boolean } };
+export const leftLine = (x: Left) => {
+  if (x.kind === 'study') return `Its study used ${x.fields?.length ? x.fields.join(', ').toLowerCase() : 'your record'}. Your answer left as two unreadable shares; it got totals only.`;
+  const got = [x.released?.facts?.length ? x.released.facts.join(', ').toLowerCase() : '', x.released?.files?.length ? `${plural(x.released.files.length, 'file')} from your record (${x.released.files.join(', ')})` : '', x.released?.address ? 'your delivery address' : ''].filter(Boolean).join(', and ');
+  return `${x.kind === 'address' ? 'You bought from it' : 'You accepted its offer'}: it got ${got || 'nothing from your record'}.`;
+};
+
 // ---- my AI ----
 export const waitingLine = (a: Assistant) => { const w = a.waiting!; return `${w.count === 1 ? 'A message' : `${w.count} messages`} waiting since ${time(w.since)}: open your AI app and ask it to check the Lake.`; };
 export function lastHere(at?: string): { text: string; now: boolean } {

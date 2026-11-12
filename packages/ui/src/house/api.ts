@@ -65,7 +65,7 @@ export const useBump = () => useContext(Version).bump;
 export const useRedraw = () => { const [, set] = useState(0); return () => set((n) => n + 1); };
 
 /** Kept off the phone's quick-start cache: what the house holds about its owner, their money, an export (round 10). */
-const PRIVATE = new Set(['panel.data', 'panel.money', 'panel.export', 'panel.address', 'panel.consents']);
+const PRIVATE = new Set(['panel.data', 'panel.money', 'panel.export', 'panel.address', 'panel.consents', 'panel.left']);
 
 /** One signed call, fetched again whenever something changed; keeps what it had while it fetches, so nothing flickers. */
 export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {

@@ -478,6 +478,19 @@ async function walletIdentity(o: OwnerSession): Promise<Identity> {
 
 const LDP_CONTAINS = 'http://www.w3.org/ns/ldp#contains';
 
+/** One thing that left the house, from its /audit/ entry: who got it and what, in codes the panel puts into words. */
+function leftRow(e: Record<string, unknown>, domains: Map<string | undefined, string>) {
+  const at = String(e.at ?? '');
+  if (e.study) {
+    const who = String(e.requester ?? '');
+    return { at, kind: 'study' as const, to: String(e.requesterDomain ?? domains.get(who) ?? hostOf(who)), fields: ((e.fieldsRead as string[] | undefined) ?? []).map((f) => fieldSpec(f)?.label ?? f.replace(/_/g, ' ')), ...(e.question ? { question: String(e.question) } : {}) };
+  }
+  const released = ((e.released as string[] | undefined) ?? []).map(String);
+  const facts = released.filter((r) => r.startsWith('claims: ')).flatMap((r) => r.slice(8).split(', ')).map((f) => fieldSpec(f)?.label ?? f.replace(/_/g, ' '));
+  const files = released.filter((r) => !r.startsWith('claims: ') && r !== 'delivery address').map((r) => r.split('/').pop()!);
+  return { at, kind: e.want ? 'address' as const : 'offer' as const, to: String(e.toName ?? e.toDomain ?? hostOf(String(e.to ?? ''))), ...(e.title ? { title: String(e.title) } : {}), released: { ...(facts.length ? { facts } : {}), ...(files.length ? { files } : {}), ...(released.includes('delivery address') ? { address: true } : {}) } };
+}
+
 /** What a container holds, as paths relative to the pod root. */
 async function listContainer(o: OwnerSession, path: string): Promise<string[]> {
   const res = await o.fetch(o.podRoot + path, { headers: { accept: 'text/turtle' } });
@@ -536,6 +549,7 @@ function panelFor(x: {
   // pod read receipt by receipt, all at once, on every look. One that can't be read now is left out, and read next time;
   // a listing that fails falls back on the receipts already read.
   const receiptCache = new Map<string, { vc: Record<string, any>; at: number }>();
+  const leftCache = new Map<string, ReturnType<typeof leftRow>>();
   const readReceipts = async (files: string[]) => {
     const now = Date.now();
     await pool(files.filter((f) => now - (receiptCache.get(f)?.at ?? 0) >= 5 * 60_000), 8, async (f) => {
@@ -617,7 +631,7 @@ function panelFor(x: {
     const counter = lakeProfile(tallyCard)!.webId;
     if (before.kind === 'refused') return before;
     // It counts people, and this owner has no stamp yet: say what to do, not the tally's refusal (a reader's first tap).
-    if (before.people_only && !s) return { kind: 'refused', problems: ['This pledge counts people, once each. Get a person stamp first: You, then About this house. Then sign again.'] };
+    if (before.people_only && !s) return { kind: 'refused', problems: ['This pledge counts people, once each. Get a person stamp first: You, This phone, then About this house. Then sign again.'] };
     // Still finding its quorum: nothing to sign yet (and a blind pass fetched now would be spent for nothing).
     if (before.state === 'gathering') return { kind: 'refused', problems: [`it opens for signing only if enough people privately say they'd join, when its quorum closes (${(before.quorum as { closes?: string } | undefined)?.closes ?? 'soon'}); answer its question first`] };
     // A pledge with money (SPEC §11.4a): the contribution the owner signed on their device for this pledge is paid, held for
@@ -887,6 +901,18 @@ function panelFor(x: {
         sources, folders,
       };
     },
+    // What left this house, newest first, from the pod's /audit/ log: each study answered (as shares), what an accepted
+    // offer sent, an address that went with a payment. An entry never changes, so each is read once.
+    async left() {
+      const files = (await listContainer(owner, 'audit/')).filter((f) => f.endsWith('.json')).sort().reverse();
+      const domains = new Map((await consents()).map((c) => [c.visitorWebId, c.visitor] as const));
+      const recent = files.slice(0, 60);
+      await pool(recent.filter((f) => !leftCache.has(f)), 8, async (f) => {
+        const e = await owner.fetch(owner.podRoot + f).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Record<string, unknown> | null;
+        if (e) leftCache.set(f, leftRow(e, domains));
+      });
+      return { total: files.length, left: recent.map((f) => leftCache.get(f)).filter(Boolean) };
+    },
     async market() {
       const m = x.keeper().market;
       return {
@@ -957,12 +983,14 @@ function panelFor(x: {
       const offer = x.wants.find(wantId)?.offers.find((o) => o.id === offerId);
       if (!offer) return { error: 'no such offer' };
       const deliverTo = await x.deliveryAddress();
-      if (!deliverTo) return { error: 'add your delivery address first (You → Delivery address): the shop needs to know where to send it. Nothing was paid' };
+      if (!deliverTo) return { error: 'add your delivery address first (You, Money, then Delivery address): the shop needs to know where to send it. Nothing was paid' };
       const payments = await paymentsFor(offer.cart);
       if (!payments) return { error: 'no payments agent on this Lake that the shop takes: nothing was paid' };
       const r = await x.wants.buy(wantId, offerId, signed, { id: x.id, webId: owner.webId, card: x.card, payments, deliverTo, send });
       if ('error' in r) return r;
       if (r.receipt) await put(owner, cartReceiptPath(offer.cart.contents.id), r.receipt, 'text/plain').catch(() => {});
+      // The address went to that one shop with the payment: written down like everything else that leaves (SPEC §6.1).
+      await put(owner, `audit/${Date.now()}-address.json`, JSON.stringify({ at: new Date().toISOString(), want: r.want.id, to: offer.seller.webId, toName: offer.seller.name, toDomain: offer.seller.domain, released: ['delivery address'], consent: 'owner, live' }), 'application/json').catch(() => {});
       await x.recard(x.keeper().rules);
       x.note('want.bought', `You bought "${r.want.name}" from ${offer.seller.name} for ${offer.total.currency} ${offer.total.value.toFixed(2)}: paid, held until you say it arrived`);
       return { ok: true, want: r.want.id, offer: offer.id };
@@ -1041,7 +1069,7 @@ function panelFor(x: {
       if (cell < 0) return { kind: 'refused', problems: [`choice: one of ${q.options.join(' | ')}`] };
       const counter = lakeProfile(card)!.webId;
       const person = await stampFor(await stamp(), countContext(counter, id), counter, id);
-      if (!person) return { kind: 'refused', problems: ['This counts people, once each. Get a person stamp first: You, then About this house.'] };
+      if (!person) return { kind: 'refused', problems: ['This counts people, once each. Get a person stamp first: You, This phone, then About this house.'] };
       const { payload: joined } = await send(tally, { kind: 'tally.quorum', id, person });
       if (joined.kind !== 'tally.joined') return joined;
       const sent = await x.keeper().answerCount(q.count, q.tellers, q.options.length, cell);

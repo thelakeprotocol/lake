@@ -4,10 +4,11 @@ import { useRef, useState } from 'preact/hooks';
 import { call, key, must, state, useBump, useHouse, useRedraw } from './api';
 import { Btn, CopyBtn, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
 import { WantRow } from './chats';
-import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, plural, said, shortShop, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
+import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, plural, said, shortShop, signPledge, time, useLine, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
+import { goTab, push } from './nav';
 import { signEnvelope } from '../owner-crypto';
 
-// The pages under You. Each is one job, with its back to You.
+// The pages under You. Each is one job, with its back to the row it sits under (nav.ts UNDER).
 
 type P = { backTo: () => void };
 const page = (title: string, backTo: () => void, ...children: unknown[]) => h(Page, { title, back: backTo, backLabel: 'You' }, ...(children as never[]));
@@ -152,29 +153,28 @@ export function AccessPage({ backTo }: P) {
   const footer = now ? h('div', { class: 'savebar' }, h(Btn, { label: 'Take everything back', color: 'danger', fill: 'outline', run: () => call({ kind: 'revoke', revoke: 'all' }), ask: { header: 'Take every yes back?', sub: 'Every agent is cut off on its next request.', button: 'Take everything back' }, done: 'Taken back' })) : undefined;
   return h(Page, { title: 'Who has access', back: backTo, backLabel: 'You', footer },
     h('div', { class: 'stat-row' },
-      h('div', { class: 'stat mint' }, h('b', {}, String(now)), h('span', {}, 'can see now')),
+      h('div', { class: 'stat mint' }, h('b', {}, String(now)), h('span', {}, 'have a yes now')),
       h('div', { class: 'stat' }, h('b', {}, String(askedToday)), h('span', {}, 'asked today')),
       h('div', { class: 'stat' }, h('b', {}, String(blockedToday)), h('span', {}, 'blocked today'))),
     h('div', { class: 'pad' }, h('ion-segment', { value: filter, onionChange: (e: CustomEvent) => setFilter(e.detail.value), 'aria-label': 'Show' },
-      h('ion-segment-button', { value: 'now' }, h('ion-label', {}, 'Can see now')), h('ion-segment-button', { value: 'asked' }, h('ion-label', {}, 'Asked lately')), h('ion-segment-button', { value: 'all' }, h('ion-label', {}, 'Everyone')))),
+      h('ion-segment-button', { value: 'now' }, h('ion-label', {}, 'Have a yes')), h('ion-segment-button', { value: 'asked' }, h('ion-label', {}, 'Asked lately')), h('ion-segment-button', { value: 'all' }, h('ion-label', {}, 'Everyone')))),
     shown.length ? h(Section, {}, ...shown.slice(0, 40).map((r) => {
       const open = r.yeses.filter((c) => c.status === 'active');
-      const fields = [...new Set(open.flatMap((c) => c.fields.map((f) => f.label)))];
       const latest = [...open].sort((x, y) => y.until.localeCompare(x.until))[0];
       const expanded = openRow === r.id;
       return [
         h('ion-item', { key: r.id, button: true, detail: false, lines: expanded ? 'none' : 'full', class: 'access-row', onClick: () => setOpenRow(expanded ? null : r.id) },
           h('div', { slot: 'start', class: `row-icon tint-${r.canSee ? 'blue' : 'muted'}` }, h('ion-icon', { name: r.canSee ? 'eye-outline' : 'eye-off-outline' })),
           h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, r.domain ?? r.id.replace(/^key:/, 'unverified key ')),
-            h('p', {}, latest ? `Can see ${fields.join(', ')} · ${hoursLeft(latest.until)} left · ${why(latest)}` : 'Can\'t see anything now'),
-            r.asked || r.last ? h('p', {}, `Asked ${r.asked}×${r.lastAsked ? `, ${ago(r.lastAsked)}` : ''}${r.last ? ` · your house ${said(r.last.decision)}` : ''}`) : null,
+            h('p', {}, latest ? `${useLine(open)} · ${hoursLeft(latest.until)} left · ${why(latest)}` : 'No yes from you now'),
+            r.asked || r.last ? h('p', {}, [r.asked ? `Asked ${r.asked}×${r.lastAsked ? `, ${ago(r.lastAsked)}` : ''}` : '', r.last ? `your house ${said(r.last.decision)}` : ''].filter(Boolean).join(' · ')) : null,
             open.length ? h('div', { class: 'row-below', onClick: (e: Event) => e.stopPropagation() }, h(Btn, { label: 'Take it back', size: 'small', fill: 'outline', color: 'danger', run: async () => { for (const c of open) await call({ kind: 'revoke', revoke: c.id }); }, ask: { header: `Take back ${r.domain ?? 'this agent'}'s access?`, button: 'Take back' }, done: 'Taken back' })) : null)),
         expanded ? h('div', { key: `${r.id}-x`, class: 'access-more' },
           ...r.standing.map((st) => h('div', { key: st.purpose, class: 'more-line' }, h('span', {}, `Always yes to ${st.domain || 'this agent'}, for ${st.purpose} · used ${st.uses} time${st.uses === 1 ? '' : 's'}`), h(Btn, { label: 'Remove', size: 'small', fill: 'clear', color: 'danger', run: () => call({ kind: 'panel.standing.remove', jkt: st.jkt, purpose: st.purpose }) }))),
           ...r.yeses.slice(0, 15).map((c) => h('div', { key: c.id, class: 'more-line' }, h('span', {}, `${dayTime(c.given)} · ${c.fields.map((f) => f.label).join(', ')} · ${{ active: `until ${dayTime(c.until)}`, withdrawn: 'taken back', used: 'used', ended: 'ended' }[c.status]}`), c.status === 'active' ? h(Btn, { label: 'Take back', size: 'small', fill: 'clear', color: 'danger', run: () => call({ kind: 'revoke', revoke: c.id }) }) : null)),
           ...r.asks.slice(0, 8).map((q, k) => h('div', { key: `q${k}`, class: 'more-line muted' }, `${time(q.at)} · your house ${said(q.decision)}${q.reason ? `: ${q.reason}` : ''}`)),
           r.webId ? h('p', { class: 'mono small' }, r.webId) : null) : null];
-    }).flat()) : h(Empty, { icon: 'eye-off-outline', title: filter === 'now' ? 'Nobody can see your data' : filter === 'asked' ? 'Nobody has asked lately' : 'Nobody has come yet' }),
+    }).flat()) : h(Empty, { icon: 'eye-off-outline', title: filter === 'now' ? 'Nobody has a yes from you now' : filter === 'asked' ? 'Nobody has asked lately' : 'Nobody has come yet' }),
     junk.length ? h('p', { class: 'muted-line pad' }, `${junk.length} unproven key${junk.length === 1 ? '' : 's'} tried something and ${junk.length === 1 ? 'was' : 'were'} blocked.`) : null);
 }
 
@@ -219,6 +219,9 @@ export function MoneyPage({ backTo }: P) {
   const [open, setOpen] = useState<string | null>(null);
   // What you're looking for, each a thread of shops' offers (the ones that need you are on Today too).
   const wants = (useHouse<ListView>({ kind: 'list' }).data?.wants ?? []).filter((w) => !w.closed);
+  const market = useHouse<{ packs: unknown[] }>({ kind: 'panel.market' });
+  const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
+  const circles = useHouse<unknown[]>({ kind: 'panel.circles' });
   if (!m.data) return page('Money', backTo, h(Failed, { error: m.error }));
   const status = (r: Receipt) => (r.settlement === 'held' ? 'held' : r.settlement === 'voided' ? 'refunded' : 'paid');
   // The same thing paid by the same payer is one row (a study pays every house each round: 36 rows said one thing).
@@ -236,6 +239,10 @@ export function MoneyPage({ backTo }: P) {
       m.data.held ? h('div', { class: 'stat' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement === 'held'))), h('span', {}, 'Held')) : null,
       gone.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(gone.reduce((t, r) => t + r.amount, 0) * 100) / 100, gone[0]!.currency) : String(gone.length)), h('span', {}, 'Spent')) : null),
     wants.length ? h(Section, { title: 'Looking for', cls: 'chat-list wants' }, ...wants.map((w) => h(WantRow, { key: w.want.id, w }))) : null,
+    h(Section, { cls: 'money-rows' },
+      market.data?.packs?.length ? h(Row, { icon: 'pricetags-outline', tint: 'amber', label: 'Offers for you', onClick: () => push('#offers') }) : null,
+      h(Row, { icon: 'home-outline', tint: 'blue', label: 'Delivery address', note: addr.data ? (addr.data.address ? addr.data.address.addressLocality : 'Not set') : undefined, onClick: () => push('#address') }),
+      circles.data?.length ? h(Row, { icon: 'people-outline', tint: 'violet', label: 'Your promise circles', note: String(circles.data.length), onClick: () => push('#circles') }) : null),
     groups.size ? h(Section, { title: 'Received' }, ...[...groups].slice(0, 50).map(([k, rs]) => {
       const r = rs[0]!, n = rs.length, sum = Math.round(rs.reduce((t, x) => t + x.amount, 0) * 100) / 100;
       return [
@@ -247,7 +254,7 @@ export function MoneyPage({ backTo }: P) {
         open === k ? h('div', { key: `${k}x`, class: 'access-more' }, ...rs.slice(0, 20).map((x, i) => h('div', { key: i },
           h('p', { class: 'more-line muted' }, `${n > 1 ? `${money$(x.amount, x.currency)} · ${dayTime(x.at)} · ` : ''}Signed by ${who(x.from)}`),
           x.heldUntil ? h('p', { class: 'more-line muted' }, `Held until the buyer accepts, ${dayTime(x.heldUntil)} at the latest`) : null))) : null];
-    }).flat()) : spent.length || wants.length ? null : h(Empty, { icon: 'wallet-outline', title: 'No payments yet' }),
+    }).flat()) : spent.length || wants.length ? null : h('p', { class: 'muted-line pad' }, 'No payments yet.'),
     m.data.spent?.length ? h(Section, { title: 'What you spent' }, ...m.data.spent.slice(0, 50).map((r, i) => h('ion-item', { key: `s${i}`, lines: 'full', class: 'pay' },
       h('div', { slot: 'start', class: `row-icon tint-${r.settlement === 'voided' ? 'mint' : 'amber'}` }, h('ion-icon', { name: r.settlement === 'voided' ? 'arrow-undo-outline' : 'arrow-up-outline' })),
       h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, pledgeOf(r.agreement) ? `${money$(r.amount, r.currency)} for "${pledgeOf(r.agreement)!.id}"` : `${money$(r.amount, r.currency)} ${r.settlement === 'voided' ? 'back from' : 'to'} ${r.toName ? shortShop(r.toName) : named(undefined, r.to)}`), h('p', {}, [r.items?.length ? r.items.filter((i) => !/^Delivery\b/.test(i.label)).map((i) => i.label.replace(/^1 × /, '')).join(', ') : '', dayTime(r.at)].filter(Boolean).join(' · '))),
@@ -258,13 +265,20 @@ export function MoneyPage({ backTo }: P) {
 export function DataPage({ backTo }: P) {
   type Source = { pack: string; title: string; folder: string; issuer: string | null; converter: string; certifiedBy: string | null; ok: boolean; why?: string };
   const d = useHouse<{ claims: { field: string; label?: string; value: string; observedAt?: string }[]; sources: Source[]; folders: Record<string, number> }>({ kind: 'panel.data' });
+  const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
   if (!d.data) return page('What your house holds', backTo, h(Failed, { error: d.error }));
   const by = new Map<string, string[]>();
   for (const c of d.data.claims) by.set(c.label ?? nice(c.field), [...(by.get(c.label ?? nice(c.field)) ?? []), c.value]);
   return page('What your house holds', backTo,
-    h('p', { class: 'muted-line pad' }, 'It never leaves: programs run here, and only what you agree to comes out.'),
+    h('p', { class: 'muted-line pad' }, 'A study is answered here, and the one who asked gets totals only. Accepting an offer sends that shop what the offer names. Both are listed under My data.'),
     h(Section, { title: 'Where it came from' }, ...d.data.sources.map((s) => h(Row, { key: s.pack, icon: s.ok ? 'shield-checkmark-outline' : 'alert-circle-outline', tint: s.ok ? 'mint' : 'red', label: s.title, sub: `Signed by ${s.issuer ?? 'unknown'}${s.ok ? '' : ` · ${s.why ?? 'failed its check'}`}` }))),
     h(Section, { title: 'What it says about you' }, ...[...by].map(([label, vs]) => h('ion-item', { key: label, lines: 'full' }, h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, vs.join(' · ')))))),
+    // The record isn't all a house keeps: said, so "what your house holds" is the whole of it.
+    h(Section, { title: 'Also kept here', cls: 'also-kept' },
+      h(Row, { icon: 'chatbubbles-outline', tint: 'mint', label: 'What people wrote to you', sub: 'Their notes and your answers, and the email address or phone number someone left for your answer', onClick: () => goTab('chats') }),
+      h(Row, { icon: 'home-outline', tint: 'blue', label: 'Your delivery address', sub: addr.data ? (addr.data.address ? addressLine(addr.data.address) : 'Not set') : undefined, onClick: () => push('#address') }),
+      h(Row, { icon: 'time-outline', tint: 'blue', label: 'Your times', sub: 'When you can meet, and the times held or agreed', onClick: () => push('#free') }),
+      h(Row, { icon: 'file-tray-outline', tint: 'muted', label: 'Receipts and the log', sub: 'Every payment, every yes you gave, and what left your house', detail: false })),
     h(Info, {}, h('p', {}, Object.entries(d.data.folders).map(([f, n]) => `/${f}: ${n}`).join(' · '))));
 }
 

@@ -364,7 +364,8 @@ export class Market {
     offer.answer = answer;
     await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
     const released = (rec.pack.release ?? []).length;
-    await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, to: offer.quoter.webId, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live', recordsOut: 0 }));
+    // What went, and to whom (the owner's "What left your house" reads these). No recordsOut: that counts studies (SPEC §7).
+    await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, title: offer.title, to: offer.quoter.webId, toName: offer.quoter.name, toDomain: offer.quoter.domain, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live' }));
     this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { pack: offer.pack, released }));
     // Found what they were looking for: stop asking (run 28's grocers quoted the same household again within minutes),
     // but still count in the group for a day, so a neighbour who decides later gets the street's price too.

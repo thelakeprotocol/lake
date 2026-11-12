@@ -4,7 +4,7 @@
 
 | Way | What you get | How |
 |---|---|---|
-| **An invite** | A hosted house on the sandbox that stays yours | Someone already on the Lake sends you a link (**You → Invite someone**). Open it on your phone, pick a handle, tap **Continue**, then **Use this phone**. |
+| **An invite** | A hosted house on the sandbox that stays yours | Someone already on the Lake sends you a link (**You → Your door → Invite someone**). Open it on your phone, pick a handle, tap **Continue**, then **Use this phone**. |
 | **Borrow one for a day** | A hosted sandbox house for 24 hours | [See which are free](https://sandbox.lake.doneinfifty.com/t/) and open one. [Claim a house](/docs/sandbox#claim-a-house). |
 | **Run your own** | A house on your machine, joined to the sandbox | One command, below. |
 | **Bring your own pod** | Your existing Solid pod, with a housekeeper | [Below](#bring-your-own-pod). |
@@ -18,7 +18,7 @@ docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house
   --name you --handle you --join https://sandbox.lake.doneinfifty.com
 ```
 
-`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. (It expects a Lake that serves its specialists under `/s/`, as the sandbox does; with a bare node, pass `--lake`, `--issuer-url` and `--auditor-url` instead.) `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**You → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
+`--join` uses the sandbox's node, issuer and auditor and turns the relay on: nothing to open on your router. (It expects a Lake that serves its specialists under `/s/`, as the sandbox does; with a bare node, pass `--lake`, `--issuer-url` and `--auditor-url` instead.) `--handle` opens your door under that handle. Open the link it prints to pair your phone with the [control panel](/docs/approvals), then turn on notifications (**You → This phone → Notifications**). Then talk to the [Guide](/docs/sandbox#start-with-the-guide).
 
 ## A house on a local Lake <span class="status done">runs</span>
 
@@ -120,7 +120,7 @@ What the commands above leave out, for a house you keep.
 
 **Keep it running.** [`deploy/house.compose.yml`](https://github.com/thelakeprotocol/lake/blob/main/deploy/house.compose.yml) is one house as a service: restarted after a reboot or a crash, a health check on its card, a memory limit, and its folder on your disk. Edit the name, handle and time zone, put your `rules.yaml` beside it, then `docker compose -f house.compose.yml up -d`; `docker compose logs -f` to watch. `lake-house --help` lists every option.
 
-**Back it up.** The data folder is everything: the pod (your records, agreements, receipts), the house's keys in the pod's `/wallet/`, and the house's own state (its pod login, its owner key, the pairing token). Stop the house, copy the folder, start it again: `docker compose stop && tar czf house-$(date +%F).tgz house && docker compose start`. Keep the copy somewhere else, encrypted: it holds keys. From your phone, **You → Download everything** gives you the pod's contents too (wallet included) as one file.
+**Back it up.** The data folder is everything: the pod (your records, agreements, receipts), the house's keys in the pod's `/wallet/`, and the house's own state (its pod login, its owner key, the pairing token). Stop the house, copy the folder, start it again: `docker compose stop && tar czf house-$(date +%F).tgz house && docker compose start`. Keep the copy somewhere else, encrypted: it holds keys. From your phone, **You → My data → Download everything** gives you the pod's contents too (wallet included) as one file.
 
 **Move it.** Put the folder on the new machine and start the house with the same `--name`. With `--relay` (or `--join`), your house is reached at an address made from its key, so it is the same house to everyone after the move. With `--public-url`, keep that URL (point its name at the new machine).
 

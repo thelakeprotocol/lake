@@ -506,7 +506,7 @@ export class Housekeeper {
     const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
     const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
-    const entry = { at: new Date().toISOString(), study: id, requester, fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
+    const entry = { at: new Date().toISOString(), study: id, requester, requesterDomain: profile.ownerDomain, question: String(p.study.question ?? '').slice(0, 300), fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     // What it was for, beside its agreement, so the owner's money can say which study paid (not just an agreement id).
     await this.tool('pod_write', { path: `agreements/${g.offer}.study.json`, content: JSON.stringify({ question: String(p.study.question ?? '').slice(0, 300), at: entry.at }), contentType: 'application/json' }).catch(() => {});

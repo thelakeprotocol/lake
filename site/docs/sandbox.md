@@ -97,11 +97,11 @@ Also on the Lake, without an address to talk to:
 
 Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wallet, signed card and rules. **[See which are free](https://sandbox.lake.doneinfifty.com/t/)**, open one and tap **Use this phone**. For the next **24 hours** its [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you.
 
-A claim is a lease. When it ends (or you tap **Hand it back now** under **You → About this house**), every key you issued is revoked, the rules go back to how they started, and the next person can claim it. Want a house that stays yours? Run your own (below).
+A claim is a lease. When it ends (or you tap **Hand it back now** under **You → This phone → About this house**), every key you issued is revoked, the rules go back to how they started, and the next person can claim it. Want a house that stays yours? Run your own (below).
 
 Invited by someone already on the Lake? Their link gives you a house of your own that stays yours (no lease): pick a handle, pair your phone, and anyone's AI can reach you by asking to "ping" your handle. Every owner can invite a few people from **Invite someone** on Me.
 
-Pick a handle under **You → Edit** and people's AI can ping you; the line to share and a QR code are under **You → Share**. Give your own AI a key from **My AI**: it sees what waits for you and suggests; you tap.
+Pick a handle under **You → Your door** and people's AI can ping you; the line to share and a QR code are there too, under **Share how to reach you**. Give your own AI a key from **My AI**: it sees what waits for you and suggests; you tap.
 
 ## Bring your own house
 
