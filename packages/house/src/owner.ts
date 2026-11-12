@@ -247,6 +247,9 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
+/** A contact address from someone else's message: kept only if it's a web address (round 8). */
+const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; } };
+
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
@@ -399,6 +402,8 @@ export class OwnerDesk {
 
   /** Back to nobody's: keys revoked, requests dropped, owner forgotten, house reset. Anyone can claim it again. */
   async release() {
+    // The next claimant gets none of this one's model key, AI on duty or its counts (round 8: a key outlived its tenancy).
+    await this.o.dutyRunner?.forget();
     await this.revoke('all');
     this.standingUses.clear();
     await writeFile(join(this.o.dataDir, 'standing-uses.json'), '[]').catch(() => {});
@@ -591,7 +596,7 @@ export class OwnerDesk {
       if (r.kind === 'circle.matched') {
         rule.at = [...rule.at.filter((t) => t > week), Date.now()];
         void this.saveCircleRules();
-        Object.assign(c, { state: 'accepted', contact: String(r.caller?.url ?? '') });
+        Object.assign(c, { state: 'accepted', contact: webUrl(r.caller?.url) });
         text = `Your house said yes for you, under your standing rule (${rule.kinds?.join(', ') ?? 'anything'}, up to ${rule.perWeek} a week): ${text.replace(/ You won't know who.*$/, '')}`;
       }
     }
@@ -946,6 +951,8 @@ export class OwnerDesk {
 
   async revoke(which: 'all' | string): Promise<number> {
     const ids = which === 'all' ? [...this.grants.values()].filter((g) => !g.revoked).map((g) => g.id) : [which];
+    // "Take everything back" takes the AI on duty off too.
+    if (which === 'all') await this.o.dutyRunner?.stop();
     let n = 0;
     const at = new Date().toISOString();
     const withdrawn: Promise<void>[] = [];
@@ -1431,6 +1438,8 @@ export class OwnerDesk {
           const q = p as unknown as { key?: string; name?: string; webId?: string };
           const key = String(q.key ?? '');
           if (!/^[\w-]{20,100}$/.test(key)) return void res.status(400).json({ error: 'contact: { key (its RFC 7638 thumbprint), name, webId }' });
+          // An AI on duty can't make someone known by saying it wrote to them (round 8): only replies it may send anyway.
+          if (assistant?.duty && !this.isRevoked(assistant.duty.statusId)) return void res.json({ ok: true, counted: false });
           if (!this.contacts.has(key)) { this.contacts.set(key, { name: String(q.name ?? '').slice(0, 80), webId: String(q.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
           return void res.json({ ok: true });
         }
@@ -1524,7 +1533,11 @@ export class OwnerDesk {
         const code = randomBytes(9).toString('base64url');
         this.invites.set(code, { label: String(q.label ?? 'AI on duty').slice(0, 60), until: Date.now() + 15 * 60_000, duty });
         // "Run it in my house": the house's own runner takes the code now, so nothing is copied anywhere.
-        if (q.runner === 'house') { await this.o.dutyRunner!.start(code); return void res.json({ ok: true, runner: 'house', note: 'your house runs your AI on duty now, under the grant you signed' }); }
+        if (q.runner === 'house') {
+          // Answered once it has signed in, or with why not (round 8: it said "on duty" before anything had started).
+          try { await this.o.dutyRunner!.start(code); } catch (e) { return void res.status(502).json({ error: `your house couldn't start your AI on duty: ${(e as Error).message}` }); }
+          return void res.json({ ok: true, runner: 'house', note: 'your house runs your AI on duty now, under the grant you signed' });
+        }
         return void res.json({ ok: true, code, until: new Date(Date.now() + 15 * 60_000).toISOString(), note: 'give this code to your AI on duty (it works once, for 15 minutes)' });
       }
       if (p.kind === 'panel.duty.off') {
@@ -1532,7 +1545,7 @@ export class OwnerDesk {
         const on = [...this.assistants.values()].filter((a) => a.duty && (!kid || a.kid === kid) && !this.isRevoked(a.duty.statusId));
         for (const a of on) await this.dutyOff(a, 'your human took you off duty');
         // With nobody left on duty, the house's own runner stops too (it would only look, but a model costs nothing asleep).
-        if (![...this.assistants.values()].some((a) => a.duty && !this.isRevoked(a.duty.statusId) && !a.duty.off)) this.o.dutyRunner?.stop();
+        if (![...this.assistants.values()].some((a) => a.duty && !this.isRevoked(a.duty.statusId) && !a.duty.off)) await this.o.dutyRunner?.stop();
         return void res.json({ ok: true, off: on.length });
       }
       // Where the owner's AI on duty can run, and with whose model (never the key).
@@ -1920,7 +1933,7 @@ export class OwnerDesk {
               return r;
             }
             const r = await panel.circleSend?.(c.tally, { kind: w.report ? 'circle.report' : w.accept ? 'circle.accept' : 'circle.decline', id: c.id, call: c.call }) ?? { kind: 'refused', problems: ['this house can\'t reach circles'] };
-            if (r.kind === 'circle.matched') Object.assign(c, { state: 'accepted', contact: String(r.caller?.url ?? '') });
+            if (r.kind === 'circle.matched') Object.assign(c, { state: 'accepted', contact: webUrl(r.caller?.url) });
             else if (r.kind === 'circle.declined') c.state = 'declined';
             else if (r.kind === 'circle.reported') c.state = 'reported';
             else if (/taken/.test(JSON.stringify(r.problems ?? ''))) c.state = 'taken';

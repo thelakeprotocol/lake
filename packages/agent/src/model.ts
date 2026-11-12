@@ -9,7 +9,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { DUTY_TOOLS } from './duty.js';
 
 /** One run: what the runner hands a model, and what it hands back. */
-export type ModelRun = (r: { lake: string; token: string; prompt: string; maxTools: number }) => Promise<{ code: number; out: string; tokens?: number }>;
+export type ModelRun = (r: { lake: string; token: string; prompt: string; maxTools: number; signal?: AbortSignal }) => Promise<{ code: number; out: string; tokens?: number }>;
 
 export interface ModelSpec {
   /** "anthropic" (Claude, through Anthropic's API) or "stub" (tests and demos: no model, a fixed little routine). */
@@ -35,7 +35,7 @@ export function modelDriver(spec: ModelSpec): ModelRun {
 /** Claude with the duty tools, in a plain tool loop: each tool call goes to the connector, its answer back as the result. */
 function anthropicRun(spec: ModelSpec): ModelRun {
   const client = new Anthropic(spec.apiKey ? { apiKey: spec.apiKey } : {});
-  return async ({ lake, token, prompt, maxTools }) => {
+  return async ({ lake, token, prompt, maxTools, signal }) => {
     const c = await lakeClient(lake, token);
     let tokens = 0, calls = 0, last = '';
     try {
@@ -45,11 +45,13 @@ function anthropicRun(spec: ModelSpec): ModelRun {
         .map((t) => ({ name: t.name, description: t.description ?? '', input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema }));
       const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: 'Look at what waits, do what your grant allows, and say in one line what you did.' }];
       while (true) {
+        // Stopped (off duty, a new model, the house handed back): no further call, not even the one in hand.
+        if (signal?.aborted) return { code: 0, out: `${last}\n(stopped)`.trim(), tokens };
         const r = await client.beta.messages.create({
           model: spec.model ?? DEFAULT_MODEL, max_tokens: 16000, system: prompt, tools, messages,
           // Routine work: low effort keeps a night of duty to cents. A declined request is re-run by the API's own fallback.
           output_config: { effort: 'low' }, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-        });
+        }, { signal });
         tokens += r.usage.input_tokens + r.usage.output_tokens;
         last = textOf(r) || last;
         if (r.stop_reason === 'refusal') return { code: 1, out: `${last}\n(the model declined this run)`.trim(), tokens };
@@ -59,6 +61,7 @@ function anthropicRun(spec: ModelSpec): ModelRun {
         const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
         for (const b of r.content) {
           if (b.type !== 'tool_use') continue;
+          if (signal?.aborted) { results.push({ type: 'tool_result', tool_use_id: b.id, content: 'stopped', is_error: true }); continue; }
           if (++calls > maxTools) { results.push({ type: 'tool_result', tool_use_id: b.id, content: `stop: at most ${maxTools} tool calls a run`, is_error: true }); continue; }
           const out = await c.callTool({ name: b.name, arguments: b.input as Record<string, unknown> }).catch((e: Error) => ({ content: [{ type: 'text', text: e.message }], isError: true }));
           results.push({ type: 'tool_result', tool_use_id: b.id, content: textOf(out).slice(0, 20_000) || '(empty)', ...(out.isError ? { is_error: true } : {}) });

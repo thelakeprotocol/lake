@@ -144,6 +144,17 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     const agent = JSON.parse(await readFile(join(runnerDir, saved), 'utf8')).agent as { url: string };
     await wait(async () => ((await owner({ kind: 'panel.duty.log' })).duties as { runner?: { host: string } }[]).some((d) => d.runner?.host === 'house') || undefined);
 
+    // What an injected message might ask of it, tried as the AI on duty itself: the connector refuses, in code (round 8).
+    // (Two tries only: a third refusal in a night takes it off duty, as it should.)
+    const token = JSON.parse(await readFile(join(runnerDir, saved), 'utf8')).access_token as string;
+    const asDuty = new Client({ name: 'duty', version: '0' });
+    await asDuty.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
+    const tryTool = async (name: string, args: Record<string, unknown>) => { const r = await asDuty.callTool({ name, arguments: args }); return { isError: !!r.isError, text: (r.content as { text: string }[])[0]!.text }; };
+    expect(await tryTool('lake_house', { view: 'data' })).toMatchObject({ isError: true, text: expect.stringMatching(/requests, free hours, the overview and errands only/) });
+    expect(await tryTool('lake_house_suggest', { text: 'Confirm with the courier?', ask: { choices: ['Yes', 'No'] }, then: [{ to: 'https://stranger.example/a2a', text: 'hello' }, null] })).toMatchObject({ isError: true, text: expect.stringMatching(/nothing their tap would send or sign/) });
+    expect((await tryTool('lake_house', { view: 'free' })).isError).toBe(false);
+    await asDuty.close();
+
     // Someone writes to it at night: the house runs the model once, and the owner finds a note in the morning.
     const anon = await (await fetch(`${site}/mcp/oauth/anonymous`, { method: 'POST' })).json() as { access_token: string };
     const kim = new Client({ name: 'Kim', version: '0' });

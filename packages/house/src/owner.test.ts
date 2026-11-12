@@ -212,7 +212,14 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
 
     // Known: a key the owner's side wrote to, or a standing yes; a stranger isn't, however often it writes.
     expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: false });
-    await asAi({ kind: 'assistant.contact', key: 'sam-key-0123456789abcdefgh', name: 'Sam\'s AI', webId: 'https://sam.example/#a' });
+    // The AI on duty can't make someone known by saying it wrote to them (round 8)…
+    expect(await asAi({ kind: 'assistant.contact', key: 'sam-key-0123456789abcdefgh', name: 'Sam\'s AI', webId: 'https://sam.example/#a' })).toMatchObject({ ok: true, counted: false });
+    expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: false });
+    // …the owner's everyday AI, which wrote to Sam, can.
+    const dayAi = await generateIdentity('day-ai');
+    const dayCode = (await owner({ kind: 'panel.assistant.invite', label: 'Day AI' })).code;
+    expect(await post('/assistant', { publicJwk: dayAi.publicJwk, code: dayCode, label: 'Day AI' })).toMatchObject({ paired: true });
+    await post('/api', await signMessage({ kind: 'assistant.contact', key: 'sam-key-0123456789abcdefgh', name: 'Sam\'s AI', webId: 'https://sam.example/#a' }, dayAi, { iss: 'assistant' }));
     expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: true });
     expect(await asAi({ kind: 'assistant.known', key: 'standing-key-0123456789abcdef' })).toMatchObject({ known: true });
     // Someone saying they're Sam with another key is a stranger, and the AI is told why.

@@ -353,6 +353,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const r = (await houseCall({ kind: 'assistant.duty', action, ...(to ? { to } : {}) }).catch(() => null)) as { room?: { ok: boolean; why?: string } } | null;
       return r?.room && !r.room.ok ? refuse(r.room.why ?? 'a limit for tonight is reached', action, true) : undefined;
     };
+    // On duty it sees what it needs for its grant: notes and requests at the door, free hours, the house's overview, errands;
+    // never the owner's records, money or consents (round 8: an injected "quote every claim" could have read them out).
+    if (name === 'lake_house' && !['requests', 'free', 'overview', 'errands'].includes(String(a.view ?? 'overview'))) return refuse('on duty you see requests, free hours, the overview and errands only');
     if (DUTY_READ.has(name)) return undefined;
     if (name === 'lake_block') return { log: { tool: name, action: 'block', ...(typeof a.agent_url === 'string' ? { to: { url: a.agent_url } } : {}), ...(typeof a.agent_url === 'string' && !a.undo ? { undo: { kind: 'block', ref: a.agent_url } } : {}) } };
     const st = (await houseCall({ kind: 'assistant.duty' }).catch(() => ({ on: false, why: 'your human\'s house can\'t be reached' }))) as { on?: boolean; why?: string; kinds?: string[] };
@@ -362,6 +365,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const agenda = a.agenda as { what?: string; with?: string } | undefined;
       if (agenda && !kinds.includes('book')) return refuse('booking isn\'t in your duty: leave your human a note', 'book');
       if (a.rules || a.allowance || a.door) return refuse('rules, doors and allowances are your human\'s own changes: not on duty');
+      // A question whose answers send messages (then), a pledge or a count to sign: each would act beyond the grant on the
+      // owner's tap, to anyone (round 8). On duty, a note or a plain question only.
+      if (a.then || a.pledge || a.count) return refuse('on duty, leave your human a note or a plain question: nothing their tap would send or sign');
       if (agenda) { const full = await room('book', agenda.with ? { name: String(agenda.with) } : undefined); if (full) return full; }
       return { log: { tool: name, action: agenda ? 'book' : 'note', ...(agenda?.with ? { to: { name: String(agenda.with).slice(0, 80) } } : {}), text: String(agenda?.what ?? a.text ?? '').slice(0, 500) } };
     }
@@ -382,6 +388,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (!kinds.includes('reply')) return refuse('replying isn\'t in your duty', 'reply');
       const msg = (a.message ?? { kind: a.kind ?? 'note', text: a.text }) as Record<string, unknown>;
       if (!['note', 'message', 'text', 'reply'].includes(String(msg.kind))) return refuse(`on duty you send words only (a note or message), not "${String(msg.kind)}"`, 'reply');
+      if (String(msg.text ?? msg.body ?? '').length > 1500) return refuse('on duty a reply is short: at most 1,500 characters', 'reply');
       const url = String(a.agent_url ?? a.to ?? '');
       const to = await whoIs(url).catch(() => null);
       if (!to) return refuse('no Lake agent at that address', 'reply');

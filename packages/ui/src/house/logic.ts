@@ -120,7 +120,8 @@ export async function signPledge(tally: string, id: string): Promise<Signed> {
 }
 /** A draft signed on this device and sent back (allowances, duty grants, purchases, pledges). */
 export const signDraft = (draft: Record<string, unknown>) => signCredential({ ...draft, validFrom: new Date().toISOString() }, loadKey());
-export const doorOf = (url?: string) => (url ? url.replace(/\/a2a\/?$/, '') : '');
+// Only a web address is a door (round 8: a hostile tally could have sent a javascript: link).
+export const doorOf = (url?: string) => (url && /^https?:\/\//i.test(url) ? url.replace(/\/a2a\/?$/, '') : '');
 
 // ---- my AI ----
 export const waitingLine = (a: Assistant) => { const w = a.waiting!; return `${w.count === 1 ? 'A message' : `${w.count} messages`} waiting since ${time(w.since)}: open your AI app and ask it to check the Lake.`; };

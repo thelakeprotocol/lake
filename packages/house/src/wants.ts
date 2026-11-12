@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { cartHash, checkCart, looksLikeInjection, makeWant, MAX_WANTS, signPaymentMandate, type AgentCard, type CartMandate, type Identity, type LakeProfile, type PostalAddress, type Want } from '@thelakeprotocol/core';
 
 /** One shop's offer for a want, as the house keeps it: the signed cart, what it checked, and how it went. */
@@ -75,7 +76,8 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       const matched = said?.map((m) => props.get(m.toLowerCase())).filter((m): m is string => !!m);
       const dropped = said?.filter((m) => !props.has(m.toLowerCase()));
       const offer: WantOfferRecord = {
-        id: `o-${c.id.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 64)}`, at: new Date().toISOString(),
+        // The seller's key is in the id: two shops can't make offers with the same id by choosing the same cart id (round 8).
+        id: `o-${createHash('sha256').update(`${profile.webId}|${c.id}`).digest('hex').slice(0, 20)}`, at: new Date().toISOString(),
         seller: { name: short(card.name, 80), webId: profile.webId, url: String(card.supportedInterfaces?.[0]?.url ?? ''), domain: profile.ownerDomain },
         cart: p.cart as CartMandate, total: c.total, items: c.items, expires: c.expires,
         ...(matched ? { matched: [...new Set(matched)] } : {}),
