@@ -756,6 +756,33 @@ describe('a time on duty is held for the owner (step 5 of the app design)', () =
     expect(card4.booking).toMatchObject({ with: 'Pat', what: 'Call with Pat' });
     expect(await owner({ kind: 'panel.assistant.answer', id: card4.id, choice: 'Confirm' })).toMatchObject({ ok: true });
     expect(desk.webNoteState(web.id, web.key)).toMatchObject({ status: 'answered', answer: { text: expect.stringMatching(/^Confirmed by Robin: /) } });
+
+    // A reply on duty that answers a note: the note names the log's entry (the two calls come in either order), so the
+    // owner can take it back in the chat. The house's own words about a held time are marked as the house's.
+    const samKey = 'sam-key-0123456789abcdefgh', toSam = { name: 'Sam\'s AI', key: samKey, url: 'https://sam.example/a2a' };
+    const noteOf = async (id: string) => (await owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === id);
+    expect((await noteOf(kim)).answered).toMatchObject({ by: 'Night AI', fixed: true });
+    const more = desk.addNote({ from: from('Sam'), text: 'And could you bring the drill?' })!;
+    expect(await asAi({ kind: 'assistant.answered', note: more, text: 'Yes, Robin will bring it.' })).toMatchObject({ ok: true });
+    const said = await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: toSam, text: 'Yes, Robin will bring it.', undo: { kind: 'correction', ref: toSam.url } });
+    expect(await noteOf(more)).toMatchObject({ answered: { by: 'Night AI', entry: said.entry } });
+    const last = desk.addNote({ from: from('Sam'), text: 'Thanks!' })!;
+    const said2 = await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: toSam, text: 'See you then.', undo: { kind: 'correction', ref: toSam.url } });
+    expect(await asAi({ kind: 'assistant.answered', note: last, text: 'See you then.' })).toMatchObject({ ok: true });
+    expect((await noteOf(last)).answered).toMatchObject({ entry: said2.entry });
+    // Taken back: the note waits for the owner again, what was said is kept as taken back, the AI's connector is told to
+    // send the correction, and the conversation is the owner's (left with the AI, it would answer the same note again).
+    expect(await owner({ kind: 'panel.duty.undo', entry: said.entry })).toMatchObject({ ok: true, undone: said.entry });
+    const back = await noteOf(more);
+    expect(back.answered).toBeUndefined();
+    expect(back).toMatchObject({ retracted: { text: 'Yes, Robin will bring it.', by: 'Night AI', undone: expect.any(String) } });
+    expect((await noteOf(last)).answered).toMatchObject({ entry: said2.entry });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.at(-1)).toMatchObject({ about: 'duty.undo', entry: { undo: { kind: 'correction', ref: toSam.url } } });
+    expect(await asAi({ kind: 'assistant.known', key: samKey })).toMatchObject({ known: false, why: expect.stringContaining('answers this conversation themselves') });
+    expect(await asAi({ kind: 'assistant.answered', note: more, text: 'Again.' })).toMatchObject({ error: expect.stringContaining('answers this conversation themselves') });
+    const forAi = (await asAi({ kind: 'list' })).notes.find((n: { id: string }) => n.id === more);
+    expect(forAi).toMatchObject({ hidden: true, retracted: { text: '(theirs)' } });
     server.close();
   }, 20_000);
 });

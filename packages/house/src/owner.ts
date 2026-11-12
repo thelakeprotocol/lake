@@ -316,6 +316,22 @@ export class OwnerDesk {
     const k = from.key ?? (from.web ? from.webId : undefined);
     return (k ? this.chatModes[k] : undefined) ?? (!from.web && this.knownBy(from.key) ? 'ai' : 'me');
   }
+  /**
+   * A reply on duty reaches the house as two calls, in either order: the connector's log entry and the note it answered.
+   * The note is given its entry here, so the owner can take the reply back in the chat it's in.
+   */
+  private linkReplies(a: { kid: string; label: string }): boolean {
+    let any = false;
+    for (const e of this.dutyLog.slice(-30)) {
+      const at = Date.parse(e.at);
+      if (e.by !== a.kid || e.action !== 'reply' || e.refused || e.undone || !e.undo || !e.to?.key || Date.now() - at > 120_000) continue;
+      if (this.notes.some((n) => n.answered?.entry === e.id)) continue;
+      const gap = (n: { answered?: { at: string } }) => Math.abs(Date.parse(n.answered!.at) - at);
+      const n = this.notes.filter((x) => x.from.key === e.to!.key && x.answered?.by === a.label && !x.answered.own && !x.answered.fixed && !x.answered.entry && gap(x) < 120_000).sort((p, q) => gap(p) - gap(q))[0];
+      if (n) { n.answered!.entry = e.id; any = true; }
+    }
+    return any;
+  }
   private buyDrafts = new Map<string, { want: string; offer: string; draft: ReturnType<typeof purchaseDraft> }>();
   private saveChatModes = () => writeFile(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes)).catch(() => {});
   /** How far the owner has read each conversation (the newest message's time when they last opened it), on every device. */
@@ -1021,7 +1037,7 @@ export class OwnerDesk {
     const text = `${owner}'s AI has pencilled in ${time} for "${item.what.slice(0, 120)}". ${owner} hasn't confirmed it yet: you'll hear here when they do, by ${this.whenWords(until)} at the latest.`;
     if (!(await this.tellBooking(item, text, 'held', a.label))) return { error: 'the one who asked couldn\'t be told the time is only held, so nothing was held: leave your human a note about it instead' };
     this.agenda = [...this.agenda, item].slice(-100);
-    about.answered = { text, by: a.label, at: new Date(now).toISOString() };
+    about.answered = { text, by: a.label, fixed: true, at: new Date(now).toISOString() };
     const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: a.label, by: a.kid, text: `Pencilled in ${time} with ${who}: ${item.what}. ${who} was told you'll confirm it yourself.${item.note ? ` ${item.note}` : ''}`.slice(0, 1500), note: about.id, booking: { id: item.id, until, start: item.start!, with: who, what: item.what }, ask: { choices: ['Confirm', 'Decline'] }, at: new Date(now).toISOString() };
     this.suggestions = [sug, ...this.suggestions];
     this.trimSuggestions();
@@ -1048,7 +1064,7 @@ export class OwnerDesk {
       const at = new Date().toISOString(), own = how === 'confirmed' || how === 'declined';
       if (how === 'confirmed') { delete item.held; item.confirmed = at; } else this.agenda = this.agenda.filter((x) => x.id !== id);
       const about = this.notes.find((x) => x.id === h.note);
-      if (about) about.answered = { text, by: own ? 'you' : item.by, ...(own ? { own: true as const } : {}), at };
+      if (about) about.answered = { text, by: own ? 'you' : item.by, ...(own ? { own: true as const } : {}), fixed: true, at };
       if (how === 'confirmed' && h.to.key && !this.contacts.has(h.to.key)) this.contacts.set(h.to.key, { name: who, webId: String(about?.from.webId ?? '').slice(0, 300), at });
       this.suggestions = this.suggestions.filter((x) => x.booking?.id !== id);
       const e = this.dutyLog.find((x) => x.undo?.kind === 'agenda' && x.undo.ref === id);
@@ -1166,7 +1182,7 @@ export class OwnerDesk {
   }
 
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true } }[] = [];
+  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string } }): string | null {
     this.touch();
@@ -1674,6 +1690,7 @@ export class OwnerDesk {
           // Marking a note answered takes it off the owner's waiting list: only in a conversation their AI may answer.
           if (this.modeOf(n.from) !== 'ai') return void res.status(403).json({ error: 'your human answers this conversation themselves: the note stays with them as unanswered' });
           n.answered = { text: String(q.text ?? '').trim().slice(0, 1000), by: assistant.label, at: new Date().toISOString() };
+          this.linkReplies(assistant);
           void this.saveNotes();
           this.touch();
           return void res.json({ ok: true });
@@ -1742,6 +1759,7 @@ export class OwnerDesk {
           const heldItem = undo?.kind === 'agenda' ? this.agenda.find((x) => x.id === undo.ref && x.held) : undefined;
           if (heldItem?.held) { e.to = { name: heldItem.held.to.name, ...(heldItem.held.to.key ? { key: heldItem.held.to.key } : {}), ...(heldItem.held.to.url ? { url: heldItem.held.to.url } : {}) }; e.booking = 'held'; }
           this.dutyLog.push(e);
+          if (this.linkReplies(assistant)) void this.saveNotes();
           await this.saveDuty();
           const start = this.nightStart(assistant.duty);
           const tonight = this.dutyLog.filter((x) => x.by === assistant.kid && Date.parse(x.at) >= start);
@@ -1938,6 +1956,14 @@ export class OwnerDesk {
         if (e.undo.kind === 'standing' && e.to?.key) await this.o.panel?.removeStanding?.(e.to.key);
         e.undone = new Date().toISOString();
         await this.saveDuty();
+        // A reply taken back: the note waits for the owner again, and that conversation is theirs to answer from here (the
+        // correction tells the other side so; left with the AI, it would answer the same note again).
+        if (e.action === 'reply' && e.to?.key) {
+          const n = this.notes.find((x) => x.answered?.entry === e.id);
+          if (n?.answered) { n.retracted = { text: n.answered.text, by: n.answered.by, at: n.answered.at, undone: e.undone }; delete n.answered; void this.saveNotes(); }
+          this.chatModes[e.to.key] = 'me';
+          await this.saveChatModes();
+        }
         this.news({ about: 'duty.undo', entry: { id: e.id, tool: e.tool, action: e.action, ...(e.to ? { to: e.to } : {}), undo: e.undo }, note: 'your human undid this: your connector does its part (unblock, or tell the other side)' }, e.by);
         if (a?.duty) {
           const start = this.nightStart(a.duty);
@@ -2132,8 +2158,10 @@ export class OwnerDesk {
           const text = String(q.text ?? '').trim().slice(0, 1000);
           if (!text) return void res.status(400).json({ error: 'text: the answer, up to 1000 characters' });
           if (!lakeNote.from.url) return void res.status(400).json({ error: 'that note came with no address to answer' });
-          const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'note.reply', note: lakeNote.id, text, re: lakeNote.text.slice(0, 200) }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }) as Record<string, any>);
-          if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their agent didn't take it: ${JSON.stringify(sent?.problems ?? sent?.why ?? 'no answer')}` });
+          const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'note.reply', note: lakeNote.id, text, re: lakeNote.text.slice(0, 200) }).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
+          // Said in the owner's chat, under the message that didn't go: plain words, the detail beside them.
+          if (!sent || sent.kind === 'unreached') return void res.status(502).json({ error: 'their AI can\'t be reached right now', detail: [sent?.problems ?? 'no answer'].flat().map(String).join('; ').slice(0, 300) });
+          if (sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their AI didn't take it${sent.problems ?? sent.why ? `: ${[sent.problems ?? sent.why].flat().map(String).join('; ').slice(0, 300)}` : ''}` });
           lakeNote.answered = { text, by: 'you', own: true, at: new Date().toISOString() };
           if (lakeNote.from.key && !this.contacts.has(lakeNote.from.key)) { this.contacts.set(lakeNote.from.key, { name: lakeNote.from.name.slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
           void this.saveNotes();
@@ -2535,7 +2563,7 @@ export class OwnerDesk {
     // A standing yes is a consent: its domain is said only to an assistant that reads records.
     const seesConsents = who !== 'duty' && this.readsOf(this.assistants.get(who || '')).has('records');
     const why = (n: object) => (!seesConsents && (n as { known_why?: string }).known_why?.startsWith('a standing yes') ? { known_why: 'your human\'s side has dealt with it before' } : {});
-    const notes = full.notes.map((n) => (hidden(n.from) ? { ...n, ...why(n), text: '(your human answers this conversation themselves)', ...(n.answered ? { answered: { ...n.answered, text: '(theirs)' } } : {}), hidden: true } : { ...n, ...why(n) }));
+    const notes = full.notes.map((n) => (hidden(n.from) ? { ...n, ...why(n), text: '(your human answers this conversation themselves)', ...(n.answered ? { answered: { ...n.answered, text: '(theirs)' } } : {}), ...(n.retracted ? { retracted: { ...n.retracted, text: '(theirs)' } } : {}), hidden: true } : { ...n, ...why(n) }));
     if (!forAssistant) return full;
     if (who === 'duty') return { webId: full.webId, until: full.until, requests: [], suggestions: full.suggestions.filter((x) => (x as { errand?: unknown }).errand), notes, wants: [], agenda: [], keys: [], assistants: [], connects: [], seen: undefined };
     const reads = this.readsOf(this.assistants.get(who)), records = reads.has('records'), money = reads.has('money');

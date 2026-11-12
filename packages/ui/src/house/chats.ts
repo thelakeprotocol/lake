@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
-import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type Note, type WantOfferV, type WantV } from './logic';
+import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Assistant, type Chat, type DoorNote, type DutyEntry, type DoorState, type DutyLog, type ListView, type Note, type WantOfferV, type WantV } from './logic';
 import { back, focusNote, push } from './nav';
 import { SuggestionCard } from './inbox';
 
@@ -84,20 +84,30 @@ export function ChatPage({ arg }: { arg: string }) {
   const c = chats.find((x) => x.key === arg || x.keys.includes(arg) || x.notes.some((n) => n.id === arg));
   // A link to a chat that's gone (cleared, say): back to the list.
   if (!c) return h(Page, { title: 'Chat', back: () => back('#chats'), backLabel: 'People' }, h(Empty, { icon: 'chatbubble-outline', title: 'This chat isn\'t here any more', action: h('ion-button', { shape: 'round', onClick: () => back('#chats') }, 'Back to People') }));
-  return h(ChatView, { c, all: chats, held: (list.data.suggestions ?? []).filter((x) => x.booking && x.note) });
+  return h(ChatView, { c, all: chats, held: (list.data.suggestions ?? []).filter((x) => x.booking && x.note), ais: list.data.assistants ?? [] });
 }
 
-function ChatView({ c, all, held }: { c: Chat; all: Chat[]; held: Note[] }) {
+function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; ais: Assistant[] }) {
   const bump = useBump();
   const [mode, setMode] = useState(c.mode);
   const [info, setInfo] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ text: string; why: string } | null>(null);
+  const [pick, setPick] = useState(false);
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
-  const onDuty = (duty.data?.duties ?? []).some(dutyLive);
+  const live = (duty.data?.duties ?? []).filter(dutyLive), onDuty = live.length > 0;
+  // The AI by its name where there is one to name (the one on duty, or the only one connected) and the name is short.
+  const named = shortName(live[0]?.label ?? (ais.length === 1 ? ais[0]!.label : '')), ai = named && named.length <= 9 ? named : 'My AI';
   const end = useRef<HTMLDivElement>(null);
   const latest = c.notes[c.notes.length - 1]!;
-  useEffect(() => { setMode(c.mode); }, [c.mode]);
+  // Answering someone new makes them someone you know, and a chat with someone you know is your AI's while it's on duty:
+  // the house changed who replies here without a tap, so the chat says so, once, where the control is.
+  const chose = useRef(c.mode), sent = useRef(false);
+  useEffect(() => {
+    if (c.canMode && c.mode === 'ai' && chose.current === 'me' && sent.current) void toast(`You've answered ${c.name}, so ${ai} replies here while it's on duty.`, { duration: 8000, buttons: [{ text: 'I reply', handler: () => setTo('me') }] });
+    chose.current = c.mode; setMode(c.mode);
+  }, [c.mode]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, sending]);
   // Open is seen: its badge goes (the house keeps how far you read, for every device).
   useEffect(() => {
@@ -106,41 +116,66 @@ function ChatView({ c, all, held }: { c: Chat; all: Chat[]; held: Note[] }) {
       if ((seen.at[k] ?? '') < at) { seen.at = { ...seen.at, [k]: at }; void call({ kind: 'panel.chat.seen', key: k, at }).then(bump); }
     }
   }, [c.notes.length]);
-  const setTo = async (m: 'ai' | 'me') => { setMode(m); try { for (const k of c.keys) await must({ kind: 'panel.chat.mode', key: k, mode: m }); void toast(m === 'ai' ? `Your AI replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
-  const send = async () => {
-    const t = draft.trim(); if (!t) return;
-    // Shown at once, sending; then the house's answer redraws it as sent (or says why not).
-    setSending(t); setDraft('');
-    try { await must({ kind: 'panel.note.reply', id: latest.id, text: t }); } catch (e) { setDraft(t); void toast(`Not sent: ${(e as Error).message}`, { color: 'danger', duration: 5000 }); }
+  const setTo = async (m: 'ai' | 'me') => { setMode(m); chose.current = m; try { for (const k of c.keys) await must({ kind: 'panel.chat.mode', key: k, mode: m }); void toast(m === 'ai' ? `${ai} replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
+  const send = async (again?: string) => {
+    const t = (again ?? draft).trim(); if (!t) return;
+    // Shown at once, sending; then the house's answer redraws it as sent, or it stays, not sent, with Retry.
+    setSending(t); setFailed(null); if (!again) setDraft('');
+    try { await must({ kind: 'panel.note.reply', id: latest.id, text: t }); sent.current = true; } catch (e) { setFailed({ text: t, why: e instanceof TypeError ? 'your house can\'t be reached right now' : (e as Error).message.replace(/\.$/, '') }); }
     setSending(null); bump();
+  };
+  // What your AI sent on duty can be taken back from its bubble while the night's log has it: the house names the entry.
+  const entryOf = (n: DoorNote): DutyEntry | undefined => (n.answered?.entry ? (duty.data?.entries ?? []).find((e) => e.id === n.answered!.entry && e.undo && !e.undone) : undefined);
+  const undo = async (e: DutyEntry) => {
+    try { await must({ kind: 'panel.duty.undo', entry: e.id }); setMode('me'); chose.current = 'me'; void toast(`Taken back. ${c.name} is told to set it aside, and you reply from now on.`, { duration: 6000 }); } catch (x) { void toast((x as Error).message, { color: 'danger' }); }
+    bump();
   };
   let lastDay = '';
   const bubbles = c.notes.flatMap((n) => {
     const d = day(n.at), divider = d !== lastDay ? ((lastDay = d), h('div', { key: `d-${n.id}`, class: 'daydiv' }, d)) : null;
     return [divider,
       h('div', { key: n.id, class: `bubble them${focusNote() === n.id ? ' lit' : ''}` }, h('p', {}, n.text), h('time', {}, time(n.at))),
-      n.answered ? h('div', { key: `${n.id}-a`, class: `bubble ${n.answered.by === 'you' ? 'me' : 'ai'}` },
-        n.answered.by === 'you' ? null : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered.by)} (your AI)`), h('p', {}, n.answered.text), n.answered.at ? h('time', {}, time(n.answered.at)) : null) : null,
+      // What your AI said here and you took back stays, struck through: they did read it.
+      n.retracted ? h('div', { key: `${n.id}-r`, class: 'bubble ai undone' }, h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.retracted.by)}, your AI`), h('p', {}, n.retracted.text),
+        h('div', { class: 'bubble-foot' }, h('span', { class: 'took-back' }, 'Taken back'), h('time', {}, time(n.retracted.at)))) : null,
+      n.answered ? ((e) => h('div', { key: `${n.id}-a`, class: `bubble ${n.answered!.by === 'you' ? 'me' : n.answered!.fixed ? 'ai house' : 'ai'}` },
+        // Whose words: yours, your AI's by its name, or your house's own (a held time is told in fixed words).
+        n.answered!.by === 'you' ? (n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ' Your house, on your answer') : null)
+          : n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ` Your house, for ${shortName(n.answered!.by)}`)
+            : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered!.by)}, your AI`),
+        h('p', {}, n.answered!.text),
+        h('div', { class: 'bubble-foot' },
+          e ? h('button', { type: 'button', class: 'link-btn bubble-undo', onClick: () => void undo(e) }, 'Undo') : null,
+          n.answered!.at ? h('time', {}, time(n.answered!.at)) : null)))(entryOf(n)) : null,
       // A time your AI pencilled in while answering this: yours to confirm, here as on Today.
       ...held.filter((x) => x.note === n.id).map((x) => h('div', { key: `${n.id}-h`, class: 'chat-card' }, h(SuggestionCard, { x })))];
   });
   const titleNode = h('ion-title', {}, h('button', { type: 'button', class: 'chatwho', onClick: () => setInfo(true), 'aria-label': `About ${c.name}` },
-    h(Avatar, { name: c.name, ring: c.trust, size: 34 }), h('span', { class: 'chatwho-text' }, h('b', {}, c.name), h('small', {}, c.canMode ? (mode === 'ai' ? 'Your AI replies' : c.via) : c.via))));
+    h(Avatar, { name: c.name, ring: c.trust, size: 34 }), h('span', { class: 'chatwho-text' }, h('b', {}, c.name), h('small', {}, c.via))));
+  // Who replies: one control, at the top, saying who does now.
+  const who = c.canMode ? h('button', { type: 'button', class: `replymode ${mode}`, onClick: () => setPick(true), 'aria-label': `Who replies: ${mode === 'ai' ? `${ai} replies` : 'I reply'}. Change`, 'aria-haspopup': 'dialog' },
+    // Beside the name there's room for a dozen letters: a longer AI name stands alone, with its mark.
+    mode === 'ai' ? h('ion-icon', { name: 'sparkles' }) : null, h('span', {}, mode !== 'ai' ? 'I reply' : ai.length <= 5 ? `${ai} replies` : ai), h('ion-icon', { name: 'chevron-down' })) : null;
+  const aiNote = c.web ? 'An AI you\'ve connected can read this chat and answer it.' : onDuty ? 'It answers while it\'s on duty. A time it only holds, for you to confirm.' : 'It answers once it\'s on duty, which is off now (My AI).';
+  const opt = (m: 'ai' | 'me', icon: string, label: string, sub: string) => h('ion-item', { key: m, button: true, detail: false, lines: m === 'me' ? 'full' : 'none', class: `mode-opt${mode === m ? ' on' : ''}`, 'aria-current': mode === m ? 'true' : undefined, onClick: () => { setPick(false); if (mode !== m) void setTo(m); } },
+    h('ion-icon', { slot: 'start', name: icon }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, sub)), mode === m ? h('ion-icon', { slot: 'end', name: 'checkmark', color: 'primary', 'aria-label': 'Chosen' }) : null);
   const composer = h('div', { class: 'composer' },
-    c.canMode ? h('div', { class: 'modebar' },
-      h('ion-segment', { value: mode, onionChange: (e: CustomEvent) => void setTo(e.detail.value as 'ai' | 'me'), 'aria-label': 'Who replies' },
-        h('ion-segment-button', { value: 'me' }, h('ion-label', {}, 'I reply')),
-        h('ion-segment-button', { value: 'ai' }, h('ion-label', {}, 'My AI replies'))),
-      mode === 'ai' && c.web ? h('p', { class: 'mode-note' }, 'An AI you\'ve connected can read this chat and answer it.') : mode === 'ai' && !onDuty ? h('p', { class: 'mode-note' }, 'Your AI replies once it\'s on duty (My AI).') : null) : null,
+    // Handed to an AI that isn't answering now: said where you'd type, so the chat doesn't sit unanswered unnoticed.
+    c.canMode && mode === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
     h('div', { class: 'composer-row' },
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
-      h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: send, 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
-  return h(Page, { title: c.name, titleNode, back: () => back('#chats'), cls: 'chat-page', footer: composer },
+      h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: () => void send(), 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
+  return h(Page, { title: c.name, titleNode, back: () => back('#chats'), cls: `chat-page${who ? ' has-mode' : ''}`, footer: composer, end: who },
     h(NewStrip, { c, latest }),
     h('div', { class: 'bubbles' }, ...bubbles,
       sending ? h('div', { class: 'bubble me sending' }, h('p', {}, sending), h('time', {}, h('ion-spinner', { name: 'dots' }))) : null,
+      failed && !sending ? h('div', { class: 'bubble me failed', role: 'alert' }, h('p', {}, failed.text),
+        h('small', { class: 'why' }, `Not sent: ${failed.why}.`),
+        h('div', { class: 'bubble-foot' }, h('button', { type: 'button', class: 'link-btn', onClick: () => void send(failed.text) }, 'Retry'), h('button', { type: 'button', class: 'link-btn', onClick: () => { setDraft(failed.text); setFailed(null); } }, 'Edit'))) : null,
       h('div', { ref: end })),
-    h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, mode, setTo, onDuty, latest, close: () => setInfo(false) })));
+    h(Sheet, { open: pick, onClose: () => setPick(false), title: `Who replies to ${c.name}?`, short: true },
+      h(Section, {}, opt('me', 'person-outline', 'I reply', 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote))),
+    h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, who: mode === 'ai' ? `${ai} replies` : 'You reply', change: () => { setInfo(false); setPick(true); }, latest, close: () => setInfo(false) })));
 }
 
 /**
@@ -165,7 +200,7 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
 }
 
 /** About a conversation (a tap on its name): what's checked and what isn't, who replies, mute and clear. */
-function ChatInfo({ c, all, mode, setTo, onDuty, latest, close }: { c: Chat; all: Chat[]; mode: 'ai' | 'me'; setTo: (m: 'ai' | 'me') => Promise<void>; onDuty: boolean; latest: DoorNote; close: () => void }) {
+function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]; who: string; change: () => void; latest: DoorNote; close: () => void }) {
   const bump = useBump();
   const f = latest.from;
   const namesakes = all.filter((x) => x.key !== c.key && x.name.toLowerCase() === c.name.toLowerCase());
@@ -180,9 +215,7 @@ function ChatInfo({ c, all, mode, setTo, onDuty, latest, close }: { c: Chat; all
       c.keys.length > 1 ? h(Row, { icon: 'link-outline', label: `Writes with ${c.keys.length} keys`, sub: 'You said they\'re the same person', cls: 'joined',
         below: h(Btn, { label: 'Separate them', size: 'small', fill: 'outline', color: 'medium', run: async () => { for (const k of c.keys) if (k !== c.key) await must({ kind: 'panel.person.same', key: k, as: '' }); close(); bump(); }, done: 'Separated' }) }) : null,
       namesakes.length ? h(Row, { icon: 'people-outline', tint: 'amber', label: `Also called ${c.name}`, sub: `${namesakes.length} other chat${namesakes.length === 1 ? '' : 's'}, through ${namesakes.map((x) => x.agent).join(', ')}: maybe not the same person` }) : null),
-    c.canMode ? h(Section, {},
-      h('ion-item', { lines: 'none' }, h('ion-toggle', { checked: mode === 'ai', onionChange: (e: CustomEvent) => void setTo(e.detail.checked ? 'ai' : 'me') }, 'Let my AI reply')),
-      onDuty || c.web ? null : h('ion-item', { lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, 'Needs AI on duty, which is off now.')))) : null,
+    c.canMode ? h(Section, {}, h(Row, { icon: 'chatbubbles-outline', label: 'Who replies', sub: who, onClick: change, cls: 'who-replies' })) : null,
     h(Section, {},
       h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirmMute())) return; await call({ kind: 'panel.note.mute', id: latest.id }); close(); void toast(`${c.name} muted`); back('#chats'); } }, h('ion-icon', { name: 'notifications-off-outline', slot: 'start' }), h('ion-label', {}, 'Mute')),
       h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { close(); await clearChats([c], bump, 'Chat cleared').catch((e: Error) => void toast(e.message, { color: 'danger' })); back('#chats'); } }, h('ion-icon', { name: 'trash-outline', slot: 'start', color: 'danger' }), h('ion-label', { color: 'danger' }, 'Clear chat'))),

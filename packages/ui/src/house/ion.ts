@@ -62,9 +62,17 @@ export type Child = ComponentChildren;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const h = (tag: any, props?: Record<string, unknown> | null, ...children: Child[]): VNode => ph(tag, (props ?? null) as never, ...(children as never[]));
 
+// Above the tab bar; in a chat, above the message box (a toast over it hid what you were typing).
+const anchor = () => document.querySelector<HTMLElement>('.chat-page ion-footer') ?? document.getElementById('tabbar') ?? undefined;
+
+let shown: HTMLIonToastElement | undefined;
+
 /** A short message at the bottom, gone by itself; with buttons when there's something to do next (Undo, Always allow). */
 export async function toast(message: string, o: { color?: string; duration?: number; buttons?: { text: string; handler: () => void | Promise<void> }[] } = {}) {
-  const t = await toastController.create({ message, duration: o.duration ?? (o.buttons ? 6000 : 2400), color: o.color ?? 'dark', position: 'bottom', positionAnchor: 'tabbar', buttons: o.buttons?.map((b) => ({ text: b.text, handler: () => { void b.handler(); } })), cssClass: 'lake-toast' });
+  const t = await toastController.create({ message, duration: o.duration ?? (o.buttons ? 6000 : 2400), color: o.color ?? 'dark', position: 'bottom', positionAnchor: anchor(), buttons: o.buttons?.map((b) => ({ text: b.text, handler: () => { void b.handler(); } })), cssClass: 'lake-toast' });
+  // One at a time: a newer one takes the older one's place (two used to sit on top of each other).
+  void shown?.dismiss().catch(() => {});
+  shown = t;
   await t.present();
 }
 
@@ -160,11 +168,11 @@ export function Avatar({ name, ring, size = 44, iconName }: { name: string; ring
 export const Pill = ({ text, tone = 'muted' }: { text: string; tone?: 'mint' | 'amber' | 'red' | 'violet' | 'muted' }) => h('span', { class: `lake-pill tone-${tone}` }, text);
 
 /** A bottom sheet with its own content; drag down or tap outside to close. */
-export function Sheet({ open, onClose, children, title, full }: { open: boolean; onClose: () => void; children: Child; title?: string; full?: boolean }) {
+export function Sheet({ open, onClose, children, title, full, short }: { open: boolean; onClose: () => void; children: Child; title?: string; full?: boolean; short?: boolean }) {
   // Leaving the screen closes it (Ionic moves an open sheet to the top of the app, out of the screen's reach).
   const ref = useRef<HTMLElement & { dismiss: () => Promise<boolean> }>(null);
   useEffect(() => () => { void ref.current?.dismiss?.(); ref.current?.remove(); }, []);
-  return h('ion-modal', { ref, isOpen: open, onionModalDidDismiss: onClose, initialBreakpoint: full ? undefined : 0.9, breakpoints: full ? undefined : [0, 0.6, 0.9, 1], handle: !full, class: 'lake-sheet' },
+  return h('ion-modal', { ref, isOpen: open, onionModalDidDismiss: onClose, initialBreakpoint: full ? undefined : short ? 0.38 : 0.9, breakpoints: full ? undefined : short ? [0, 0.38, 0.9] : [0, 0.6, 0.9, 1], handle: !full, class: 'lake-sheet' },
     h('div', { class: 'sheet-inner' },
       title ? h('div', { class: 'sheet-head' }, h('h2', {}, title), h('ion-button', { fill: 'clear', shape: 'round', onClick: onClose, 'aria-label': 'Close' }, h('ion-icon', { name: 'close' }))) : null,
       open ? children : null));

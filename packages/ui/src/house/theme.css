@@ -317,6 +317,14 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .chatwho-text b { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52vw; }
 .chatwho-text small { font-size: 12px; color: var(--lake-muted); font-weight: 500; }
 .chat-page ion-title { padding-inline: 44px 16px; text-align: left; }
+/* Who replies, at the top of a chat: says who does now; a tap changes it. */
+.chat-page.has-mode ion-title { padding-inline-end: 158px; }
+.chat-page.has-mode .chatwho-text b { max-width: 32vw; }
+.replymode { display: inline-flex; align-items: center; gap: 4px; height: 32px; max-width: 150px; padding: 0 9px 0 12px; margin-inline-end: 8px; border-radius: 999px; border: 1px solid var(--lake-line); background: var(--lake-surface); color: var(--lake-text); font-size: 13px; font-weight: 650; cursor: pointer; white-space: nowrap; }
+.replymode span { overflow: hidden; text-overflow: ellipsis; }
+.replymode ion-icon { font-size: 13px; flex: none; }
+.replymode.ai { background: var(--lake-violet-soft); border-color: color-mix(in srgb, var(--lake-violet) 30%, transparent); color: var(--lake-violet); }
+.mode-opt.on h3 { font-weight: 700; }
 .bubbles { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 8px; }
 .bubble { max-width: 82%; padding: 9px 13px 7px; border-radius: 20px; font-size: 16px; line-height: 1.38; position: relative; animation: lake-in 0.18s ease-out; }
 .bubble p { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
@@ -326,6 +334,20 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .bubble.ai { align-self: flex-end; background: var(--lake-violet-soft); border: 1px solid color-mix(in srgb, var(--lake-violet) 30%, transparent); border-bottom-right-radius: 6px; }
 .bubble.ai .who { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--lake-violet); margin-bottom: 2px; }
 .bubble.sending { opacity: 0.7; }
+.bubble-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 3px; font-size: 12px; }
+.bubble-foot time { margin-top: 0; }
+.bubble-foot .link-btn { font-size: 12.5px; padding: 2px 0; }
+.bubble.ai .bubble-foot .link-btn { color: var(--lake-violet); }
+.bubble.ai.undone { background: transparent; border-style: dashed; }
+.bubble.undone p { text-decoration: line-through; color: var(--lake-muted); }
+.bubble.me .who { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700; color: rgba(255, 255, 255, 0.82); margin-bottom: 2px; }
+.took-back { font-weight: 650; color: var(--lake-muted); }
+.bubble.ai.house { background: var(--lake-surface-2); border-color: var(--lake-line); }
+.bubble.ai.house .who { color: var(--lake-muted); }
+.bubble.me.failed { background: var(--lake-red-soft); color: var(--lake-text); border: 1px solid color-mix(in srgb, var(--lake-red) 35%, transparent); }
+.bubble.me.failed .why { display: block; margin-top: 4px; color: var(--lake-red); font-size: 12.5px; font-weight: 600; }
+.bubble.me.failed .bubble-foot { justify-content: flex-start; gap: 18px; font-weight: 650; }
+.bubble.me.failed .link-btn { color: var(--lake-red); text-decoration: underline; }
 .bubble.lit { box-shadow: 0 0 0 2px var(--lake-mint); }
 @keyframes lake-in { from { opacity: 0; transform: translateY(4px); } }
 .daydiv { align-self: center; font-size: 12px; font-weight: 650; color: var(--lake-muted); background: var(--lake-surface-2); padding: 4px 10px; border-radius: 999px; margin: 8px 0 4px; }
@@ -340,8 +362,7 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .newstrip.threat b { color: var(--lake-red); }
 .newstrip-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .composer { padding: 8px 10px calc(8px + var(--ion-safe-area-bottom, 0px)); background: var(--lake-glass); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); border-top: 1px solid var(--lake-line); }
-.modebar { padding: 0 2px 8px; }
-.mode-note { font-size: 12px; color: var(--lake-amber); margin: 6px 4px 0; }
+.mode-note { font-size: 12.5px; color: var(--lake-amber); margin: 0 6px 8px; line-height: 1.35; }
 .composer-row { display: flex; align-items: flex-end; gap: 8px; }
 .composer-input { flex: 1; background: var(--lake-surface); padding: 0 14px; --padding-top: 10px; --padding-bottom: 10px; border-radius: 22px; border: 1px solid var(--lake-line); min-height: 42px; font-size: 16px; }
 .send-btn { --padding-start: 0; --padding-end: 0; width: 42px; height: 42px; min-height: 42px; margin: 0; }

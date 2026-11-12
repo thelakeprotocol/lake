@@ -71,6 +71,8 @@ const goBack = async (p: Page = page) => p.getByRole('button', { name: /^Back/ }
 const onTab = (name: string, p: Page = page) => p.locator('ion-tab-button.tab-selected', { hasText: name }).waitFor({ timeout: 15_000 });
 const sheet = () => page.locator('ion-modal.lake-sheet');
 const closeSheet = async () => { await sheet().getByRole('button', { name: 'Close' }).click(); await page.waitForTimeout(300); };
+// Who replies in the open chat: the control at its top, then one of the two in its sheet.
+const replyMode = async (who: 'me' | 'ai') => { await page.locator('.replymode').click(); await sheet().locator('ion-item.mode-opt', { hasText: who === 'me' ? 'Their messages wait for you.' : /replies/ }).click(); };
 
 const lostKey = async (p: Page) => {
   const said = p.getByText(/isn't your house's key any more/);
@@ -498,13 +500,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const forAi = async () => ((await asAssistant({ kind: 'list' })).notes as { id: string; text: string; hidden?: boolean }[]).find((n) => n.id === left.note);
     expect(await forAi()).toMatchObject({ hidden: true, text: expect.not.stringContaining('coffee') });
     expect(await asAssistant({ kind: 'assistant.reply', note: left.note, text: 'Sure!' })).toMatchObject({ error: expect.any(String) });
-    const who = page.locator('.modebar ion-segment');
-    expect(await who.evaluate((e) => (e as HTMLElement & { value: string }).value)).toBe('me');
-    await who.locator('ion-segment-button', { hasText: 'My AI replies' }).click();
-    await page.locator('.mode-note', { hasText: 'An AI you\'ve connected can read this chat' }).waitFor({ timeout: 6000 });
+    // Who replies is one control at the top of the chat: it says who does now, and a tap gives the choice of two.
+    await page.locator('.replymode.me', { hasText: 'I reply' }).waitFor();
+    expect(await page.locator('.modebar').count()).toBe(0);
+    await page.locator('.replymode').click();
+    await sheet().locator('ion-item.mode-opt', { hasText: 'Their messages wait for you.' }).locator('ion-icon[name=checkmark]').waitFor();
+    await tidy();
+    await sheet().locator('ion-item.mode-opt', { hasText: 'An AI you\'ve connected can read this chat' }).click();
+    await page.getByText(/replies to .+ now$/).waitFor({ timeout: 6000 });
+    await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor();
     expect(await forAi()).toMatchObject({ text: 'Hi, Ana here: coffee next week?' });
-    await who.locator('ion-segment-button', { hasText: 'I reply' }).click();
-    await page.locator('.mode-note').waitFor({ state: 'detached', timeout: 6000 });
+    await replyMode('me');
+    await page.getByText('You reply from now on').waitFor({ timeout: 6000 });
+    await page.locator('.replymode.me').waitFor();
     expect((await forAi())?.hidden).toBe(true);
     await page.getByLabel('Message').fill('Yes: Tuesday 10:00?');
     await page.getByRole('button', { name: 'Send', exact: true }).click();
@@ -526,33 +534,49 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.goto(`${house}/owner/?n=${encodeURIComponent('Alex left you a note, via their AI.')}#note=${left.note}`);
       await page.locator('.bubble.them.lit', { hasText: 'free for a call Thursday' }).waitFor({ timeout: 8000 });
       await page.getByText('Alex left you a note, via their AI.').waitFor();
-      // Who it is, at the top; who replies, above the message box.
+      // Who it is, at the top, and beside it who replies.
       await page.locator('.chatwho', { hasText: 'Alex' }).waitFor();
-      const seg = page.locator('.modebar ion-segment');
-      expect(await seg.evaluate((e) => (e as HTMLElement & { value: string }).value)).toBe('me');
+      await page.locator('.replymode.me', { hasText: 'I reply' }).waitFor();
       await page.getByLabel('Message').fill('Thursday 4pm works.');
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       await page.locator('.bubble.me:not(.sending)', { hasText: 'Thursday 4pm works.' }).waitFor({ timeout: 6000 });
       for (let i = 0; i < 20 && !got.some((x) => x.kind === 'note.reply'); i++) await page.waitForTimeout(250);
       expect(got.find((x) => x.kind === 'note.reply')).toMatchObject({ kind: 'note.reply', text: 'Thursday 4pm works.' });
-      // This chat to your AI, in one tap above the message box; the chat's details say so; take over in one tap.
-      await seg.locator('ion-segment-button', { hasText: 'My AI replies' }).click();
-      await page.locator('.chatwho', { hasText: 'Your AI replies' }).waitFor({ timeout: 6000 });
+      // Answered, Alex is someone the owner knows, and such a chat is their AI's while it's on duty: the house changed who
+      // replies without a tap, so the chat says it (the control used to flip in silence), and where you'd type says the
+      // AI isn't on duty yet. The chat's details say who replies too, and lead to the same choice.
+      await page.getByText(/^You've answered Alex, so .+ replies here while it's on duty\.$/).waitFor({ timeout: 6000 });
+      await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor();
       await page.locator('.mode-note', { hasText: 'once it\'s on duty' }).waitFor();
+      await tidy();
       await page.locator('.chatwho').click();
       await sheet().getByText('Its key is checked on every message').waitFor();
-      expect(await sheet().locator('ion-toggle').first().evaluate((e) => (e as HTMLElement & { checked: boolean }).checked)).toBe(true);
-      await closeSheet();
-      await seg.locator('ion-segment-button', { hasText: 'I reply' }).click();
-      await page.locator('.chatwho', { hasText: 'Your AI replies' }).waitFor({ state: 'detached', timeout: 6000 });
-      expect(await seg.evaluate((e) => (e as HTMLElement & { value: string }).value)).toBe('me');
+      const whoRow = sheet().locator('ion-item.who-replies');
+      await whoRow.locator('p', { hasText: /replies$/ }).waitFor();
+      await whoRow.click();
+      await sheet().locator('ion-item.mode-opt', { hasText: 'Their messages wait for you.' }).click();
+      await page.getByText('You reply from now on').waitFor({ timeout: 6000 });
+      await page.locator('.replymode.me').waitFor();
+      await page.locator('.mode-note').waitFor({ state: 'detached' });
+      // Their agent can't be reached: the message stays in the chat, not sent, with Retry and Edit (it used to go back
+      // into the message box under a toast that was gone in five seconds).
+      await alex.close();
+      await page.getByLabel('Message').fill('One more thing: bring the charger.');
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      const failed = page.locator('.bubble.me.failed', { hasText: 'One more thing: bring the charger.' });
+      await failed.getByText('Not sent: their AI can\'t be reached right now.').waitFor({ timeout: 20_000 });
+      await failed.getByRole('button', { name: 'Retry' }).waitFor();
+      await tidy();
+      await failed.getByRole('button', { name: 'Edit' }).click();
+      await failed.waitFor({ state: 'detached' });
+      expect(await page.getByLabel('Message').evaluate((e) => (e as HTMLTextAreaElement).value)).toBe('One more thing: bring the charger.');
       // A link to a chat that's gone (cleared, say) says so, with the way back.
       await page.goto(`${house}/owner/#note=gone-for-good`);
       await page.getByText('This chat isn\'t here any more').waitFor();
       await page.locator('.lake-empty').getByRole('button', { name: 'Back to People' }).click();
       await onTab('People');
       await tidy();
-    } finally { await alex.close(); }
+    } finally { await alex.close().catch(() => {}); }
   });
 
   it('People: the ones you know on top, new people folded to three, and cleared in one tap with Undo', async () => {
@@ -1135,8 +1159,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     try {
       const left = await sam.ask(`${house}/a2a`, { kind: 'note', text: 'Sam here: could we talk next week?' }) as { kind: string; note: string };
       await page.goto(`${house}/owner/#note=${left.note}`);
-      await page.locator('.modebar ion-segment ion-segment-button', { hasText: 'My AI replies' }).click();
-      await page.locator('.chatwho', { hasText: 'Your AI replies' }).waitFor({ timeout: 6000 });
+      await replyMode('ai');
+      await page.getByText(/replies to Sam now$/).waitFor({ timeout: 6000 });
+      // The AI on duty is named, and nothing says it's waiting to go on duty: it is.
+      await page.locator('.replymode.ai[aria-label="Who replies: Night AI replies. Change"]', { hasText: 'Night AI' }).waitFor({ timeout: 10_000 });
+      expect(await page.locator('.mode-note').count()).toBe(0);
       // Overnight: a time held for the owner, a reply, and one thing it was stopped from doing.
       // On duty a time is a free slot (an earlier test set the free hours), answers a note, and is at least three hours off.
       expect(await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'next week', with: 'Sam' })).toMatchObject({ error: expect.stringContaining('needs its start') });
@@ -1147,7 +1174,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // Sam's AI has it from the house, in the house's words: pencilled in, not confirmed.
       expect(await heard('held')).toMatchObject({ kind: 'note.reply', note: left.note, text: expect.stringContaining('hasn\'t confirmed it yet'), booking: { id: booked.id, status: 'held' } });
       expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam (Claude)' }, text: 'Call with Sam', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, used: 1 });
-      expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'I\'ve asked for a time.', undo: { kind: 'correction', ref: 'https://sam.example/a2a' }, reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
+      // Sam writes again and the AI answers in its own words: its connector marks the note and files the reply (Sam's key).
+      const again = await sam.ask(`${house}/a2a`, { kind: 'note', text: 'Sam again: any day but Monday.' }) as { kind: string; note: string };
+      const samKey = ((await asNight({ kind: 'list' })).notes as { id: string; from: { key: string } }[]).find((n) => n.id === again.note)!.from.key;
+      expect(await asNight({ kind: 'assistant.answered', note: again.note, text: 'I\'ve asked for a time.' })).toMatchObject({ ok: true });
+      expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: samKey }, text: 'I\'ve asked for a time.', undo: { kind: 'correction', ref: 'https://sam.example/a2a' }, reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
       expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
       // The morning. Today asks for the owner's own yes on the held time: Confirm or Decline, nothing else to do with it.
       await tab('Today');
@@ -1161,7 +1192,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.locator('ion-item.lake-row', { hasText: 'Call with Sam' }).locator('.lake-pill', { hasText: 'Held' }).waitFor();
       // The same card sits in Sam's chat, under what the house told Sam's AI.
       await page.goto(`${house}/owner/#note=${left.note}`);
-      await page.locator('.bubble.ai', { hasText: 'hasn\'t confirmed it yet' }).waitFor({ timeout: 10_000 });
+      // Whose words each bubble is: the house's own about the held time, and the AI's own by its name, with Undo.
+      await page.locator('.bubble.ai.house', { hasText: 'hasn\'t confirmed it yet' }).locator('.who', { hasText: 'Your house, for Night AI' }).waitFor({ timeout: 10_000 });
+      const own = page.locator('.bubble.ai:not(.house)', { hasText: 'I\'ve asked for a time.' });
+      await own.locator('.who', { hasText: 'Night AI, your AI' }).waitFor();
+      await own.getByRole('button', { name: 'Undo', exact: true }).waitFor();
+      expect(await page.locator('.bubble.ai.house').getByRole('button', { name: 'Undo' }).count()).toBe(0);
       const inChat = page.locator('.chat-card ion-card.sug', { hasText: 'Held for your OK' });
       await inChat.locator('.held-what', { hasText: 'Call with Sam' }).waitFor();
       await inChat.getByRole('button', { name: 'Confirm', exact: true }).waitFor();
@@ -1193,10 +1229,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tab('My AI');
       expect(await page.locator('.stat-row .stat b').allTextContents()).toEqual(['2', '0', '0']);
       await page.locator('ion-item.slept-row', { hasText: /Booked with Sam.* \(you confirmed\)/ }).locator('.lake-pill', { hasText: 'Confirmed' }).waitFor();
-      // A reply can be undone (the AI's connector sends the correction).
-      const said = page.locator('ion-item.slept-row', { hasText: 'Replied to Sam\'s AI: I\'ve asked for a time.' });
-      await said.getByRole('button', { name: 'Undo' }).click();
-      await said.getByText('Undone').waitFor({ timeout: 10_000 });
+      // A reply is taken back where it was said, in Sam's chat (the AI's connector sends the correction). It stays, struck
+      // through, the note waits for the owner again, and the chat is theirs to answer.
+      await page.goto(`${house}/owner/#note=${again.note}`);
+      await own.getByRole('button', { name: 'Undo', exact: true }).click();
+      await page.getByText('Taken back. Sam is told to set it aside, and you reply from now on.').waitFor({ timeout: 10_000 });
+      await page.locator('.bubble.ai.undone', { hasText: 'I\'ve asked for a time.' }).getByText('Taken back').waitFor();
+      expect(await page.locator('.bubble-undo').count()).toBe(0);
+      await page.locator('.replymode.me', { hasText: 'I reply' }).waitFor();
+      await tidy();
+      expect(((await asNight({ kind: 'list' })).notes as { id: string; hidden?: boolean; answered?: unknown }[]).find((n) => n.id === again.note)).toMatchObject({ hidden: true });
+      await goBack();
+      await tab('My AI');
+      await page.locator('ion-item.slept-row', { hasText: 'Replied to Sam\'s AI: I\'ve asked for a time.' }).getByText('Undone').waitFor({ timeout: 10_000 });
       await tidy();
     } finally { await sam.close(); }
     // On duty, with tonight's count; its own page says what it may do; off duty after a sheet that asks.
