@@ -109,9 +109,9 @@ function ConnectCard({ c }: { c: Connect }) {
 
 function AgendaRow({ a }: { a: AgendaItem }) {
   return h('ion-item', { lines: 'full', class: 'lake-row' },
-    h('div', { slot: 'start', class: `row-icon tint-${a.agreed ? 'mint' : 'amber'}` }, h('ion-icon', { name: 'calendar-outline' })),
+    h('div', { slot: 'start', class: `row-icon tint-${!a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber'}` }, h('ion-icon', { name: 'calendar-outline' })),
     h('ion-label', {}, h('h3', {}, a.what), h('p', {}, [a.when, a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · '))),
-    h(Pill, { text: a.agreed ? 'Agreed' : 'Proposed', tone: a.agreed ? 'mint' : 'amber' }),
+    h(Pill, { text: a.held ? 'Held' : a.confirmed ? 'Confirmed' : a.agreed ? 'Agreed' : 'Proposed', tone: !a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber' }),
     h('ion-button', { slot: 'end', fill: 'clear', color: 'medium', 'aria-label': `Remove ${a.what}`, onClick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void toast('Removed'); } }, h('ion-icon', { name: 'close', slot: 'icon-only' })));
 }
 
@@ -130,16 +130,22 @@ function Notes({ notes }: { notes: Note[] }) {
     h(Sheet, { open: !!open, onClose: () => setOpen(null), title: open ? shortName(open.from) : undefined }, open ? h(SuggestionCard, { x: open, onDone: () => setOpen(null) }) : null));
 }
 
+const dayTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
 /** Your AI's question or suggestion: what it says and advises, and each answer as a button. */
-function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
+export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
   const bump = useBump();
   const [more, setMore] = useState(false);
   const [reply, setReply] = useState('');
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
-  const kicker = x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.sender ? 'A warning' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const kicker = x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.sender ? 'A warning' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const advice = x.advice ? h(Pill, { text: x.sender && x.advice === 'dont' ? 'Warning' : { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice], tone: x.advice === 'do' ? 'mint' : x.advice === 'dont' ? 'red' : 'muted' }) : null;
   const acts: Child[] = [];
-  if (x.ask && !x.ask.answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: c }) })));
+  // A time your AI pencilled in: yours to confirm (the house tells them either way). Nothing else to do with it.
+  if (x.booking) acts.push(
+    h(Btn, { key: 'bk', label: 'Confirm', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Confirm' }), done: `Confirmed. ${x.booking.with} was told.` }),
+    h(Btn, { key: 'bd', label: 'Decline', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Decline' }), done: `Declined. ${x.booking.with} was told.` }));
+  else if (x.ask && !x.ask.answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: c }) })));
   if (x.offer) acts.push(h(Btn, { key: 'of', label: 'Accept the offer', run: async () => { const r = await call<{ error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: x.offer, even_over_allowance: true }); if (r.error) throw new Error(r.error); await dismiss(); }, ask: { header: 'Accept this offer?', sub: 'What it needs goes to that one agent.', button: 'Accept', destructive: false } }));
   if (x.allowance && x.by) acts.push(h(Btn, { key: 'al', label: `Give ${money$(x.allowance.amount, x.allowance.currency)} for ${x.allowance.days} day${x.allowance.days === 1 ? '' : 's'}`, run: async () => { const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.allowance.draft', kid: x.by, amount: x.allowance!.amount, currency: x.allowance!.currency, days: x.allowance!.days }); await must({ kind: 'panel.allowance.set', id: d.id, credential: await signDraft(d.draft) }); await dismiss(); } }));
   if (x.sender && /^https?:\/\//.test(x.sender)) acts.push(h(Btn, { key: 'bl', label: 'Block them', color: 'danger', run: () => call({ kind: 'panel.assistant.block', id: x.id }), ask: { header: 'Block this agent?', sub: 'Its messages are turned away.', button: 'Block' } }));
@@ -152,11 +158,14 @@ function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
   if (x.count?.mine && !x.count.answered) acts.push(h(Btn, { key: 'ct', label: 'Count it in', run: () => must({ kind: 'panel.count.answer', note: x.id }) }));
   if (x.pledge && !x.pledge.quorum) acts.push(h(Btn, { key: 'pl', label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); }, ...(x.pledge.money ? { ask: { header: `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)}?`, sub: `Held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}: paid on only if ${x.pledge.money.threshold} sign; otherwise back to you.`, button: 'Put in and sign', destructive: false } } : {}) }));
   return h('ion-card', { class: 'lake-card sug' }, h('ion-card-content', {},
-    h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
+    h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.booking ? 'calendar-outline' : x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
     x.sender ? h('p', { class: 'muted-line' }, `About: ${x.sender}`) : null,
     x.invitedBy ? h('p', { class: `private-line${x.invitedBy.known ? '' : ' warn-text'}` }, h('ion-icon', { name: x.invitedBy.known ? 'person-outline' : 'alert-circle-outline' }), x.invitedBy.known ? ` From ${x.invitedBy.name}, someone your side knows. The terms below are the tally's own.` : ` From ${x.invitedBy.name}, someone your side hasn't dealt with: their words are unchecked. The terms below are the tally's own.`) : null,
-    h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
-    !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
+    // A held time, from its own fields and in this phone's time (the house's own sentence names the free hours' zone).
+    x.booking?.what ? [h('h3', { class: 'held-what', key: 'hw' }, x.booking.what), h('p', { class: 'held-when', key: 'hn' }, `${dayTime(x.booking.start)} · with ${x.booking.with}`),
+      h('p', { class: 'muted-line', key: 'ht' }, `Your AI pencilled this in. ${x.booking.with} was told you'll confirm it yourself.`)]
+      : h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
+    !x.booking?.what && !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.pledge?.money ? h('p', { class: 'muted-line' }, `Puts in ${money$(x.pledge.money.amount, x.pledge.money.currency)}, held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}. Paid on only if ${x.pledge.money.threshold} sign (${x.pledge.money.count} so far); otherwise it comes back.`) : null,
     x.pledge?.circle ? h('p', { class: 'muted-line' }, `A promise circle: you promise ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year. No money.`) : null,
@@ -165,11 +174,12 @@ function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
     x.count ? h('p', { class: 'muted-line' }, x.count.answered ? 'Counted, privately: only totals come out.' : x.count.mine ? `Your ${x.count.label}: ${x.count.mine.replace(/:/g, ' · ')}. Counted privately; only totals come out.` : `Your record has no ${x.count.label}.`) : null,
     x.ask?.private ? h('p', { class: 'private-line' }, h('ion-icon', { name: 'lock-closed-outline' }), ' Private: your AI won\'t see your answer.') : null,
     x.ask?.answered ? h('p', { class: 'muted-line' }, `You answered: ${x.ask.answered}`) : null,
+    x.booking ? h('p', { class: 'muted-line held-until' }, `Held until ${dayTime(x.booking.until)}. With no answer by then it's off, and ${x.booking.with} is told.`) : null,
     acts.length ? h('div', { class: 'card-actions wrap' }, ...acts) : null,
-    x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : h('div', { class: 'card-reply' },
+    x.booking ? null : x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : h('div', { class: 'card-reply' },
       h('ion-input', { value: reply, placeholder: 'Reply in your own words', 'aria-label': 'Reply', class: 'reply-input', onionInput: (e: CustomEvent) => setReply(String(e.detail.value ?? '')) }),
       reply.trim() ? h(Btn, { label: 'Send', size: 'small', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, text: reply.trim() }); setReply(''); void toast('Sent to your AI'); } }) : null),
-    h('div', { class: 'card-foot' }, h('ion-button', { fill: 'clear', size: 'small', color: 'medium', onClick: async () => { await dismiss(); onDone?.(); bump(); } }, 'Dismiss'))));
+    x.booking ? null : h('div', { class: 'card-foot' }, h('ion-button', { fill: 'clear', size: 'small', color: 'medium', onClick: async () => { await dismiss(); onDone?.(); bump(); } }, 'Dismiss'))));
 }
 
 function Quorum({ x }: { x: Note }) {

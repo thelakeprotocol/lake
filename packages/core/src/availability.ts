@@ -43,9 +43,18 @@ export function availabilityProblems(a: unknown): string[] {
   return out;
 }
 
+// One formatter per zone, kept: building one costs far more than using it, and a month of half-hour slots asks some
+// three thousand times (13 Nov: a booking took 0.4 s of the house's processor).
+const zones = new Map<string, Intl.DateTimeFormat>();
+const zone = (tz: string) => {
+  let f = zones.get(tz);
+  if (!f) { if (zones.size > 50) zones.clear(); zones.set(tz, f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })); }
+  return f;
+};
+
 /** Minutes the zone is ahead of UTC at that instant. */
 function offset(tz: string, at: Date): number {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
+  const p = Object.fromEntries(zone(tz).formatToParts(at).map((x) => [x.type, x.value]));
   return (Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!, +p.second!) - at.getTime()) / 60000;
 }
 

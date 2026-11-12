@@ -179,7 +179,9 @@ const MAX_GRANT_MS = 48 * 3_600_000;
 export interface Duty { statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean };
   /** Where its runner runs, since when, when it last looked, and the gaps when it didn't (the computer slept): said honestly. */ runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] } }
 /** One thing the AI on duty did, or was refused: what the owner's morning page shows, with its signed reply and an undo. */
-export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction'; ref: string }; undone?: string }
+export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction'; ref: string }; undone?: string; /** A booking is a time the house held for the owner (SPEC §6.1): how it stands now. */ booking?: Booked }
+/** A time held for the owner's own yes: still held, or how it ended. */
+export type Booked = 'held' | 'confirmed' | 'declined' | 'expired' | 'withdrawn';
 /** What else an assistant may read, beyond the notes at the door and its own errands (SPEC §6.1): the owner's choice. */
 export type Reads = 'records' | 'money';
 const READS: readonly Reads[] = ['records', 'money'];
@@ -213,6 +215,8 @@ export interface Suggestion {
   door?: { about: string };
   /** Something the assistant is waiting on (a reply, a cart): the house holds it while the assistant's chat is gone. */
   errand?: Errand;
+  /** A time the AI on duty pencilled in: the house holds it, and Confirm or Decline here is the owner's own word on it. */
+  booking?: { id: string; until: string; start: string; with: string; what?: string };
   at: string;
 }
 /**
@@ -236,6 +240,8 @@ const COUNTED = new Set<string>(DUTY_KINDS);
  * person gets a few replies and one booking, so a chatty friend (or a hijacked one) can't use up the night.
  */
 const BOOKINGS_A_NIGHT = 3, PER_PERSON = { reply: 3, book: 1, deliver: 3 } as Record<string, number>;
+/** A held time: how far ahead it must start, how long the owner has to confirm it, and how long before it starts it lapses. */
+const HELD_AHEAD = 3 * 3_600_000, HELD_FOR = 48 * 3_600_000, HELD_BEFORE = 2 * 3_600_000;
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
 /**
  * Something the owner agreed to, in their agenda. Who agreed on the other side is what it rests on (run 47: a visitor's
@@ -246,6 +252,14 @@ export interface AgendaItem {
   id: string; what: string; when: string; /** When it starts, for the owner's calendar. */ start?: string; /** How long, in minutes (the owner's usual meeting length if not said). */ minutes?: number; where?: string; with?: string;
   /** The assistant's own words to the owner about it ("I assumed your first week starts Monday"). */ note?: string;
   agreed?: { by: string; domain: string; said: string; at: string; speaks_for?: { house: string; checked: boolean } };
+  /**
+   * Pencilled in by an AI on duty, which can't agree a time for the owner (SPEC §6.1): the house holds the slot until then,
+   * has told the one who asked so in its own words, and only the owner's tap confirms it. The note it answers, the AI's
+   * key, and where the house's word about it goes.
+   */
+  held?: { until: string; note: string; kid: string; to: { name: string; key?: string; url?: string; web?: true } };
+  /** When the owner confirmed a held time themselves. */
+  confirmed?: string;
   by: string; at: string;
 }
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
@@ -503,8 +517,8 @@ export class OwnerDesk {
     // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
     for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
       const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';
-      const what = e.action === 'reply' ? `Replied to ${who}` : e.action === 'book' ? `Booked ${e.text ? `"${e.text.slice(0, 60)}"` : 'a time'}${e.to?.name ? ` with ${who}` : ''}` : e.action === 'deliver' ? `Delivered an order to ${who}` : e.action === 'block' ? `Blocked ${e.to?.url ?? 'a sender'}` : `Left you a note`;
-      lines.push({ by: 'ai', text: `${what}${e.undone ? ' (undone)' : ''}`, at: e.at, to: '#ai', ...(e.undo && !e.undone ? { undo: e.id } : {}) });
+      const what = e.booking && e.booking !== 'confirmed' ? `Held a time with ${who}${{ held: ' for you to confirm', declined: ': you said no', expired: ': it lapsed, not confirmed', withdrawn: ', then took it back' }[e.booking]}` : e.action === 'reply' ? `Replied to ${who}` : e.action === 'book' ? `Booked ${e.text ? `"${e.text.slice(0, 60)}"` : 'a time'}${e.to?.name ? ` with ${who}` : ''}` : e.action === 'deliver' ? `Delivered an order to ${who}` : e.action === 'block' ? `Blocked ${e.to?.url ?? 'a sender'}` : `Left you a note`;
+      lines.push({ by: 'ai', text: `${what}${e.booking === 'confirmed' ? ' (you confirmed)' : e.undone ? ' (undone)' : ''}`, at: e.at, to: '#ai', ...(e.undo && !e.undone && !e.booking ? { undo: e.id } : {}) });
     }
     // Money in: amounts by currency, held ones said so.
     const money = (await panel.money().catch(() => null)) as { receipts?: { amount: number; currency: string; at: string; settlement?: string }[] } | null;
@@ -606,7 +620,7 @@ export class OwnerDesk {
       check();
       setInterval(check, 60_000).unref();
     }
-    setInterval(() => this.sweepErrands(), 60_000).unref();
+    setInterval(() => { this.sweepErrands(); this.sweepHeld(); }, 60_000).unref();
     this.dutyLog = JSON.parse(await readFile(join(this.o.dataDir, 'duty-log.json'), 'utf8').catch(() => '[]'));
     this.contacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'contacts.json'), 'utf8').catch(() => '[]')));
     this.firstContacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'first-contacts.json'), 'utf8').catch(() => '[]')));
@@ -948,7 +962,7 @@ export class OwnerDesk {
   dutySummary(a: AssistantKey, since: number) {
     const mine = this.dutyLog.filter((e) => e.by === a.kid && Date.parse(e.at) >= since);
     return {
-      handled: mine.filter((e) => !e.refused && COUNTED.has(e.action)).length,
+      handled: mine.filter((e) => !e.refused && COUNTED.has(e.action) && (!e.booking || e.booking === 'confirmed')).length,
       waiting: this.suggestions.filter((x) => x.by === a.kid && Date.parse(x.at) >= since && ((x.ask && !x.ask.answered) || x.errand?.state === 'held' || (!x.ask && !x.errand))).length,
       blocked: mine.filter((e) => e.action === 'block').length,
       refused: mine.filter((e) => e.refused).length,
@@ -964,7 +978,7 @@ export class OwnerDesk {
   /** At most 50 notes, oldest first out; open errands don't count and aren't cut (their own cap is 20 an assistant). */
   private trimSuggestions() {
     let notes = 0;
-    this.suggestions = this.suggestions.filter((x) => (x.errand && (x.errand.state === 'open' || x.errand.state === 'held')) || ++notes <= 50);
+    this.suggestions = this.suggestions.filter((x) => (x.errand && (x.errand.state === 'open' || x.errand.state === 'held')) || x.booking || ++notes <= 50);
   }
   /** What the assistant's connector needs to answer the other side: who, what, the cart or tag, how it ended. */
   private errandNews(s: Suggestion) {
@@ -979,6 +993,77 @@ export class OwnerDesk {
     this.suggestions = this.suggestions.filter((x) => !due.includes(x));
     void this.saveSuggestions();
     for (const s of due) { s.errand!.state = 'expired'; s.errand!.ended = { at: new Date(now).toISOString(), how: 'expired' }; this.news({ about: 'errand.ended', errand: this.errandNews(s) }, s.by); }
+  }
+  /** A time in the owner's own zone, as the house says it (never the AI's words for it). */
+  private whenWords(iso: string) {
+    const tz = this.o.panel?.availability?.()?.tz;
+    try { return `${new Intl.DateTimeFormat('en-AU', { ...(tz ? { timeZone: tz } : {}), weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))}${tz ? ` (${tz})` : ' UTC'}`; } catch { return iso; }
+  }
+  /** The house's own word about a held time, to the one who asked: at their private link (web), or to their agent, signed. */
+  private async tellBooking(item: AgendaItem, text: string, status: Booked, by: string): Promise<boolean> {
+    const h = item.held!;
+    if (h.to.web) return 'ok' in this.answerWebNote(h.note, text, by, status !== 'held');
+    if (!h.to.url) return false;
+    const re = this.notes.find((x) => x.id === h.note)?.text.slice(0, 200);
+    const sent = await this.o.panel?.replyAgent?.(h.to.url, { kind: 'note.reply', note: h.note, text, ...(re ? { re } : {}), booking: { id: item.id, what: item.what, start: item.start, minutes: item.minutes, status } }).catch(() => null);
+    return !!sent && sent.kind !== 'refused' && sent.kind !== 'rejected';
+  }
+  /**
+   * A time an AI on duty wants to give someone (SPEC §6.1). It can't agree for the owner: the house holds the slot, tells
+   * the one who asked so in fixed words of its own, and puts Confirm and Decline to the owner. Unanswered, it lapses.
+   */
+  private async holdBooking(a: AssistantKey, item: AgendaItem, about: OwnerDesk['notes'][number]): Promise<{ ok: true } | { error: string }> {
+    const start = Date.parse(item.start!), now = Date.now();
+    const until = new Date(Math.min(now + HELD_FOR, start - HELD_BEFORE)).toISOString();
+    const who = (about.from.as || about.from.name).replace(/ \(.*\)$/, '').slice(0, 80) || 'them';
+    item.held = { until, note: about.id, kid: a.kid, to: { name: who, ...(about.from.key ? { key: about.from.key } : {}), ...(about.from.url ? { url: about.from.url } : {}), ...(about.from.web ? { web: true as const } : {}) } };
+    const owner = this.o.panel?.door?.()?.name?.trim() || 'The owner', time = this.whenWords(item.start!);
+    const text = `${owner}'s AI has pencilled in ${time} for "${item.what.slice(0, 120)}". ${owner} hasn't confirmed it yet: you'll hear here when they do, by ${this.whenWords(until)} at the latest.`;
+    if (!(await this.tellBooking(item, text, 'held', a.label))) return { error: 'the one who asked couldn\'t be told the time is only held, so nothing was held: leave your human a note about it instead' };
+    this.agenda = [...this.agenda, item].slice(-100);
+    about.answered = { text, by: a.label, at: new Date(now).toISOString() };
+    const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: a.label, by: a.kid, text: `Pencilled in ${time} with ${who}: ${item.what}. ${who} was told you'll confirm it yourself.${item.note ? ` ${item.note}` : ''}`.slice(0, 1500), note: about.id, booking: { id: item.id, until, start: item.start!, with: who, what: item.what }, ask: { choices: ['Confirm', 'Decline'] }, at: new Date(now).toISOString() };
+    this.suggestions = [sug, ...this.suggestions];
+    this.trimSuggestions();
+    await Promise.all([this.saveAgenda(), this.saveSuggestions(), this.saveNotes()]);
+    this.notifyOwner('booking', `Your AI pencilled in ${time} with ${who}. It's yours to confirm.`);
+    this.touch();
+    return { ok: true };
+  }
+  private settling = new Set<string>();
+  /** How a held time ends: the owner's Confirm or Decline, its date, or the AI taking it back. The house tells the one who asked. */
+  private async settleBooking(id: string, how: Exclude<Booked, 'held'>): Promise<{ ok: true } | { error: string }> {
+    const item = this.agenda.find((x) => x.id === id && x.held);
+    if (!item?.held || this.settling.has(id)) return { error: 'no time held with that id' };
+    this.settling.add(id);
+    try {
+      const h = item.held, who = h.to.name, named = this.o.panel?.door?.()?.name?.trim(), owner = named || 'The owner', by = named || 'the owner', time = this.whenWords(item.start!), what = `"${item.what.slice(0, 120)}"`;
+      const text = how === 'confirmed' ? `Confirmed by ${by}: ${time} for ${what}.`
+        : how === 'declined' ? `${owner} said no to ${time} for ${what}, so it is off.`
+        : how === 'expired' ? `${time} for ${what} wasn't confirmed by ${by} in time, so it is off and the time is free again.`
+        : `${owner}'s AI took back the time it had pencilled in (${time}, ${what}): it is off.`;
+      const told = await this.tellBooking(item, text, how, how === 'confirmed' || how === 'declined' ? 'you' : item.by);
+      // A yes that didn't reach them isn't one yet: the owner taps again. A no stands either way.
+      if (how === 'confirmed' && !told) return { error: `${who} couldn't be reached, so it isn't confirmed yet: try again in a moment` };
+      const at = new Date().toISOString(), own = how === 'confirmed' || how === 'declined';
+      if (how === 'confirmed') { delete item.held; item.confirmed = at; } else this.agenda = this.agenda.filter((x) => x.id !== id);
+      const about = this.notes.find((x) => x.id === h.note);
+      if (about) about.answered = { text, by: own ? 'you' : item.by, ...(own ? { own: true as const } : {}), at };
+      if (how === 'confirmed' && h.to.key && !this.contacts.has(h.to.key)) this.contacts.set(h.to.key, { name: who, webId: String(about?.from.webId ?? '').slice(0, 300), at });
+      this.suggestions = this.suggestions.filter((x) => x.booking?.id !== id);
+      const e = this.dutyLog.find((x) => x.undo?.kind === 'agenda' && x.undo.ref === id);
+      if (e) e.booking = how;
+      await Promise.all([this.saveAgenda(), this.saveSuggestions(), this.saveNotes(), this.saveDuty()]);
+      if (how !== 'withdrawn') this.news({ about: `booking.${how}`, agenda: id, what: item.what, start: item.start, with: who, note: `${how === 'confirmed' ? 'your human confirmed it' : how === 'declined' ? 'your human said no' : 'your human didn\'t confirm it in time, so it lapsed'}: the house ${told ? 'told' : 'couldn\'t reach'} ${who}${told ? '; nothing for you to send' : ''}` }, h.kid);
+      if (how === 'expired') this.notifyOwner('booking', `The time held with ${who} lapsed: it wasn't confirmed.`);
+      this.touch();
+      return { ok: true };
+    } finally { this.settling.delete(id); }
+  }
+  /** Held times past their date lapse: the slot is free again, and the one who asked is told. */
+  private sweepHeld() {
+    const now = Date.now();
+    for (const x of this.agenda.filter((x) => x.held && Date.parse(x.held.until) <= now)) void this.settleBooking(x.id, 'expired');
   }
   private saveSuggestions = async () => {
     // Capped by size as well as count (a note may carry a whole rules file): the oldest go first.
@@ -1496,8 +1581,12 @@ export class OwnerDesk {
           }
         }
         if (p.kind === 'assistant.agenda') {
-          const q = p as unknown as { what?: string; when?: string; start?: string; minutes?: number; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string; id?: string };
-          if (q.remove) { this.agenda = this.agenda.filter((x) => !(x.id === q.remove && x.by === assistant.label)); await this.saveAgenda(); return void res.json({ ok: true }); }
+          const q = p as unknown as { what?: string; when?: string; start?: string; minutes?: number; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string; id?: string; re?: string };
+          if (q.remove) {
+            // A held time taken back: the one who was told about it is told it is off.
+            if (this.agenda.some((x) => x.id === q.remove && x.by === assistant.label && x.held)) { await this.settleBooking(String(q.remove), 'withdrawn'); return void res.json({ ok: true, note: 'the house told them it is off' }); }
+            this.agenda = this.agenda.filter((x) => !(x.id === q.remove && x.by === assistant.label)); await this.saveAgenda(); return void res.json({ ok: true });
+          }
           // A proposed entry the other side has now agreed to: the same entry, with their word (run 51: a time was offered
           // and nothing held it, so the agenda showed nothing while the other side checked with their person).
           if (q.id) {
@@ -1511,6 +1600,8 @@ export class OwnerDesk {
             if (q.where) item.where = str(q.where, 120);
             item.agreed = { by: str(ag.by, 120), domain: str(ag.domain, 200), said: str(ag.said, 300), at: str(ag.at, 40), ...(ag.speaks_for ? { speaks_for: { house: str(ag.speaks_for.house, 300), checked: ag.speaks_for.checked === true } } : {}) };
             await this.saveAgenda();
+            // Their yes is kept with a held time; the owner's own yes is still what confirms it.
+            if (item.held) return void res.json({ ok: true, id: item.id, status: `held: their yes (${item.agreed.by}) is kept with it; your human still confirms it, and the house tells them when they do` });
             return void res.json({ ok: true, id: item.id, status: `agreed: by ${item.agreed.by}` });
           }
           const what = String(q.what ?? '').trim().slice(0, 200), when = String(q.when ?? '').trim().slice(0, 80);
@@ -1527,6 +1618,16 @@ export class OwnerDesk {
             const busy = this.agenda.filter((x) => x.start).map((x) => ({ start: x.start!, ...(x.minutes ? { minutes: x.minutes } : {}) }));
             const fits = freeSlots(av, busy, new Date(), 31, 2000).some((sl) => Date.parse(sl.start) <= start.getTime() && start.getTime() + len <= Date.parse(sl.end));
             if (!fits) return void res.status(409).json({ error: 'that time isn\'t one of your human\'s free slots (lake_house { view: "free" }): on duty you can only book a free slot' });
+            // A time is the owner's to agree (round 15: "Thursday 10am works" from an AI was a commitment nobody made). On duty
+            // it answers a note from someone the AI may answer, far enough ahead for the owner to say yes or no.
+            const about = this.notes.find((x) => x.id === String(q.re ?? ''));
+            if (!about) return void res.status(400).json({ error: 'on duty a time answers a note at the door: agenda.re is that note\'s id (the note id in its house.news)' });
+            if (this.modeOf(about.from) !== 'ai') return void res.status(403).json({ error: 'your human answers this conversation themselves (someone new, or a chat they kept): leave them a note about the time instead' });
+            if (!about.from.web && !about.from.url) return void res.status(400).json({ error: 'that note came with no address to answer: leave your human a note about the time instead' });
+            if (this.agenda.some((x) => x.held?.note === about.id)) return void res.status(409).json({ error: 'a time is already held for that note: your human confirms or declines it first' });
+            if (start.getTime() < Date.now() + HELD_AHEAD) return void res.status(409).json({ error: 'on duty a time is held for your human to confirm, so it starts at least three hours from now: offer a later slot, or leave them a note' });
+            const room = this.dutyRoom(assistant, 'book', { key: about.from.key, name: about.from.name });
+            if (!room.ok) return void res.status(429).json({ error: room.why });
           }
           const str = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
           const ag = q.agreed;
@@ -1534,6 +1635,11 @@ export class OwnerDesk {
           // As long as offered (run 52: a 45-minute coffee blocked an hour in the owner's calendar).
           const minutes = Number.isInteger(q.minutes) && q.minutes! >= 5 && q.minutes! <= 720 ? q.minutes! : this.o.panel?.availability?.()?.meetings ?? 60;
           const item: AgendaItem = { id: randomBytes(6).toString('hex'), what, when, ...(start ? { start: start.toISOString(), minutes } : {}), ...(q.where ? { where: str(q.where, 120) } : {}), ...(q.with ? { with: str(q.with, 120) } : {}), ...(q.note ? { note: str(q.note, 500) } : {}), ...(agreed ? { agreed } : {}), by: assistant.label, at: new Date().toISOString() };
+          if (assistant.duty) {
+            const r = await this.holdBooking(assistant, item, this.notes.find((x) => x.id === String(q.re ?? ''))!);
+            if ('error' in r) return void res.status(502).json(r);
+            return void res.json({ ok: true, id: item.id, status: 'held: your human confirms it themselves. The house has told them so, in its own words, and tells them how it ends; you send nothing more about it', note: `held until ${item.held!.until}. Never say a time is agreed or booked: only your human's tap makes it so` });
+          }
           this.agenda = [...this.agenda, item].slice(-100);
           await this.saveAgenda();
           return void res.json({ ok: true, id: item.id, status: agreed ? `agreed: by ${agreed.by}${agreed.speaks_for?.checked ? `, which speaks for ${agreed.speaks_for.house}` : ', an agent that showed no house it speaks for'}` : 'proposed: it holds the time (your human\'s calendar shows it as tentative); when they agree, send agenda { id, agreed_in }', note: 'in your human\'s agenda, in their house' });
@@ -1633,6 +1739,8 @@ export class OwnerDesk {
           const to = q.to ? { ...(q.to.name ? { name: String(q.to.name).slice(0, 80) } : {}), ...(q.to.webId ? { webId: String(q.to.webId).slice(0, 300) } : {}), ...(q.to.key ? { key: String(q.to.key).slice(0, 100) } : {}), ...(q.to.url ? { url: String(q.to.url).slice(0, 300) } : {}) } : undefined;
           const undo = q.undo && ['agenda', 'block', 'standing', 'correction'].includes(q.undo.kind) ? { kind: q.undo.kind, ref: String(q.undo.ref ?? '').slice(0, 300) } : undefined;
           const e: DutyEntry = { id: randomBytes(6).toString('hex'), by: assistant.kid, at: new Date().toISOString(), tool: String(q.tool ?? '').slice(0, 60), action: String(q.action ?? '').slice(0, 40), ...(to ? { to } : {}), ...(q.text ? { text: String(q.text).slice(0, 1500) } : {}), ...(q.reply !== undefined ? { reply: JSON.stringify(q.reply).length <= 4000 ? q.reply : `${JSON.stringify(q.reply).slice(0, 4000)}…` } : {}), ...(q.refused ? { refused: String(q.refused).slice(0, 300), ...(q.limit ? { limit: true } : {}) } : {}), ...(q.receipt ? { receipt: String(q.receipt).slice(0, 8000) } : {}), ...(undo ? { undo } : {}) };
+          const heldItem = undo?.kind === 'agenda' ? this.agenda.find((x) => x.id === undo.ref && x.held) : undefined;
+          if (heldItem?.held) { e.to = { name: heldItem.held.to.name, ...(heldItem.held.to.key ? { key: heldItem.held.to.key } : {}), ...(heldItem.held.to.url ? { url: heldItem.held.to.url } : {}) }; e.booking = 'held'; }
           this.dutyLog.push(e);
           await this.saveDuty();
           const start = this.nightStart(assistant.duty);
@@ -1819,6 +1927,12 @@ export class OwnerDesk {
         const e = this.dutyLog.find((x) => x.id === String((p as unknown as { entry?: string }).entry ?? ''));
         if (!e?.undo) return void res.status(404).json({ error: 'nothing to undo for that entry' });
         if (e.undone) return void res.status(409).json({ error: 'already undone' });
+        // A held time is the owner's to answer, not to undo: taking it out is their no (and doesn't count against the AI).
+        if (e.booking) {
+          if (e.booking !== 'held') return void res.status(409).json({ error: 'nothing to undo: that time was answered already' });
+          const r = await this.settleBooking(e.undo.ref, 'declined');
+          return void res.status('error' in r ? 409 : 200).json('error' in r ? r : { ok: true, declined: e.id });
+        }
         const a = this.assistants.get(e.by);
         if (e.undo.kind === 'agenda') { this.agenda = this.agenda.filter((x) => x.id !== e.undo!.ref); await this.saveAgenda(); }
         if (e.undo.kind === 'standing' && e.to?.key) await this.o.panel?.removeStanding?.(e.to.key);
@@ -1892,6 +2006,14 @@ export class OwnerDesk {
         const sug = this.suggestions.find((x) => x.id === q.id);
         const text = typeof q.text === 'string' ? q.text.trim().slice(0, 500) : '';
         if (!sug || (q.choice !== undefined && !sug.ask?.choices.includes(String(q.choice))) || (q.choice === undefined && !text)) return void res.status(400).json({ error: 'answer a note: one of its choices, your own words (text), or both' });
+        // A held time: the tap is the owner's own yes or no, and the house tells the one who asked.
+        if (sug.booking) {
+          if (q.choice === undefined) return void res.status(400).json({ error: 'a held time takes Confirm or Decline' });
+          const late = Date.parse(sug.booking.until) <= Date.now();
+          const r = await this.settleBooking(sug.booking.id, late ? 'expired' : q.choice === 'Confirm' ? 'confirmed' : 'declined');
+          if ('error' in r) return void res.status(502).json(r);
+          return void res.status(late ? 409 : 200).json(late ? { error: 'it lapsed before you answered: the time is free again, and they were told' } : { ok: true, answered: String(q.choice) });
+        }
         if (q.choice !== undefined) sug.ask!.answered = String(q.choice);
         if (text) sug.reply = text;
         const er = sug.errand;
@@ -1989,6 +2111,8 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.agenda.remove') {
         const id = String((p as unknown as { id?: string }).id ?? '');
+        // Taking out a held time is the owner's no: the one who asked is told.
+        if (this.agenda.some((x) => x.id === id && x.held)) { const r = await this.settleBooking(id, 'declined'); return void res.status('error' in r ? 409 : 200).json(r); }
         this.agenda = this.agenda.filter((x) => x.id !== id);
         await this.saveAgenda();
         return void res.json({ ok: true });
@@ -2073,6 +2197,8 @@ export class OwnerDesk {
       if (p.kind === 'panel.assistant.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
         const gone = this.suggestions.find((x) => x.id === id);
+        // A held time can't be set aside unanswered: someone was told the owner would say yes or no.
+        if (gone?.booking) return void res.status(409).json({ error: 'a held time takes Confirm or Decline' });
         this.suggestions = this.suggestions.filter((x) => x.id !== id);
         await this.saveSuggestions();
         if (gone?.errand && (gone.errand.state === 'open' || gone.errand.state === 'held')) {
@@ -2534,10 +2660,10 @@ export function agendaIcs(items: AgendaItem[], house: string): string {
   const t = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d+/, '');
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//The Lake//house agenda//EN', 'X-WR-CALNAME:Agenda'];
   for (const x of items.filter((i) => i.start)) {
-    const who = x.agreed ? `Agreed by ${x.agreed.by}${x.agreed.speaks_for?.checked ? ` (speaks for ${x.agreed.speaks_for.house})` : ''}: "${x.agreed.said}"` : 'Proposed: their side has not agreed yet';
+    const who = x.held ? 'Held by your AI: you haven\'t confirmed it yet' : x.confirmed ? 'Confirmed by you' : x.agreed ? `Agreed by ${x.agreed.by}${x.agreed.speaks_for?.checked ? ` (speaks for ${x.agreed.speaks_for.house})` : ''}: "${x.agreed.said}"` : 'Proposed: their side has not agreed yet';
     lines.push('BEGIN:VEVENT', `UID:${x.id}@${new URL(house).host}`, `DTSTAMP:${t(x.at)}`, `DTSTART:${t(x.start!)}`, `DURATION:PT${x.minutes ?? 60}M`, `SUMMARY:${esc(x.what)}`,
       ...(x.where ? [`LOCATION:${esc(x.where)}`] : []), `DESCRIPTION:${esc([x.when, x.with ? `with ${x.with}` : '', who, x.note ?? ''].filter(Boolean).join('\n'))}`,
-      `STATUS:${x.agreed ? 'CONFIRMED' : 'TENTATIVE'}`, 'END:VEVENT');
+      `STATUS:${(x.agreed || x.confirmed) && !x.held ? 'CONFIRMED' : 'TENTATIVE'}`, 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   // Lines end in CRLF, and long ones fold at 75 octets (RFC 5545 §3.1).

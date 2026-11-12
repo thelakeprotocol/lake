@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
-import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type WantOfferV, type WantV } from './logic';
+import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Chat, type DoorNote, type DoorState, type DutyLog, type ListView, type Note, type WantOfferV, type WantV } from './logic';
 import { back, focusNote, push } from './nav';
+import { SuggestionCard } from './inbox';
 
 // People: one row per person, the ones you know above the new ones, and a chat with each. What you're looking for (a
 // thread of shops' offers each) shows on Today while it needs you, and under Money.
@@ -83,10 +84,10 @@ export function ChatPage({ arg }: { arg: string }) {
   const c = chats.find((x) => x.key === arg || x.keys.includes(arg) || x.notes.some((n) => n.id === arg));
   // A link to a chat that's gone (cleared, say): back to the list.
   if (!c) return h(Page, { title: 'Chat', back: () => back('#chats'), backLabel: 'People' }, h(Empty, { icon: 'chatbubble-outline', title: 'This chat isn\'t here any more', action: h('ion-button', { shape: 'round', onClick: () => back('#chats') }, 'Back to People') }));
-  return h(ChatView, { c, all: chats });
+  return h(ChatView, { c, all: chats, held: (list.data.suggestions ?? []).filter((x) => x.booking && x.note) });
 }
 
-function ChatView({ c, all }: { c: Chat; all: Chat[] }) {
+function ChatView({ c, all, held }: { c: Chat; all: Chat[]; held: Note[] }) {
   const bump = useBump();
   const [mode, setMode] = useState(c.mode);
   const [info, setInfo] = useState(false);
@@ -119,7 +120,9 @@ function ChatView({ c, all }: { c: Chat; all: Chat[] }) {
     return [divider,
       h('div', { key: n.id, class: `bubble them${focusNote() === n.id ? ' lit' : ''}` }, h('p', {}, n.text), h('time', {}, time(n.at))),
       n.answered ? h('div', { key: `${n.id}-a`, class: `bubble ${n.answered.by === 'you' ? 'me' : 'ai'}` },
-        n.answered.by === 'you' ? null : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered.by)} (your AI)`), h('p', {}, n.answered.text), n.answered.at ? h('time', {}, time(n.answered.at)) : null) : null];
+        n.answered.by === 'you' ? null : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered.by)} (your AI)`), h('p', {}, n.answered.text), n.answered.at ? h('time', {}, time(n.answered.at)) : null) : null,
+      // A time your AI pencilled in while answering this: yours to confirm, here as on Today.
+      ...held.filter((x) => x.note === n.id).map((x) => h('div', { key: `${n.id}-h`, class: 'chat-card' }, h(SuggestionCard, { x })))];
   });
   const titleNode = h('ion-title', {}, h('button', { type: 'button', class: 'chatwho', onClick: () => setInfo(true), 'aria-label': `About ${c.name}` },
     h(Avatar, { name: c.name, ring: c.trust, size: 34 }), h('span', { class: 'chatwho-text' }, h('b', {}, c.name), h('small', {}, c.canMode ? (mode === 'ai' ? 'Your AI replies' : c.via) : c.via))));

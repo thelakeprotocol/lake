@@ -138,7 +138,7 @@ function Night({ log }: { log?: DutyLog }) {
           h('div', { class: 'stat' }, h('b', {}, String(sum.blocked)), h('span', {}, 'Blocked'))),
         h(Section, { key: 'l' }, ...done.slice(0, 20).map((e) => h('ion-item', { key: e.id, lines: 'full', class: 'lake-row slept-row' },
           h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, dutyLine(e)), h('p', {}, `${time(e.at)} · ${receiptWords(e)}`)),
-          e.undo ? (e.undone ? h(Pill, { text: 'Undone' }) : h('div', { slot: 'end' }, h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: e.id }), done: 'Undone' }))) : null))),
+          e.booking ? h(Pill, { text: { held: 'Held', confirmed: 'Confirmed', declined: 'Declined', expired: 'Lapsed', withdrawn: 'Taken back' }[e.booking], tone: e.booking === 'confirmed' ? 'mint' : e.booking === 'held' ? 'amber' : 'muted' }) : e.undo ? (e.undone ? h(Pill, { text: 'Undone' }) : h('div', { slot: 'end' }, h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: e.id }), done: 'Undone' }))) : null))),
         stopped.length ? h('p', { class: 'muted-line pad', key: 'sp' }, `Stopped ${stopped.length} thing${stopped.length === 1 ? '' : 's'} it may not do.`) : null]);
 }
 

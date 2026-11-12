@@ -1128,31 +1128,77 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await closeSheet();
     const asNight = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, night, { iss: 'assistant' })) })).json();
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0 });
-    // Overnight: a booking (undoable), a reply, and one thing it was stopped from doing.
-    // On duty it books only a free slot (an earlier test set the free hours); with none given, it's refused.
-    expect(await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Mon 10:00', with: 'Sam' })).toMatchObject({ error: expect.stringContaining('needs its start') });
-    const slot = (await asNight({ kind: 'panel.free' })).slots[0];
-    const booked = await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'Mon 10:00', with: 'Sam', start: slot.start });
-    expect(booked).toMatchObject({ ok: true, id: expect.any(String) });
-    expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Call on Monday at 10:00', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, on: true });
-    expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'Yes, Monday works.', reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
-    expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
-    // The morning: Inbox says it in one line, and My AI shows what it did, in order, with Undo; what it was stopped
-    // from, counted.
-    await tab('Today');
-    // Handled for you: each thing it did, saying it was your AI, with Undo where the house can undo it.
-    const handled = page.locator('ion-list.handled');
-    await handled.locator('ion-item.handled-row', { hasText: "Replied to Sam's AI" }).getByText(/Your AI · /).waitFor({ timeout: 10_000 });
-    await handled.locator('ion-item.handled-row', { hasText: 'Booked "Call on Monday at 10:00"' }).getByRole('button', { name: 'Undo', exact: true }).waitFor();
-    await tab('My AI');
-    expect(await page.locator('.stat-row .stat b').allTextContents()).toEqual(['2', '0', '0']);
-    await page.getByText('Replied to Sam\'s AI: Yes, Monday works.').waitFor();
-    await page.getByText('Stopped 1 thing it may not do.').waitFor();
-    const book = page.locator('ion-item.slept-row', { hasText: 'Booked with Sam\'s AI: Call on Monday at 10:00' });
-    await book.getByRole('button', { name: 'Undo' }).click();
-    await book.getByText('Undone').waitFor({ timeout: 10_000 });
-    expect((await (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, night, { iss: 'assistant' })) })).json()).agenda.some((x: { id: string }) => x.id === booked.id)).toBe(false);
-    await tidy();
+    // Sam's AI leaves a note, and the owner hands that chat to their AI: someone it may answer while they're away.
+    const samGot: Record<string, any>[] = [];
+    const sam = await joinLake({ name: 'Sam (Claude)', domain: 'sam.example', node: nodeUrl, port: await freePort(), onMessage: async (m) => { samGot.push(m.payload as Record<string, any>); return { kind: 'received' }; } });
+    const heard = async (status: string) => { for (let i = 0; i < 40 && !samGot.some((x) => x.booking?.status === status); i++) await page.waitForTimeout(250); return samGot.find((x) => x.booking?.status === status); };
+    try {
+      const left = await sam.ask(`${house}/a2a`, { kind: 'note', text: 'Sam here: could we talk next week?' }) as { kind: string; note: string };
+      await page.goto(`${house}/owner/#note=${left.note}`);
+      await page.locator('.modebar ion-segment ion-segment-button', { hasText: 'My AI replies' }).click();
+      await page.locator('.chatwho', { hasText: 'Your AI replies' }).waitFor({ timeout: 6000 });
+      // Overnight: a time held for the owner, a reply, and one thing it was stopped from doing.
+      // On duty a time is a free slot (an earlier test set the free hours), answers a note, and is at least three hours off.
+      expect(await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'next week', with: 'Sam' })).toMatchObject({ error: expect.stringContaining('needs its start') });
+      const slot = (await asNight({ kind: 'panel.free' })).slots.find((s: { start: string }) => Date.parse(s.start) > Date.now() + 4 * 3_600_000);
+      expect(await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'next week', with: 'Sam', start: slot.start })).toMatchObject({ error: expect.stringContaining('agenda.re') });
+      const booked = await asNight({ kind: 'assistant.agenda', what: 'Call with Sam', when: 'next week', with: 'Sam', start: slot.start, re: left.note });
+      expect(booked).toMatchObject({ ok: true, id: expect.any(String), status: expect.stringContaining('held') });
+      // Sam's AI has it from the house, in the house's words: pencilled in, not confirmed.
+      expect(await heard('held')).toMatchObject({ kind: 'note.reply', note: left.note, text: expect.stringContaining('hasn\'t confirmed it yet'), booking: { id: booked.id, status: 'held' } });
+      expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam (Claude)' }, text: 'Call with Sam', undo: { kind: 'agenda', ref: booked.id }, reply: { kind: 'received', digest: 'abc123' } })).toMatchObject({ ok: true, used: 1 });
+      expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: { name: 'Sam\'s AI (Claude, via MCP)', key: 'sam-key-0123456789abcdefgh' }, text: 'I\'ve asked for a time.', undo: { kind: 'correction', ref: 'https://sam.example/a2a' }, reply: { kind: 'received', digest: 'def456' } })).toMatchObject({ ok: true, used: 2 });
+      expect(await asNight({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', to: { name: 'Quick Cash' }, refused: 'no money on duty' })).toMatchObject({ ok: true });
+      // The morning. Today asks for the owner's own yes on the held time: Confirm or Decline, nothing else to do with it.
+      await tab('Today');
+      const card = page.locator('ion-card.sug', { hasText: 'Held for your OK' });
+      await card.locator('.held-what', { hasText: 'Call with Sam' }).waitFor({ timeout: 10_000 });
+      await card.locator('.held-when', { hasText: /· with Sam$/ }).waitFor();
+      await card.getByText('Your AI pencilled this in. Sam was told you\'ll confirm it yourself.').waitFor();
+      await card.locator('.held-until', { hasText: /^Held until .+ With no answer by then it's off/ }).waitFor();
+      await card.getByRole('button', { name: 'Decline', exact: true }).waitFor();
+      expect(await card.getByRole('button', { name: 'Dismiss' }).count()).toBe(0);
+      await page.locator('ion-item.lake-row', { hasText: 'Call with Sam' }).locator('.lake-pill', { hasText: 'Held' }).waitFor();
+      // The same card sits in Sam's chat, under what the house told Sam's AI.
+      await page.goto(`${house}/owner/#note=${left.note}`);
+      await page.locator('.bubble.ai', { hasText: 'hasn\'t confirmed it yet' }).waitFor({ timeout: 10_000 });
+      const inChat = page.locator('.chat-card ion-card.sug', { hasText: 'Held for your OK' });
+      await inChat.locator('.held-what', { hasText: 'Call with Sam' }).waitFor();
+      await inChat.getByRole('button', { name: 'Confirm', exact: true }).waitFor();
+      await tidy();
+      await goBack();
+      await tab('Today');
+      // Handled for you: each thing it did, saying it was your AI, with Undo where there is something to undo (a held
+      // time isn't handled: it waits above).
+      const handled = page.locator('ion-list.handled');
+      await handled.locator('ion-item.handled-row', { hasText: "Replied to Sam's AI" }).getByText(/Your AI · /).waitFor({ timeout: 10_000 });
+      await handled.locator('ion-item.handled-row', { hasText: "Replied to Sam's AI" }).getByRole('button', { name: 'Undo', exact: true }).waitFor();
+      const heldLine = handled.locator('ion-item.handled-row', { hasText: /Held a time with Sam.* for you to confirm/ });
+      await heldLine.waitFor();
+      expect(await heldLine.getByRole('button', { name: 'Undo' }).count()).toBe(0);
+      await tidy();
+      // My AI counts it as waiting, not handled.
+      await tab('My AI');
+      expect(await page.locator('.stat-row .stat b').allTextContents()).toEqual(['1', '1', '0']);
+      await page.locator('ion-item.slept-row', { hasText: /Held a time with Sam.* for you to confirm/ }).locator('.lake-pill', { hasText: 'Held' }).waitFor();
+      await page.getByText('Stopped 1 thing it may not do.').waitFor();
+      // Confirm: the owner's own yes. The house tells Sam's AI, and the time is theirs.
+      await tab('Today');
+      await card.getByRole('button', { name: 'Confirm', exact: true }).click();
+      await page.getByText('Confirmed. Sam was told.').waitFor({ timeout: 10_000 });
+      await card.waitFor({ state: 'detached', timeout: 10_000 });
+      expect(await heard('confirmed')).toMatchObject({ kind: 'note.reply', note: left.note, text: expect.stringMatching(/^Confirmed by /), booking: { id: booked.id, status: 'confirmed' } });
+      await page.locator('ion-item.lake-row', { hasText: 'Call with Sam' }).locator('.lake-pill', { hasText: 'Confirmed' }).waitFor({ timeout: 10_000 });
+      await tidy();
+      await tab('My AI');
+      expect(await page.locator('.stat-row .stat b').allTextContents()).toEqual(['2', '0', '0']);
+      await page.locator('ion-item.slept-row', { hasText: /Booked with Sam.* \(you confirmed\)/ }).locator('.lake-pill', { hasText: 'Confirmed' }).waitFor();
+      // A reply can be undone (the AI's connector sends the correction).
+      const said = page.locator('ion-item.slept-row', { hasText: 'Replied to Sam\'s AI: I\'ve asked for a time.' });
+      await said.getByRole('button', { name: 'Undo' }).click();
+      await said.getByText('Undone').waitFor({ timeout: 10_000 });
+      await tidy();
+    } finally { await sam.close(); }
     // On duty, with tonight's count; its own page says what it may do; off duty after a sheet that asks.
     const on = page.locator('ion-item.duty-row', { hasText: 'Night AI' });
     await on.locator('.lake-pill', { hasText: 'On duty' }).waitFor({ timeout: 10_000 });

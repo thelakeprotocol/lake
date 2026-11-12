@@ -649,3 +649,113 @@ describe('people (step 3 of the app design)', () => {
     h.close();
   });
 });
+
+describe('a time on duty is held for the owner (step 5 of the app design)', () => {
+  it('answers a note from someone the AI may answer; the house says it is only held; Confirm, Decline and its date each end it in the house\'s words', async () => {
+    const told: Record<string, unknown>[] = [], sent: { url: string; m: Record<string, any> }[] = [];
+    let key: JWK | null = null;
+    const known = (jkt: string, domain: string) => ({ jkt, domain, purpose: 'contact', fields: [], retention: 'P0D', added: '', until: '', uses: 0 });
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [],
+      statusUrl: () => 'http://h/status', tell: async (_u, p) => { told.push(p); },
+      panel: {
+        standing: () => [known('sam-key-0123456789abcdefgh', 'sam.example'), known('dee-key-0123456789abcdefgh', 'dee.example'), known('kim-key-0123456789abcdefgh', 'kim.example')],
+        availability: () => ({ tz: 'UTC', free: ['mon-sun 00:00-24:00'], meetings: 30 }), door: () => ({ name: 'Robin' }), activity: () => [], money: async () => null,
+        replyAgent: async (url: string, m: Record<string, any>) => { sent.push({ url, m }); return { kind: 'ok' }; },
+      } as never,
+    });
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 5 });
+    const { code } = await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, phone) });
+    const ai = await generateIdentity('duty');
+    await post('/assistant', { publicJwk: ai.publicJwk, code, label: 'Night AI', url: 'https://duty.example/a2a' });
+    const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, ai, { iss: 'assistant' }));
+    const from = (n: string) => ({ name: `${n}'s AI`, domain: `${n.toLowerCase()}.example`, webId: `https://${n.toLowerCase()}.example/#a`, url: `https://${n.toLowerCase()}.example/a2a`, key: `${n.toLowerCase()}-key-0123456789abcdefgh`, checked: false });
+    const sam = desk.addNote({ from: from('Sam'), text: 'Could we talk tomorrow?' })!, eve = desk.addNote({ from: from('Eve'), text: 'I am new here: a call?' })!;
+    const hour = 3_600_000, slot = (h: number) => new Date(Math.ceil((Date.now() + h * hour) / hour) * hour).toISOString();
+    const book = (re: string | undefined, start: string, who = 'Sam') => asAi({ kind: 'assistant.agenda', what: `Call with ${who}`, when: 'tomorrow', with: who, start, ...(re ? { re } : {}) });
+
+    // No note named, a stranger's note, or too soon for the owner to answer: nothing is held and nobody is told anything.
+    expect(await book(undefined, slot(26))).toMatchObject({ error: expect.stringContaining('agenda.re') });
+    expect(await book(eve, slot(26), 'Eve')).toMatchObject({ error: expect.stringContaining('answers this conversation themselves') });
+    expect(await book(sam, slot(1))).toMatchObject({ error: expect.stringContaining('three hours') });
+    expect(sent).toHaveLength(0);
+    expect(desk.agenda).toHaveLength(0);
+
+    // Held: the slot is taken, Sam's agent has the house's own words (not the AI's), and the owner has Confirm and Decline.
+    const held = await book(sam, slot(26));
+    expect(held).toMatchObject({ ok: true, status: expect.stringContaining('held') });
+    expect(sent[0]).toMatchObject({ url: 'https://sam.example/a2a', m: { kind: 'note.reply', note: sam, text: expect.stringContaining('Robin hasn\'t confirmed it yet'), booking: { id: held.id, status: 'held' } } });
+    expect(sent[0]!.m.text).toContain('Robin\'s AI has pencilled in');
+    expect(await book(sam, slot(28))).toMatchObject({ error: expect.stringContaining('already held') });
+    const logged = await asAi({ kind: 'assistant.duty.log', tool: 'lake_house_suggest', action: 'book', to: { name: 'Sam' }, text: 'Call with Sam', undo: { kind: 'agenda', ref: held.id } });
+    let list = await owner({ kind: 'list' });
+    const card = list.suggestions.find((x: { booking?: { id: string } }) => x.booking?.id === held.id);
+    expect(card).toMatchObject({ from: 'Night AI', ask: { choices: ['Confirm', 'Decline'] }, booking: { with: 'Sam\'s AI' }, text: expect.stringContaining('was told you\'ll confirm it yourself') });
+    expect(list.agenda[0]).toMatchObject({ id: held.id, held: { note: sam } });
+    expect(list.notes.find((n: { id: string }) => n.id === sam).answered).toMatchObject({ by: 'Night AI' });
+    // Not handled yet, and not something to undo: it waits for the owner.
+    expect((await owner({ kind: 'panel.duty.log' })).duties[0]).toMatchObject({ summary: { handled: 0, waiting: 1 } });
+    const line = (await owner({ kind: 'panel.today', tz_offset: 0 })).lines.find((l: { text: string }) => l.text.startsWith('Held a time'));
+    expect(line).toMatchObject({ text: 'Held a time with Sam\'s AI for you to confirm' });
+    expect(line.undo).toBeUndefined();
+    expect(await owner({ kind: 'panel.assistant.dismiss', id: card.id })).toMatchObject({ error: expect.stringContaining('Confirm or Decline') });
+    expect(agendaIcs(desk.agenda, 'http://h/me')).toContain('STATUS:TENTATIVE');
+
+    // Confirm: the owner's own yes, sent by the house; the AI hears it and sends nothing.
+    expect(await owner({ kind: 'panel.assistant.answer', id: card.id, choice: 'Confirm' })).toMatchObject({ ok: true });
+    expect(sent[1]!.m).toMatchObject({ kind: 'note.reply', note: sam, text: expect.stringMatching(/^Confirmed by Robin: /), booking: { status: 'confirmed' } });
+    list = await owner({ kind: 'list' });
+    expect(list.suggestions.some((x: { booking?: unknown }) => x.booking)).toBe(false);
+    expect(list.agenda[0].held).toBeUndefined();
+    expect(list.agenda[0].confirmed).toEqual(expect.any(String));
+    expect(list.notes.find((n: { id: string }) => n.id === sam).answered).toMatchObject({ by: 'you', own: true });
+    expect(agendaIcs(desk.agenda, 'http://h/me')).toContain('STATUS:CONFIRMED');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.at(-1)).toMatchObject({ about: 'booking.confirmed', agenda: held.id });
+    expect((await owner({ kind: 'panel.duty.log' })).entries.find((e: { id: string }) => e.id === logged.entry)).toMatchObject({ booking: 'confirmed', to: { key: 'sam-key-0123456789abcdefgh' } });
+    expect((await owner({ kind: 'panel.duty.log' })).duties[0]).toMatchObject({ summary: { handled: 1 } });
+
+    // Decline: the time is free again and Dee is told it's off.
+    const dee = desk.addNote({ from: from('Dee'), text: 'Lunch on Friday?' })!;
+    const second = await book(dee, slot(30), 'Dee');
+    const card2 = (await owner({ kind: 'list' })).suggestions.find((x: { booking?: { id: string } }) => x.booking?.id === second.id);
+    expect(await owner({ kind: 'panel.assistant.answer', id: card2.id, choice: 'Decline' })).toMatchObject({ ok: true });
+    expect(sent.at(-1)!.m).toMatchObject({ note: dee, text: expect.stringContaining('Robin said no'), booking: { status: 'declined' } });
+    expect(desk.agenda.some((x) => x.id === second.id)).toBe(false);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(told.at(-1)).toMatchObject({ about: 'booking.declined' });
+
+    // Its date passes unanswered: off, the slot free, Kim told, and the owner's card gone.
+    const kim = desk.addNote({ from: from('Kim'), text: 'A quick call this week?' })!;
+    const third = await book(kim, slot(40), 'Kim');
+    desk.agenda.find((x) => x.id === third.id)!.held!.until = new Date(Date.now() - 1000).toISOString();
+    (desk as unknown as { sweepHeld: () => void }).sweepHeld();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent.at(-1)!.m).toMatchObject({ note: kim, text: expect.stringContaining('wasn\'t confirmed by Robin in time'), booking: { status: 'expired' } });
+    expect(desk.agenda.some((x) => x.id === third.id)).toBe(false);
+    expect((await owner({ kind: 'list' })).suggestions.some((x: { booking?: unknown }) => x.booking)).toBe(false);
+    expect(told.at(-1)).toMatchObject({ about: 'booking.expired' });
+
+    // Someone who wrote from the public page, in a chat the owner handed to their AI: the same words wait at their link.
+    const web = desk.addWebNote({ text: 'Could I call you about the fence?', from: 'Pat', purpose: 'contact' })!;
+    const pat = (await owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === web.id).from.webId;
+    expect(await book(web.id, slot(50), 'Pat')).toMatchObject({ error: expect.stringContaining('answers this conversation themselves') });
+    expect(await owner({ kind: 'panel.chat.mode', key: pat, mode: 'ai' })).toMatchObject({ ok: true });
+    const fourth = await book(web.id, slot(50), 'Pat');
+    expect(fourth).toMatchObject({ ok: true, status: expect.stringContaining('held') });
+    expect(desk.webNoteState(web.id, web.key)).toMatchObject({ status: 'replied, and the answer is still to come', answer: { text: expect.stringContaining('Robin hasn\'t confirmed it yet') } });
+    const card4 = (await owner({ kind: 'list' })).suggestions.find((x: { booking?: { id: string } }) => x.booking?.id === fourth.id);
+    expect(card4.booking).toMatchObject({ with: 'Pat', what: 'Call with Pat' });
+    expect(await owner({ kind: 'panel.assistant.answer', id: card4.id, choice: 'Confirm' })).toMatchObject({ ok: true });
+    expect(desk.webNoteState(web.id, web.key)).toMatchObject({ status: 'answered', answer: { text: expect.stringMatching(/^Confirmed by Robin: /) } });
+    server.close();
+  }, 20_000);
+});
