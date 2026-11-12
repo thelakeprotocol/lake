@@ -1,10 +1,11 @@
 import { useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
+import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
 import { ReadsToggles } from './ai';
 import { WantRow, WelcomeCard, wantNeedsYou } from './chats';
 import { push } from './nav';
+import { TaskCard, TellButton } from './tasks';
 
 // Inbox: everything that waits for your tap, newest first. Data requests your rules left to you, your AI's questions and
 // suggestions, app sign-ins, your circle's calls; and what's coming up.
@@ -32,13 +33,15 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const v = list.data;
   if (!v) return h(Page, { title: 'Today', big: true, status, footer: tabbar }, h(Failed, { error: list.error }));
   const groups = sameAsks(v.requests);
-  const decide = v.suggestions.filter(needsDecision), notes = v.suggestions.filter((x) => !needsDecision(x));
+  // What you told an AI to do shows its own card until you've seen how it ended; the note it was about waits under it.
+  const tasks = taskCards(v), tasked = new Set(tasks.map((t) => t.suggestion));
+  const decide = v.suggestions.filter((x) => needsDecision(x) && !tasked.has(x.id)), notes = v.suggestions.filter((x) => !needsDecision(x) && !tasked.has(x.id));
   const waiting = v.assistants.filter((a) => a.waiting);
   // What you're looking for shows here while it needs you: an offer to say yes to, or a parcel to say arrived (the rest is under Money).
   const wants = (v.wants ?? []).filter(wantNeedsYou);
   // People waiting for an answer in People: Today never says all clear while they wait (round 15).
   const w = today.data?.waiting, knownN = w?.known ?? 0, newN = (w?.people ?? 0) - knownN;
-  const any = groups.length || decide.length || (v.connects ?? []).length || waiting.length || connectedNote || w?.people || wants.length;
+  const any = groups.length || decide.length || tasks.length || (v.connects ?? []).length || waiting.length || connectedNote || w?.people || wants.length;
   const lines = today.data?.lines ?? [];
   return h(Page, { title: 'Today', big: true, status, footer: tabbar },
     h(WelcomeCard, { door: door.data, key: 'welcome' }),
@@ -49,6 +52,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'alert-circle-outline' }), `${shortName(a.label)} isn't reading`),
       h('p', {}, waitingLine(a))))),
     ...groups.map((all) => h(RequestCard, { key: all[0]!.id, all })),
+    ...tasks.map((t) => h(TaskCard, { key: `t-${t.id}`, t, v })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
     wants.length ? h(Section, { title: 'Looking for', key: 'wants', cls: 'chat-list wants' }, ...wants.map((x) => h(WantRow, { key: x.want.id, w: x }))) : null,
     w?.people ? h(Section, { key: 'wait', cls: 'waiting' },
@@ -176,6 +180,8 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
     x.ask?.answered ? h('p', { class: 'muted-line' }, `You answered: ${x.ask.answered}`) : null,
     x.booking ? h('p', { class: 'muted-line held-until' }, `Held until ${dayTime(x.booking.until)}. With no answer by then it's off, and ${x.booking.with} is told.`) : null,
     acts.length ? h('div', { class: 'card-actions wrap' }, ...acts) : null,
+    // One instruction and your AI does it: it writes to them for you and reports back (13 Nov).
+    h(TellButton, { x, onSent: onDone }),
     x.booking ? null : x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : h('div', { class: 'card-reply' },
       h('ion-input', { value: reply, placeholder: 'Reply in your own words', 'aria-label': 'Reply', class: 'reply-input', onionInput: (e: CustomEvent) => setReply(String(e.detail.value ?? '')) }),
       reply.trim() ? h(Btn, { label: 'Send', size: 'small', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, text: reply.trim() }); setReply(''); void toast('Sent to your AI'); } }) : null),
@@ -214,4 +220,4 @@ function CircleNote({ x, c }: { x: Note; c: CircleItem }) {
 }
 
 /** How many things wait for a decision, for the tab's badge. */
-export const decisions = (v?: ListView) => (v ? v.requests.length + v.suggestions.filter(needsDecision).length + (v.connects ?? []).length + (v.wants ?? []).filter(wantNeedsYou).length : 0);
+export const decisions = (v?: ListView) => (v ? v.requests.length + v.suggestions.filter((x) => needsDecision(x) && !taskCards(v).some((t) => t.suggestion === x.id)).length + taskCards(v).filter((t) => t.state === 'back' || t.state === 'cant').length + (v.connects ?? []).length + (v.wants ?? []).filter(wantNeedsYou).length : 0);

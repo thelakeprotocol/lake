@@ -556,3 +556,26 @@ ion-button { --border-radius: 12px; font-weight: 600; letter-spacing: 0; text-tr
 ion-button.button-outline { --border-width: 1.5px; --border-color: var(--lake-line); --color: var(--lake-text); }
 ion-button.button-outline.ion-color-danger { --border-color: var(--lake-red); }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+
+/* Telling your AI what to do: the sheet, and the card that says how far it got. */
+.tell { padding: 4px 20px 0; }
+.tell-about, .task-did { background: var(--lake-surface-2); border-radius: 14px; padding: 10px 12px; margin: 10px 0; }
+.tell-about small, .task-did small { display: block; font-size: 12px; font-weight: 700; color: var(--lake-muted); margin-bottom: 2px; }
+.tell-about p, .task-did p { margin: 0; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+ion-card.lake-card ion-card-content .task-did p { margin: 0; }
+.task-did.report { background: color-mix(in srgb, var(--lake-violet) 10%, var(--lake-surface)); }
+.tell-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.chip { border: 1px solid var(--lake-line); background: var(--lake-surface); color: var(--lake-text); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 600; min-height: 38px; cursor: pointer; }
+.chip.on { border-color: var(--lake-mint); background: color-mix(in srgb, var(--lake-mint) 14%, var(--lake-surface)); }
+.tell-input { --background: var(--lake-surface-2); border-radius: 14px; --padding-start: 12px; --padding-end: 12px; --padding-top: 10px; margin-top: 10px; font-size: 16px; }
+.tell-scope { font-size: 13.5px; }
+.tell .card-actions .tell-send { flex: 1; }
+.tell-row { margin-top: 12px; }
+.tell-btn { margin: 0; }
+.task-card { border-color: color-mix(in srgb, var(--lake-violet) 35%, transparent); }
+.task-card.back, .task-card.cant { border-color: color-mix(in srgb, var(--lake-amber) 45%, transparent); }
+.task-card .card-kicker .lake-pill { margin-left: auto; }
+ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 650; line-height: 1.35; margin: 2px 0 4px; }
+.mode-note.task-note { color: var(--lake-violet); }
+.mode-note.task-note ion-icon { vertical-align: -2px; }
+.mode-note.task-note .link-btn { color: var(--lake-violet); text-decoration: underline; }

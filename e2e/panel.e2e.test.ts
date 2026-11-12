@@ -755,6 +755,117 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
+  it('tells its AI what to do about a message in a few words: the AI writes to them for a day, five messages at most, and the card says how it went (13 Nov)', async () => {
+    const got: Record<string, unknown>[] = [];
+    const sam = await joinLake({ name: 'Sam (Claude)', domain: 'sam.example', node: nodeUrl, port: await freePort(), onMessage: async (m) => { got.push(m.payload as Record<string, unknown>); return { kind: 'received' }; } });
+    const replies = () => got.filter((x) => x.kind === 'note.reply');
+    try {
+      const left = await sam.ask(`${house}/a2a`, { kind: 'note', text: 'Sam here: I\'m selling a used adult hybrid bike for AUD 80. Interested?' }) as { kind: string; note: string };
+      expect(left).toMatchObject({ kind: 'noted' });
+      // Someone new: their chat is the owner's, and the owner's AI may not answer in it.
+      expect(await asAssistant({ kind: 'assistant.reply', note: left.note, text: 'No thanks.' })).toMatchObject({ error: expect.stringMatching(/answers this conversation themselves/) });
+      expect(await asAssistant({ kind: 'assistant.suggest', text: 'Someone new, Sam, wrote to you about a bike for sale. I haven\'t replied: answering is up to you.', note: left.note, advice: 'your_call' })).toMatchObject({ ok: true });
+      await tab('Today');
+      const sug = page.locator('ion-card.sug', { hasText: 'Someone new, Sam' });
+      const badge = async () => { const b = page.locator('ion-tab-button', { hasText: 'Today' }).locator('ion-badge'); return (await b.count()) ? Number(await b.textContent()) : 0; };
+      await sug.waitFor({ timeout: 5000 });
+      const before = await badge();
+      // One button on the AI's note: whom it's about and what they wrote, a few words, what the AI may do with them.
+      await sug.getByRole('button', { name: 'Tell Nova what to do' }).click();
+      await sheet().getByRole('heading', { name: 'Tell Nova what to do' }).waitFor();
+      await sheet().locator('.tell-about', { hasText: 'About Sam\'s message' }).getByText('selling a used adult hybrid bike').waitFor();
+      await sheet().getByText(/^Nova can read this chat and send Sam up to 5 messages, until this time tomorrow\. This doesn't let it spend money or change your rules\. Nova isn't running by itself\. It sees this the next time you open a chat with it\.$/).waitFor();
+      const send = sheet().locator('ion-button.tell-send');
+      expect(await send.evaluate((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+      await sheet().getByRole('button', { name: 'Say no thanks, politely' }).click();
+      await expect.poll(() => send.evaluate((b) => (b as HTMLButtonElement).disabled)).toBe(false);
+      await tidy();
+      await send.click();
+      await page.getByText('Sent to Nova').waitFor({ timeout: 6000 });
+      // The AI's note makes way for the card of what you told it; nothing waits for you while the AI has it.
+      const card = page.locator('ion-card.task-card');
+      await card.locator('.card-kicker', { hasText: 'You told Nova' }).getByText('With Nova').waitFor({ timeout: 6000 });
+      await card.getByText('“Say no thanks, politely”').waitFor();
+      await card.getByText(/^Not started yet\. Nova isn't running by itself\./).waitFor();
+      await sug.waitFor({ state: 'detached' });
+      await expect.poll(badge, { timeout: 5000 }).toBe(before - 1);
+      await tidy();
+      // The AI finds it with the conversation, and the house sends what it writes: to Sam's AI, marked as on the owner's instruction.
+      const mine = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string; your_humans_words: string; left: number; conversation: { note: string; text: string }[] }[] };
+      expect(mine.tasks).toHaveLength(1);
+      expect(mine.tasks[0]).toMatchObject({ your_humans_words: 'Say no thanks, politely', left: 5, conversation: [{ note: left.note, text: expect.stringContaining('hybrid bike') }] });
+      await card.getByText('Nova is working on it.').waitFor({ timeout: 6000 });
+      expect(await asAssistant({ kind: 'assistant.reply', note: left.note, text: 'Thanks for thinking of us, Sam, but no: we have enough bikes.' })).toMatchObject({ ok: true, sent: true, left: 4 });
+      expect(replies()).toHaveLength(1);
+      expect(replies()[0]).toMatchObject({ note: left.note, text: 'Thanks for thinking of us, Sam, but no: we have enough bikes.', by: 'their AI, as they asked' });
+      await card.locator('.task-did', { hasText: 'Nova wrote to Sam' }).getByText('we have enough bikes').waitFor({ timeout: 6000 });
+      await card.getByText('Waiting for Sam\'s answer.').waitFor();
+      // They answer: the card says so, and how many messages the AI has left.
+      const again = await sam.ask(`${house}/a2a`, { kind: 'note', text: 'No worries. It\'s here till Sunday if you change your mind.' }) as { kind: string; note: string };
+      expect(again).toMatchObject({ kind: 'noted' });
+      await card.locator('.task-did.theirs', { hasText: 'Sam answered' }).getByText('here till Sunday').waitFor({ timeout: 6000 });
+      await card.getByText('Sam answered. Nova can send 4 more messages.').waitFor();
+      await tidy();
+      // The AI says how it ended: Done, in its words, and the chat shows whose words went out and why.
+      expect(await asAssistant({ kind: 'assistant.task.done', id: mine.tasks[0]!.id, outcome: 'done', text: 'Told Sam no thanks. The bike is there till Sunday if you change your mind.' })).toMatchObject({ ok: true });
+      await card.locator('.card-kicker').getByText('Done').waitFor({ timeout: 6000 });
+      await card.locator('.task-did.report', { hasText: 'Nova says' }).getByText('The bike is there till Sunday').waitFor();
+      await card.getByRole('button', { name: 'Let Nova keep answering Sam' }).waitFor();
+      await tidy();
+      // Over: the AI is out of that chat again.
+      expect(await asAssistant({ kind: 'assistant.reply', note: again.note, text: 'One more thing.' })).toMatchObject({ error: expect.stringMatching(/answers this conversation themselves/) });
+      await card.getByRole('button', { name: 'Open chat' }).click();
+      await page.locator('.bubble.ai', { hasText: 'we have enough bikes' }).locator('.who', { hasText: 'Nova, your AI, as you asked' }).waitFor({ timeout: 6000 });
+      await tidy();
+      await tab('Today');
+      await card.getByRole('button', { name: 'OK', exact: true }).click();
+      await card.waitFor({ state: 'detached', timeout: 6000 });
+      expect(await sug.count()).toBe(0);
+      // From the chat itself: a third choice under who replies. The owner's own words this time, and Take it back.
+      await page.goto(`${house}/owner/#note=${again.note}`);
+      await page.locator('.bubble.them', { hasText: 'here till Sunday' }).waitFor({ timeout: 8000 });
+      await page.locator('.replymode').click();
+      await tidy();
+      await sheet().locator('ion-item.tell-opt', { hasText: 'Tell Nova what to do' }).click();
+      await sheet().locator('.tell-about', { hasText: 'About Sam\'s message' }).getByText('here till Sunday').waitFor();
+      await sheet().getByLabel('Your instruction').fill('Ask if they would take 60');
+      await sheet().getByRole('button', { name: 'Send to Nova' }).click();
+      const strip = page.locator('.mode-note.task-note');
+      await strip.getByText(/Nova is on it: “Ask if they would take 60”/).waitFor({ timeout: 6000 });
+      await tidy();
+      expect(await asAssistant({ kind: 'assistant.tasks', note: again.note })).toMatchObject({ task: { left: 5 } });
+      await strip.getByRole('button', { name: 'Take it back' }).click();
+      await strip.waitFor({ state: 'detached', timeout: 6000 });
+      expect(await asAssistant({ kind: 'assistant.tasks', note: again.note })).toEqual({ task: null });
+      // What you took back leaves no card.
+      await tab('Today');
+      await page.waitForTimeout(500);
+      expect(await card.count()).toBe(0);
+      // An AI that can't finish hands it back: the card waits for the owner, and answering Sam themselves settles it.
+      await page.goto(`${house}/owner/#note=${again.note}`);
+      await page.locator('.replymode').click();
+      await sheet().locator('ion-item.tell-opt').click();
+      await sheet().getByLabel('Your instruction').fill('Ask where to pick it up');
+      await sheet().getByRole('button', { name: 'Send to Nova' }).click();
+      await strip.waitFor({ timeout: 6000 });
+      const second = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string }[] };
+      expect(await asAssistant({ kind: 'assistant.task.done', id: second.tasks[0]!.id, outcome: 'back', text: 'Sam asks for your phone number first. That is yours to give.' })).toMatchObject({ ok: true });
+      await strip.waitFor({ state: 'detached', timeout: 6000 });
+      await tab('Today');
+      await card.locator('.card-kicker').getByText('Back to you').waitFor({ timeout: 6000 });
+      await card.getByText('Sam asks for your phone number first').waitFor();
+      await card.getByRole('button', { name: 'Tell Nova what to do' }).waitFor();
+      await tidy();
+      await card.getByRole('button', { name: 'Reply yourself' }).click();
+      await page.getByLabel('Message').fill('Pick-up is fine, no number needed.');
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      await page.locator('.bubble.me:not(.sending)', { hasText: 'Pick-up is fine' }).waitFor({ timeout: 6000 });
+      await tab('Today');
+      await card.waitFor({ state: 'detached', timeout: 6000 });
+      await tidy();
+    } finally { await sam.close().catch(() => {}); }
+  });
+
   it('edits rules with a save bar that shows only when something changed', async () => {
     await tab('Rules');
     await page.locator('ion-item.rule').first().waitFor();

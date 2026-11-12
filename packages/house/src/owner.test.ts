@@ -725,6 +725,126 @@ describe('what an attacker tried (round 16)', () => {
     expect((h.desk as unknown as { firstContacts: Map<string, unknown> }).firstContacts.has('old-key')).toBe(false);
     h.close();
   });
+
+  // 13 Nov: "a button to delegate to AI with a small instructions… and it will just do it on your behalf".
+  const withReplies = async () => {
+    const sent: { url: string; m: Record<string, any> }[] = [];
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (url: string, m: Record<string, any>) => { sent.push({ url, m }); return { kind: 'ok' }; } } });
+    return { ...h, sent };
+  };
+  it('a task: the owner\'s few words let one AI into one chat, five messages at most, and nobody else', async () => {
+    const h = await withReplies();
+    const a = await h.connect('Helper'), b = await h.connect('Other');
+    const kid = a.id.publicJwk.kid!;
+    const id = h.desk.addNote({ from: from('sam'), text: 'Selling a used hybrid bike, AUD 80. Interested?' })!;
+    h.desk.addNote({ from: from('kim'), text: 'Lunch on Friday?' });
+    await settle();
+    // Someone new: neither AI gets the words, or may answer.
+    expect((await a.call({ kind: 'list' })).notes.find((n: { id: string }) => n.id === id)).toMatchObject({ hidden: true });
+    expect(await a.call({ kind: 'assistant.reply', note: id, text: 'No thanks' })).toHaveProperty('error');
+    // Only the owner gives a task; an AI can't give itself one.
+    expect(await a.call({ kind: 'panel.task.set', note: id, text: 'Buy it' })).toHaveProperty('error');
+    expect(await h.owner({ kind: 'panel.task.set', note: id, text: 'Say no thanks' })).toMatchObject({ error: expect.stringContaining('which of your AIs') });
+    h.told.length = 0;
+    const set = await h.owner({ kind: 'panel.task.set', note: id, by: kid, text: 'Say no thanks, politely' });
+    expect(set.task).toMatchObject({ state: 'open', left: 5, by: kid, label: 'Helper', to: { key: from('sam').key }, text: 'Say no thanks, politely' });
+    await settle();
+    // That AI alone is told, and reads that chat alone.
+    expect(h.told.filter((t) => t.p.about === 'task').map((t) => t.url)).toEqual([a.url]);
+    const mine = await a.call({ kind: 'list' });
+    expect(mine.notes.find((n: { id: string }) => n.id === id)).toMatchObject({ text: expect.stringContaining('bike') });
+    expect(mine.notes.find((n: { text: string; hidden?: boolean }) => n.hidden)).toBeTruthy(); // Kim's stays hidden
+    expect(mine.tasks).toHaveLength(1);
+    expect((await b.call({ kind: 'list' })).notes.every((n: { hidden?: boolean }) => n.hidden)).toBe(true);
+    const tasks = await a.call({ kind: 'assistant.tasks' });
+    expect(tasks.tasks[0]).toMatchObject({ id: set.task.id, your_humans_words: 'Say no thanks, politely', left: 5, conversation: [{ note: id, text: expect.stringContaining('bike') }] });
+    expect((await b.call({ kind: 'assistant.tasks' })).tasks).toEqual([]);
+    expect(await a.call({ kind: 'assistant.tasks', note: id })).toMatchObject({ task: { id: set.task.id, left: 5 } });
+    expect(await b.call({ kind: 'assistant.tasks', note: id })).toEqual({ task: null });
+    // The other AI, and the other chat, stay shut.
+    expect(await b.call({ kind: 'assistant.reply', note: id, text: 'hello' })).toHaveProperty('error');
+    const kims = h.desk.notes.find((n) => n.from.key === from('kim').key)!.id;
+    expect(await a.call({ kind: 'assistant.reply', note: kims, text: 'Friday works' })).toHaveProperty('error');
+    // The house sends the answer and counts it; the sender doesn't become someone the owner's side knows.
+    expect(await a.call({ kind: 'assistant.reply', note: id, text: 'Thanks, but no.' })).toMatchObject({ ok: true, sent: true, left: 4 });
+    expect(h.sent).toEqual([{ url: from('sam').url, m: expect.objectContaining({ kind: 'note.reply', note: id, text: 'Thanks, but no.', by: expect.stringContaining('as they asked') }) }]);
+    expect(await a.call({ kind: 'assistant.known', key: from('sam').key })).toMatchObject({ known: false });
+    const owners = await h.owner({ kind: 'list' });
+    expect(owners.notes.find((n: { id: string }) => n.id === id)).toMatchObject({ answered: { text: 'Thanks, but no.', by: 'Helper', task: set.task.id } });
+    expect(owners.notes.find((n: { id: string }) => n.id === id).known).toBeFalsy();
+    expect(owners.tasks[0]).toMatchObject({ id: set.task.id, seen: expect.any(String), did: [{ text: 'Thanks, but no.', note: id }] });
+    // Today says what was done for the owner, and Sam no longer waits; Kim still does.
+    const today = await h.desk.today(0);
+    expect(today.lines.find((l) => l.by === 'ai')?.text).toContain('wrote to');
+    expect(today.waiting).toMatchObject({ people: 1 });
+    // Sam writes again: the tasked AI gets the words with the task's name, the other doesn't.
+    h.told.length = 0;
+    const again = h.desk.addNote({ from: from('sam'), text: 'What about 70?' })!;
+    await settle();
+    expect(h.told.find((t) => t.url === a.url && t.p.about === 'note')!.p).toMatchObject({ text: 'What about 70?', task: set.task.id });
+    expect(h.told.find((t) => t.url === b.url && t.p.about === 'note')!.p.text).toBeUndefined();
+    for (let left = 3; left >= 0; left--) expect(await a.call({ kind: 'assistant.reply', note: again, text: `Still no (${left})` })).toMatchObject({ sent: true, left });
+    expect(await a.call({ kind: 'assistant.reply', note: again, text: 'A sixth' })).toMatchObject({ error: expect.stringContaining('5 messages are used') });
+    expect(h.sent).toHaveLength(5);
+    // Its report ends it; nothing more goes out under it, and the owner's OK clears the card.
+    expect(await h.owner({ kind: 'panel.task.ok', id: set.task.id })).toMatchObject({ error: expect.stringContaining('still open') });
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'maybe', text: 'x' })).toHaveProperty('error');
+    expect(await b.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x' })).toHaveProperty('error');
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Told Sam no thanks; they offered 70 and I declined.' })).toMatchObject({ ok: true });
+    expect((await h.owner({ kind: 'list' })).tasks[0]).toMatchObject({ state: 'done', ended: { text: expect.stringContaining('declined') } });
+    expect(await a.call({ kind: 'assistant.reply', note: again, text: 'One more' })).toHaveProperty('error');
+    expect((await a.call({ kind: 'list' })).notes.find((n: { id: string }) => n.id === again)).toMatchObject({ hidden: true });
+    expect(await a.call({ kind: 'panel.task.ok', id: set.task.id })).toHaveProperty('error');
+    expect(await h.owner({ kind: 'panel.task.ok', id: set.task.id })).toEqual({ ok: true });
+    expect((await h.owner({ kind: 'list' })).tasks[0].ok).toBe(true);
+    h.close();
+  });
+
+  it('a task ends when the owner answers, takes it back or gives another; when its time runs out; and with its AI', async () => {
+    const h = await withReplies();
+    // No AI: said so, with what's needed.
+    const first = h.desk.addNote({ from: from('sam'), text: 'Selling a bike' })!;
+    expect(await h.owner({ kind: 'panel.task.set', note: first, text: 'Say no' })).toMatchObject({ error: 'no AI is connected yet', needs: 'ai' });
+    const a = await h.connect('Helper');
+    const ended = (why: string) => h.told.filter((t) => t.p.about === 'task.ended' && String(t.p.why).includes(why)).length;
+    const task = async (note: string, text = 'Say no') => (await h.owner({ kind: 'panel.task.set', note, text })).task as { id: string };
+    const state = async (id: string) => (await h.owner({ kind: 'list' })).tasks.find((t: { id: string }) => t.id === id) as { state: string; ended?: { why?: string } } | undefined;
+    // A task is about one chat with someone who can be answered.
+    expect(await h.owner({ kind: 'panel.task.set', text: 'Do my taxes' })).toMatchObject({ error: expect.stringContaining('one conversation') });
+    expect(await h.owner({ kind: 'panel.task.set', note: first, text: '   ' })).toHaveProperty('error');
+    // Another instruction for the same chat replaces the first.
+    const t1 = await task(first), t2 = await task(first, 'Ask what size the frame is');
+    expect(await state(t1.id)).toMatchObject({ state: 'stopped', ended: { why: 'You gave a new instruction.' } });
+    expect((await a.call({ kind: 'assistant.tasks' })).tasks.map((t: { id: string }) => t.id)).toEqual([t2.id]);
+    // The owner answers themselves: it's theirs again.
+    expect(await h.owner({ kind: 'panel.note.reply', id: first, text: 'No thanks, Sam.' })).not.toHaveProperty('error');
+    expect(await state(t2.id)).toMatchObject({ state: 'stopped', ended: { why: 'You answered yourself.' } });
+    expect(await a.call({ kind: 'assistant.reply', note: first, text: 'Too late' })).toHaveProperty('error');
+    // Taken back.
+    const dee = h.desk.addNote({ from: from('dee'), text: 'Can you lend me a ladder?' })!;
+    const t3 = await task(dee);
+    expect(await h.owner({ kind: 'panel.task.stop', id: t3.id })).toEqual({ ok: true });
+    expect(await state(t3.id)).toMatchObject({ state: 'stopped', ended: { why: 'You took it back.' } });
+    // Its day ran out with nothing sent: not done.
+    const t4 = await task(dee);
+    h.desk.tasks.find((t) => t.id === t4.id)!.until = new Date(Date.now() - 1000).toISOString();
+    expect(await a.call({ kind: 'assistant.reply', note: dee, text: 'Late' })).toHaveProperty('error');
+    (h.desk as unknown as { sweepTasks: () => void }).sweepTasks();
+    expect(await state(t4.id)).toMatchObject({ state: 'cant', ended: { why: 'Time ran out.' } });
+    // Blocking the sender ends it; so does removing the AI.
+    const t5 = await task(dee);
+    await h.desk.mute(from('dee').key);
+    expect(await state(t5.id)).toMatchObject({ state: 'stopped' });
+    const kim = h.desk.addNote({ from: from('kim'), text: 'Lunch?' })!;
+    const t6 = await task(kim);
+    await settle();
+    expect(ended('new instruction')).toBe(1);
+    expect(ended('answered yourself')).toBe(1);
+    expect(ended('took it back')).toBe(1);
+    expect(await h.owner({ kind: 'panel.assistant.revoke', kid: a.id.publicJwk.kid })).not.toHaveProperty('error');
+    expect(await state(t6.id)).toMatchObject({ state: 'stopped', ended: { why: 'That AI is no longer connected.' } });
+    h.close();
+  });
 });
 
 describe('people (step 3 of the app design)', () => {

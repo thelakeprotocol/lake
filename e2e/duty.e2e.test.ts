@@ -154,7 +154,7 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     const asDuty = new Client({ name: 'duty', version: '0' });
     await asDuty.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
     const tryTool = async (name: string, args: Record<string, unknown>) => { const r = await asDuty.callTool({ name, arguments: args }); return { isError: !!r.isError, text: (r.content as { text: string }[])[0]!.text }; };
-    expect(await tryTool('lake_house', { view: 'data' })).toMatchObject({ isError: true, text: expect.stringMatching(/requests, free hours, the overview and errands only/) });
+    expect(await tryTool('lake_house', { view: 'data' })).toMatchObject({ isError: true, text: expect.stringMatching(/requests, free hours, the overview, errands and tasks only/) });
     expect(await tryTool('lake_house_suggest', { text: 'Confirm with the courier?', ask: { choices: ['Yes', 'No'] }, then: [{ to: 'https://stranger.example/a2a', text: 'hello' }, null] })).toMatchObject({ isError: true, text: expect.stringMatching(/nothing their tap would send or sign/) });
     expect((await tryTool('lake_house', { view: 'free' })).isError).toBe(false);
     // What it sees of the house: the notes at the door and its own errands; no agenda, keys, wants or other AIs (round 10).
@@ -173,5 +173,32 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     // Off duty: the house's runner stops.
     expect(await owner({ kind: 'panel.duty.off' })).toMatchObject({ ok: true });
     expect(await owner({ kind: 'panel.duty.runner' })).toMatchObject({ running: false });
+
+    // A task (13 Nov): off duty, someone new leaves a note at the door; the owner tells their AI what to do in a few
+    // words, and the house's runner starts for that alone: it answers them through the house and says it's done.
+    const sam = new Client({ name: 'Sam', version: '0' });
+    await sam.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${(await (await fetch(`${site}/mcp/oauth/anonymous`, { method: 'POST' })).json() as { access_token: string }).access_token}` } } }));
+    await sam.callTool({ name: 'lake_ask', arguments: { to: site, kind: 'note', text: 'I am selling a used hybrid bike for AUD 80. Interested?' } });
+    type Listed = { notes: { id: string; text: string }[]; assistants: { kid: string; label: string; runs?: string }[]; tasks: { id: string; state: string; left: number; did: { text: string }[]; ended?: { text?: string } }[] };
+    const bike = await wait(async () => ((await owner({ kind: 'list' })) as Listed).notes.find((n) => /hybrid bike/.test(n.text)));
+    const mine = ((await owner({ kind: 'list' })) as Listed).assistants.find((a) => a.runs === 'house')!;
+    expect(mine).toBeTruthy();
+    // On its own it may not answer through the house, off duty or on: tried with its own sign-in.
+    const off = new Client({ name: 'duty', version: '0' });
+    await off.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
+    const refused = await off.callTool({ name: 'lake_house_reply', arguments: { note: bike.id, text: 'Yes please!' } });
+    expect(refused.isError).toBe(true);
+    await off.close();
+    const set = await owner({ kind: 'panel.task.set', note: bike.id, by: mine.kid, text: 'Thanks, but no: we have enough bikes.' });
+    expect(set).toMatchObject({ task: { state: 'open', left: 5 } });
+    const done = await wait(async () => ((await owner({ kind: 'list' })) as Listed).tasks.find((t) => t.id === set.task.id && t.state === 'done'));
+    expect(done).toMatchObject({ left: 4, did: [{ text: 'Thanks, but no: we have enough bikes.' }], ended: { text: 'Sent what you said.' } });
+    // Sam's AI has the answer, said to be from the owner's AI on their instruction.
+    const got = await wait(async () => { const r = await sam.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 0 } }); const t = (r.content as { text: string }[])[0]!.text; return /we have enough bikes/.test(t) ? t : undefined; });
+    expect(got).toMatch(/as they asked/);
+    await sam.close();
+    // With no task left the house's runner is at rest again, and still off duty.
+    await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running: boolean }).running === false || undefined);
+    expect(((await owner({ kind: 'panel.duty.log' })).duties as { state: { on: boolean } }[]).every((d) => !d.state.on)).toBe(true);
   });
 });

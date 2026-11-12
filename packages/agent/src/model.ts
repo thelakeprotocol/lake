@@ -43,7 +43,7 @@ function anthropicRun(spec: ModelSpec): ModelRun {
       const tools: Anthropic.Beta.BetaTool[] = (await c.listTools()).tools
         .filter((t) => DUTY_TOOLS.includes(t.name))
         .map((t) => ({ name: t.name, description: t.description ?? '', input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema }));
-      const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: 'Look at what waits, do what your grant allows, and say in one line what you did.' }];
+      const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: prompt.includes('gave you a task') ? 'Look at your task, do what your human asked, and say in one line what you did.' : 'Look at what waits, do what your grant allows, and say in one line what you did.' }];
       while (true) {
         // Stopped (off duty, a new model, the house handed back): no further call, not even the one in hand.
         if (signal?.aborted) return { code: 0, out: `${last}\n(stopped)`.trim(), tokens };
@@ -81,7 +81,7 @@ function anthropicRun(spec: ModelSpec): ModelRun {
  * No model: what a careful AI on duty would do with what waits, as a fixed routine (tests, and a sandbox with no model
  * key): each new message becomes a note for its human, and it tries one thing it may not do, which the connector refuses.
  */
-const stubRun: ModelRun = async ({ lake, token }) => {
+const stubRun: ModelRun = async ({ lake, token, prompt }) => {
   const c = await lakeClient(lake, token);
   const call = async (name: string, args: Record<string, unknown>) => {
     const r = await c.callTool({ name, arguments: args });
@@ -89,6 +89,17 @@ const stubRun: ModelRun = async ({ lake, token }) => {
     try { return { ...(JSON.parse(text) as Record<string, any>), isError: !!r.isError } as Record<string, any>; } catch { return { text, isError: !!r.isError } as Record<string, any>; }
   };
   try {
+    // A task from its human: their words are sent as they are, and it says it's done (a model would word it).
+    const tasks = ((await call('lake_house', { view: 'tasks' })).tasks ?? []) as { id: string; your_humans_words: string; conversation: { note: string }[]; you_sent: unknown[] }[];
+    let did = 0;
+    for (const t of tasks) {
+      const note = t.conversation.at(-1)?.note;
+      if (!note || t.you_sent.length) continue;
+      const sent = await call('lake_house_reply', { note, text: t.your_humans_words });
+      await call('lake_house_suggest', { text: sent.isError ? 'I couldn\'t send it.' : 'Sent what you said.', task: t.id, outcome: sent.isError ? 'cant' : 'done' });
+      did++;
+    }
+    if (prompt.includes('gave you a task')) return { code: 0, out: `Did ${did} task(s) for my human.`, tokens: 0 };
     const inbox = await call('lake_inbox', { wait_seconds: 0 });
     const said = ((inbox.messages ?? []) as { from: { name: string; url?: string }; message?: { text?: unknown } }[]).filter((m) => typeof m.message?.text === 'string');
     for (const m of said) await call('lake_house_suggest', { text: `While you were away, ${m.from.name} wrote: "${String(m.message!.text).slice(0, 300)}". Shall I answer?`, ask: { choices: ['Yes, answer', 'Leave it'] } });

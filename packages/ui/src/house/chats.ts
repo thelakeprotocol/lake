@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
-import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Assistant, type Chat, type DoorNote, type DutyEntry, type DoorState, type DutyLog, type ListView, type Note, type WantOfferV, type WantV } from './logic';
+import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Assistant, type Chat, type DoorNote, type DutyEntry, type DoorState, type DutyLog, type ListView, type Note, type TaskV, type WantOfferV, type WantV } from './logic';
 import { back, focusNote, push } from './nav';
 import { SuggestionCard } from './inbox';
+import { TellSheet } from './tasks';
 
 // People: one row per person, the ones you know above the new ones, and a chat with each. What you're looking for (a
 // thread of shops' offers each) shows on Today while it needs you, and under Money.
@@ -86,10 +87,10 @@ export function ChatPage({ arg }: { arg: string }) {
   const c = chats.find((x) => x.key === arg || x.keys.includes(arg) || x.notes.some((n) => n.id === arg));
   // A link to a chat that's gone (cleared, say): back to the list.
   if (!c) return h(Page, { title: 'Chat', back: () => back('#chats'), backLabel: 'People' }, h(Empty, { icon: 'chatbubble-outline', title: 'This chat isn\'t here any more', action: h('ion-button', { shape: 'round', onClick: () => back('#chats') }, 'Back to People') }));
-  return h(ChatView, { c, all: chats, held: (list.data.suggestions ?? []).filter((x) => x.booking && x.note), ais: list.data.assistants ?? [] });
+  return h(ChatView, { c, all: chats, held: (list.data.suggestions ?? []).filter((x) => x.booking && x.note), ais: list.data.assistants ?? [], task: (list.data.tasks ?? []).find((t) => t.state === 'open' && c.keys.includes(t.to.key)) });
 }
 
-function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; ais: Assistant[] }) {
+function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Note[]; ais: Assistant[]; task?: TaskV }) {
   const bump = useBump();
   const [mode, setMode] = useState(c.mode);
   const [info, setInfo] = useState(false);
@@ -97,6 +98,7 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
   const [sending, setSending] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ text: string; why: string } | null>(null);
   const [pick, setPick] = useState(false);
+  const [tell, setTell] = useState(false);
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const live = (duty.data?.duties ?? []).filter(dutyLive), onDuty = live.length > 0;
   // The AI by its name where there is one to name (the one on duty, or the only one connected) and the name is short.
@@ -147,7 +149,7 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
         // Whose words: yours, your AI's by its name, or your house's own (a held time is told in fixed words).
         n.answered!.by === 'you' ? (n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ' Your house, on your answer') : null)
           : n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ` Your house, for ${shortName(n.answered!.by)}`)
-            : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered!.by)}, your AI`),
+            : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered!.by)}, your AI${n.answered!.task ? ', as you asked' : ''}`),
         h('p', {}, n.answered!.text),
         h('div', { class: 'bubble-foot' },
           e ? h('button', { type: 'button', class: 'link-btn bubble-undo', onClick: () => void undo(e) }, 'Undo') : null,
@@ -169,7 +171,10 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
     h('ion-icon', { slot: 'start', name: icon }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, sub)), shown === m ? h('ion-icon', { slot: 'end', name: 'checkmark', color: 'primary', 'aria-label': 'Chosen' }) : null);
   const composer = h('div', { class: 'composer' },
     // Handed to an AI that isn't answering now: said where you'd type, so the chat doesn't sit unanswered unnoticed.
-    c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
+    // An instruction of yours is open here: said where you'd type (typing your own answer ends it).
+    task ? h('p', { class: 'mode-note task-note' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(task.label)} is on it: “${task.text.length > 60 ? `${task.text.slice(0, 58)}…` : task.text}” `,
+      h('button', { type: 'button', class: 'link-btn', onClick: async () => { try { await must({ kind: 'panel.task.stop', id: task.id }); void toast('Taken back'); } catch (e) { void toast((e as Error).message, { color: 'danger' }); } bump(); } }, 'Take it back'))
+      : c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
     h('div', { class: 'composer-row' },
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
       h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: () => void send(), 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
@@ -181,8 +186,12 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
         h('small', { class: 'why' }, `Not sent: ${failed.why}.`),
         h('div', { class: 'bubble-foot' }, h('button', { type: 'button', class: 'link-btn', onClick: () => void send(failed.text) }, 'Retry'), h('button', { type: 'button', class: 'link-btn', onClick: () => { setDraft(failed.text); setFailed(null); } }, 'Edit'))) : null,
       h('div', { ref: end })),
-    h(Sheet, { open: pick, onClose: () => setPick(false), title: `Who replies to ${c.name}?`, short: true },
-      h(Section, {}, opt('me', 'person-outline', 'I reply', hasAi ? 'Their messages wait for you. Your AI doesn\'t get their words.' : 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote))),
+    h(Sheet, { open: pick, onClose: () => setPick(false), title: `Who replies to ${c.name}?`, short: !hasAi || !!c.forwarded, half: hasAi && !c.forwarded },
+      h(Section, {}, opt('me', 'person-outline', 'I reply', hasAi ? 'Their messages wait for you. Your AI doesn\'t get their words.' : 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote)),
+      // One instruction about this chat, in place of handing the whole chat over.
+      hasAi && !c.forwarded ? h(Section, {}, h('ion-item', { button: true, detail: true, lines: 'none', class: 'mode-opt tell-opt', onClick: () => { setPick(false); setTell(true); } },
+        h('ion-icon', { slot: 'start', name: 'create-outline' }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, `Tell ${ai === 'My AI' ? 'my AI' : ai} what to do`), h('p', {}, 'One instruction about this chat. It writes to them for you and reports back.')))) : null),
+    h(TellSheet, { open: tell, onClose: () => setTell(false), note: latest.id }),
     h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, who: shown === 'ai' ? `${ai} replies` : 'You reply', change: () => { setInfo(false); setPick(true); }, latest, close: () => setInfo(false) })));
 }
 

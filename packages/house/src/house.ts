@@ -299,7 +299,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   setTimeout(() => void consentIndex.relist().catch(() => {}), 20_000).unref();
   // The owner's AI on duty, run here when they choose (duty-runner.ts): as awake as the house.
   const dutyRunner = houseRunner({ dataDir: o.dataDir, connector: o.connector ?? new URL('/mcp', o.publicUrl).href, house: o.publicUrl, operatorModel: o.dutyModel, log: say });
-  setTimeout(() => void dutyRunner.resume(), 30_000).unref();
+  // Back on duty if it was; off duty, back for any task its owner gave it that still waits.
+  setTimeout(() => void dutyRunner.resume().then(() => desk.wakeForTasks()), 30_000).unref();
   const desk = new OwnerDesk({
     panel, dutyRunner,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl, ownerUrl: o.ownerUrl,
