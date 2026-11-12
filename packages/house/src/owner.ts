@@ -279,6 +279,10 @@ const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); retur
 const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close']);
 // What each look needs beyond the base: the owner turns these on per assistant; the house refuses the rest (SPEC §6.1).
 const NEEDS: Record<string, Reads> = { 'panel.rules': 'records', 'panel.activity': 'records', 'panel.agents': 'records', 'panel.consents': 'records', 'panel.access': 'records', 'panel.data': 'records', 'panel.money': 'money', 'panel.market': 'money' };
+/** Refused actions (limits aside) that take an AI off duty for the night. */
+const REFUSALS_A_NIGHT = 3;
+/** News that only informs an assistant: nothing for it to answer or do (SPEC §6.1, `fyi`). */
+const FYI = new Set(['study', 'money', 'pledge.money', 'duty', 'duty.undo', 'reads', 'sender.muted', 'block', 'request.answered', 'request.withdrawn']);
 const NEEDS_SAID: Record<Reads, string> = { records: 'records (data, consents, requests, activity, rules, who is in their circles and the favours owed)', money: 'money (what they earned and spent, offers priced for them, the most they\'d pay)' };
 // Play money on a sandbox (in whichever currency); a real Lake would take the cap from the owner's own settings. A gig fee
 // or a bond is more than 500 (run 78: a bar couldn't sign A$600 for a band), so 1000.
@@ -847,13 +851,18 @@ export class OwnerDesk {
     // Who, not what: the name they gave (or their AI's), so the owner knows at a glance; the words stay in the panel.
     if (payload.about === 'note') { const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined; this.notifyOwner('note', f?.as ? `${f.as} left you a note${f.web ? '' : ', via their AI'}.` : f?.name && !f.web ? `${f.name.replace(/ \(.*\)$/, '')} left you a note.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`); }
     if (!this.o.tell) return;
-    // Requests carry fields and prices, offers and purchases money: only to an assistant allowed to read them.
-    const about = String(payload.about ?? ''), needs: Reads | undefined = about.startsWith('request.') ? 'records' : about.startsWith('offer.') || about === 'want.bought' ? 'money' : undefined;
+    // Requests carry fields and prices, a study answered is what the house did with the records, offers, purchases and
+    // money in are money: only to an assistant allowed to read them, so never to one on duty. Money earned through an
+    // assistant's own sale is told to that one (it wrote the cart).
+    const about = String(payload.about ?? ''), needs: Reads | undefined = about.startsWith('request.') || about === 'study' ? 'records' : about.startsWith('offer.') || about === 'want.bought' || about === 'money' || about === 'pledge.money' ? 'money' : undefined;
+    // News that asks nothing of an assistant says so (fyi), and a connector starts no AI on duty for it: on 12 Nov a
+    // study answered every quarter of an hour started thirty model runs in a night, each with nothing to do.
+    const told = FYI.has(about) || about.startsWith('booking.') || payload.text_hidden ? { ...payload, fyi: true } : payload;
     for (const a of this.assistants.values()) {
       if (!a.url || (onlyKid && a.kid !== onlyKid)) continue;
-      if (needs && !this.readsOf(a).has(needs)) continue;
+      if (needs && !this.readsOf(a).has(needs) && !(about === 'money' && payload.via && payload.via === a.webId)) continue;
       // A busy network loses a message now and then (run 24's assistant never heard of its allowance): try three times.
-      const send = (left: number, wait: number): void => void this.o.tell!(a.url!, { kind: 'house.news', house: this.o.webId, ...payload })
+      const send = (left: number, wait: number): void => void this.o.tell!(a.url!, { kind: 'house.news', house: this.o.webId, ...told })
         .catch(() => { if (left > 1) setTimeout(() => send(left - 1, wait * 4), wait).unref(); });
       send(3, 5_000);
     }
@@ -1690,6 +1699,8 @@ export class OwnerDesk {
           // Marking a note answered takes it off the owner's waiting list: only in a conversation their AI may answer.
           if (this.modeOf(n.from) !== 'ai') return void res.status(403).json({ error: 'your human answers this conversation themselves: the note stays with them as unanswered' });
           n.answered = { text: String(q.text ?? '').trim().slice(0, 1000), by: assistant.label, at: new Date().toISOString() };
+          // Its log entry may have come first and put this reply under their newest note: it belongs under this one only.
+          for (const x of this.notes) if (x !== n && x.from.key === n.from.key && x.answered?.entry && x.answered.by === assistant.label && x.answered.text === n.answered.text && Date.now() - Date.parse(x.answered.at) < 120_000) delete x.answered;
           this.linkReplies(assistant);
           void this.saveNotes();
           this.touch();
@@ -1759,13 +1770,22 @@ export class OwnerDesk {
           const heldItem = undo?.kind === 'agenda' ? this.agenda.find((x) => x.id === undo.ref && x.held) : undefined;
           if (heldItem?.held) { e.to = { name: heldItem.held.to.name, ...(heldItem.held.to.key ? { key: heldItem.held.to.key } : {}), ...(heldItem.held.to.url ? { url: heldItem.held.to.url } : {}) }; e.booking = 'held'; }
           this.dutyLog.push(e);
-          if (this.linkReplies(assistant)) void this.saveNotes();
+          const linked = this.linkReplies(assistant);
+          // A reply on duty answers what that person wrote last, whether or not the connector could name the note (it
+          // forgets which note is whose when it restarts: on 12 Nov three runs each found Pike unanswered and wrote again).
+          const last = e.action === 'reply' && !e.refused && e.to?.key && !this.notes.some((n) => n.answered?.entry === e.id) ? this.notes.find((n) => n.from.key === e.to!.key && !n.from.web) : undefined;
+          const open = last && !last.answered && this.modeOf(last.from) === 'ai' ? last : undefined;
+          if (open) open.answered = { text: (e.text ?? '').trim().slice(0, 1000), by: assistant.label, at: e.at, entry: e.id };
+          if (linked || open) void this.saveNotes();
           await this.saveDuty();
           const start = this.nightStart(assistant.duty);
           const tonight = this.dutyLog.filter((x) => x.by === assistant.kid && Date.parse(x.at) >= start);
-          if (tonight.filter((x) => x.refused && !x.limit).length >= 3 && !this.isRevoked(assistant.duty.statusId)) await this.dutyOff(assistant, 'three refused actions in one night: off duty until your human puts you back on');
+          const refusals = tonight.filter((x) => x.refused && !x.limit).length;
+          if (refusals >= REFUSALS_A_NIGHT && !this.isRevoked(assistant.duty.statusId)) await this.dutyOff(assistant, 'three refused actions in one night: off duty until your human puts you back on');
           const now = this.dutyState(assistant);
-          return void res.json({ ok: true, entry: e.id, on: now.on, ...(now.on ? { used: now.used, cap: assistant.duty.cap } : { why: now.why }) });
+          // A refusal says how many are left: an AI that means well stops trying it another way (12 Nov: three honest
+          // mistakes took the owner's AI off duty on its second night).
+          return void res.json({ ok: true, entry: e.id, on: now.on, ...(e.refused && !e.limit ? { refusals, off_at: REFUSALS_A_NIGHT } : {}), ...(now.on ? { used: now.used, cap: assistant.duty.cap } : { why: now.why }) });
         }
         if (p.kind === 'assistant.private_answer') {
           // The owner's private answer, for this assistant's connector to send as a secret count's shares (never shown to it
@@ -2235,7 +2255,7 @@ export class OwnerDesk {
         }
         return void res.json({ ok: true });
       }
-      if (p.kind === 'list') return void res.json(this.view(signer !== this.ownerJwk?.kid ? (assistant?.duty && !this.isRevoked(assistant.duty.statusId) ? 'duty' : signer) : false));
+      if (p.kind === 'list') return void res.json(this.view(signer !== this.ownerJwk?.kid ? signer : false, !!assistant?.duty && !this.isRevoked(assistant.duty.statusId)));
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
       if (p.kind === 'revoke') return void res.json({ revoked: await this.revoke(p.revoke ?? 'all') });
       if (p.kind === 'release' && this.o.leaseHours) {
@@ -2556,16 +2576,27 @@ export class OwnerDesk {
    * chats the owner answers themselves without their words), or as an AI on duty may: only what its grant needs, the notes
    * at the door and its own errands (round 10: on duty it had seen price limits, the agenda, keys and other AIs' allowances).
    */
-  view(who: false | string | 'duty' = false) {
+  view(who: false | string = false, duty = false) {
     const forAssistant = who !== false;
     const hidden = (from: { key?: string; web?: boolean; webId?: string }) => forAssistant && this.modeOf(from) === 'me';
     const full = this.fullView(forAssistant);
     // A standing yes is a consent: its domain is said only to an assistant that reads records.
-    const seesConsents = who !== 'duty' && this.readsOf(this.assistants.get(who || '')).has('records');
+    const seesConsents = !duty && this.readsOf(this.assistants.get(who || '')).has('records');
     const why = (n: object) => (!seesConsents && (n as { known_why?: string }).known_why?.startsWith('a standing yes') ? { known_why: 'your human\'s side has dealt with it before' } : {});
-    const notes = full.notes.map((n) => (hidden(n.from) ? { ...n, ...why(n), text: '(your human answers this conversation themselves)', ...(n.answered ? { answered: { ...n.answered, text: '(theirs)' } } : {}), ...(n.retracted ? { retracted: { ...n.retracted, text: '(theirs)' } } : {}), hidden: true } : { ...n, ...why(n) }));
+    // A reply answers the conversation: an older note under a newer reply says so, or an AI that starts each run from
+    // scratch finds it unanswered and writes again.
+    const replied = new Map<string, string>();
+    if (forAssistant) for (const n of full.notes) { const k = n.from.key, at = (n.answered as { at?: string } | undefined)?.at; if (k && at && at > (replied.get(k) ?? '')) replied.set(k, at); }
+    const since = (n: { at: string; answered?: unknown; from: { key?: string } }) => (!n.answered && n.from.key && (replied.get(n.from.key) ?? '') > n.at ? { answered_since: replied.get(n.from.key) } : {});
+    const notes = full.notes.map((n) => (hidden(n.from) ? { ...n, ...why(n), ...since(n), text: '(your human answers this conversation themselves)', ...(n.answered ? { answered: { ...n.answered, text: '(theirs)' } } : {}), ...(n.retracted ? { retracted: { ...n.retracted, text: '(theirs)' } } : {}), hidden: true } : { ...n, ...why(n), ...since(n) }));
     if (!forAssistant) return full;
-    if (who === 'duty') return { webId: full.webId, until: full.until, requests: [], suggestions: full.suggestions.filter((x) => (x as { errand?: unknown }).errand), notes, wants: [], agenda: [], keys: [], assistants: [], connects: [], seen: undefined };
+    if (duty) {
+      // On duty: the notes, its errands, and its own night so far (what it sent, held, told the owner, was refused), since
+      // each run starts from scratch: on 12 Nov one told the owner of the same scam note four times.
+      const a = this.assistants.get(who);
+      const mine = full.suggestions.filter((x) => (x as { by?: string }).by === who && !(x as { errand?: unknown }).errand).slice(0, 20);
+      return { webId: full.webId, until: full.until, requests: [], suggestions: [...full.suggestions.filter((x) => (x as { errand?: unknown }).errand), ...mine], notes, wants: [], agenda: [], keys: [], assistants: [], connects: [], seen: undefined, tonight: a?.duty ? this.tonightOf(a) : [] };
+    }
     const reads = this.readsOf(this.assistants.get(who)), records = reads.has('records'), money = reads.has('money');
     return {
       ...full, notes, connects: [], assistants: full.assistants.filter((a) => a.kid === who), keys: [],
@@ -2597,6 +2628,15 @@ export class OwnerDesk {
     const taken = new Set([...this.assistants.values()].filter((a) => a.kid !== kid).map((a) => a.label.toLowerCase()));
     if (!taken.has(base.toLowerCase())) return base;
     for (let i = 2; ; i++) if (!taken.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
+  }
+
+  /** An AI on duty's own night so far, in short: what a run that starts from scratch must know not to say twice. */
+  private tonightOf(a: AssistantKey) {
+    const start = this.nightStart(a.duty!);
+    return this.dutyLog.filter((x) => x.by === a.kid && Date.parse(x.at) >= start).slice(-40).map((x) => ({
+      at: x.at, action: x.action, ...(x.to?.name ? { to: x.to.name } : {}), ...(x.text ? { text: x.text.slice(0, 200) } : {}),
+      ...(x.refused ? { refused: x.refused, ...(x.limit ? { limit: true } : {}) } : {}), ...(x.booking ? { booking: x.booking } : {}), ...(x.undone ? { undone: true } : {}),
+    }));
   }
 
   /** What an assistant may read beyond the base: nothing while it's on duty, else what the owner chose. */

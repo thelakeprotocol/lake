@@ -387,7 +387,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     return p;
   };
   const dutyGate = async (name: string, a: Record<string, unknown>): Promise<{ refused: string } | { log: DutyLog } | undefined> => {
-    const refuse = async (why: string, action = name, limit = false) => { await houseCall({ kind: 'assistant.duty.log', tool: name, action, refused: why, ...(limit ? { limit: true } : {}) }).catch(() => {}); return { refused: why }; };
+    const refuse = async (why: string, action = name, limit = false) => {
+      const r = (await houseCall({ kind: 'assistant.duty.log', tool: name, action, refused: why, ...(limit ? { limit: true } : {}) }).catch(() => null)) as { on?: boolean; refusals?: number; off_at?: number } | null;
+      // Said with the refusal, so a run that means well doesn't try it another way and lose the night.
+      const left = !r?.refusals || !r.off_at ? '' : r.refusals >= r.off_at || r.on === false ? ` (refused action ${r.refusals} tonight: you are off duty now, until your human puts you back on. Stop here)` : ` (refused action ${r.refusals} of ${r.off_at} tonight: at ${r.off_at} you are off duty until your human puts you back on, so don't try it another way; leave your human a plain note instead)`;
+      return { refused: `${why}${left}` };
+    };
     // Room tonight for one more of this, for this person (a few replies and one booking each; bookings and replies apart).
     const room = async (action: string, to?: { key?: string; name?: string }) => {
       const r = (await houseCall({ kind: 'assistant.duty', action, ...(to ? { to } : {}) }).catch(() => null)) as { room?: { ok: boolean; why?: string } } | null;
@@ -2740,7 +2745,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (look) { dutyLook.at = Date.now(); dutyLook.every = Math.max(30, Math.min(3600, look.every || 600)); }
       const deliver = onDuty ? [...orders.values()].filter((o) => o.role === 'seller' && o.evidence[0]?.step === 'ordered' && !o.delivered && (o.payment === 'held' || o.payment === 'paid')).length : 0;
       const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty', ...(look ? { runner: look } : {}) }).catch(() => null)) as { on?: boolean; why?: string } | null) : null;
-      return { waiting: inbox.length, ...(deliver ? { to_deliver: deliver } : {}), ...(inbox[0] ? { oldest: inbox[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}) };
+      // Its own house's news that asks nothing (fyi: a study answered, a held time's ending) is read with the next real
+      // message: no run is started for it.
+      const asks = inbox.filter((m) => !((m.from as { your_house?: boolean }).your_house && m.message.kind === 'house.news' && m.message.fyi === true));
+      return { waiting: asks.length, ...(inbox.length > asks.length ? { fyi: inbox.length - asks.length } : {}), ...(deliver ? { to_deliver: deliver } : {}), ...(asks[0] ? { oldest: asks[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}) };
     },
     wake: async () => { await agent(); },
     passport: async () => {

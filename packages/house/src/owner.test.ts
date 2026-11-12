@@ -293,6 +293,85 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(desk.nightStart(a.duty!, Date.UTC(2026, 10, 7, 3, 0))).toBe(Date.UTC(2026, 10, 6, 22, 0));
     server.close();
   });
+
+  it('a night on duty that starts each run from scratch: news that asks nothing, what it already did, and how many refusals are left', async () => {
+    const told: { url: string; p: Record<string, any> }[] = [];
+    let key: JWK | null = null;
+    const desk = new OwnerDesk({
+      dataDir: await mkdtemp(join(tmpdir(), 'desk-')), webId: 'http://h/me', actor: 'house:h', openPairing: true, emit: () => {},
+      readOwnerKey: async () => key, saveOwnerKey: async (k) => { key = k; }, writeGrant: async () => {}, saveRevoked: async () => {}, loadRevoked: async () => [],
+      statusUrl: () => 'http://h/status', tell: async (url, p) => { told.push({ url, p }); },
+      panel: { standing: () => [{ jkt: 'sam-key-0123456789abcdefgh', domain: 'sam.example', purpose: 'contact', fields: [], retention: 'P0D', added: '', until: '', uses: 0 }] } as never,
+    });
+    await desk.init();
+    const server = express().use('/owner', desk.router()).listen(0);
+    const base = `http://localhost:${(server.address() as AddressInfo).port}/owner`;
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const phone = await generateIdentity('phone');
+    await post('/pair', { publicJwk: phone.publicJwk });
+    const owner = async (p: Record<string, unknown>) => post('/api', await signMessage(p, phone, { iss: 'http://h/me' }));
+    const { id, draft } = await owner({ kind: 'panel.duty.draft', kinds: ['reply', 'book'], cap: 5 });
+    const { code } = await owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, phone) });
+    const night = await generateIdentity('duty'), day = await generateIdentity('day'), plain = await generateIdentity('plain'), shop = await generateIdentity('shop');
+    await post('/assistant', { publicJwk: night.publicJwk, code, label: 'Night AI', url: 'https://night.example/a2a' });
+    const pair = async (who: typeof day, label: string, reads: string[], webId?: string) => post('/assistant', { publicJwk: who.publicJwk, code: (await owner({ kind: 'panel.assistant.invite', label, reads })).code, label, url: `https://${label.toLowerCase()}.example/a2a`, ...(webId ? { webId } : {}) });
+    await pair(day, 'Day', ['records', 'money']);
+    await pair(plain, 'Plain', []);
+    await pair(shop, 'Shop', [], 'https://shop.example/#a');
+    const asAi = async (p: Record<string, unknown>) => post('/api', await signMessage(p, night, { iss: 'assistant' }));
+    const heard = async (about: string) => { await new Promise((r) => setTimeout(r, 20)); return told.filter((t) => t.p.about === about).map((t) => new URL(t.url).hostname.split('.')[0]).sort(); };
+
+    // What the house did with the records, and money in: only to an AI that may read them, never to one on duty; the
+    // one whose own sale earned the money hears of that sale. All of it asks nothing, and says so.
+    desk.news({ about: 'study', question: 'steps', fieldsCounted: ['steps'], recordsOut: 0 });
+    expect(await heard('study')).toEqual(['day']);
+    desk.news({ about: 'money', amount: 5, currency: 'AUD', via: 'https://shop.example/#a' });
+    expect(await heard('money')).toEqual(['day', 'shop']);
+    desk.news({ about: 'pledge.money', amount: 2 });
+    expect(await heard('pledge.money')).toEqual(['day']);
+    expect(told.every((t) => t.p.fyi === true)).toBe(true);
+    // A note the AI may answer asks something; one whose words are the owner's doesn't (the owner has it on their phone).
+    told.length = 0;
+    const from = (n: string) => ({ name: `${n}'s AI`, domain: `${n.toLowerCase()}.example`, webId: `https://${n.toLowerCase()}.example/#a`, url: `https://${n.toLowerCase()}.example/a2a`, key: `${n.toLowerCase()}-key-0123456789abcdefgh`, checked: false });
+    const first = desk.addNote({ from: from('Sam'), text: 'Is Robin free on Friday?' })!;
+    desk.addNote({ from: from('Eve'), text: 'I am new here.' });
+    await new Promise((r) => setTimeout(r, 20));
+    const toNight = told.filter((t) => t.url.includes('night.example') && t.p.about === 'note');
+    expect(toNight.find((t) => t.p.note === first)!.p).toMatchObject({ text: 'Is Robin free on Friday?' });
+    expect(toNight.find((t) => t.p.note === first)!.p.fyi).toBeUndefined();
+    expect(toNight.find((t) => t.p.note !== first)!.p).toMatchObject({ text_hidden: expect.any(String), fyi: true });
+
+    // A reply on duty answers what that person wrote last, whether or not the connector named the note: the next run,
+    // which starts from scratch, sees the conversation answered (the older note says since when) and what it did tonight.
+    const second = desk.addNote({ from: from('Sam'), text: 'Or Saturday?' })!;
+    const toSam = { name: 'Sam\'s AI', key: 'sam-key-0123456789abcdefgh', url: 'https://sam.example/a2a' };
+    const said = await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', to: toSam, text: 'Robin will answer in the morning.', undo: { kind: 'correction', ref: toSam.url } });
+    const tip = await asAi({ kind: 'assistant.suggest', text: 'Sam asked about Friday or Saturday; I said you will answer.' });
+    const seen = await asAi({ kind: 'list' });
+    expect(seen.notes.find((n: { id: string }) => n.id === second)).toMatchObject({ answered: { by: 'Night AI', text: 'Robin will answer in the morning.', entry: said.entry } });
+    expect(seen.notes.find((n: { id: string }) => n.id === first)).toMatchObject({ answered_since: expect.any(String) });
+    expect(seen.notes.find((n: { id: string }) => n.id === first).answered).toBeUndefined();
+    expect(seen.tonight).toEqual([expect.objectContaining({ action: 'reply', to: 'Sam\'s AI', text: 'Robin will answer in the morning.' })]);
+    expect(seen.suggestions.map((x: { id: string }) => x.id)).toContain(tip.id);
+    // The owner's own list has no such fields, and another AI's doesn't carry the night.
+    const mine = await owner({ kind: 'list' });
+    expect(mine.tonight).toBeUndefined();
+    expect(mine.notes.some((n: { answered_since?: string }) => n.answered_since)).toBe(false);
+    expect((await post('/api', await signMessage({ kind: 'list' }, day, { iss: 'assistant' }))).tonight).toBeUndefined();
+    // The connector naming an older note afterwards moves the reply there: said once, in one place.
+    expect(await asAi({ kind: 'assistant.answered', note: first, text: 'Robin will answer in the morning.' })).toMatchObject({ ok: true });
+    const after = (await owner({ kind: 'list' })).notes;
+    expect(after.find((n: { id: string }) => n.id === first)).toMatchObject({ answered: { entry: said.entry } });
+    expect(after.find((n: { id: string }) => n.id === second).answered).toBeUndefined();
+
+    // A refusal says how many there have been and where it ends; a limit says neither.
+    expect(await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', refused: 'limit', limit: true })).not.toHaveProperty('refusals');
+    expect(await asAi({ kind: 'assistant.duty.log', tool: 'lake_ask', action: 'reply', refused: 'someone new to your human' })).toMatchObject({ on: true, refusals: 1, off_at: 3 });
+    expect(await asAi({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', refused: 'no money on duty' })).toMatchObject({ on: true, refusals: 2, off_at: 3 });
+    expect((await asAi({ kind: 'list' })).tonight.at(-1)).toMatchObject({ action: 'pay', refused: 'no money on duty' });
+    expect(await asAi({ kind: 'assistant.duty.log', tool: 'lake_pay', action: 'pay', refused: 'no money on duty' })).toMatchObject({ on: false, refusals: 3, off_at: 3 });
+    server.close();
+  }, 20_000);
 });
 
 describe('the morning after a night on duty', () => {

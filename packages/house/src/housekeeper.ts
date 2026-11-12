@@ -739,7 +739,7 @@ export class Housekeeper {
     // The owner's assistant hears of money in as it lands (run 62: one told its human "In: A$0" with $10 earned).
     const cs = check.vc.credentialSubject as Record<string, any>;
     const items = Array.isArray(cs.items) ? cs.items.map((i: { label?: string }) => String(i.label ?? '')).filter(Boolean) : [];
-    this.o.desk.news({ about: 'money', amount: Number(cs.amount?.value ?? 0), currency: String(cs.amount?.currency ?? 'USD'), settlement: String(cs.settlement ?? ''), from: String(cs.payer_name ?? cs.payer ?? ''), ...(items.length ? { for: items } : {}), agreement: String(cs.agreement ?? ''), note: cs.settlement === 'held' ? 'paid to your human\'s house, held until the buyer accepts: tell your human it is coming, not that it is theirs yet' : 'paid to your human\'s house: it shows on their Money' });
+    this.o.desk.news({ about: 'money', amount: Number(cs.amount?.value ?? 0), currency: String(cs.amount?.currency ?? 'USD'), settlement: String(cs.settlement ?? ''), from: String(cs.payer_name ?? cs.payer ?? ''), ...(items.length ? { for: items } : {}), ...(cs.seller ? { via: String(cs.seller) } : {}), agreement: String(cs.agreement ?? ''), note: cs.settlement === 'held' ? 'paid to your human\'s house, held until the buyer accepts: tell your human it is coming, not that it is theirs yet' : 'paid to your human\'s house: it shows on their Money' });
     return this.reply({ kind: 'filed', receipt: agreement });
   }
 

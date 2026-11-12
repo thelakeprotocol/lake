@@ -742,8 +742,16 @@ describe('the owner', () => {
       // Money is refused in code, whatever the model is told.
       const pay = await call('lake_pay', { agent_url: friend.card.supportedInterfaces[0]!.url, amount: 1, unit: 'USD', memo: 'a tip' });
       expect(pay).toMatchObject({ error: true, text: expect.stringContaining('no money on duty') });
+      // The refusal says how many there have been, and where the night ends.
+      expect(pay.text).toContain('refused action 1 of 3 tonight');
       // Nobody new: first contact is the owner's. Sam is known once the owner's side has written to him.
       expect(await call('lake_ask', { to: stranger.card.supportedInterfaces[0]!.url, text: 'Hello!' })).toMatchObject({ error: true, text: expect.stringContaining('someone new to your human') });
+      // A stranger's note at the door is the owner's to read: the AI on duty hears only that one came, and its runner
+      // starts no run for news that asks nothing.
+      expect(await stranger.ask(houses.strict!, { kind: 'note', text: 'Hello, could we talk about your gutters?' })).toMatchObject({ kind: 'noted' });
+      let look: { waiting?: number; fyi?: number } = {};
+      for (let i = 0; i < 20 && !look.fyi; i++) { await new Promise((r) => setTimeout(r, 250)); look = await (await fetch(`${url}/duty/pending`, { headers: { authorization: `Bearer ${anon.access_token}` } })).json(); }
+      expect(look).toMatchObject({ waiting: 0, fyi: 1 });
       // The owner's day assistant (another chat, another agent) writes to Sam: its connector tells the house, by Sam's key.
       const { code: c2 } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Day assistant' });
       const dayTok = await (await fetch(`${url}/oauth/anonymous`, { method: 'POST' })).json();
@@ -757,7 +765,9 @@ describe('the owner', () => {
       const sent = await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, text: 'Monday 10:00 works for my human.' });
       expect(sent.json).toMatchObject({ kind: 'received' });
       // Words only: an order or a cart isn't a reply.
-      expect(await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, message: { kind: 'trade.order', sku: 'x' } })).toMatchObject({ error: true, text: expect.stringContaining('words only') });
+      const third = await call('lake_ask', { to: friend.card.supportedInterfaces[0]!.url, message: { kind: 'trade.order', sku: 'x' } });
+      expect(third).toMatchObject({ error: true, text: expect.stringContaining('words only') });
+      expect(third.text).toContain('you are off duty now');
       // The morning page: the reply with its signed answer and an undo; the refusals said so.
       const log = await ownerCall({ kind: 'panel.duty.log' });
       const reply = log.entries.find((e: { action: string; refused?: string }) => e.action === 'reply' && !e.refused);
