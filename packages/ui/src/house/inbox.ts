@@ -140,6 +140,7 @@ function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
   return h('ion-card', { class: 'lake-card sug' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
     x.sender ? h('p', { class: 'muted-line' }, `About: ${x.sender}`) : null,
+    x.invitedBy ? h('p', { class: `private-line${x.invitedBy.known ? '' : ' warn-text'}` }, h('ion-icon', { name: x.invitedBy.known ? 'person-outline' : 'alert-circle-outline' }), x.invitedBy.known ? ` From ${x.invitedBy.name}, someone your side knows. The terms below are the tally's own.` : ` From ${x.invitedBy.name}, someone your side hasn't dealt with: their words are unchecked. The terms below are the tally's own.`) : null,
     h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
     !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
     x.door ? h('blockquote', {}, x.door.about) : null,

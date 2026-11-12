@@ -1528,7 +1528,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const r = await me.payCart(url, x.mandate, a.hold, a.release_after_hours);
           const filed = await reportSpend(r);
           if (x.status === 'carted') x.status = 'paid';
-          if (r.hold) { x.hold = r.hold.id; x.holdUntil = r.hold.until; x.payment = 'held'; x.reviewHours = a.release_after_hours ?? HOLD_REVIEW_HOURS; } else x.payment = 'paid';
+          if (r.hold) { x.hold = r.hold.id; x.holdUntil = r.hold.until; x.payment = 'held'; x.reviewHours = a.release_after_hours ?? cartTerms(x.mandate.contents).delivery?.review_hours ?? HOLD_REVIEW_HOURS; } else x.payment = 'paid'; // the cart's own review time, as the payments agent holds it (round 11: said 24 h where the cart said 72)
           if (r.hold && x.delivered) x.holdUntil = new Date(Date.now() + x.reviewHours! * 3_600_000).toISOString();
           x.receipt = { credential: r.receipt, card: (await (await fetch(cardUrlFor(`${o.payments ?? 'http://payments:4600'}/a2a`))).json()) as AgentCard };
           x.evidence.push({ step: 'paid', at: new Date().toISOString(), signed: r.receipt });
@@ -1684,6 +1684,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
         currency: z.string().regex(/^[A-Za-z]{3}$/).optional().describe('The currency of price_usd\'s amount, when not US dollars (e.g. AUD): nothing converts; a house rule in another currency won\'t take it'),
         reveal_house: z.boolean().default(false).describe('With a note and no fields: say which house is your human\'s, deliberately. The note then carries that house\'s signed word that you speak for it, which the house you knock on checks. For neighbours and friends your human knows (run 61: a parcel favour from an unproven assistant was turned down twice); never for strangers'),
+        pledge: z.object({ tally: z.string(), id: z.string() }).optional().describe('With a note and no fields: a pledge to invite the owner to sign (lake_pledge): their phone shows it with the tally\'s own terms and a Sign button; only their tap signs'),
         note: z.string().max(1000).optional().describe('To the owner (who you are, why), shown quoted as your unchecked words; with fields, up to 280 characters and it never changes a decision (one that gives orders gets the offer declined); with none, it is the whole message'),
       },
     },
@@ -1699,7 +1700,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (a.reveal_house && !speaksFor) throw new Error('reveal_house: you have no house\'s word to show: only an assistant connected to its human\'s house (lake_house_connect) carries one');
           const named = !a.reveal_house ? namesHouse(a.note) : null;
           if (named) throw new Error(`this names your human's house (${named}). To a neighbour or friend who knows your human, send it with reveal_house: true: it carries the house's checked word that you speak for it; bare words are likely to get a no. To a stranger, leave the house out`);
-          return json(await (await agent()).ask(house, { kind: 'note', text: a.note, purpose: a.purpose, ...(a.reveal_house && speaksFor ? { speaks_for: speaksFor } : {}) }));
+          return json(await (await agent()).ask(house, { kind: 'note', text: a.note, purpose: a.purpose, ...(a.reveal_house && speaksFor ? { speaks_for: speaksFor } : {}), ...(a.pledge ? { pledge: a.pledge } : {}) }));
         }
         if ((a.note?.length ?? 0) > 280) throw new Error('note: up to 280 characters with a data request (with no fields, up to 1000)');
         return json(await (await agent()).knock(house, { purpose: a.purpose, fields: a.fields, priceUsd: a.price_usd, ...(a.currency && a.currency.toUpperCase() !== 'USD' ? { price: { amount: a.price_usd, currency: a.currency.toUpperCase() } } : {}), retention: a.retention, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(a.note ? { note: a.note } : {}) }));
@@ -1752,6 +1753,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         who: z.string().max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
         about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words'),
         from: z.string().max(60).optional().describe('Your human\'s name as they introduce themselves ("Alex"): shown to the person as who the note is from, via you. Ask your human if you don\'t know it'),
+        pledge: z.object({ tally: z.string(), id: z.string() }).optional().describe('A pledge to invite them to sign (lake_pledge): their phone shows it with the tally\'s own terms and a Sign button; only their tap signs'),
         purpose: z.string().default('contact').describe('Default contact. Another of the Lake\'s purposes if it fits better'),
       },
     },
@@ -1773,7 +1775,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (r?.ok) { found = (await r.json()) as Found; break; }
         }
         if (!found?.url) throw new Error(`nobody goes by "${handle}" ${host ? `on ${host}` : 'on this Lake or the Lakes it follows'}. Ask them for their handle (they choose it when they open their house's door), or for their house's address and use lake_knock`);
-        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}) })) as Record<string, any>;
+        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}), ...(a.pledge ? { pledge: a.pledge } : {}) })) as Record<string, any>;
         if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
         if (typeof r.note === 'string') pingsOut.set(r.note, { to: found.handle, house: found.url, about: a.about.slice(0, 80), sent: new Date().toISOString() });
         return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,
@@ -2309,7 +2311,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         'Blind pledges ("nobody goes first", where nobody, the tally included, learns who signed until it fills): sign one, reveal yourself once it has filled, or take your signature back before. It fetches anonymous passes (Privacy Pass) for every open blind pledge at once, signs from a throwaway identity with a commitment to who you are, and keeps the salt and secret for you in this conversation. On a pledge opened with unveil, signing also deposits your reveal sealed to a drand round just after the deadline: if it fills, the tally opens every signer\'s at the same moment and tells you who is in, so nobody reveals first and you needn\'t call reveal; if it lapses, they are discarded unopened. Open a blind pledge with lake_ask to a tally: { kind: "tally.open", id, text, threshold, deadline, blind: true, unveil: true, listed: true } (listed: others find it in lake_ask_around, with how many more it needs). action "open" opens a pledge with money (people only, never blind): each signer puts in contribution, held until the deadline; if it fills, it all goes to the payee (you, unless payee_url names another agent); if not, it all goes back, and with bond, your bond (paid now from your human\'s allowance, held) is shared equally among everyone who signed, so saying yes costs nothing if it doesn\'t happen, and pays (a dominant assurance contract). Only a person signs one, on their own device: suggest it to your human with lake_house_suggest { pledge: { tally, id } }.',
       inputSchema: {
         action: z.enum(['sign', 'reveal', 'withdraw', 'count', 'open']),
-        tally: z.string().describe('The tally\'s address (…/a2a)'),
+        tally: z.string().describe('The tally\'s address (…/a2a), needed for every action, open too: lake_search { skill: "tally" } finds one. Once open, invite people with lake_ping { who, about, pledge: { tally, id } }: their phone shows it with a Sign button'),
         id: z.string().describe('The pledge'),
         text: z.string().optional().describe('open: what signers commit to, and what the money is for'),
         threshold: z.number().int().optional().describe('open: how many must sign for it to bind'),

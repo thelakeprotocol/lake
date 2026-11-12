@@ -999,6 +999,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // A circle of two on the street. Signing before having a person stamp says plainly what to do.
     const organiser = await makeVisitor(await generateIdentity(), 'street.example');
     expect((await ask(`${specialists}/tally/a2a`, organiser, { kind: 'tally.open', id: 'street-circle', text: 'Our street helps out.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), people_only: true, listed: true, circle: { promise: 'a lift or a meal', times: 3, kinds: ['a lift', 'a meal'] } })).reply).toMatchObject({ kind: 'tally.opened' });
+    // Someone invites the owner to sign it, in a note: the phone shows the tally's terms with Sign, and says the sender is
+    // someone the house hasn't dealt with (round 11: an agent's only way to ask a person to sign was free text).
+    expect((await ask(house, organiser, { kind: 'note', text: 'Our street is starting a promise circle: would you join?', pledge: { tally: `${specialists}/tally`, id: 'street-circle' } })).reply).toMatchObject({ kind: 'noted' });
+    await tab('Today');
+    const invite = page.locator('ion-card.sug', { hasText: 'invites you to sign' });
+    await invite.getByText(/someone your side hasn't dealt with: their words are unchecked/).waitFor({ timeout: 15_000 });
+    await invite.getByRole('button', { name: 'Sign the pledge' }).waitFor();
+    await invite.getByRole('button', { name: 'Dismiss' }).click();
+    await invite.waitFor({ state: 'detached', timeout: 10_000 });
     await tab('About this house');
     await page.locator('ion-accordion', { hasText: 'Sign a pledge from your house' }).locator('ion-item[slot="header"]').click();
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);

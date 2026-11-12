@@ -602,13 +602,16 @@ export class Housekeeper {
    * assistant is told, with the sender's address to answer: so a neighbour reaches the assistant without anyone saying
    * which agent it is. Text only, shown as the sender's words; it decides nothing. A few an hour from one sender.
    */
-  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown; as?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string, key: string): Promise<LakeData> {
+  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown; as?: unknown; pledge?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string, key: string): Promise<LakeData> {
     const text = typeof p.text === 'string' ? p.text.trim() : '';
     if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text, purpose? } (text 1 to 1000 characters; purpose, e.g. contact or marketing, defaults to contact)' });
     if (looksLikeInjection(text)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note is for the owner to read, not instructions' });
     // Its purpose, said by the sender (contact by default): the owner's rules about who and why decide whether it is
     // delivered, as they would a knock (run 44: five sales notes all reached the owner).
     const purpose = typeof p.purpose === 'string' && p.purpose ? p.purpose : 'contact';
+    // An invitation to sign a pledge (SPEC §3): structured, so the owner's phone can offer Sign; the words around it stay words.
+    const pl = p.pledge as { tally?: unknown; id?: unknown } | undefined;
+    if (pl !== undefined && (typeof pl !== 'object' || !/^https?:\/\/\S+$/.test(String(pl?.tally ?? '')) || typeof pl?.id !== 'string' || !pl.id || pl.id.length > 80)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'pledge: { tally: the tally\'s address, id: the pledge\'s id }' });
     if (!isPurpose(purpose)) return this.reply({ kind: 'rejected', code: 'malformed', why: `purpose: one of ${Object.keys(PURPOSES).join(', ')}` });
     // A note is a knock at the door like any other: counted, and in the owner's activity (run 47: four notes, "knocksToday: 0").
     this.o.emit(makeEvent('knock', this.actor, `agent:${from.ownerDomain}`, { purpose }));
@@ -626,7 +629,7 @@ export class Housekeeper {
     const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
     // The person the AI writes for, as they name themselves ("Alex"): shown as their words, never checked.
     const as = typeof p.as === 'string' ? p.as.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) : '';
-    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose });
+    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}) });
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).

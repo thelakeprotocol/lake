@@ -188,6 +188,8 @@ export interface Suggestion {
   id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
+  /** Someone (not the owner's AI) invited the owner to sign this pledge, in a note: who, and whether the owner's side knows them. */
+  invitedBy?: { name: string; known: boolean; key?: string };
   /** Another agent the assistant warns the owner about (its name or url, as the assistant gave it). */
   sender?: string;
   /** The assistant's key, so an answer goes back to the one that asked. */
@@ -963,7 +965,7 @@ export class OwnerDesk {
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
   notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
-  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string }): string | null {
+  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string } }): string | null {
     this.touch();
     // The same words again from the same sender are the same note (run 45 got one twice).
     const again = this.notes.find((x) => x.from.webId === n.from.webId && x.text === n.text);
@@ -975,9 +977,36 @@ export class OwnerDesk {
     this.notes = [note, ...this.notes].slice(0, 50);
     void this.saveNotes();
     const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from);
+    // An invitation to sign: a card with the tally's own terms and a Sign button, from this sender, for the owner's tap.
+    if (n.pledge) void this.invite(note.id, n.from, n.pledge, !!known);
     const mine = !!n.from.key && this.chatModes[n.from.key] === 'me';
     this.news({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true } : {}) }, ...(mine ? { text_hidden: 'your human answers this conversation themselves: its words stay with them' } : { text: n.text }), ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
     return note.id;
+  }
+
+  /** A pledge someone invited the owner to sign (a note with `pledge`): put to them as a card, the terms from the tally itself. */
+  private async invite(noteId: string, from: NoteSender, ref: { tally: string; id: string }, known: boolean) {
+    const tally = ref.tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+    if (this.suggestions.some((x) => x.pledge?.tally === tally && x.pledge.id === ref.id)) return;
+    const pledge = await this.pledgeFor(tally, ref.id).catch(() => null);
+    if (!pledge) return; // a tally that doesn't answer, or no such pledge: the note still says what it says
+    const name = from.as ? `${from.as} (via ${from.name})` : from.name;
+    this.suggestions.unshift({ id: randomBytes(6).toString('hex'), from: name, at: new Date().toISOString(), note: noteId, pledge, invitedBy: { name, known, ...(from.key ? { key: from.key } : {}) },
+      text: `${name} invites you to sign: ${pledge.money?.text ?? pledge.quorum?.text ?? ref.id}` });
+    this.suggestions = this.suggestions.slice(0, 100);
+    await this.saveSuggestions();
+    this.touch();
+  }
+
+  /** A pledge as the owner's card shows it: what it costs, from the tally's own terms, never anyone's account of them. */
+  private async pledgeFor(tally: string, id: string): Promise<NonNullable<Suggestion['pledge']>> {
+    const pledge: NonNullable<Suggestion['pledge']> = { tally, id: id.slice(0, 80) };
+    const t = await this.o.panel?.pledgeTerms?.(tally, pledge.id);
+    if (!t || t.error) throw new Error(String(t?.error ?? 'no such pledge'));
+    if (t.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year), ...(Array.isArray(t.circle.kinds) ? { kinds: (t.circle.kinds as unknown[]).map(String) } : {}) };
+    if (t.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
+    if (t.money) pledge.money = { amount: Number(t.money.contribution.amount), currency: String(t.money.contribution.currency), payee: String(t.money.payee.name ?? t.money.payee.webId), threshold: Number(t.threshold), deadline: String(t.deadline), count: Number(t.count), ...(t.money.bond ? { bond: Number(t.money.bond.amount) } : {}), text: String(t.text) };
+    return pledge;
   }
 
   /** Whether the owner has dealt with this visitor: given it a key, or answered a request of its (SPEC §5: presence only to them). */
