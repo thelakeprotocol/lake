@@ -197,10 +197,11 @@ export async function startQuoter(o: QuoterOptions): Promise<Quoter> {
     if (said?.settlement !== 'held' || !said.settlementId) return;
     const content = `Dispatched: ${sold.label}. It arrives within two days; accept it when it does.`;
     const sha256 = createHash('sha256').update(content).digest('hex');
-    await ask(sold.buyer.url, me, { kind: 'trade.deliver', cart: cartId, content, sha256 });
-    // Filed with the payments agent holding the money: whichever of the cart's issued the receipt.
+    // Filed first with the payments agent holding the money (whichever of the cart's issued the receipt), then the buyer
+    // told: a buyer whose AI has gone doesn't cost the delivery.
     const holder = (await cartParties()).find((x) => x.webId === issuer)?.url ?? `${o.payments}/a2a`;
     await ask(holder, me, { kind: 'delivered', hold: said.settlementId, sha256 });
+    await ask(sold.buyer.url, me, { kind: 'trade.deliver', cart: cartId, content, sha256 }).catch(() => {});
     ourCarts.delete(cartId);
   }
 

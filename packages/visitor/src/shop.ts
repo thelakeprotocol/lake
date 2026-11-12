@@ -97,11 +97,12 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     const tracking = `DEMO-${createHash('sha256').update(cartId).digest('hex').slice(0, 8).toUpperCase()}`;
     const note = `Posted${to ? ` to ${[to.addressLocality, to.addressRegion, to.postalCode].filter(Boolean).join(' ')}` : ''}: ${s.label}. Tracking ${tracking} (a demo: nothing is really sent). About ${ex.delivery.days === 1 ? 'a day' : `${ex.delivery.days} days`}.`;
     const sha256 = createHash('sha256').update(note).digest('hex');
-    await ask(s.house, me, { kind: 'want.shipped', want: s.want, cart: cartId, note, sha256 });
+    // Filed with the payments agent first, then the house told: a house that can't be reached doesn't cost the delivery.
     if (vc.credentialSubject?.settlement === 'held' && vc.credentialSubject.settlementId) {
       const holder = (await cartParties()).find((x) => x.webId === issuer)?.url ?? `${o.payments}/a2a`;
       await ask(holder, me, { kind: 'delivered', hold: vc.credentialSubject.settlementId, sha256 });
     }
+    await ask(s.house, me, { kind: 'want.shipped', want: s.want, cart: cartId, note, sha256 }).catch((e: Error) => log(`${ex.name}: shipped, but the house wasn't reached: ${e.message}`));
     sold.delete(cartId);
   }
 

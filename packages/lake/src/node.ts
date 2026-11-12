@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { getHeapStatistics } from 'node:v8';
@@ -332,13 +332,36 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
 
   // What people are looking for (SPEC §6.8): every open want on the cards this node knows, its own Lake's first, newest
   // first. `q` keeps those whose words include all of q's. Sellers' agents read this and offer to the house.
-  app.get('/wants', (req, res) => {
-    const words = (str(req.query.q) ?? '').toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+  // What people are looking for (SPEC §6.8): for shops' backends to poll cheaply (round 12, with Grok's and Fable's lists):
+  // filters by words, area and currency; an ETag so an unchanged list is a 304; readable from a browser (CORS); and one
+  // want at /wants/<id>.
+  const openWants = () => {
     const now = Date.now();
-    const out = registry.all().filter((e) => e.profile.role === 'house' && !e.asleep).flatMap((e) => (e.profile.wants ?? []).filter((w) => Date.parse(w.availabilityEnds) > now).map((w) => ({ want: w, house: { url: e.card.supportedInterfaces[0]?.url, webId: e.profile.webId, name: e.card.name, ...(e.profile.handle ? { handle: e.profile.handle } : {}) }, ...(e.via !== 'direct' ? { via: e.via } : {}) })))
-      .filter((x) => !words.length || ((t) => words.every((w) => t.includes(w)))([x.want.name, x.want.description ?? '', x.want.itemOffered.name, ...x.want.itemOffered.additionalProperty.map((p) => `${p.name} ${p.value}`)].join(' ').toLowerCase()))
+    return registry.all().filter((e) => e.profile.role === 'house' && !e.asleep).flatMap((e) => (e.profile.wants ?? []).filter((w) => Date.parse(w.availabilityEnds) > now).map((w) => ({ want: w, house: { url: e.card.supportedInterfaces[0]?.url, webId: e.profile.webId, name: e.card.name, ...(e.profile.handle ? { handle: e.profile.handle } : {}) }, ...(e.via !== 'direct' ? { via: e.via } : {}) })));
+  };
+  const cacheable = (req: express.Request, res: express.Response, body: unknown) => {
+    const text = JSON.stringify(body);
+    const etag = `"${createHash('sha256').update(text).digest('base64url').slice(0, 22)}"`;
+    res.set({ 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=10', etag });
+    if (req.headers['if-none-match'] === etag) return void res.status(304).end();
+    res.type('application/json').send(text);
+  };
+  app.get('/wants', (req, res) => {
+    // Words of two letters or more (an area code like "QLD", a size like "XL"); each must appear somewhere in the want.
+    const words = (str(req.query.q) ?? '').toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+    const area = (str(req.query.area) ?? '').toLowerCase().trim(), currency = (str(req.query.currency) ?? '').toUpperCase().trim();
+    const out = openWants()
+      .filter((x) => !words.length || ((t) => words.every((w) => t.includes(w)))([x.want.name, x.want.description ?? '', x.want.itemOffered.name, x.want.areaServed ?? '', ...x.want.itemOffered.additionalProperty.map((p) => `${p.name} ${p.value}`)].join(' ').toLowerCase()))
+      // An area as the want says it: "AU-QLD" finds "Brisbane, AU-QLD"; "AU" finds every Australian one.
+      .filter((x) => !area || (x.want.areaServed ?? '').toLowerCase().split(/[\s,;/]+/).some((t) => t === area || t.startsWith(`${area}-`)))
+      .filter((x) => !currency || x.want.priceCurrency === currency)
       .sort((a, b) => Number(!!a.via) - Number(!!b.via) || b.want.availabilityEnds.localeCompare(a.want.availabilityEnds));
-    res.json(out.slice(0, 200));
+    cacheable(req, res, out.slice(0, 200));
+  });
+  app.get('/wants/:id', (req, res) => {
+    const hit = openWants().find((x) => x.want.id === req.params.id);
+    if (!hit) return void res.status(404).set('access-control-allow-origin', '*').json({ error: 'no open want with that id here: closed, bought, past its date, or never on this Lake', status: 'not open' });
+    cacheable(req, res, { ...hit, status: 'open' });
   });
 
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));

@@ -484,6 +484,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     receipt?: { credential: string; card: AgentCard };
     /** The seller's deliveries as sent, the first and its revisions: the buyer's signed "received" names each one's digest. */
     sentDeliveries?: Record<string, unknown>[];
+    /** Filed, but the buyer's AI couldn't be reached when it was sent: deliver again resends it. */
+    unsent?: boolean;
     buyerCard?: AgentCard;
     ruling?: string;
   };
@@ -1369,10 +1371,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // Accepted is final; a refunded cart is closed. A revision replaces a delivery; a first delivery is sent once.
           if (x.status === 'accepted') throw new Error(`the buyer signed "accepted" for ${x.cart}: that is final, nothing to ${a.action}`);
           if (x.status === 'refunded' || x.payment === 'voided') throw new Error(`cart ${x.cart} was refunded: nothing to ${a.action}`);
+          const last = sent.at(-1);
+          // Delivered and filed, but the buyer's AI couldn't be reached then: the same content again sends it again.
+          if (a.action === 'deliver' && sent.length && x.unsent && last?.sha256 === sha256(a.content)) {
+            const again = await me.ask(x.with.url, last as Record<string, unknown> & { kind: string }).catch((e: Error) => ({ error: e.message }));
+            if (!('error' in again)) { x.unsent = false; x.evidence.push({ step: 'delivery sent again (their signed receipt of it)', at: new Date().toISOString(), signed: me.sent.at(-1)?.reply }); }
+            return json({ delivered: x.cart, sent_again: !('error' in again), their_reply: again, money: moneyLine(x) });
+          }
           if (a.action === 'deliver' && sent.length) throw new Error(`you delivered cart ${x.cart} already: to send a new version, lake_sell { action: "revise", cart, content }`);
           if (a.action === 'revise' && !sent.length) throw new Error(`nothing delivered for cart ${x.cart} yet: deliver it first`);
           if (sent.length > MAX_REVISIONS) throw new Error(`cart ${x.cart} has had ${MAX_REVISIONS} revisions: refund it, or ask the Arbiter`);
-          const last = sent.at(-1);
           if (last && last.sha256 === sha256(a.content)) throw new Error('that is exactly what you delivered last time');
           const n = sent.length + 1;
           // A revision: the same cart, its number, the sha256 of the content it replaces, and the digest of the buyer's signed
@@ -1380,23 +1388,26 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const delivery = { kind: 'trade.deliver', cart: x.cart, content: a.content, sha256: sha256(a.content), ...(a.note ? { note: a.note } : {}), ...(n > 1 ? { revision: n, revises: last!.sha256, ...(x.dispute ? { answers: x.dispute } : {}) } : {}) };
           const ownTerms = cartTerms(x.mandate.contents).delivery;
           const missesOwn = ownTerms?.words || ownTerms?.lines ? deliveryMisses(a.content, ownTerms) : [];
-          const reply = await me.ask(x.with.url, delivery);
-          // Their signed "received" names the digest of exactly what arrived: proof of delivery (kept before anything else is sent).
-          const receipt = me.sent.at(-1)?.reply;
-          // A held payment follows the delivery itself: the payments agent is told its sha256, and the buyer's time to
-          // answer starts (or restarts, for a revision) there.
+          // A held payment follows the delivery itself, so it is filed first (round 12: told to the buyer first, a filing that
+          // failed afterwards left the seller "delivered" and the money going back to the buyer, with no way to file again).
           let filed: Record<string, unknown> | undefined;
           if (x.hold && x.payment === 'held') {
             filed = await me.ask(await holder(x), { kind: 'delivered', hold: x.hold, sha256: delivery.sha256 }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
-            if (filed.kind === 'delivered' && typeof filed.until === 'string') x.holdUntil = filed.until;
+            if (filed.kind !== 'delivered') return json({ not_delivered: x.cart, held_payment: { filed: false, problems: (filed.problems as string[] | undefined) ?? [String(filed.kind)], goes_back_to_buyer_at: x.holdUntil }, next: `nothing was sent: try lake_sell { action: "${a.action}", cart, content } again; the money goes back to the buyer at ${x.holdUntil} if no delivery is filed` });
+            if (typeof filed.until === 'string') x.holdUntil = filed.until;
           }
+          const reply = await me.ask(x.with.url, delivery).catch((e: Error) => ({ error: e.message }));
+          // Their signed "received" names the digest of exactly what arrived: proof of delivery.
+          const receipt = 'error' in reply ? undefined : me.sent.at(-1)?.reply;
+          x.unsent = 'error' in reply;
           x.sentDeliveries = [...sent, delivery];
           x.status = 'delivered';
           x.delivered = { sha256: delivery.sha256, ...(n > 1 ? { revision: n } : {}) };
-          x.evidence.push({ step: n > 1 ? `revision ${n} delivered (their signed receipt of it)` : 'delivered (their signed receipt of it)', at: new Date().toISOString(), signed: receipt });
+          x.evidence.push({ step: n > 1 ? `revision ${n} delivered${receipt ? ' (their signed receipt of it)' : ', filed; the buyer not reached yet'}` : `delivered${receipt ? ' (their signed receipt of it)' : ', filed; the buyer not reached yet'}`, at: new Date().toISOString(), signed: receipt });
           return json({ delivered: x.cart, ...(n > 1 ? { revision: n, revises: last!.sha256 } : {}), sha256: delivery.sha256, their_reply: reply, money: moneyLine(x),
             ...(missesOwn.length ? { misses_your_terms: missesOwn, warning: 'this misses what your cart promised: the buyer\'s connector counts it too, and an arbiter rules on it' } : {}),
             ...(filed ? { held_payment: filed.kind === 'delivered' ? `told of this delivery: released when the buyer accepts it, or at ${String(filed.until)} with no answer` : `the payments agent did not take this delivery: ${((filed.problems as string[] | undefined) ?? []).join('; ')}` } : {}),
+            ...(x.unsent ? { buyer_not_reached: `the delivery is filed, but the buyer's AI couldn't be reached: send it again with lake_sell { action: "deliver", cart, content } (the same content)` } : {}),
             ...(x.payment ? {} : { note: 'delivered before you were paid: the buyer pays the cart with lake_buy { action: "pay" }' }),
             ...(n > 1 ? { next: 'the buyer\'s connector checks it like the first; they accept it (releasing a held payment) or dispute again' } : {}) });
         }

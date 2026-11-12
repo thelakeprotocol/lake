@@ -344,6 +344,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       for (let i = 0; i < 20 && !listed.some((x) => x.want.id === wantId); i++) { listed = await (await fetch(`${nodeUrl}/wants?q=shower`)).json(); if (!listed.some((x) => x.want.id === wantId)) await page.waitForTimeout(500); }
       expect(listed.find((x) => x.want.id === wantId)).toBeTruthy();
       expect(JSON.stringify(listed)).not.toContain('34.5');
+      // For shops' backends (round 12): by area and currency, an ETag for cheap polling, readable from a browser, one want by id.
+      const feed = async (q: string) => (await (await fetch(`${nodeUrl}/wants?${q}`)).json()) as { want: { id: string } }[];
+      expect((await feed('area=AU-QLD')).some((x) => x.want.id === wantId)).toBe(true);
+      expect((await feed('area=AU')).some((x) => x.want.id === wantId)).toBe(true);
+      expect((await feed('area=AU-NSW')).some((x) => x.want.id === wantId)).toBe(false);
+      expect((await feed('currency=USD')).some((x) => x.want.id === wantId)).toBe(false);
+      const polled = await fetch(`${nodeUrl}/wants?currency=AUD`);
+      expect(polled.headers.get('access-control-allow-origin')).toBe('*');
+      expect((await fetch(`${nodeUrl}/wants?currency=AUD`, { headers: { 'if-none-match': polled.headers.get('etag')! } })).status).toBe(304);
+      expect(await (await fetch(`${nodeUrl}/wants/${wantId}`)).json()).toMatchObject({ want: { id: wantId }, status: 'open' });
       // Chats: a "Looking for" thread; the offers come in by themselves.
       await tab('Chats');
       const row = page.locator('.chatrow.want-row', { hasText: 'Handheld shower head' });
@@ -383,6 +393,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tidy();
       // Off the card now, and the receipt is with the owner's money.
       expect(((await (await fetch(`${nodeUrl}/wants`)).json()) as { want: { id: string } }[]).some((x) => x.want.id === wantId)).toBe(false);
+      expect((await fetch(`${nodeUrl}/wants/${wantId}`)).status).toBe(404);
       const v = await asAssistant({ kind: 'list' });
       expect(v.wants.find((w: { want: { id: string } }) => w.want.id === wantId)).toMatchObject({ bought: expect.any(String), offers: expect.arrayContaining([expect.objectContaining({ state: 'arrived', total: { currency: 'AUD', value: 34 } })]) });
       await goBack();

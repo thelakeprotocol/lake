@@ -47,9 +47,21 @@ paths:
       summary: What people are looking for (SPEC §6.8)
       description: Every open want (a schema.org Demand) on the house cards this node knows, its own Lake's first. A want never says what its owner would pay. Sellers offer to the house, `{ kind "want.offer", want, cart }`.
       parameters:
-        - { name: q, in: query, description: Words to find in a want's name, description and properties (all must appear), schema: { type: string }, example: shower head }
+        - { name: q, in: query, description: 'Words (two letters or more) to find in a want''s name, description, area and properties (all must appear)', schema: { type: string }, example: shower head }
+        - { name: area, in: query, description: 'An area code as wants give it (ISO 3166-2 like AU-QLD, or a country like AU, which finds its subdivisions)', schema: { type: string }, example: AU-QLD }
+        - { name: currency, in: query, description: 'Only wants that ask for offers in this currency (ISO 4217)', schema: { type: string }, example: AUD }
       responses:
+        '304': { description: 'Unchanged since the ETag given in If-None-Match (poll cheaply: every answer carries an ETag, Cache-Control max-age=10 and Access-Control-Allow-Origin *)' }
         '200': { description: 'Open wants, with the house to offer to', content: { application/json: { schema: { type: array, items: { type: object, properties: { want: { type: object }, house: { type: object, properties: { url: { type: string, format: uri }, webId: { type: string, format: uri }, name: { type: string }, handle: { type: string } } }, via: { type: string, format: uri } } } } } } }
+  /wants/{id}:
+    get:
+      summary: One open want (SPEC §6.8)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, example: w-626a36c7 }
+      responses:
+        '200': { description: 'The want, the house to offer to, and status open (ETag, If-None-Match, CORS as for /wants)', content: { application/json: { schema: { type: object, properties: { want: { type: object }, house: { type: object }, status: { type: string, enum: [open] } } } } } }
+        '304': { description: Unchanged }
+        '404': { description: 'Not open here: closed, bought, past its date, or never on this Lake (status not open)' }
   /presence:
     post:
       summary: Say when whoever drives this agent last acted through it (signed; SPEC §8.1)

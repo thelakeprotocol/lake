@@ -249,6 +249,12 @@ export interface AgendaItem {
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
 export interface NoteSender { /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
+/**
+ * A one-time code for an AI to pair with: never starting with "-" or "_", which a command line would read as an option
+ * (12 Nov: `lake duty --code -Xy…` failed one time in 64).
+ */
+const oneTimeCode = (): string => { for (;;) { const c = randomBytes(9).toString('base64url'); if (/^[A-Za-z0-9]/.test(c)) return c; } };
+
 /** A contact address from someone else's message: kept only if it's a web address (round 8). */
 const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; } };
 
@@ -1549,7 +1555,7 @@ export class OwnerDesk {
         if (!c) return void res.status(404).json({ error: 'that sign-in has gone (they last 15 minutes)' });
         this.connects.delete(String(q.id));
         this.touch();
-        const code = randomBytes(9).toString('base64url');
+        const code = oneTimeCode();
         if (q.yes) this.invites.set(code, { label: c.app, until: Date.now() + 15 * 60_000 });
         const house = this.o.publicUrl!.replace(/\/$/, '');
         const r2 = await fetch(c.back, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(q.yes ? { ask: c.ask, house, code } : { ask: c.ask, house, refused: true }), signal: AbortSignal.timeout(20_000) }).catch((e: Error) => ({ ok: false, json: async () => ({ error: e.message }) }) as Response);
@@ -1559,7 +1565,7 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.assistant.invite') {
         // Fifteen minutes, one use: long enough to paste into a chat with your agent.
-        const code = randomBytes(9).toString('base64url');
+        const code = oneTimeCode();
         this.invites.set(code, { label: String((p as unknown as { label?: string }).label ?? 'my assistant').slice(0, 60), until: Date.now() + 15 * 60_000 });
         return void res.json({ code, until: new Date(Date.now() + 15 * 60_000).toISOString() });
       }
@@ -1607,7 +1613,7 @@ export class OwnerDesk {
         const sub = vc.credentialSubject as unknown as { kinds: DutyKind[]; cap: number; until: string; hours?: Duty['hours'] };
         const duty: Duty = { statusId: d.statusId, credential: String(q.credential), kinds: sub.kinds, cap: sub.cap, until: sub.until, ...(sub.hours ? { hours: sub.hours } : {}), at: new Date().toISOString() };
         this.dutyDrafts.delete(d.statusId);
-        const code = randomBytes(9).toString('base64url');
+        const code = oneTimeCode();
         this.invites.set(code, { label: String(q.label ?? 'AI on duty').slice(0, 60), until: Date.now() + 15 * 60_000, duty });
         // "Run it in my house": the house's own runner takes the code now, so nothing is copied anywhere.
         if (q.runner === 'house') {
