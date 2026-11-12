@@ -26,7 +26,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const ais = v.data.assistants;
   return h(Page, { title: 'My AI', big: true, status, footer: tabbar },
     ais.length ? h(Section, { title: 'Your AIs' },
-      ...ais.map((a) => h(Row, { key: a.kid, start: h('div', { slot: 'start' }, h(Avatar, { name: shortName(a.label), size: 40 })), label: shortName(a.label), sub: [onDuty.has(a.kid) ? 'On duty' : readsLine(a.reads), lastHere(a.seenAt).text, a.waiting ? `${a.waiting.count} waiting` : ''].filter(Boolean).join(' · '), onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`), cls: 'ai-row' })),
+      ...ais.map((a) => h(Row, { key: a.kid, start: h('div', { slot: 'start' }, h(Avatar, { name: shortName(a.label), size: 40 })), label: shortName(a.label), sub: [onDuty.has(a.kid) ? 'On duty' : readsLine(a.reads), a.waiting ? 'Not reading' : lastHere(a.seenAt).text, a.waiting ? `${a.waiting.count} waiting` : ''].filter(Boolean).join(' · '), onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`), cls: 'ai-row' })),
       h(Row, { icon: 'add', label: 'Connect another AI', onClick: () => setConnect(true), detail: false }))
       : h('ion-card', { class: 'lake-card hero-card' }, h('ion-card-content', {},
         h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'sparkles' })),
@@ -150,7 +150,7 @@ export function AiKeyPage({ arg }: { arg: string }) {
   if (!a) return h(Page, { title: 'Your AI', back: () => back('#ai'), backLabel: 'My AI' }, v.data ? h(Empty, { icon: 'sparkles-outline', title: 'This AI isn\'t connected any more' }) : h(Failed, { error: v.error }));
   const onDuty = (duty.data?.duties ?? []).some((d) => d.kid === a.kid && dutyLive(d));
   return h(Page, { title: shortName(a.label), back: () => back('#ai'), backLabel: 'My AI' },
-    h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(a.label), size: 72 }), h('h2', {}, shortName(a.label)), h(Pill, { text: lastHere(a.seenAt).text, tone: lastHere(a.seenAt).now ? 'mint' : 'muted' })),
+    h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(a.label), size: 72 }), h('h2', {}, shortName(a.label)), a.waiting ? h(Pill, { text: 'Not reading', tone: 'amber' }) : h(Pill, { text: lastHere(a.seenAt).text, tone: lastHere(a.seenAt).now ? 'mint' : 'muted' })),
     a.waiting ? h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {}, h('p', {}, waitingLine(a)))) : null,
     h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${time(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: 'Replies and bookings only, never money' }) : null),
     // On duty it reads the notes and its errands only, whatever is switched on here.

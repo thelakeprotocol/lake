@@ -89,9 +89,9 @@ export function DoorPage({ backTo }: { backTo: () => void }) {
   const save = (open: boolean) => async () => { await must({ kind: 'panel.door.set', open, about: f.about, name: f.name, handle: f.handle.trim().toLowerCase(), note: f.note.trim() }); setForm(null); };
   return h(Page, { title: 'Handle and public page', back: backTo, backLabel: 'You' },
     h(Section, {},
-      h('ion-item', {}, h('ion-input', { label: 'Handle', labelPlacement: 'stacked', value: f.handle, placeholder: 'e.g. stan', maxlength: 30, autocapitalize: 'none', autocorrect: 'off', spellcheck: false, 'aria-label': 'Your handle', helperText: 'People ask their AI to "ping" it', onionInput: set('handle') })),
+      h('ion-item', {}, h('ion-input', { label: 'Handle', labelPlacement: 'stacked', value: f.handle, placeholder: 'e.g. stan', maxlength: 30, autocapitalize: 'none', autocorrect: 'off', spellcheck: false, 'aria-label': 'Your handle', helperText: f.handle ? `People tell their AI: "ping ${f.handle}"` : 'People tell their AI to "ping" it', onionInput: set('handle') })),
       h('ion-item', {}, h('ion-input', { label: 'Name (optional)', labelPlacement: 'stacked', value: f.name, maxlength: 60, 'aria-label': 'Name', onionInput: set('name') })),
-      h('ion-item', { lines: 'none' }, h('ion-input', { label: 'A line people see (optional)', labelPlacement: 'stacked', value: f.about, maxlength: 200, placeholder: 'e.g. Send your AI over: mine knows when I\'m free.', 'aria-label': 'A line people see', onionInput: set('about') }))),
+      h('ion-item', { lines: 'none' }, h('ion-input', { label: 'A line people see (optional)', labelPlacement: 'stacked', value: f.about, maxlength: 200, placeholder: 'e.g. Your AI can book a call with mine', 'aria-label': 'A line people see', onionInput: set('about') }))),
     // The door note (round 15): the owner's standing reply to people writing for the first time, sent once each by the house.
     h(Section, { title: 'Door note', cls: 'door-note' },
       h('ion-item', { lines: 'none' }, h('ion-textarea', { label: 'Sent once to each new person who writes', labelPlacement: 'stacked', value: f.note, maxlength: 500, counter: true, autoGrow: true, rows: 3, placeholder: 'e.g. Thanks for writing. I read these on Fridays. Bugs: https://…', 'aria-label': 'Door note', onionInput: set('note') })),
@@ -110,7 +110,7 @@ export function NotifyPage({ backTo }: { backTo: () => void }) {
   const re = () => setPerm(pushable() ? Notification.permission : 'unsupported');
   return h(Page, { title: 'Notifications', back: backTo, backLabel: 'You' },
     h('div', { class: 'bigwho' }, h('div', { class: `hero-icon${perm === 'granted' ? ' on' : ''}` }, h('ion-icon', { name: perm === 'granted' ? 'notifications' : 'notifications-off-outline' })), h('h2', {}, perm === 'granted' ? 'On for this phone' : 'Off for this phone'),
-      h('p', { class: 'muted-line' }, 'Says who, never what: the words stay here.')),
+      h('p', { class: 'muted-line' }, 'A notification says who wrote. What they wrote stays in your house.')),
     ios ? h('p', { class: 'muted-line pad' }, 'On iPhone: Share → Add to Home Screen, then open your house from that icon and turn them on.')
       : perm === 'unsupported' ? h('p', { class: 'muted-line pad' }, 'This browser can\'t take notifications.')
       : perm === 'denied' ? h('p', { class: 'muted-line pad' }, 'Blocked in this browser: allow them in its site settings.') : null,

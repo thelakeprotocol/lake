@@ -4,7 +4,7 @@ import { useRef, useState } from 'preact/hooks';
 import { call, key, must, state, useBump, useHouse, useRedraw } from './api';
 import { Btn, CopyBtn, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
 import { WantRow } from './chats';
-import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, said, shortShop, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
+import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, plural, said, shortShop, signPledge, time, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
 import { signEnvelope } from '../owner-crypto';
 
 // The pages under You. Each is one job, with its back to You.
@@ -228,9 +228,12 @@ export function MoneyPage({ backTo }: P) {
   // Money that came back (a pledge that lapsed, a refund) is listed, and isn't counted as spent.
   const gone = spent.filter((r) => r.settlement !== 'voided');
   const spentIn = new Set(gone.map((r) => r.currency));
+  // A total per currency, each with its own sign (an A$34 spend sat beside "$0 Earned"); nothing yet is said in the currency in use.
+  const sums = (rs: { amount: number; currency: string }[]) => { const by = new Map<string, number>(); for (const r of rs) by.set(r.currency, (by.get(r.currency) ?? 0) + r.amount);
+    return by.size ? [...by].map(([c, n]) => money$(Math.round(n * 100) / 100, c)).join(' + ') : money$(0, m.data!.receipts[0]?.currency ?? gone[0]?.currency ?? 'USD'); };
   return page('Money', backTo,
-    h('div', { class: 'stat-row' }, h('div', { class: 'stat mint' }, h('b', {}, `$${m.data.total}`), h('span', {}, 'Earned')),
-      m.data.held ? h('div', { class: 'stat' }, h('b', {}, `$${m.data.held}`), h('span', {}, 'Held')) : null,
+    h('div', { class: 'stat-row' }, h('div', { class: 'stat mint' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement !== 'held'))), h('span', {}, 'Earned')),
+      m.data.held ? h('div', { class: 'stat' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement === 'held'))), h('span', {}, 'Held')) : null,
       gone.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(gone.reduce((t, r) => t + r.amount, 0) * 100) / 100, gone[0]!.currency) : String(gone.length)), h('span', {}, 'Spent')) : null),
     wants.length ? h(Section, { title: 'Looking for', cls: 'chat-list wants' }, ...wants.map((w) => h(WantRow, { key: w.want.id, w }))) : null,
     groups.size ? h(Section, { title: 'Received' }, ...[...groups].slice(0, 50).map(([k, rs]) => {
@@ -284,8 +287,8 @@ function CircleCard({ c }: { c: CircleRow }) {
   return h('ion-card', { class: 'lake-card circle-card' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'people-outline' }), 'Your promise circles'),
     h('h3', {}, c.view.text ?? c.id),
-    h('p', { class: 'muted-line' }, c.view.promise ? `You promised: ${c.view.promise}, ${c.view.times_a_year === 1 ? 'once' : `${c.view.times_a_year} times`} a year, to ${Math.max(0, (c.view.members ?? 1) - 1)} others.` : (c.view.problems ?? []).join('; ')),
-    c.view.promise ? h('p', { class: 'muted-line' }, `Kept ${c.view.kept} of ${c.view.of} calls; you've kept ${c.view.you?.kept ?? 0}.`) : null,
+    h('p', { class: 'muted-line' }, c.view.promise ? `You promised: ${c.view.promise}, ${c.view.times_a_year === 1 ? 'once' : `${c.view.times_a_year} times`} a year, to ${plural(Math.max(0, (c.view.members ?? 1) - 1), 'other', 'others')}.` : (c.view.problems ?? []).join('; ')),
+    c.view.promise ? h('p', { class: 'muted-line' }, c.view.of ? `Kept ${c.view.kept} of ${c.view.of} calls; you've kept ${c.view.you?.kept ?? 0}.` : 'Nobody has asked for help yet.') : null,
     c.view.open && c.view.kinds ? h('div', { class: 'chips' }, h('span', { class: 'chips-label' }, 'You help with:'), ...c.view.kinds.map((k) => h('ion-chip', { key: k, color: mine.includes(k) ? 'primary' : undefined, outline: !mine.includes(k), onClick: () => void toggle(k) }, k))) : null,
     c.view.open ? h('ion-item', { lines: 'none' }, h('ion-toggle', { checked: per > 0, onionChange: async (e: CustomEvent) => { const n = e.detail.checked ? 1 : 0; const r = await call<{ ok?: boolean }>({ kind: 'panel.circle.rule', tally: c.url, id: c.id, perWeek: n, kinds: mine }); if (r.ok) setPer(n); } }, 'Say yes for me, once a week')) : null,
     c.view.open ? h('div', { class: 'circle-ask' },

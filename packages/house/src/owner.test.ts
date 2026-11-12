@@ -662,6 +662,22 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('a report that nobody is reading doesn\'t count as the AI being here (round 18)', async () => {
+    const h = await house();
+    const ai = await h.connect('Helper');
+    // It was last here an hour ago; then its chat ended, and its connector reports the messages nobody reads.
+    const hourAgo = new Date(Date.now() - 3_600_000).toISOString();
+    for (const a of (h.desk as unknown as { assistants: Map<string, { seenAt?: string }> }).assistants.values()) a.seenAt = hourAgo;
+    expect(await ai.call({ kind: 'assistant.waiting', count: 2, senders: 1 })).toEqual({ ok: true });
+    const told = (await h.owner({ kind: 'list' })).assistants[0];
+    expect(told.waiting).toMatchObject({ count: 2 });
+    expect(told.seenAt).toBe(hourAgo);
+    // The AI itself reading is it being here.
+    await ai.call({ kind: 'list' });
+    expect((await h.owner({ kind: 'list' })).assistants[0].seenAt > hourAgo).toBe(true);
+    h.close();
+  });
+
   it('the overview names what an AI may see; a call signed for another house is refused; an AI closes only its own want', async () => {
     const h = await house({
       publicUrl: 'https://lake.example/t/mine',

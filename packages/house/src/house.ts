@@ -617,7 +617,7 @@ function panelFor(x: {
     const counter = lakeProfile(tallyCard)!.webId;
     if (before.kind === 'refused') return before;
     // It counts people, and this owner has no stamp yet: say what to do, not the tally's refusal (a reader's first tap).
-    if (before.people_only && !s) return { kind: 'refused', problems: ['it counts people, once each: get a person stamp first (Settings → Activity → Get a person stamp), then sign'] };
+    if (before.people_only && !s) return { kind: 'refused', problems: ['This pledge counts people, once each. Get a person stamp first: You, then About this house. Then sign again.'] };
     // Still finding its quorum: nothing to sign yet (and a blind pass fetched now would be spent for nothing).
     if (before.state === 'gathering') return { kind: 'refused', problems: [`it opens for signing only if enough people privately say they'd join, when its quorum closes (${(before.quorum as { closes?: string } | undefined)?.closes ?? 'soon'}); answer its question first`] };
     // A pledge with money (SPEC §11.4a): the contribution the owner signed on their device for this pledge is paid, held for
@@ -1041,7 +1041,7 @@ function panelFor(x: {
       if (cell < 0) return { kind: 'refused', problems: [`choice: one of ${q.options.join(' | ')}`] };
       const counter = lakeProfile(card)!.webId;
       const person = await stampFor(await stamp(), countContext(counter, id), counter, id);
-      if (!person) return { kind: 'refused', problems: ['it counts people: get a person stamp first (Home → One person, one house)'] };
+      if (!person) return { kind: 'refused', problems: ['This counts people, once each. Get a person stamp first: You, then About this house.'] };
       const { payload: joined } = await send(tally, { kind: 'tally.quorum', id, person });
       if (joined.kind !== 'tally.joined') return joined;
       const sent = await x.keeper().answerCount(q.count, q.tellers, q.options.length, cell);

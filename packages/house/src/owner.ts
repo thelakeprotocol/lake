@@ -1446,8 +1446,8 @@ export class OwnerDesk {
       if (!assistant) this.seen();
       if (assistant) {
         // "Connected" only says it holds a key; when it last used it is what the owner can judge by (an AI app may drop
-        // its connection and come back as another agent).
-        if (!assistant.seenAt || Date.now() - Date.parse(assistant.seenAt) > 600_000) {
+        // its connection and come back as another agent). Its connector's report that nobody is reading isn't the AI here.
+        if (p.kind !== 'assistant.waiting' && (!assistant.seenAt || Date.now() - Date.parse(assistant.seenAt) > 600_000)) {
           assistant.seenAt = new Date().toISOString();
           await this.o.saveAssistants?.([...this.assistants.values()]);
         }

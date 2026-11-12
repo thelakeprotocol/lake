@@ -279,6 +279,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await visitor.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await visitor.close();
     await page.locator('.chatrow', { hasText: 'would love a coffee' }).waitFor({ timeout: 4000 });
+    // No AI is connected yet, so nothing in a chat says one replies (round 18: a first-time owner answered a note and
+    // the header turned to "My AI replies"). The other choice says so, and leads to connecting one.
+    await page.locator('.chatrow', { hasText: 'would love a coffee' }).click();
+    await page.locator('.replymode.me', { hasText: 'I reply' }).waitFor();
+    expect(await page.locator('.mode-note').count()).toBe(0);
+    await page.locator('.replymode').click();
+    await sheet().locator('ion-item.mode-opt', { hasText: 'Their messages wait for you.' }).locator('ion-icon[name=checkmark]').waitFor();
+    await sheet().locator('ion-item.mode-opt', { hasText: 'No AI is connected yet' }).waitFor();
+    await tidy();
+    await sheet().locator('ion-item.mode-opt', { hasText: 'No AI is connected yet' }).click();
+    await onTab('My AI');
+    await tab('People');
+    await page.locator('.chatrow', { hasText: 'would love a coffee' }).waitFor({ timeout: 4000 });
   });
 
   it('opens a note an AI wrote, filled in, for its human to send with one tap (an AI that can\'t open links it writes)', async () => {
@@ -513,7 +526,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('.replymode.me', { hasText: 'I reply' }).waitFor();
     expect(await page.locator('.modebar').count()).toBe(0);
     await page.locator('.replymode').click();
-    await sheet().locator('ion-item.mode-opt', { hasText: 'Their messages wait for you.' }).locator('ion-icon[name=checkmark]').waitFor();
+    await sheet().locator('ion-item.mode-opt', { hasText: 'Their messages wait for you. Your AI doesn\'t get their words.' }).locator('ion-icon[name=checkmark]').waitFor();
+    // The other choice says what it gives the AI before it's chosen (round 18): the chat, never where Ana asked to be answered.
+    await sheet().locator('ion-item.mode-opt', { hasText: 'It doesn\'t get the email address they left.' }).waitFor();
     await tidy();
     await sheet().locator('ion-item.mode-opt', { hasText: 'An AI you\'ve connected can read this chat' }).click();
     await page.getByText(/replies to .+ now$/).waitFor({ timeout: 6000 });
@@ -677,10 +692,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const withIt = await badge();
     expect(withIt).toBeGreaterThan(0);
     await tab('My AI');
-    await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/3 waiting/).waitFor();
+    await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/Not reading · 3 waiting/).waitFor();
+    expect(await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/Here now/).count()).toBe(0);
     expect(await page.locator('ion-tab-button', { hasText: 'My AI' }).locator('ion-badge').count()).toBe(0);
     expect(await asAssistant({ kind: 'assistant.waiting', count: 0 })).toEqual({ ok: true });
     await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/waiting/).waitFor({ state: 'detached', timeout: 5000 });
+    expect(await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/Not reading/).count()).toBe(0);
     await expect.poll(badge, { timeout: 5000 }).toBe(withIt - 1);
     await tidy();
   });
@@ -1304,7 +1321,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
     await page.getByPlaceholder('pledge id').fill('street-circle');
     await page.getByRole('button', { name: 'Sign this pledge' }).click();
-    await page.getByText(/it counts people, once each: get a person stamp first/).waitFor({ timeout: 15_000 });
+    await page.getByText(/Get a person stamp first: You, then About this house\./).waitFor({ timeout: 15_000 });
     // The owner gets a person stamp from About this house.
     await page.getByRole('button', { name: 'Get a person stamp' }).click();
     await page.getByText('One person, one house: stamped').waitFor({ timeout: 15_000 });
@@ -1318,7 +1335,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.goto(`${house}/owner/#you`);
     await tab('Your promise circles');
     const circles = page.locator('ion-card.circle-card');
-    await circles.getByText('You promised: a lift or a meal, 3 times a year, to 1 others.').waitFor({ timeout: 15_000 });
+    await circles.getByText('You promised: a lift or a meal, 3 times a year, to 1 other.').waitFor({ timeout: 15_000 });
     expect(await circles.locator('ion-select.help-kind').evaluate((e) => (e as HTMLElement & { value: string }).value)).toBe('a lift');
     await circles.getByLabel('What do you need').fill('A lift to the station on Friday');
     await circles.getByRole('button', { name: 'Ask my circle' }).click();
@@ -1359,7 +1376,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('turns notifications on, off or tests them from You → Notifications (7 Nov)', async () => {
     await tab('Notifications');
     await page.getByRole('heading', { name: /for this phone/ }).waitFor();
-    expect(await page.getByText(/Says who, never what/).count()).toBe(1);
+    expect(await page.getByText(/A notification says who wrote\. What they wrote stays in your house\./).count()).toBe(1);
     await tidy();
   });
 

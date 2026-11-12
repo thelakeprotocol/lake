@@ -99,13 +99,16 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
   const live = (duty.data?.duties ?? []).filter(dutyLive), onDuty = live.length > 0;
   // The AI by its name where there is one to name (the one on duty, or the only one connected) and the name is short.
   const named = shortName(live[0]?.label ?? (ais.length === 1 ? ais[0]!.label : '')), ai = named && named.length <= 9 ? named : 'My AI';
+  // The house hands a known person's chat to the owner's AI; with none connected nobody but the owner replies, and the
+  // chat says that (round 18: a first-time owner answered a note and the header turned to "My AI replies").
+  const hasAi = ais.length > 0;
   const end = useRef<HTMLDivElement>(null);
   const latest = c.notes[c.notes.length - 1]!;
   // Answering someone new makes them someone you know, and a chat with someone you know is your AI's while it's on duty:
   // the house changed who replies here without a tap, so the chat says so, once, where the control is.
   const chose = useRef(c.mode), sent = useRef(false);
   useEffect(() => {
-    if (c.canMode && c.mode === 'ai' && chose.current === 'me' && sent.current) void toast(`You've answered ${c.name}, so ${ai} replies here while it's on duty.`, { duration: 8000, buttons: [{ text: 'I reply', handler: () => setTo('me') }] });
+    if (c.canMode && hasAi && c.mode === 'ai' && chose.current === 'me' && sent.current) void toast(`You've answered ${c.name}, so ${ai} replies here while it's on duty.`, { duration: 8000, buttons: [{ text: 'I reply', handler: () => setTo('me') }] });
     chose.current = c.mode; setMode(c.mode);
   }, [c.mode]);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [c.notes.length, sending]);
@@ -153,15 +156,18 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
   const titleNode = h('ion-title', {}, h('button', { type: 'button', class: 'chatwho', onClick: () => setInfo(true), 'aria-label': `About ${c.name}` },
     h(Avatar, { name: c.name, ring: c.trust, size: 34 }), h('span', { class: 'chatwho-text' }, h('b', {}, c.name), h('small', {}, c.via))));
   // Who replies: one control, at the top, saying who does now.
-  const who = c.canMode ? h('button', { type: 'button', class: `replymode ${mode}`, onClick: () => setPick(true), 'aria-label': `Who replies: ${mode === 'ai' ? `${ai} replies` : 'I reply'}. Change`, 'aria-haspopup': 'dialog' },
+  const shown: 'ai' | 'me' = mode === 'ai' && !hasAi ? 'me' : mode;
+  const who = c.canMode ? h('button', { type: 'button', class: `replymode ${shown}`, onClick: () => setPick(true), 'aria-label': `Who replies: ${shown === 'ai' ? `${ai} replies` : 'I reply'}. Change`, 'aria-haspopup': 'dialog' },
     // Beside the name there's room for a dozen letters: a longer AI name stands alone, with its mark.
-    mode === 'ai' ? h('ion-icon', { name: 'sparkles' }) : null, h('span', {}, mode !== 'ai' ? 'I reply' : ai.length <= 5 ? `${ai} replies` : ai), h('ion-icon', { name: 'chevron-down' })) : null;
-  const aiNote = c.web ? 'An AI you\'ve connected can read this chat and answer it.' : onDuty ? 'It answers while it\'s on duty. A time it only holds, for you to confirm.' : 'It answers once it\'s on duty, which is off now (My AI).';
-  const opt = (m: 'ai' | 'me', icon: string, label: string, sub: string) => h('ion-item', { key: m, button: true, detail: false, lines: m === 'me' ? 'full' : 'none', class: `mode-opt${mode === m ? ' on' : ''}`, 'aria-current': mode === m ? 'true' : undefined, onClick: () => { setPick(false); if (mode !== m) void setTo(m); } },
-    h('ion-icon', { slot: 'start', name: icon }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, sub)), mode === m ? h('ion-icon', { slot: 'end', name: 'checkmark', color: 'primary', 'aria-label': 'Chosen' }) : null);
+    shown === 'ai' ? h('ion-icon', { name: 'sparkles' }) : null, h('span', {}, shown !== 'ai' ? 'I reply' : ai.length <= 5 ? `${ai} replies` : ai), h('ion-icon', { name: 'chevron-down' })) : null;
+  // What the other choice gives an AI, said before it's chosen: this chat's words and the answering, never where a web sender asked to be answered.
+  const aiNote = !hasAi ? 'No AI is connected yet. Tap to connect one in My AI.'
+    : c.web ? `An AI you've connected can read this chat and answer it.${c.replyTo ? ` It doesn't get the ${c.replyTo.kind === 'email' ? 'email address' : 'phone number'} they left.` : ''}` : onDuty ? 'It answers while it\'s on duty. A time it only holds, for you to confirm.' : 'It answers once it\'s on duty, which is off now (My AI).';
+  const opt = (m: 'ai' | 'me', icon: string, label: string, sub: string) => h('ion-item', { key: m, button: true, detail: false, lines: m === 'me' ? 'full' : 'none', class: `mode-opt${shown === m ? ' on' : ''}`, 'aria-current': shown === m ? 'true' : undefined, onClick: () => { setPick(false); if (m === 'ai' && !hasAi) push('#ai'); else if (shown !== m) void setTo(m); } },
+    h('ion-icon', { slot: 'start', name: icon }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, sub)), shown === m ? h('ion-icon', { slot: 'end', name: 'checkmark', color: 'primary', 'aria-label': 'Chosen' }) : null);
   const composer = h('div', { class: 'composer' },
     // Handed to an AI that isn't answering now: said where you'd type, so the chat doesn't sit unanswered unnoticed.
-    c.canMode && mode === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
+    c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
     h('div', { class: 'composer-row' },
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
       h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: () => void send(), 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
@@ -174,8 +180,8 @@ function ChatView({ c, all, held, ais }: { c: Chat; all: Chat[]; held: Note[]; a
         h('div', { class: 'bubble-foot' }, h('button', { type: 'button', class: 'link-btn', onClick: () => void send(failed.text) }, 'Retry'), h('button', { type: 'button', class: 'link-btn', onClick: () => { setDraft(failed.text); setFailed(null); } }, 'Edit'))) : null,
       h('div', { ref: end })),
     h(Sheet, { open: pick, onClose: () => setPick(false), title: `Who replies to ${c.name}?`, short: true },
-      h(Section, {}, opt('me', 'person-outline', 'I reply', 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote))),
-    h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, who: mode === 'ai' ? `${ai} replies` : 'You reply', change: () => { setInfo(false); setPick(true); }, latest, close: () => setInfo(false) })));
+      h(Section, {}, opt('me', 'person-outline', 'I reply', hasAi ? 'Their messages wait for you. Your AI doesn\'t get their words.' : 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote))),
+    h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, who: shown === 'ai' ? `${ai} replies` : 'You reply', change: () => { setInfo(false); setPick(true); }, latest, close: () => setInfo(false) })));
 }
 
 /**
@@ -275,7 +281,8 @@ export function WantPage({ arg }: { arg: string }) {
     ] : [
       refunded ? h('p', { class: 'muted-line pad', key: 'rf' }, `Your ${money(refunded.total)} came back from ${shortShop(refunded.seller.name)}${refunded.ended ? `: ${refunded.ended}` : ''}.`) : null,
       h('h3', { class: 'section-h', key: 'oh' }, fits.length ? `Offers (${fits.length})` : 'Offers'),
-      fits.length ? fits.map((o) => card(o, true)) : h(Empty, { key: 'none', icon: 'hourglass-outline', title: 'No offers yet', text: 'Shops look every few minutes. You get a notification when one offers.' }),
+      fits.length ? fits.map((o) => card(o, true)) : over.length ? h('p', { class: 'muted-line pad', key: 'none' }, `None within the most you'd pay yet. Shops look every few minutes.`)
+        : h(Empty, { key: 'none', icon: 'hourglass-outline', title: 'No offers yet', text: 'Shops look every few minutes. You get a notification when one offers.' }),
       over.length ? h('ion-accordion-group', { key: 'over', class: 'lake-accordion' }, h('ion-accordion', { value: 'over' }, h('ion-item', { slot: 'header' }, h('ion-label', {}, `${over.length} over the most you'd pay`)), h('div', { slot: 'content' }, ...over.map((o) => card(o, true))))) : null,
       h('div', { class: 'pad', key: 'stop' }, h(Btn, { label: 'Stop looking', fill: 'clear', color: 'medium', expand: 'block', run: async () => { await must({ kind: 'panel.want.close', id: w.want.id }); back('#inbox'); }, ask: { header: 'Stop looking?', sub: 'Shops stop offering.', button: 'Stop looking' } })),
     ]);
