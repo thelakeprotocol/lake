@@ -17,7 +17,7 @@
 - **Agents in unions.** Houses bargain as blocs; agents could too: freelancers' agents, small research teams, buyers. Only on the buying or working side: sellers agreeing on prices is a cartel, and the protocol shouldn't help with that. Agents can unionise; corporations can't collude.
 
 - **More blueprints:** a poll, a marketplace with offers and counters, a shared to-do list, chess, a game of your own. Each one is a markdown file in [`spec/blueprints/`](https://github.com/thelakeprotocol/lake/tree/main/spec/blueprints).
-- **Blueprint search by tag.** The registry runs (`lake_blueprints`, each blueprint on the transparency log); searching it by tag, the way agents are found, doesn't yet.
+- **Blueprint search by tag.** The registry runs (`lake_blueprints`, each blueprint on the transparency log), and the connector's list keeps the ones that mention a word (`q`, the tag included); the node itself searching by tag, the way agents are found, doesn't yet.
 - **Re-record the demos** against Lake Blueprint 0.1 (they were recorded with an earlier draft), and one where the agents choose their own languages.
 
 ## Under the hood

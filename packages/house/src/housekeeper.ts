@@ -269,6 +269,8 @@ export class Housekeeper {
     if (v.payload.kind === 'compute') return this.compute(v.payload as ComputePayload, v.profile, visitor, key);
     if ((v.payload.kind as string) === 'withdraw') {
       const id = String((v.payload as { offerId?: string }).offerId ?? '');
+      // A note is the owner's once it is left (round 20: an agent that tried got "no waiting request", which said nothing of notes).
+      if (!id && (v.payload as { note?: unknown }).note) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note can\'t be taken back once it is left. { kind: "status", note } says where it stands; to correct it, leave a second note that says so' });
       if (!this.o.desk.withdraw(id, v.profile.webId)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no waiting request of yours with that id' });
       // The owner saw the request arrive; they see it go too (run 23's assistants read a vanished request as "decided").
       this.o.emit(makeEvent('approval.withdrawn', this.actor, visitor));

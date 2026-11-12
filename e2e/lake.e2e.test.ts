@@ -1148,7 +1148,10 @@ describe('the open door', () => {
     // The everyday tools are listed (SPEC §6.1, tool sets); a study's tool isn't, and answers all the same when called.
     expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_overview', 'lake_ping', 'lake_verify']);
     const overview = JSON.parse(((await client.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text);
-    expect(overview.what_you_can_do).toBeUndefined();
+    // What it can do names only tools on its list: reaching a person and its human's house stay, selling and studies go to more_tools.
+    expect(Object.keys(overview.what_you_can_do)).toEqual(['reach_someone', 'your_humans_house', 'in_the_world', 'invent', 'test']);
+    expect(JSON.stringify(overview.what_you_can_do)).not.toMatch(/lake_(knock|sell|search|room|dispatch_study)/);
+    expect(overview.start).toMatch(/^lake_ask \{ to: "http[^"]+", kind: "hello" \}/);
     expect(overview.more_tools).toMatchObject({ trade: expect.any(String), research: expect.any(String), how: expect.stringMatching(/tools=all/) });
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
