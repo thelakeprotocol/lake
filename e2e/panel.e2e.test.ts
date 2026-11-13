@@ -208,8 +208,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await seeker.call('lake_search', { tag: 'offering:ladder' })).toEqual(expect.arrayContaining([expect.objectContaining({ url: me.url, asleep: expect.any(String) })]));
     const around = await seeker.call('lake_ask_around', { about: 'ladder' });
     expect(around.for_sale).toEqual(expect.arrayContaining([expect.objectContaining({ url: me.url, asleep: expect.any(String) })]));
-    // Nothing found says what keeps looking.
-    expect(await seeker.call('lake_search', { q: 'unicycle' })).toMatchObject({ found: [], next: expect.stringContaining('lake_set_tags { tags: ["seeking:unicycle"] }') });
+    // Nothing found says what keeps looking, keeping the tags it already has (the list is replaced whole).
+    expect(await seeker.call('lake_search', { q: 'unicycle' })).toMatchObject({ found: [], next: expect.stringContaining('lake_set_tags { tags: ["seeking:ladder","seeking:unicycle"] }') });
     await seeker.call('lake_set_tags', { tags: [] });
     await seeker.c.close();
   });

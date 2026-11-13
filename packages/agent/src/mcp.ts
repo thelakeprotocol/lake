@@ -629,6 +629,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     said?: Record<string, unknown>;
     /** Refunded in part (the seller's offer to settle a dispute), in the cart's currency: the rest is still held. */
     partRefunded?: number;
+    /** Each part refund counted once, by its hold and what it left held: the seller's own answer and the payments agent's receipt are the same refund. */
+    partKeys?: string[];
     /** The buyer's time to answer a delivery, in hours (release_after_hours): a held payment's clock restarts at each one. */
     reviewHours?: number;
     /** The buyer disputed it (the payments agent then keeps a held payment until accept, refund or ruling), and the digest of that signed dispute. */
@@ -668,6 +670,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     if (x.payment === 'voided') return seller ? 'voided: the held payment went back to the buyer' : 'voided: the held payment is back under your allowance';
     // Refunded after it was released: the seller paid the whole cart back.
     if (x.status === 'refunded') return 'paid, then refunded in full';
+    if (x.payment === 'released' && x.partRefunded) return `paid: ${x.total.currency} ${x.partRefunded} refunded to the buyer, ${x.total.currency} ${Math.round((x.total.value - x.partRefunded) * 100) / 100} released to ${seller ? 'you' : 'the seller'}`;
     if (x.payment === 'released') return seller ? 'paid, and released to you' : 'paid, and released to the seller';
     return x.payment === 'paid' ? 'paid' : 'not paid yet';
   };
@@ -684,6 +687,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     const p = m.payload as Record<string, any>;
     const me = await agent();
     const peer = { name: m.card.name, url: m.card.supportedInterfaces?.[0]?.url, webId: m.from.webId };
+    if (p.kind === 'trade.declined') return { checked: { note: 'the seller said no to your order: nothing was signed or charged. A reason, if any, is their words' } };
     if (p.kind === 'trade.order') {
       // From the menu: the price is the one on this agent's signed card, so the cart goes back at once, signed.
       const item = menu.find((x) => x.sku === p.sku);
@@ -704,13 +708,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       }
       if (!onDutyHere && ((hereUntil && now > hereUntil && lastActive <= hereUntil) || now - lastActive > AWAY_AFTER_MS)) {
         return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), away: `the seller's AI isn't here (last active ${new Date(lastActive).toISOString()}): no cart was made and nothing is charged. Your order waits in its inbox; a cart comes only if it comes back and says yes. Look for another seller meanwhile` },
-          checked: { note: 'an order from your menu came while you were away, so no cart was signed: answer with lake_sell { action: "cart" } if you still want to sell it' } };
+          checked: { note: 'an order from your menu came while you were away, so no cart was signed: lake_sell { action: "cart", order: <this message\'s id> } sends the cart your menu would have, or lake_sell { action: "decline", order: <this message\'s id> } says no' } };
       }
       // Each order asked first (run 61: "list it, but ask me before each booking" couldn't be kept: menu orders were signed
       // at once): the order waits in the seller's inbox, and the buyer hears that a cart comes when the seller says yes.
       if (item.confirm) {
         return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), note: `the seller confirms each order of "${item.label}" first: a cart comes to your inbox when they say yes` },
-          checked: { note: `an order for "${item.label}" (${qty}) that waits for your yes (your menu says confirm): ask your human if you need to, then send the cart with lake_sell { action: "cart", to: "${peer.url}", items: [{ label: "${qty} × ${item.label}", price: ${Math.round(item.price.value * qty * 100) / 100}, currency: "${item.price.currency}" }] }, or tell them no` } };
+          checked: { note: `an order for "${item.label}" (${qty}) that waits for your yes (your menu says confirm): ask your human if you need to, then send its cart with lake_sell { action: "cart", order: <this message's id> } (your menu's price and delivery terms, and their note), or say no with lake_sell { action: "decline", order: <this message's id> }` } };
       }
       // Paid another way the menu lists (SPEC §6.7): deeds or favours, the cart naming whose word that it was paid counts.
       const alt = typeof p.pays_in === 'string' ? item.prices?.find((x) => x.assetCode === p.pays_in) : undefined;
@@ -793,8 +797,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     const money = p.kind === 'receipt' && o ? await checkMoney(p, m.from, me.webId, trustedPayments) : undefined;
     // A held payment settled: the payments agent tells both sides, with its signed receipt (SPEC §6.5).
     if (o && money?.verified && money.part_refunded && money.cart?.id === o.cart && o.hold === money.part_refunded.hold) {
-      o.partRefunded = Math.round(((o.partRefunded ?? 0) + money.part_refunded.amount) * 100) / 100;
-      o.evidence.push({ step: `part refunded (${o.total.currency} ${money.part_refunded.amount})`, at: new Date().toISOString(), signed: m.signed });
+      // The seller who refunded counted it already from the payments agent's answer: its receipt is the same refund
+      // (14 Nov: A$10 of A$60 refunded showed as A$20, and A$40 still held).
+      const key = `${money.part_refunded.hold}:${money.part_refunded.still_held}`;
+      if (!o.partKeys?.includes(key)) {
+        o.partKeys = [...(o.partKeys ?? []), key];
+        o.partRefunded = Math.round(((o.partRefunded ?? 0) + money.part_refunded.amount) * 100) / 100;
+      }
+      o.evidence.push({ step: `part refunded (${o.total.currency} ${money.part_refunded.amount}), the payments agent's receipt`, at: new Date().toISOString(), signed: m.signed });
       return { checked: { ...money, order: moneyLine(o), ...(o.role === 'buyer' ? { next: 'accept the delivery to settle on that (the rest goes to the seller), or keep it disputed' } : {}) } };
     }
     if (o && money?.verified && money.hold_settled && money.cart?.id === o.cart && (!o.hold || o.hold === money.hold_settled.hold)) {
@@ -1493,7 +1503,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     {
       description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. team: several of you did one job for one buyer: one cart, one held payment, each member paid its share when the buyer accepts; give members [{ url, amount }] (you among them); each agrees its share with consent, and the cart goes to the buyer when the last does. withdraw: take back a cart nobody has paid. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. A menu item or a cart can carry delivery terms you promise (how soon, revisions, word or line counts): signed in the cart, counted by the buyer\'s connector, and ruled on by the Arbiter. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you, and the payments agent is told of each delivery by its sha256); content is what is hashed and checked, note rides beside it unhashed. The buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer asks for changes or disputes it, send a new delivery of the same cart (numbered, naming the one it replaces); they can accept it, which releases a held payment. refund: pay the buyer back, in full, or (with amount, while it is held) in part, the rest staying held for the buyer to accept: a way to settle a dispute. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
       inputSchema: {
-        action: z.enum(['menu', 'cart', 'team', 'consent', 'withdraw', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
+        action: z.enum(['menu', 'cart', 'decline', 'team', 'consent', 'withdraw', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
+        order: z.number().int().optional().describe('cart / decline: the lake_inbox id of an order from your menu: its cart has the menu\'s price and delivery terms and the buyer\'s note, as if signed at once; decline tells the buyer no'),
+        reason: z.string().max(300).optional().describe('decline: a word to the buyer on why'),
         members: z.array(z.object({ url: z.string(), amount: z.number() })).min(2).max(5).optional().describe('team: each member\'s A2A address (yours too) and its share; the shares add up to the total'),
         items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), prices: z.array(z.object({ asset: z.string().regex(/^[A-Z]{3}$/).describe('HUR: certified hours of community service (deeds); FAV: favours'), value: z.number().int().min(1).max(100).default(1), accept_url: z.string().describe('the A2A address of the agent whose word that it was paid you take: the organisation that certifies the deeds') })).max(3).optional().describe('menu: other ways to pay for it, besides money ("an hour of my time for an hour volunteered at Open Hands")'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
         delivery: DELIVERY.optional().describe('cart: what you promise about the delivery, signed into the cart (an order from your menu gets the item\'s)'),
@@ -1517,7 +1529,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const items = (a.items ?? []).map((x, i) => ({ ...(alts.get(i) ? { prices: alts.get(i) } : {}), sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}) }));
           await me.setMenu(items);
           menu = items;
-          return json({ ok: true, menu: items, note: items.length ? 'on your signed card now: lake_search finds it, and an order for an item on it gets a signed cart back at once' : 'menu cleared' });
+          // Said as it is (14 Nov: "a signed cart back at once" for items that wait for a yes, and for an AI gone quiet).
+          return json({ ok: true, menu: items, note: items.length ? `on your signed card now: lake_search finds it. While you're here (until five minutes after your last call, even with a later here_until), an order gets a signed cart at once${items.some((x) => x.confirm) ? '; items marked confirm wait for your yes' : ''}. An order that comes while you're away waits in lake_inbox: answer it with lake_sell { action: "cart", order: <its id> }` : 'menu cleared' });
         }
         // A team's cart (run 77): one cart, one payment held whole, each member paid its share on release. Each member
         // agrees its share first; the cart goes to the buyer by itself when the last one has.
@@ -1560,8 +1573,38 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const reply = x.with.url ? await me.ask(x.with.url, { kind: 'trade.withdraw', cart: x.cart }).catch((e: Error) => ({ error: e.message })) : null;
           return json({ withdrawn: x.cart, buyer_said: reply, note: 'if they pay it anyway, refund it (lake_sell { action: "refund" })' });
         }
+        // An order answered by its inbox id: the cart the menu would have signed, with the item's terms and the buyer's note
+        // (14 Nov: a confirm-first booking answered by hand lost its 168 hours and became a 24-hour hold).
+        const orderOf = (id: number) => {
+          const got = received.find((r) => r.id === id);
+          const p = got?.message as { kind?: string; sku?: unknown; qty?: unknown; note?: unknown } | undefined;
+          if (!got || p?.kind !== 'trade.order') throw new Error(`no order ${id} in what you received (lake_inbox lists each with its id)`);
+          if (!got.from.url) throw new Error('no address for the buyer');
+          return { got: got as typeof got & { from: { url: string } }, p };
+        };
+        if (a.action === 'decline') {
+          if (a.order === undefined) throw new Error('decline needs order: the lake_inbox id of the order');
+          const { got, p } = orderOf(a.order);
+          const reply = await me.ask(got.from.url, { kind: 'trade.declined', sku: String(p.sku ?? ''), ...(a.reason ? { reason: a.reason } : {}) });
+          return json({ declined: a.order, their_reply: reply });
+        }
+        if (a.action === 'cart' && a.order !== undefined) {
+          const { got, p } = orderOf(a.order);
+          const item = menu.find((x) => x.sku === p.sku);
+          if (!item) throw new Error(`"${String(p.sku)}" isn't on your menu now: answer with lake_sell { action: "cart", to, items } if you can do it`);
+          const buyerCard = (await (await fetch(cardUrlFor(got.from.url))).json()) as AgentCard;
+          const buyer = lakeProfile(buyerCard);
+          if (!buyer) throw new Error(`no Lake agent at ${got.from.url}`);
+          const qty = Number.isInteger(p.qty) && (p.qty as number) >= 1 && (p.qty as number) <= 100 ? (p.qty as number) : 1;
+          const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
+          const cart = await me.cart(buyer.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note, item.sku);
+          const c = await checkCart(cart, (await key).publicJwk);
+          orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? got.from.name), url: got.from.url, webId: buyer.webId }, buyerCard, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: got.at, signed: got.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+          const reply = await me.ask(got.from.url, { kind: 'trade.cart', cart });
+          return json({ sent: c.id, total: c.total, expires: c.expires, from_your_menu: item.sku, their_reply: reply });
+        }
         if (a.action === 'cart') {
-          if (!a.to || !a.items?.length) throw new Error('cart needs to (the buyer\'s A2A endpoint) and items ({ label, price, currency })');
+          if (!a.to || !a.items?.length) throw new Error('cart needs to (the buyer\'s A2A endpoint) and items ({ label, price, currency }), or order (an order\'s lake_inbox id)');
           const buyerCard = (await (await fetch(cardUrlFor(a.to))).json()) as AgentCard;
           const buyer = lakeProfile(buyerCard);
           if (!buyer) throw new Error(`no Lake agent at ${a.to}`);
@@ -1634,9 +1677,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             if (!(x.hold && x.payment === 'held')) throw new Error(`a part refund is for a held payment; cart ${x.cart} is ${moneyLine(x)}: refund it all, or not`);
             const v = await me.ask(await holder(x), { kind: 'void', hold: x.hold, amount: a.amount });
             if (v.kind !== 'voided') throw new Error((v.problems as string[] | undefined)?.join('; ') ?? 'the payments agent would not refund part of it');
-            x.partRefunded = Math.round(((x.partRefunded ?? 0) + a.amount) * 100) / 100;
+            const key = `${x.hold}:${v.still_held}`;
+            if (!x.partKeys?.includes(key)) {
+              x.partKeys = [...(x.partKeys ?? []), key];
+              x.partRefunded = Math.round(((x.partRefunded ?? 0) + a.amount) * 100) / 100;
+            }
             x.evidence.push({ step: `part refunded (${x.total.currency} ${a.amount})`, at: new Date().toISOString(), signed: v.credential });
-            return json({ refunded_part: a.amount, still_held: v.still_held, cart: x.cart, note: 'the buyer can accept the delivery now to settle on that: the rest is released to you' });
+            return json({ refunded_part: a.amount, still_held: v.still_held, cart: x.cart, note: x.delivered ? 'the buyer can accept the delivery now to settle on that: the rest is released to you' : 'the rest stays held for you: deliver, and it is released when the buyer accepts' });
           }
           if (x.hold && x.payment === 'held') {
             // Still held: void it at the payments agent, which sends both sides its signed receipt.
@@ -1897,7 +1944,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const thing = standing ? q.tag!.slice(q.tag!.indexOf(':') + 1) : q.q?.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
         if (!withRecord.length && thing && (standing || q.q)) {
           const want = standing?.[1] === 'seeking' ? `offering:${thing}` : `seeking:${thing}`;
-          return json({ found: [], next: `${standing?.[1] === 'seeking' ? `Nobody is looking for "${thing}"` : `Nobody offers "${thing}"`} now. Leave it standing: lake_set_tags { tags: ["${want}"] } keeps looking, and whoever turns up later is in your lake_inbox (and, if you have a key to your human's house and aren't reading, on their phone).` });
+          // lake_set_tags replaces the whole list: the suggestion keeps the tags this agent already has (14 Nov: following
+          // it would have wiped an offering:bike).
+          const keep = JSON.stringify([...tags.filter((t) => t !== want), want].slice(-8));
+          return json({ found: [], next: `${standing?.[1] === 'seeking' ? `Nobody is looking for "${thing}"` : `Nobody offers "${thing}"`} now. Leave it standing: lake_set_tags { tags: ${keep} } keeps looking (${standing ? '' : `selling one? offering:${thing} in place of seeking:${thing}; `}it replaces your whole list, so keep the tags you have), and whoever turns up later is in your lake_inbox (and, if you have a key to your human's house and aren't reading, on their phone).` });
         }
         return json(withRecord);
       } catch (e) {

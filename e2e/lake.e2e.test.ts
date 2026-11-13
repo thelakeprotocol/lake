@@ -1333,16 +1333,35 @@ describe('the open door', () => {
     expect(JSON.stringify(turned)).toMatch(/does not take messages from you/);
     expect(await text('lake_block', { agent_url: theirs.you.url, undo: true })).toMatchObject({ unblocked: expect.any(String) });
     // A menu item its seller confirms first (a booking): an order gets no cart, and the buyer hears why (run 61).
-    await theirText('lake_sell', { action: 'menu', items: [{ sku: 'tutoring', label: 'Maths tutoring, 1 hour', price: 45, currency: 'USD', confirm: true }] });
-    const booked = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'tutoring' });
+    const tutoring = { sku: 'tutoring', label: 'Maths tutoring, 1 hour', price: 5, currency: 'USD', confirm: true, delivery: { within_hours: 168 } };
+    await theirText('lake_sell', { action: 'menu', items: [tutoring] });
+    const booked = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'tutoring', note: 'Sunday afternoon, algebra' });
     expect(booked.reply?.note).toMatch(/confirms each order of "Maths tutoring, 1 hour" first/);
     expect(booked.cart).toBeUndefined();
     // Play money in each currency the sandbox's shops use (run 67, take two: every AUD cart met USD-only play money).
-    await theirText('lake_sell', { action: 'menu', items: [{ sku: 'jam', label: 'Apricot jam, 250 g', price: 4.5, currency: 'AUD' }] });
+    await theirText('lake_sell', { action: 'menu', items: [tutoring, { sku: 'jam', label: 'Apricot jam, 250 g', price: 4.5, currency: 'AUD' }] });
     const jam = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'jam' });
     expect(await text('lake_buy', { action: 'pay', cart: jam.cart })).toMatchObject({ paid: 4.5, unit: 'AUD' });
     // The order waits in the seller's inbox for its yes (read here, so later checks of that inbox start clean).
-    expect((await theirText('lake_inbox', { wait_seconds: 2 })).messages.some((m: { message?: { kind?: string } }) => m.message?.kind === 'trade.order')).toBe(true);
+    const waiting = (await theirText('lake_inbox', { wait_seconds: 2 })).messages as { id: number; message?: { kind?: string; sku?: string } }[];
+    const order = waiting.find((m) => m.message?.kind === 'trade.order' && m.message.sku === 'tutoring')!;
+    expect(order).toBeTruthy();
+    // Answered by its id: the cart the menu would have signed, with the item's week to deliver in and the buyer's note
+    // (14 Nov: answered by hand, a booking's 168 hours became a 24-hour hold).
+    const yes = await theirText('lake_sell', { action: 'cart', order: order.id });
+    expect(yes).toMatchObject({ sent: expect.any(String), from_your_menu: 'tutoring' });
+    const lesson = await text('lake_buy', { action: 'pay', cart: yes.sent });
+    expect(Date.parse(lesson.hold.until) - Date.now()).toBeGreaterThan(100 * 3_600_000);
+    expect(lesson.deliver_by).toBeUndefined();
+    // Given back, so what the buyer has left is as the checks below expect.
+    await theirText('lake_inbox', { wait_seconds: 2 });
+    expect(await theirText('lake_sell', { action: 'refund', cart: yes.sent })).toMatchObject({ refunded: yes.sent, voided: true });
+    // Or no: the buyer hears it, and nothing is signed or charged.
+    await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'tutoring' });
+    const rebooked = ((await theirText('lake_inbox', { wait_seconds: 2 })).messages as typeof waiting).find((m) => m.message?.kind === 'trade.order' && m.message.sku === 'tutoring')!;
+    expect(await theirText('lake_sell', { action: 'decline', order: rebooked.id, reason: 'Fully booked this week' })).toMatchObject({ declined: rebooked.id });
+    const saidNo = (await text('lake_inbox', { wait_seconds: 2 })).messages as { message?: { kind?: string; reason?: string } }[];
+    expect(saidNo.some((m) => m.message?.kind === 'trade.declined' && m.message.reason === 'Fully booked this week')).toBe(true);
     const tagged = await text('lake_set_tags', { tags: ['game:coinflip'], about: 'Plays fair coin flips for small stakes.' });
     expect(tagged.url).toBe(o.you.url); // the same address before and after
     // Forgiving search: a tag prefix, and words in a card's own line.
@@ -1789,9 +1808,12 @@ describe('the open door', () => {
     expect(await poet('lake_sell', { action: 'refund', cart: second.cart, amount: 1 })).toMatchObject({ refunded_part: 1, still_held: 1 });
     await buyer('lake_inbox', { wait_seconds: 5 });
     expect((await buyer('lake_buy', { action: 'orders' })).orders.find((x: any) => x.cart === second.cart).money).toMatch(/USD 1 of it refunded already, USD 1 still held$/);
+    // The seller counts it once, though the payments agent's receipt of it comes too (14 Nov: A$10 showed as A$20).
+    await poet('lake_inbox', { wait_seconds: 3 });
+    expect((await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === second.cart).money).toMatch(/USD 1 of it refunded already, USD 1 still held$/);
     expect(await buyer('lake_buy', { action: 'accept', cart: second.cart })).toMatchObject({ held_payment: 'released to the seller' });
     for (let i = 0; i < 20 && (await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === second.cart).payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
-    expect((await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === second.cart)).toMatchObject({ payment: 'released' });
+    expect((await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === second.cart)).toMatchObject({ payment: 'released', money: 'paid: USD 1 refunded to the buyer, USD 1 released to you' });
     // A refund: the seller pays the whole cart back, and the buyer's order says so.
     const third = await buyer('lake_buy', { action: 'order', seller_url: found.url, sku: 'haiku' });
     await buyer('lake_buy', { action: 'pay', cart: third.cart });
