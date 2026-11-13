@@ -305,7 +305,8 @@ export interface LakeMcpAgent {
   /** Its state now, as `save` would get it. */
   snapshot(): Promise<AgentSnapshot>;
   /** How many messages wait unread, and since when, and for an AI on duty whether it is on now (the runner's cheap look). */
-  pending(look?: { host: string; since: string; every: number }): Promise<{ waiting: number; to_deliver?: number; oldest?: string; duty?: { on: boolean; why?: string }; tasks?: string[] }>;
+  /** With `waitMs`, an answer with nothing to do waits up to that long for the next message, then counts again (`live`). */
+  pending(look?: { host: string; since: string; every: number }, waitMs?: number): Promise<{ waiting: number; to_deliver?: number; oldest?: string; duty?: { on: boolean; why?: string }; tasks?: string[]; live?: true }>;
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
@@ -557,6 +558,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   const viaKeys = new Set<string>(x.saved?.via ?? []);
   // Every conversation waiting on the inbox is woken (two chats may wait at once).
   const wakers = new Set<() => void>();
+  /** What waits for the AI on duty, without reading it: the runner starts its human's model only when there's something. */
+  const count = async (look?: { host: string; since: string; every: number }) => {
+    if (look) { dutyLook.at = Date.now(); dutyLook.every = Math.max(30, Math.min(3600, look.every || 600)); }
+    const deliver = onDuty ? [...orders.values()].filter((o) => o.role === 'seller' && o.evidence[0]?.step === 'ordered' && !o.delivered && (o.payment === 'held' || o.payment === 'paid')).length : 0;
+    const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty', ...(look ? { runner: look } : {}) }).catch(() => null)) as { on?: boolean; why?: string; tasks?: string[] } | null) : null;
+    // Its own house's news that asks nothing (fyi: a study answered, a held time's ending) is read with the next real
+    // message: no run is started for it.
+    const asks = inbox.filter((m) => !isFyi(m));
+    return { waiting: asks.length, ...(inbox.length > asks.length ? { fyi: inbox.length - asks.length } : {}), ...(deliver ? { to_deliver: deliver } : {}), ...(asks[0] ? { oldest: asks[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}), ...(duty?.tasks?.length ? { tasks: duty.tasks } : {}) };
+  };
   type Incoming = { from: LakeProfile; card: AgentCard; payload: Record<string, unknown>; signed: unknown };
   const pushInbox = (m: Incoming, checked?: Checked | Record<string, unknown>, quietly = false) => {
     // Its place among this sender's messages to you: a correction that arrives later shows as a later number (run 17).
@@ -2940,14 +2951,18 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       return mcp;
     },
     snapshot,
-    pending: async (look) => {
-      if (look) { dutyLook.at = Date.now(); dutyLook.every = Math.max(30, Math.min(3600, look.every || 600)); }
-      const deliver = onDuty ? [...orders.values()].filter((o) => o.role === 'seller' && o.evidence[0]?.step === 'ordered' && !o.delivered && (o.payment === 'held' || o.payment === 'paid')).length : 0;
-      const duty = onDuty && house ? ((await houseCall({ kind: 'assistant.duty', ...(look ? { runner: look } : {}) }).catch(() => null)) as { on?: boolean; why?: string; tasks?: string[] } | null) : null;
-      // Its own house's news that asks nothing (fyi: a study answered, a held time's ending) is read with the next real
-      // message: no run is started for it.
-      const asks = inbox.filter((m) => !isFyi(m));
-      return { waiting: asks.length, ...(inbox.length > asks.length ? { fyi: inbox.length - asks.length } : {}), ...(deliver ? { to_deliver: deliver } : {}), ...(asks[0] ? { oldest: asks[0].at } : {}), ...(duty ? { duty: { on: !!duty.on, ...(duty.why ? { why: duty.why } : {}) } } : {}), ...(duty?.tasks?.length ? { tasks: duty.tasks } : {}) };
+    pending: async (look, waitMs = 0) => {
+      const counted = await count(look);
+      if (!waitMs) return counted;
+      // Live (the runner on its human's computer answers within seconds): with nothing to do, the answer waits for the
+      // next message to arrive, or the end of the wait, and is counted again. Something to do is answered at once.
+      if (!counted.waiting && !counted.to_deliver && !counted.tasks?.length) {
+        let w = () => {};
+        const came = await new Promise<boolean>((ok) => { const t = setTimeout(() => ok(false), waitMs); t.unref?.(); w = () => { clearTimeout(t); ok(true); }; wakers.add(w); });
+        wakers.delete(w);
+        if (came) return { ...(await count(look)), live: true as const };
+      }
+      return { ...counted, live: true as const };
     },
     wake: async () => { await agent(); },
     passport: async () => {

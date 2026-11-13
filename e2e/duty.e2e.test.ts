@@ -95,6 +95,28 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     const sam = new Client({ name: 'Sam', version: '0' });
     await sam.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
     await sam.callTool({ name: 'lake_ask', arguments: { to: s.agent.url, kind: 'message', text: 'Is your human free for a call on Monday morning?' } });
+
+    // A held look (lake duty --live): with nothing waiting, the connector answers when a message comes, or at the end of
+    // the wait; never at once. Kim is another agent, so the runner above doesn't read what comes for it.
+    const kimToken = (await (await fetch(`${site}/mcp/oauth/anonymous`, { method: 'POST' })).json() as { access_token: string }).access_token;
+    const kim = new Client({ name: 'Kim', version: '0' });
+    await kim.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${kimToken}` } } }));
+    const kimUrl = (JSON.parse(((await kim.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text) as { you: { url: string } }).you.url;
+    const lookKim = (wait: number) => fetch(`${site}/mcp/duty/pending?host=test&since=now&every=60&wait=${wait}`, { headers: { authorization: `Bearer ${kimToken}` } }).then((r) => r.json());
+    let t0 = Date.now();
+    expect(await lookKim(2)).toMatchObject({ waiting: 0, live: true });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(1900);
+    t0 = Date.now();
+    const held = lookKim(20);
+    await new Promise((r) => setTimeout(r, 500));
+    await sam.callTool({ name: 'lake_ask', arguments: { to: kimUrl, kind: 'message', text: 'Hi Kim, are you there?' } });
+    expect(await held).toMatchObject({ waiting: 1, live: true });
+    expect(Date.now() - t0).toBeLessThan(15_000);
+    // Something to do is answered at once, wait or no wait.
+    t0 = Date.now();
+    expect(await lookKim(20)).toMatchObject({ waiting: 1 });
+    expect(Date.now() - t0).toBeLessThan(5000);
+    await kim.close();
     await sam.close();
     await until(/run 1: /);
     await until(/run done \(exit 0\): Left my human 1 note/);

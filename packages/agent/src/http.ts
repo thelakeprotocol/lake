@@ -447,7 +447,10 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
     let l = live.get(principal);
     if (!l && !look.host) return void res.json({ waiting: 0, asleep: true });
     if (!l) { try { l = await agentFor(principal); await l.agent.wake(); } catch (e) { return void res.status(503).json({ error: (e as Error).message }); } }
-    res.json(await l.agent.pending(look.host ? look : undefined).catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
+    // ?wait=N (at most 25 s): with nothing to do, the answer waits for the next message (a long poll), so a runner on its
+    // human's computer starts within seconds of someone writing, without asking every few seconds.
+    const wait = Math.max(0, Math.min(25, Number(req.query.wait) || 0)) * 1000;
+    res.json(await l.agent.pending(look.host ? look : undefined, wait).catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
   });
   app.delete(path, ...signedIn, stream);
   app.get('/health', (_req, res) => void res.json({ ok: true, sessions: sessions.size, agents: live.size }));

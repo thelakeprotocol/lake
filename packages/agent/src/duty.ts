@@ -166,11 +166,12 @@ async function call(o: DutyOptions, s: Saved, name: string, args: Record<string,
 
 /** Unread messages for this agent, without reading them (the connector's GET <lake>/duty/pending). */
 const started = new Date().toISOString();
-async function pending(o: DutyOptions, s: Saved, lookMs = o.every ?? 600_000): Promise<{ waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string }; tasks?: string[] }> {
-  const q = new URLSearchParams({ host: o.host ?? hostname(), since: started, every: String(Math.round(lookMs / 1000)) });
+type Pending = { waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string }; tasks?: string[]; live?: boolean };
+async function pending(o: DutyOptions, s: Saved, lookMs = o.every ?? 600_000, waitS = 0): Promise<Pending> {
+  const q = new URLSearchParams({ host: o.host ?? hostname(), since: started, every: String(Math.round(lookMs / 1000)), ...(waitS ? { wait: String(waitS) } : {}) });
   const r = await fetch(`${o.lake.replace(/\/$/, '')}/duty/pending?${q}`, { headers: { authorization: `Bearer ${s.access_token}` } });
   if (r.status === 401) { s.expires_at = 0; throw new Error('401'); }
-  return (await r.json()) as { waiting: number | null; to_deliver?: number; duty?: { on: boolean; why?: string }; tasks?: string[] };
+  return (await r.json()) as Pending;
 }
 
 /** Runs the owner's agent CLI once with the Lake as its only tools; resolves with what it said last. */
@@ -218,7 +219,11 @@ export async function runDuty(o: DutyOptions): Promise<void> {
   const tried = new Map<string, number>();
   let cut: (() => void) | null = null;
   o.wake?.(() => cut?.());
+  // Whether the next look may be held open by the connector until something arrives (a long poll): only when it said it
+  // can, and the last look left nothing it chose not to run (otherwise the answer would come back at once, again and again).
+  let hold = true, ran = false;
   const run = async (prompt: string, what: string, n: number, task = false) => {
+    ran = true;
     runs.push(Date.now());
     log(`run ${n}: ${what}`);
     const lake = task ? taskUrl(o.lake) : dutyUrl(o.lake);
@@ -238,7 +243,9 @@ export async function runDuty(o: DutyOptions): Promise<void> {
   while (!o.signal?.aborted) {
     try {
       s = await fresh(o, s, file);
-      const p = await pending(o, s, look);
+      ran = false;
+      const p = await pending(o, s, look, hold ? 25 : 0);
+      hold = !!p.live && (ran || !((p.waiting ?? 1) > 0 || (p.to_deliver ?? 0) > 0 || (p.tasks?.length ?? 0) > 0));
       // A connector that can't count says null: then run now and then anyway (every sixth look), not at every look.
       const unknownDue = p.waiting === null && !runs.some((t) => Date.now() - t < every * 6);
       const recent = runs.filter((t) => Date.now() - t < 24 * 3_600_000);
@@ -272,11 +279,14 @@ export async function runDuty(o: DutyOptions): Promise<void> {
         if (capped) log(`${p.waiting ?? 'something'} waiting, but ${capped}: not running`);
         else await run(dutyPrompt(o.house, s.duty as { kinds?: string[]; cap?: number } | null), `${p.waiting ?? 'unknown number of'} message(s) waiting${p.to_deliver ? `, ${p.to_deliver} order(s) to deliver` : ''}`, recent.length + 1);
       }
+      if (ran) hold = !!p.live;
     } catch (e) {
+      hold = false;
       if ((e as Error).message !== '401') log(`problem: ${(e as Error).message}`);
     }
-    // One listener a wait, taken off when the wait ends (each look added one before, and they piled up overnight).
-    await new Promise<void>((r) => { const stop = () => { clearTimeout(t); o.signal?.removeEventListener('abort', stop); cut = null; r(); }; const t = setTimeout(stop, look); o.signal?.addEventListener('abort', stop, { once: true }); cut = stop; });
+    // A held look was the wait. One listener a wait, taken off when the wait ends (each look added one before, and they
+    // piled up overnight).
+    if (!hold) await new Promise<void>((r) => { const stop = () => { clearTimeout(t); o.signal?.removeEventListener('abort', stop); cut = null; r(); }; const t = setTimeout(stop, look); o.signal?.addEventListener('abort', stop, { once: true }); cut = stop; });
   }
   log(`${o.tasksOnly ? 'no task left' : 'off duty'} at ${hhmm()}`);
 }

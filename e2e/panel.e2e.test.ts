@@ -1498,8 +1498,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const box = card.locator('.copybox');
     await box.waitFor({ timeout: 10_000 });
     const cmd = (await box.textContent())!.trim();
-    expect(cmd).toMatch(new RegExp(`^npx -y @thelakeprotocol/agent duty --lake \\S+/mcp --house ${house.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} --code \\S+$`));
-    const code = /--code (\S+)$/.exec(cmd)![1]!;
+    expect(cmd).toMatch(new RegExp(`^npx -y @thelakeprotocol/agent duty --lake \\S+/mcp --house ${house.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} --code \\S+ --live$`));
+    const code = /--code (\S+)/.exec(cmd)![1]!;
     await tidy();
     // The runner pairs with the code: it is the AI on duty, under exactly what was signed.
     const night = await generateIdentity('night-ai');

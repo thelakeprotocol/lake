@@ -18,6 +18,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const [connect, setConnect] = useState(false);
   const [setup, setSetup] = useState(false);
+  const [setupWhere, setSetupWhere] = useState<'house' | 'computer' | undefined>(undefined);
   const [keySheet, setKeySheet] = useState(false);
   const runner = useHouse<Runner>({ kind: 'panel.duty.runner' });
   if (!v.data) return h(Page, { title: 'My AI', big: true, status, footer: tabbar }, h(Failed, { error: v.error }));
@@ -41,14 +42,17 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
           d.runner ? h('p', {}, watching(d.runner)) : null, !d.state.on ? h('p', { class: 'warn-text' }, d.state.why) : null),
         h('div', { slot: 'end' }, h(Btn, { label: 'Turn off', size: 'small', fill: 'outline', color: 'danger', run: () => call({ kind: 'panel.duty.off', kid: d.kid }), ask: { header: 'Take your AI off duty?', sub: 'It stops now.', button: 'Turn off' } }))))
         : h(Row, { icon: 'moon-outline', tint: 'violet', label: 'Set up AI on duty', sub: 'Replies to people you know while you\'re away. Never money.', onClick: () => setSetup(true) })),
-    runner.data ? h(Section, { title: 'Its AI model' },
+    // Two ways to run it, said plainly (13 Nov: "what about just log in with your Claude subscription?"). A subscription
+    // signs in only to Claude's own apps, so it runs your AI on your computer, in Claude Code; a house runs it with a key.
+    runner.data ? h(Section, { title: 'Where your AI runs' },
+      h(Row, { icon: 'laptop-outline', tint: 'violet', label: 'On your computer', sub: 'With your Claude subscription, in Claude Code. Answers within seconds while the computer is on.', onClick: () => { setSetupWhere('computer'); setSetup(true); } }),
       runner.data.model?.whose === 'yours'
         ? h(Row, { icon: 'key-outline', tint: 'violet', label: 'Your own Claude key', sub: `${runner.data.model.model ?? 'Claude'}${runner.data.running ? ' · running in your house' : ''}`, note: h(Btn, { label: 'Remove', size: 'small', fill: 'clear', color: 'danger', run: () => must({ kind: 'panel.model.clear' }), ask: { header: 'Remove your Claude key from your house?', sub: runner.data.running ? 'Your AI on duty stops unless your house offers one.' : undefined, button: 'Remove' } }) })
-        : h(Row, { icon: 'key-outline', tint: 'violet', label: runner.data.model ? 'Your house offers one' : 'Use my own Claude key', sub: runner.data.model ? `So your house can run your AI on duty${runner.data.running ? ' (running now)' : ''}. Or use your own key.` : 'So your house can run your AI on duty, awake whenever it is', onClick: () => setKeySheet(true) })) : null,
+        : h(Row, { icon: 'key-outline', tint: 'violet', label: runner.data.model ? 'Always on: your house offers one' : 'Always on, in your house', sub: runner.data.model ? `Awake whenever your house is${runner.data.running ? ' (running now)' : ''}. Or use your own Claude API key.` : 'With a Claude API key, awake whenever your house is. You pay Anthropic for what it uses.', onClick: () => setKeySheet(true) })) : null,
     h(Night, { log: duty.data }),
     h(Sheet, { open: connect, onClose: () => setConnect(false), title: 'Give your AI a key' }, h(ConnectSheet, { houseUrl: houseBase(), ais })),
     h(Sheet, { open: keySheet, onClose: () => setKeySheet(false), title: 'Your own Claude key' }, h(KeySheet, { done: () => setKeySheet(false) })),
-    h(Sheet, { open: setup || !!dutyCode, onClose: () => { setSetup(false); dutyCode = null; }, title: 'AI on duty' }, h(DutySetup, { houseUrl: houseBase(), log: duty.data, done: () => setSetup(false) })));
+    h(Sheet, { open: setup || !!dutyCode, onClose: () => { setSetup(false); setSetupWhere(undefined); dutyCode = null; }, title: 'AI on duty' }, setup || dutyCode ? h(DutySetup, { key: setupWhere ?? 'any', houseUrl: houseBase(), log: duty.data, start: setupWhere, done: () => { setSetup(false); setSetupWhere(undefined); } }) : null));
 }
 
 /** An Anthropic API key, kept in your house so it can run your AI on duty; you pay Anthropic for what it uses. */
@@ -79,7 +83,7 @@ function ConnectSheet({ houseUrl, ais }: { houseUrl: string; ais: Assistant[] })
 }
 
 /** What your AI on duty may do, in which hours, how many things a night, for how long; signed here; then the command. */
-function DutySetup({ houseUrl, log, done }: { houseUrl: string; log?: DutyLog; done: () => void }) {
+function DutySetup({ houseUrl, log, done, start }: { houseUrl: string; log?: DutyLog; done: () => void; start?: 'house' | 'computer' }) {
   const [kinds, setKinds] = useState<string[]>(['reply', 'book']);
   const [from, setFrom] = useState('22:00');
   const [to, setTo] = useState('07:00');
@@ -87,18 +91,18 @@ function DutySetup({ houseUrl, log, done }: { houseUrl: string; log?: DutyLog; d
   const [days, setDays] = useState(7);
   const redraw = useRedraw();
   const runner = useHouse<Runner>({ kind: 'panel.duty.runner' });
-  const [where, setWhere] = useState<'house' | 'computer'>('house');
+  const [where, setWhere] = useState<'house' | 'computer'>(start ?? 'house');
   const inHouse = !!runner.data?.can && where === 'house';
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (dutyCode && (dutyCode.until < Date.now() || (log?.duties ?? []).some((d) => d.seenAt && Date.parse(d.seenAt) >= dutyCode!.made - 1000))) dutyCode = null;
   if (dutyCode) return h('div', { class: 'sheet-body' },
-    h('p', {}, `Run this on the computer where your AI app is. The code works once, for ${Math.max(1, Math.round((dutyCode.until - Date.now()) / 60_000))} minutes.`),
+    h('p', {}, `Run this on a computer where Claude Code is signed in. The code works once, for ${Math.max(1, Math.round((dutyCode.until - Date.now()) / 60_000))} minutes. It answers while that computer is on.`),
     h('div', { class: 'copybox mono' }, dutyCode.cmd),
     h('div', { class: 'sheet-actions' }, h(CopyBtn, { text: dutyCode.cmd, label: 'Copy command', fill: 'solid' })));
   return h('div', { class: 'sheet-body' },
     runner.data?.can ? h('ion-segment', { value: where, class: 'where-seg', 'aria-label': 'Where it runs', onionChange: (e: CustomEvent) => setWhere(e.detail.value) },
       h('ion-segment-button', { value: 'house' }, h('ion-label', {}, 'In my house')), h('ion-segment-button', { value: 'computer' }, h('ion-label', {}, 'On my computer'))) : null,
-    h('p', { class: 'muted-line' }, inHouse ? `Your house runs it, awake whenever your house is, with ${runner.data!.model!.whose === 'yours' ? 'your own Claude key' : 'the AI your house offers'}. Never money; anything new waits for you.` : 'It runs on your computer with your own AI app. Never money; anything new waits for you.'),
+    h('p', { class: 'muted-line' }, inHouse ? `Your house runs it, awake whenever your house is, with ${runner.data!.model!.whose === 'yours' ? 'your own Claude API key' : 'the AI your house offers'}. Never money; anything new waits for you.` : 'It runs on your computer in Claude Code, on your own Claude subscription, and answers within seconds while the computer is on. Never money; anything new waits for you.'),
     h('ion-list', { inset: true, class: 'lake-list' },
       ...DUTY_KINDS.map(([k, label]) => h('ion-item', { key: k }, h('ion-checkbox', { checked: kinds.includes(k), onionChange: (e: CustomEvent) => setKinds(e.detail.checked ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k)), labelPlacement: 'end', justify: 'start' }, label))),
       h('ion-item', {}, h('ion-input', { type: 'time', label: 'From', value: from, 'aria-label': 'On duty from', onionInput: (e: CustomEvent) => setFrom(String(e.detail.value)) })),
@@ -115,7 +119,7 @@ function DutySetup({ houseUrl, log, done }: { houseUrl: string; log?: DutyLog; d
         const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
         if (inHouse) { await must({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: await signDraft(d.draft), runner: 'house' }); void toast('Your house runs your AI on duty now'); done(); return; }
         const r = await must<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: 'AI on duty', credential: await signDraft(d.draft) });
-        dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code}${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
+        dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code} --live${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
         redraw();
       } }),
       h('ion-button', { fill: 'clear', color: 'medium', expand: 'block', onClick: done }, 'Not now')));
