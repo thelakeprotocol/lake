@@ -625,6 +625,19 @@ describe('what an attacker tried (round 16)', () => {
   const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, url: `https://${key}.example/a2a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
+  it('only a sender the owner\'s side knows hears when the owner was last here; a cleared note says only that (13 Nov)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'ok' }) } });
+    const kim = h.desk.addNote({ from: from('kim'), text: 'Hi, it\'s Kim' })!;
+    const lee = h.desk.addNote({ from: from('lee'), text: 'Hi, it\'s Lee' })!;
+    expect(h.desk.senderKnown(from('kim').webId)).toBe(false);
+    expect(await h.owner({ kind: 'panel.note.reply', id: kim, text: 'Hello Kim' })).not.toHaveProperty('error');
+    expect(h.desk.senderKnown(from('kim').webId)).toBe(true);
+    expect(h.desk.senderKnown(from('lee').webId)).toBe(false);
+    await h.owner({ kind: 'panel.notes.clear', ids: [kim, lee] });
+    expect([h.desk.noteState(kim, from('kim').webId), h.desk.noteState(lee, from('lee').webId)]).toEqual(['set aside by the owner', 'set aside by the owner']);
+    h.close();
+  });
+
   it('Today answers without Money when Money is slow (13 Nov: a reused house never showed Handled for you)', async () => {
     const h = await house({ panel: { activity: () => [], money: () => new Promise(() => {}) } });
     const t0 = Date.now();
@@ -1125,7 +1138,7 @@ describe('people (step 3 of the app design)', () => {
     const first = await h.owner({ kind: 'panel.notes.clear', ids: ids.slice(0, 2) });
     expect(first).toMatchObject({ ok: true, cleared: 2, undo: expect.any(String) });
     expect(h.desk.notes.map((n) => n.id)).toEqual([ids[2]]);
-    expect(h.desk.noteState(ids[0]!, from('a').webId)).toContain('set aside by the owner, unread');
+    expect(h.desk.noteState(ids[0]!, from('a').webId)).toBe('set aside by the owner');
     expect(await h.owner({ kind: 'panel.notes.clear', ids: ['nothing'] })).toMatchObject({ ok: true, cleared: 0 });
 
     expect(await h.owner({ kind: 'panel.notes.restore', undo: first.undo })).toMatchObject({ ok: true, restored: 2 });

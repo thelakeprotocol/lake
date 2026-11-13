@@ -219,7 +219,8 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
   const bump = useBump();
   if (c.trust === 'known') return null;
   const twin = c.trust === 'lookalike' ? c.twin : undefined, name = shortName(twin?.name ?? '');
-  const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Mute', fill: 'outline', color: 'medium', size: 'small', run: async () => { await must({ kind: 'panel.note.mute', id: latest.id }); void toast(`${c.name} muted`); back('#chats'); }, ask: { header: 'Mute this sender?', sub: 'Their messages are turned away.', button: 'Mute' } }) : null;
+  // It turns them away at the door and tells them so: what messaging apps call Block, so it says Block (13 Nov).
+  const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Block', fill: 'outline', color: 'medium', size: 'small', run: async () => { await must({ kind: 'panel.note.mute', id: latest.id }); void toast(`${c.name} blocked`); back('#chats'); }, ask: blockAsk(c.name) }) : null;
   if (c.trust === 'lookalike') return h('div', { class: 'newstrip threat', role: 'note' },
     h('p', {}, h('b', {}, `Says they're ${name || c.name}, with a different key.`), ' A new phone or AI app does that; so does someone pretending.'),
     h('div', { class: 'newstrip-acts' },
@@ -260,11 +261,11 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
       namesakes.length ? h(Row, { icon: 'people-outline', tint: 'amber', label: `Also called ${c.name}`, sub: `${namesakes.length} other chat${namesakes.length === 1 ? '' : 's'}, through ${namesakes.map((x) => x.agent).join(', ')}: maybe not the same person` }) : null),
     c.canMode ? h(Section, {}, h(Row, { icon: 'chatbubbles-outline', label: 'Who replies', sub: who, onClick: change, cls: 'who-replies' })) : null,
     h(Section, {},
-      h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirmMute())) return; await call({ kind: 'panel.note.mute', id: latest.id }); close(); void toast(`${c.name} muted`); back('#chats'); } }, h('ion-icon', { name: 'notifications-off-outline', slot: 'start' }), h('ion-label', {}, 'Mute')),
+      h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirm(blockAsk(c.name)))) return; await call({ kind: 'panel.note.mute', id: latest.id }); close(); void toast(`${c.name} blocked`); back('#chats'); } }, h('ion-icon', { name: 'hand-left-outline', slot: 'start' }), h('ion-label', {}, 'Block')),
       h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { close(); await clearChats([c], bump, 'Chat cleared').catch((e: Error) => void toast(e.message, { color: 'danger' })); back('#chats'); } }, h('ion-icon', { name: 'trash-outline', slot: 'start', color: 'danger' }), h('ion-label', { color: 'danger' }, 'Clear chat'))),
     f.key ? h(Info, {}, h('p', {}, 'Its key: ', h('code', {}, f.key))) : null);
 }
-const confirmMute = () => confirm({ header: 'Mute this sender?', sub: 'Their messages are turned away.', button: 'Mute' });
+export const blockAsk = (name?: string) => ({ header: `Block ${name || 'this sender'}?`, sub: 'Your house turns their messages away and tells them it doesn\'t take them. You can\'t undo this yet.', button: 'Block' });
 
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
 export function WantPage({ arg }: { arg: string }) {

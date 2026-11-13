@@ -1052,7 +1052,7 @@ export class OwnerDesk {
     this.endTasksWith(key, 'You blocked them.');
     this.endTasksWith(`via:${key}`, 'You blocked them.');
     // Its notes leave the owner's list, and say so to their sender ("no such note" made a sender think it never arrived).
-    for (const n of this.notes.filter((x) => x.from.key === key)) this.closedNotes.set(n.id, { by: n.from.webId, state: 'seen and set aside by the owner' });
+    for (const n of this.notes.filter((x) => x.from.key === key)) this.closedNotes.set(n.id, { by: n.from.webId, state: 'set aside by the owner' });
     this.notes = this.notes.filter((n) => n.from.key !== key);
     void this.saveNotes();
     await saveWhole(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted]));
@@ -1356,6 +1356,12 @@ export class OwnerDesk {
     void this.saveWebNotes();
     this.touch();
     return { ok: true };
+  }
+
+  /** Whether the owner's side knows this sender: only they hear when the owner was last here (13 Nov: any stranger who left
+   *  a note could ask, where a knock already said it only to someone the house had dealt with). */
+  senderKnown(sender: string): boolean {
+    return [...this.contacts.values()].some((c) => c.webId === sender) || this.notes.some((n) => n.from.webId === sender && !!this.knownBy(n.from.key));
   }
 
   noteState(id: string, sender: string): string | null {
@@ -2566,7 +2572,7 @@ export class OwnerDesk {
       if (p.kind === 'panel.note.dismiss') {
         const id = String((p as unknown as { id?: string }).id ?? '');
         const gone = this.notes.find((x) => x.id === id);
-        if (gone) this.closedNotes.set(id, { by: gone.from.webId, state: 'seen and set aside by the owner' });
+        if (gone) this.closedNotes.set(id, { by: gone.from.webId, state: 'set aside by the owner' });
         this.notes = this.notes.filter((x) => x.id !== id);
         void this.saveNotes();
         this.sweepTasks();
@@ -2580,8 +2586,8 @@ export class OwnerDesk {
         const gone = this.notes.filter((x) => ids.has(x.id));
         if (!gone.length) return void res.json({ ok: true, cleared: 0 });
         for (const g of gone) {
-          const read = (this.chatSeen[g.from.key ?? g.from.webId] ?? '') >= g.at || !!g.answered;
-          this.closedNotes.set(g.id, { by: g.from.webId, state: read ? 'seen and set aside by the owner' : 'set aside by the owner, unread' });
+          // Whether they read it first is the owner's to keep: a sender only hears that it was set aside (13 Nov).
+          this.closedNotes.set(g.id, { by: g.from.webId, state: 'set aside by the owner' });
         }
         this.notes = this.notes.filter((x) => !ids.has(x.id));
         const undo = randomBytes(6).toString('hex');

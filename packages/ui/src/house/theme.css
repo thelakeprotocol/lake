@@ -236,7 +236,7 @@ ion-card.lake-card ion-card-content p { margin: 4px 0; font-size: 15px; }
 .card-actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 .card-actions.wrap { flex-wrap: wrap; }
 .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; color: var(--lake-muted); font-size: 13px; }
-.card-foot.quiet { justify-content: flex-start; gap: 4px; margin-top: 6px; }
+.card-foot.quiet { justify-content: flex-start; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .card-foot.quiet ion-button { margin: 0; --padding-start: 8px; --padding-end: 8px; }
 .card-foot.quiet .foot-end { margin-left: auto; }
 .hero-card { background: linear-gradient(135deg, var(--lake-mint-soft), var(--lake-violet-soft)), var(--lake-surface); border: 1px solid color-mix(in srgb, var(--lake-mint) 30%, transparent); }
@@ -578,8 +578,8 @@ ion-card.lake-card ion-card-content .task-did p { margin: 0; }
 .tell-input { --background: var(--lake-surface-2); border-radius: 14px; --padding-start: 12px; --padding-end: 12px; --padding-top: 10px; margin-top: 10px; font-size: 16px; }
 .tell-scope { font-size: 13.5px; }
 .tell .card-actions .tell-send { flex: 1; }
-.tell-row { margin-top: 12px; }
-.tell-btn { margin: 0; }
+.tell-row { display: contents; }
+.tell-btn { margin: 0; --color: var(--lake-violet); font-weight: 600; }
 .task-card { border-color: color-mix(in srgb, var(--lake-violet) 35%, transparent); }
 .task-card.back, .task-card.cant { border-color: color-mix(in srgb, var(--lake-amber) 45%, transparent); }
 .task-card .card-kicker .lake-pill { margin-left: auto; }

@@ -758,8 +758,10 @@ export class Housekeeper {
     const noteId = String(p.note ?? (this.o.desk.pending.has(String(p.offerId ?? '')) ? '' : p.offerId ?? ''));
     if (noteId) {
       const state = this.o.desk.noteState(noteId, requester);
-      // When the owner last looked is said too: a sender can tell waiting a day from waiting in vain.
-      if (state) return this.reply({ kind: 'note.status', note: noteId, status: state, ownerActive: lastActive(this.o.desk.ownerActive()) } as never);
+      // When the owner last looked is said to a sender their side knows (they can tell waiting a day from waiting in vain),
+      // and to anyone when nobody owns the house; never to a stranger, as for a knock (run 44).
+      const active = this.o.desk.senderKnown(requester) || this.o.desk.ownerActive() === 'no owner';
+      if (state) return this.reply({ kind: 'note.status', note: noteId, status: state, ...(active ? { ownerActive: lastActive(this.o.desk.ownerActive()) } : {}) } as never);
       if (p.note) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such note from you (notes are kept by the key that sent them)' });
     }
     const req = this.o.desk.pending.get(String(p.offerId ?? ''));

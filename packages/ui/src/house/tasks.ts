@@ -78,15 +78,16 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
 }
 
 /** The button that opens it, on an AI's note that is about someone who can be answered. */
-export function TellButton({ x, onSent }: { x: Note; onSent?: () => void }) {
+export function TellButton({ x, onSent, fallback }: { x: Note; onSent?: () => void; fallback?: () => void }) {
   const list = useHouse<ListView>({ kind: 'list' });
   const [open, setOpen] = useState(false);
   const v = list.data;
-  if (!v || !x.by || x.booking || !aboutWhom(x, v)) return null;
-  const a = v.assistants.find((q) => q.kid === x.by);
-  return h('div', { class: 'tell-row' },
-    h('ion-button', { fill: 'outline', shape: 'round', class: 'lake-btn tell-btn', onClick: () => setOpen(true) }, h('ion-icon', { name: 'sparkles-outline', slot: 'start' }), `Tell ${a ? aiOf(a.label) : 'your AI'} what to do`),
-    h(TellSheet, { open, onClose: () => setOpen(false), onSent, x }));
+  if (x.booking) return null;
+  const a = v?.assistants.find((q) => q.kid === x.by);
+  const btn = (onClick: () => void) => h('ion-button', { fill: 'clear', size: 'small', class: 'tell-btn', onClick }, h('ion-icon', { name: 'sparkles-outline', slot: 'start' }), `Tell ${a ? aiOf(a.label) : 'your AI'} what to do`);
+  // Not about anyone's chat: the same words open a line to the AI itself (the card's `fallback`).
+  if (!v || !x.by || !aboutWhom(x, v)) return fallback ? btn(fallback) : null;
+  return h('div', { class: 'tell-row' }, btn(() => setOpen(true)), h(TellSheet, { open, onClose: () => setOpen(false), onSent, x }));
 }
 
 /** What you told an AI to do, on Today until you've seen how it ended: what it sent, whether they answered, and the ways on. */
@@ -98,20 +99,22 @@ export function TaskCard({ t, v }: { t: TaskV; v: ListView }) {
   const inChat = v.notes.filter((n) => chatKeyOf(n) === t.to.key).sort((p, q) => p.at.localeCompare(q.at));
   const theirs = last ? inChat.filter((n) => n.at > last.at).at(-1) : undefined;
   const open = t.state === 'open';
-  const pill = open ? h(Pill, { text: `With ${ai}`, tone: 'violet' }) : t.state === 'done' ? h(Pill, { text: 'Done', tone: 'mint' }) : t.state === 'back' ? h(Pill, { text: 'Back to you', tone: 'amber' }) : h(Pill, { text: 'Not done', tone: 'red' });
+  const pill = open ? h(Pill, { text: 'Working on it', tone: 'violet' }) : t.state === 'done' ? h(Pill, { text: 'Done', tone: 'mint' }) : t.state === 'back' ? h(Pill, { text: 'Back to you', tone: 'amber' }) : h(Pill, { text: 'Not done', tone: 'red' });
   const status = !open ? (t.ended?.text ? null : t.ended?.why ?? null)
     : !last ? (t.seen ? `${Ai} is working on it.` : `Not started yet. ${starts(a, ai)}`)
       : theirs ? `${name} answered. ${t.left > 0 ? `${Ai} can send ${plural(t.left, 'more message')}.` : `${Ai} has sent all its messages.`}`
         : `Waiting for ${name}'s answer.`;
   const toChat = () => push(`#note=${encodeURIComponent(theirs?.id ?? last?.note ?? t.note)}`);
   const ok = (extra?: () => Promise<unknown>) => async () => { await extra?.(); await must({ kind: 'panel.task.ok', id: t.id }); };
-  const chatBtn = (label: string) => h('ion-button', { key: 'chat', fill: 'clear', shape: 'round', size: 'small', class: 'lake-btn', onClick: toChat }, label);
-  const okBtn = h(Btn, { key: 'ok', label: 'OK', size: 'small', fill: t.state === 'done' ? 'solid' : 'outline', color: t.state === 'done' ? 'primary' : 'medium', run: ok() });
+  // One main button at most; the rest on one quiet line under it, as on a note from the AI (13 Nov: three buttons, one
+  // of them wrapping to a line of its own).
+  const quietBtn = (key: string, label: string, onClick: () => void, cls = '') => h('ion-button', { key, fill: 'clear', size: 'small', color: 'medium', class: cls, onClick }, label);
+  const okBtn = (main: boolean) => h(Btn, main ? { key: 'ok', label: 'OK', size: 'small', run: ok() } : { key: 'ok', label: 'OK', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: ok() });
   const again = h('ion-button', { key: 'again', shape: 'round', size: 'small', class: 'lake-btn', onClick: () => setTell(true) }, t.state === 'cant' ? `Tell ${ai} again` : `Tell ${ai} what to do`);
   const handedOver = inChat.at(-1)?.mode === 'ai';
-  const acts: Child[] = open ? [h(Btn, { key: 'stop', label: 'Take it back', size: 'small', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.task.stop', id: t.id }), done: 'Taken back' }), t.did.length ? chatBtn('Open chat') : null]
-    : t.state === 'done' ? [okBtn, chatBtn('Open chat'), handedOver ? null : h(Btn, { key: 'keep', label: `Let ${ai} keep answering ${name}`, size: 'small', fill: 'outline', run: ok(() => must({ kind: 'panel.chat.mode', key: t.to.key, mode: 'ai' })), done: `${Ai} replies to ${name} from now on, while it's on duty` })]
-      : [again, chatBtn(t.to.via ? 'Open chat' : 'Reply yourself'), okBtn];
+  const [acts, quiet]: [Child[], Child[]] = open ? [[], [t.did.length ? quietBtn('chat', 'Open chat', toChat) : null, h(Btn, { key: 'stop', label: 'Take it back', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: () => must({ kind: 'panel.task.stop', id: t.id }), done: 'Taken back' })]]
+    : t.state === 'done' ? [[okBtn(true)], [quietBtn('chat', 'Open chat', toChat), handedOver ? null : h(Btn, { key: 'keep', label: `Let ${ai} keep answering ${name}`, size: 'small', fill: 'clear', color: 'medium', run: ok(() => must({ kind: 'panel.chat.mode', key: t.to.key, mode: 'ai' })), done: `${Ai} replies to ${name} from now on, while it's on duty` })]]
+      : [[again], [quietBtn('chat', t.to.via ? 'Open chat' : 'Reply yourself', toChat), okBtn(false)]];
   return h('ion-card', { class: `lake-card task-card ${t.state}` }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), `You told ${ai}`, pill),
     h('p', { class: 'task-words' }, `“${t.text}”`),
@@ -120,6 +123,7 @@ export function TaskCard({ t, v }: { t: TaskV; v: ListView }) {
     theirs ? h('div', { class: 'task-did theirs' }, h('small', {}, `${name} answered`), h('p', {}, theirs.text)) : null,
     !open && t.ended?.text ? h('div', { class: 'task-did report' }, h('small', {}, `${Ai} says`), h('p', {}, t.ended.text)) : null,
     status ? h('p', { class: 'muted-line task-status' }, status) : null,
-    h('div', { class: 'card-actions wrap' }, ...acts),
+    acts.length ? h('div', { class: 'card-actions wrap' }, ...acts) : null,
+    h('div', { class: 'card-foot quiet' }, ...quiet),
     h(TellSheet, { open: tell, onClose: () => setTell(false), note: inChat.at(-1)?.id ?? t.note, suggestion: t.suggestion, by: t.by })));
 }

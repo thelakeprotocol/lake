@@ -630,12 +630,15 @@ describe('the owner', () => {
     await ownerCall({ kind: 'panel.assistant.dismiss', id: warned.id });
     // New rules proposed for the owner's tap: checked when proposed, applied only by the owner's key.
     expect(await asHelper({ kind: 'assistant.suggest', text: 'x', rules: 'rules: [' })).toMatchObject({ error: expect.stringMatching(/^rules:/) });
-    // Its sender can check the note by either id, and hears when the owner last looked (run 62: "no such request from you").
-    expect((await ask(houses.strict!, neighbour, { kind: 'status', offerId: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'the owner has it and hasn\'t answered or dismissed it yet', ownerActive: expect.stringMatching(/^owner last active/) });
+    // Its sender can check the note by either id (run 62: "no such request from you"); a sender the owner's side doesn't
+    // know isn't told when the owner last looked (13 Nov), as at a knock.
+    const noteStatus = (await ask(houses.strict!, neighbour, { kind: 'status', offerId: twice.note })).reply;
+    expect(noteStatus).toMatchObject({ kind: 'note.status', status: 'the owner has it and hasn\'t answered or dismissed it yet' });
+    expect(noteStatus.ownerActive).toBeUndefined();
     // A sender the owner won't hear from again, by key: its next note is declined at the door.
     expect(await ownerCall({ kind: 'panel.note.mute', id: twice.note })).toMatchObject({ ok: true, muted: 'neighbour.example' });
     // And its notes don't vanish: they were seen and set aside (run 62: "no such note from you" after a mute).
-    expect((await ask(houses.strict!, neighbour, { kind: 'status', note: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'seen and set aside by the owner' });
+    expect((await ask(houses.strict!, neighbour, { kind: 'status', note: twice.note })).reply).toMatchObject({ kind: 'note.status', status: 'set aside by the owner' });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Hello again?' })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });
     // Nor its knocks (run 66: a muted sender's knock was still weighed).
     expect((await knock(houses.strict!, neighbour, { ...presets().gp!, fields: ['medications'] })).reply).toMatchObject({ decision: 'decline', reason: "declined: this house doesn't take messages from this sender" });

@@ -747,6 +747,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await rows.count()).toBeGreaterThan(20);
     await rows.filter({ hasText: 'Suggestion number 23' }).click();
     await sheet().getByText('Suggestion number 23').waitFor();
+    // About nobody's chat: Tell opens a line to the AI itself, in place of a Reply beside it.
+    expect(await sheet().getByRole('button', { name: 'Reply', exact: true }).count()).toBe(0);
+    await sheet().getByRole('button', { name: /^Tell .+ what to do$/ }).click();
+    await sheet().locator('.reply-input').waitFor();
     await sheet().getByRole('button', { name: 'Dismiss' }).click();
     await rows.filter({ hasText: 'Suggestion number 23' }).waitFor({ state: 'detached', timeout: 5000 });
     await page.locator('ion-list.notes').getByRole('button', { name: 'Clear all' }).click();
@@ -784,7 +788,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.getByText('Sent to Nova').waitFor({ timeout: 6000 });
       // The AI's note makes way for the card of what you told it; nothing waits for you while the AI has it.
       const card = page.locator('ion-card.task-card');
-      await card.locator('.card-kicker', { hasText: 'You told Nova' }).getByText('With Nova').waitFor({ timeout: 6000 });
+      await card.locator('.card-kicker', { hasText: 'You told Nova' }).getByText('Working on it').waitFor({ timeout: 6000 });
       await card.getByText('“Say no thanks, politely”').waitFor();
       await card.getByText(/^Not started yet\. Nova isn't running by itself\./).waitFor();
       await sug.waitFor({ state: 'detached' });
@@ -867,6 +871,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // chat before anything can be sent (the AI's text mustn't choose whom the owner's words go to).
       expect(await asAssistant({ kind: 'assistant.suggest', text: 'Sam wrote again about the bike. Shall I answer?', advice: 'your_call', ask: { choices: ['Yes, answer', 'Leave it'] } })).toMatchObject({ ok: true });
       const loose = page.locator('ion-card.sug', { hasText: 'Sam wrote again' });
+      // Three things to do with it: its two answers ("Leave it" is the way out, so no Dismiss) and Tell, which is also
+      // where the owner's own words go (13 Nov: Yes, Leave it, Tell, Reply and Dismiss overlapped).
+      await loose.waitFor({ timeout: 8000 });
+      expect(await loose.locator('ion-button:visible').allInnerTexts()).toEqual([/yes, answer/i, /leave it/i, /tell nova what to do/i].map((r) => expect.stringMatching(r)));
       await loose.getByRole('button', { name: 'Tell Nova what to do' }).click({ timeout: 8000 });
       await sheet().getByText('Who is this about?').waitFor();
       expect(await sheet().locator('.tell-about').count()).toBe(0);
@@ -883,7 +891,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await sheet().locator('.tell-about', { hasText: 'About Sam\'s message' }).waitFor();
       await expect.poll(() => send.evaluate((b) => (b as HTMLButtonElement).disabled)).toBe(false);
       await send.click();
-      await card.getByText('With Nova').waitFor({ timeout: 6000 });
+      await card.getByText('Working on it').waitFor({ timeout: 6000 });
       await card.getByRole('button', { name: 'Take it back' }).click();
       await card.waitFor({ state: 'detached', timeout: 6000 });
       // Taken back, the AI's question is the owner's to answer again.
@@ -1278,9 +1286,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await warning.getByText(shopperUrl).count()).toBe(0);
     expect(await warning.getByRole('button', { name: /mute/i }).count()).toBe(0);
     expect(await warning.locator('.reply-input').count()).toBe(0);
-    expect(await warning.locator('.card-foot.quiet ion-button').allInnerTexts()).toEqual(['REPLY', 'DISMISS'].map((t) => expect.stringMatching(new RegExp(t, 'i'))));
-    await warning.getByRole('button', { name: 'Reply', exact: true }).click();
-    await warning.locator('.reply-input').waitFor();
+    expect(await warning.locator('.card-foot.quiet ion-button:visible').allInnerTexts()).toEqual([/tell .+ what to do/i, /dismiss/i].map((r) => expect.stringMatching(r)));
     await tidy();
     await warning.getByRole('button', { name: 'Block them' }).click();
     await confirmSheet('Block');
