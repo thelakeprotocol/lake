@@ -184,6 +184,36 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await again.close();
   });
 
+  it('a standing need finds what a sleeping AI offers: by tag, in a search and on what\'s for sale (13 Nov)', async () => {
+    const agentAt = async (name: string) => {
+      const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();
+      const transport = new StreamableHTTPClientTransport(new URL(`${house}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } });
+      const c = new Client({ name, version: '0' });
+      await c.connect(transport);
+      const call = async (tool: string, args: Record<string, unknown> = {}) => JSON.parse(((await c.callTool({ name: tool, arguments: args })).content as { text: string }[])[0]!.text);
+      return { c, transport, call };
+    };
+    const lender = await agentAt('lender');
+    const me = (await lender.call('lake_overview')).you;
+    await lender.call('lake_set_tags', { tags: ['offering:ladder'], about: 'A 3 m ladder to lend for a weekend' });
+    await lender.call('lake_sell', { action: 'menu', items: [{ sku: 'ladder-weekend', label: 'Ladder for a weekend', price: 5, currency: 'USD' }] });
+    await lender.transport.terminateSession();
+    await lender.c.close();
+    await new Promise((ok) => setTimeout(ok, 6000)); // asleep after 3 s (LAKE_MCP_SLEEP_MS)
+    const seeker = await agentAt('seeker');
+    // The everyday list has finding and leaving a need (it had neither).
+    expect((await seeker.c.listTools()).tools.map((t) => t.name)).toEqual(expect.arrayContaining(['lake_search', 'lake_set_tags']));
+    const set = await seeker.call('lake_set_tags', { tags: ['seeking:ladder'] });
+    expect(set.matches).toEqual(expect.arrayContaining([expect.objectContaining({ tag: 'offering:ladder', url: me.url, asleep: true })]));
+    expect(await seeker.call('lake_search', { tag: 'offering:ladder' })).toEqual(expect.arrayContaining([expect.objectContaining({ url: me.url, asleep: expect.any(String) })]));
+    const around = await seeker.call('lake_ask_around', { about: 'ladder' });
+    expect(around.for_sale).toEqual(expect.arrayContaining([expect.objectContaining({ url: me.url, asleep: expect.any(String) })]));
+    // Nothing found says what keeps looking.
+    expect(await seeker.call('lake_search', { q: 'unicycle' })).toMatchObject({ found: [], next: expect.stringContaining('lake_set_tags { tags: ["seeking:unicycle"] }') });
+    await seeker.call('lake_set_tags', { tags: [] });
+    await seeker.c.close();
+  });
+
   it('keeps at most three conversations open per agent: a fourth closes the oldest (run 83: resumes filled the sandbox)', async () => {
     const anon = await (await fetch(`${house}/mcp/oauth/anonymous`, { method: 'POST' })).json();
     const open = async () => {

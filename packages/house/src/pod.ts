@@ -93,9 +93,10 @@ async function startPodServer(o: { dataDir: string; port: number; baseUrl: strin
   // The pod server must never outlive its house, even when the house crashes.
   const reap = () => proc.kill('SIGTERM');
   process.once('exit', reap);
-  for (const sig of ['uncaughtException', 'unhandledRejection'] as const) {
-    process.once(sig, (e) => { reap(); console.error(e); process.exit(1); });
-  }
+  process.once('uncaughtException', (e) => { reap(); console.error(e); process.exit(1); });
+  // A failed promise nobody waited for (a sign-in that timed out on a busy pod server) is said and survived: exiting for it
+  // took down every house this process hosts, again and again (13 Nov). A thrown exception still ends the process.
+  process.on('unhandledRejection', (e) => console.error('WARNING: a failure nobody waited for; the house keeps running:', e));
   const died = new Promise<never>((_, reject) => proc.once('exit', (code) => reject(new Error(`pod server exited (${code}):\n${tail.join('')}`))));
   // Seeding takes longer with more pods, and much longer on a busy machine.
   const pods = o.seed.reduce((n, a) => n + a.pods.length, 0);
@@ -232,16 +233,29 @@ export async function ownerSession(o: PodOptions): Promise<OwnerSession> {
 /** An authenticated fetch for one WebID's client credentials (DPoP), logging in again when a token expires. */
 async function sessionFetch(baseUrl: string, c: { clientId: string; clientSecret: string }): Promise<typeof fetch> {
   const login = async () => {
-    const session = new Session();
-    await session.login({ ...c, oidcIssuer: baseUrl, tokenType: 'DPoP' });
-    if (!session.info.isLoggedIn) throw new Error('owner login failed');
-    return session;
+    // A pod server that just started, on one busy CPU, can take longer than a sign-in waits (3.5 s): asked again a few
+    // times, a few seconds apart, before the house gives up (13 Nov: every start timed out, and the house restarted in a loop).
+    for (let i = 0; ; i++) {
+      try {
+        const session = new Session();
+        await session.login({ ...c, oidcIssuer: baseUrl, tokenType: 'DPoP' });
+        if (!session.info.isLoggedIn) throw new Error('owner login failed');
+        return session;
+      } catch (e) {
+        if (i >= 4 || !/timed out|ECONNRESET|ECONNREFUSED|fetch failed/i.test(String((e as Error).message))) throw e;
+        await new Promise((r) => setTimeout(r, 2000 + i * 2000));
+      }
+    }
   };
   let session = await login();
+  // One sign-in at a time: when a token expires, every request in flight gets a 401 at once, and each signing in again
+  // on a busy pod server made it busier (13 Nov: sign-ins timed out after 3.5 s, one after another).
+  let again: Promise<Session> | null = null;
   return sentAgain(async (input, init) => {
-    let res = await session.fetch(input as string, init);
+    const used = session;
+    let res = await used.fetch(input as string, init);
     if (res.status === 401) {
-      session = await login();
+      if (session === used) session = await (again ??= login().finally(() => { again = null; }));
       res = await session.fetch(input as string, init);
     }
     return res;

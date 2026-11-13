@@ -16,7 +16,7 @@ const names = async (c: Client) => (await c.listTools()).tools.map((t) => t.name
 
 describe('tool sets (SPEC §6.1)', () => {
   it('lists the everyday tools by default, a group on asking, all with "all"', async () => {
-    expect(toolSet('')!.size).toBe(9);
+    expect(toolSet('')!.size).toBe(11);
     expect(toolSet('all')).toBeNull();
     expect([...toolSet('trade, nonsense')!]).toEqual([...TOOL_SETS.core!, ...TOOL_SETS.trade!]);
     // Every group's tools exist, and the groups with the everyday ones cover all 28 without overlap.

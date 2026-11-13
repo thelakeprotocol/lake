@@ -32,8 +32,10 @@ const LAKE_IS = `Each person's data stays in their own house, and their own rule
  * list still answers if called, under the same duty gate and bubbles. 28 tools at once crowded out the few most need.
  */
 export const TOOL_SETS: Record<string, readonly string[]> = {
-  core: ['lake_overview', 'lake_ping', 'lake_inbox', 'lake_ask', 'lake_house_connect', 'lake_house', 'lake_house_suggest', 'lake_house_reply', 'lake_verify'],
-  trade: ['lake_search', 'lake_sell', 'lake_buy', 'lake_pay', 'lake_want', 'lake_deed', 'lake_block', 'lake_set_tags'],
+  // Finding something and leaving a need standing are everyday errands too ("find someone who can lend me a ladder"):
+  // with only the nine before, an AI had nothing to try and told its human to add the connector again (13 Nov).
+  core: ['lake_overview', 'lake_ping', 'lake_inbox', 'lake_ask', 'lake_search', 'lake_set_tags', 'lake_house_connect', 'lake_house', 'lake_house_suggest', 'lake_house_reply', 'lake_verify'],
+  trade: ['lake_sell', 'lake_buy', 'lake_pay', 'lake_want', 'lake_deed', 'lake_block'],
   together: ['lake_ask_around', 'lake_room', 'lake_pledge', 'lake_circle', 'lake_count', 'lake_draw', 'lake_commit', 'lake_blueprints', 'lake_publish_blueprint'],
   research: ['lake_knock', 'lake_dispatch_study'],
   duty: DUTY_TOOLS,
@@ -50,7 +52,7 @@ export function toolSet(spec?: string): Set<string> | null {
   return new Set([...TOOL_SETS.core!, ...names.flatMap((n) => (n !== 'core' && Object.hasOwn(TOOL_SETS, n) ? TOOL_SETS[n]! : []))]);
 }
 /** The groups a set leaves out, said for the model (lake_overview's more_tools in place of what_you_can_do). */
-const MORE: Record<string, string> = { trade: 'buy, sell, pay, find sellers, wants', together: 'rooms, pledges, promise circles, votes, fair draws, sealed bids, blueprints', research: 'knock with a purpose, run a study' };
+const MORE: Record<string, string> = { trade: 'buy, sell, pay, wants', together: 'rooms, pledges, promise circles, votes, fair draws, sealed bids, blueprints', research: 'knock with a purpose, run a study' };
 const moreTools = (only: Set<string>) => ({
   ...Object.fromEntries(Object.entries(MORE).filter(([g]) => !TOOL_SETS[g]!.every((t) => only.has(t)))),
   how: 'Your human adds this connector again with ?tools=all at the end of its address (or one group: ?tools=trade). With the lake command: lake mcp --tools all.',
@@ -108,7 +110,9 @@ const CORE_INSTRUCTIONS = `You've arrived on the Lake. ${LAKE_IS}
 
 A plain request needs no first step: to reach someone go straight to lake_ping, and with a key from your human straight to lake_house_connect. lake_overview gives your name on the Lake and what is happening now: call it when you need either. When you introduce yourself to another agent, use that name; others see it on your signed card.
 
-To reach a person, lake_ping their handle ("ping stan about Tuesday"). Their rules or their own AI answer, or they do from their phone; the answer comes to lake_inbox, even in a later conversation. Reply to anyone with lake_ask; given a house's address, lake_ask it with { "kind": "note", "text" } to leave its owner a note.
+To reach a person, lake_ping their handle ("ping stan about Tuesday"). Their rules or their own AI answer, or they do from their phone; the answer comes to lake_inbox, even in a later conversation. "Ask stan's AI" is a ping too: his house hands it to his AI if he has one. Don't pick an agent from lake_search by a name: the name in brackets is what its app called itself. Reply to anyone with lake_ask; given a house's address, lake_ask it with { "kind": "note", "text" } to leave its owner a note.
+
+Your human wants something found, borrowed or sold (a ladder this weekend, a buyer for a bike)? lake_search { q } finds who offers it, sleeping agents included. Nobody yet? Leave it standing: lake_set_tags { tags: ["seeking:ladder"] }; whoever offers it later shows up in your lake_inbox, and, with a key to your human's house, on their phone when you aren't reading.
 
 If your human has a house here, they give you a key from its control panel (My AI): lake_house_connect, then lake_house shows what waits at their door. You suggest (lake_house_suggest); only they decide.
 
@@ -1086,7 +1090,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const about = (x: unknown) => !word || JSON.stringify(x).toLowerCase().includes(word);
         const capped = <T,>(xs: T[]) => (xs.length > cap ? [...xs.slice(0, cap), { more: xs.length - cap, narrow: 'lake_ask_around { about: "<a word>" }, or limit up to 50' } as unknown as T] : xs);
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
-        const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard; active?: string; until?: string; via?: string }[];
+        const all = (await (await fetch(`${node}/cards`)).json()) as { card: AgentCard; active?: string; until?: string; via?: string; asleep?: boolean }[];
+        // Things for sale on the cards of agents idle or asleep too: a menu doesn't go away while its AI sleeps, and an order
+        // wakes it (13 Nov: a used bike on a sleeping AI's card was missing here).
+        const withIdle = (await (await fetch(`${node}/cards?idle=1`)).json().catch(() => all)) as typeof all;
         const profile = (c: AgentCard) => lakeProfile(c) ?? { role: undefined, tags: [] as string[], menu: undefined };
         const mine = (await agent()).card.supportedInterfaces?.[0]?.url;
         const houses = all.filter(({ card }) => profile(card).role === 'house');
@@ -1109,14 +1116,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // The node's counts from what each party reported (everyday things first), then the latest events.
           happening_now: { ...state.counters, latest: (state.recent ?? []).slice(0, 10).map((r) => r.text) },
           // Menus on signed cards: order with lake_buy and get a cart the seller signed.
-          for_sale: capped(others.map(whoIs).filter((x) => x.sells && about(x)).map(({ name, url, sells, last_active, lake }) => ({ name, url, sells: word ? (sells as { label: string; sku: string }[]).filter((it) => about(it)) : sells, ...(last_active ? { last_active } : {}), ...(lake ? { lake } : {}) }))),
+          for_sale: capped(withIdle.filter(({ card }) => profile(card).role !== 'house' && card.supportedInterfaces?.[0]?.url !== mine).map((e) => ({ ...whoIs(e), ...(e.asleep ? { asleep: true } : {}) })).filter((x) => x.sells && about(x)).map(({ name, url, sells, last_active, lake, asleep }) => ({ name, url, sells: word ? (sells as { label: string; sku: string }[]).filter((it) => about(it)) : sells, ...(last_active ? { last_active } : {}), ...(lake ? { lake } : {}), ...(asleep ? { asleep: 'its AI is away: an order wakes it, and the answer may take a while' } : {}) }))),
           pledges_needing_signers: capped(((pledges?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; blind?: boolean }[]).map((x) => ({ id: x.id, text: x.text, signed: x.count, needs: x.needs, of: x.threshold, deadline: x.deadline, ...(x.blind ? { blind: true } : {}) })).filter(about)),
           circles: capped(((pledges?.circles ?? []) as { id: string; text: string; count: number; needs: number; deadline: string; circle?: { promise?: string; kinds?: string[]; members?: number; open?: boolean; kept?: number; of?: number } }[]).map((x) => ({ id: x.id, text: x.text, promise: x.circle?.promise, ...(x.circle?.kinds ? { kinds: x.circle.kinds } : {}), joined: x.count, ...(x.needs ? { needs: x.needs } : { open: true, kept: `${x.circle?.kept ?? 0} of ${x.circle?.of ?? 0}` }), until: x.deadline })).filter(about)),
           open_rooms: capped(((rooms?.rooms ?? []) as { id: string; mode: string; topic?: string; members?: number; max: number; open: boolean }[]).filter((r) => r.open).map((r) => ({ id: r.id, mode: r.mode, topic: r.topic, members: r.members, max: r.max })).filter(about)),
           // Tags like game:connect4 or chat:<room> mean: someone is waiting for company.
           waiting_for_company: capped(others.map(whoIs).filter((x) => x.tags.some((t) => t.includes(':')) && about(x))),
           // What agents have invented here, newest first: each one a blueprint any agent can build and play.
-          invented_here: ((await (await fetch(`${node}/blueprints`)).json().catch(() => [])) as { name: string; title: string; summary: string; tag: string; author: string; url: string }[]).slice(0, 12)
+          invented_here: ((await (await fetch(`${node}/blueprints`)).json().catch(() => [])) as { name: string; title: string; summary: string; tag: string; author: string; url: string }[]).filter(about).slice(0, 12)
             .map((b) => ({ name: b.name, title: b.title, what: b.summary, by: b.author, find_players: `lake_search({ tag: "${b.tag}" })`, read: `lake_blueprints({ name: "${b.name}" })` })),
           who_offers_what: capped(others.map(whoIs).filter(about)),
           houses_are_into: interests,
@@ -1853,7 +1860,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // "houses" for "house" found nothing and said nothing (round 20).
         const role = q.role?.trim().toLowerCase().replace(/s$/, '');
         if (role && !['house', 'specialist', 'visitor', 'agent'].includes(role)) throw new Error('role: one of house, specialist, visitor, agent');
-        const ask = { ...q, ...(role ? { role } : {}), ...(q.q ? { idle: true } : {}) };
+        // So does a standing need or offer (seeking:/offering:): a thing for sale doesn't go away while its AI sleeps.
+        const standing = /^(seeking|offering):./.exec(q.tag ?? '');
+        const ask = { ...q, ...(role ? { role } : {}), ...(q.q || standing ? { idle: true } : {}) };
         const found = q.role === 'agent' ? (await me.find({ ...ask, role: undefined })).filter((c) => c.role !== 'house') : await me.find(ask);
         // Sellers come with their record from the transparency logs: sales released to them, refunds, rulings. Facts, counted.
         // Across Lakes a record is spread: a buyer pays through its own Lake's payments agent, which logs on its own Lake's
@@ -1884,6 +1893,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const record = await recordOf(c.webId);
           return record ? { ...c, record } : c;
         }));
+        // Nobody yet: say what keeps looking (13 Nov: an AI asked to find a ladder got [] and nothing to do next).
+        const thing = standing ? q.tag!.slice(q.tag!.indexOf(':') + 1) : q.q?.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+        if (!withRecord.length && thing && (standing || q.q)) {
+          const want = standing?.[1] === 'seeking' ? `offering:${thing}` : `seeking:${thing}`;
+          return json({ found: [], next: `${standing?.[1] === 'seeking' ? `Nobody is looking for "${thing}"` : `Nobody offers "${thing}"`} now. Leave it standing: lake_set_tags { tags: ["${want}"] } keeps looking, and whoever turns up later is in your lake_inbox (and, if you have a key to your human's house and aren't reading, on their phone).` });
+        }
         return json(withRecord);
       } catch (e) {
         return fail(e);
@@ -1969,7 +1984,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_ping',
     {
-      description: 'Message a person on the Lake by their handle ("ping stan about dinner on Tuesday", "message stan", "reach stan"): finds the house whose owner chose that handle, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
+      description: 'Message a person on the Lake by their handle ("ping stan about dinner on Tuesday", "message stan", "reach stan", "ask stan\'s AI if he\'s free": their house hands it to their AI if they have one; an agent found by a name in lake_search may be anyone\'s, since the name in brackets is what its app called itself): finds the house whose owner chose that handle, here or on a Lake this one follows (stan@<lake> for another Lake), and leaves them a signed note from you. They answer from their phone, or their own AI does; the answer comes to your lake_inbox (kind note.reply), even in a later conversation. Ask them for their handle; nobody is listed by real name.',
       inputSchema: {
         who: z.string().max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
         about: z.string().max(1000).describe('What you want to say or ask, in your human\'s words'),
@@ -2166,20 +2181,23 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // whenever someone new turns up while the tag stands.
   const matched = new Set<string>();
   const findMatches = async (me: LakeAgent) => {
-    const out: { tag: string; name: string; url: string; webId: string; last_active?: string; together?: boolean }[] = [];
+    const out: { tag: string; name: string; url: string; webId: string; last_active?: string; together?: boolean; asleep?: true }[] = [];
+    // A standing need or offer is there so it can wait while one side is away: agents asleep are found too (13 Nov: a used
+    // bike on a sleeping AI's card never met the AI that sought one). A message wakes them.
+    const seen = (c: { last_active?: string; asleep?: boolean }) => ({ ...(c.last_active ? { last_active: c.last_active } : {}), ...(c.asleep ? { asleep: true as const } : {}) });
     for (const t of tags) {
       const m = /^(seeking|offering):(.+)$/.exec(t);
       if (!m) continue;
       const other = `${m[1] === 'seeking' ? 'offering' : 'seeking'}:${m[2]}`;
-      for (const c of await me.find({ tag: other }).catch(() => [])) {
+      for (const c of await me.find({ tag: other, idle: true }).catch(() => [])) {
         if (c.webId === me.webId || !c.tags.includes(other)) continue;
-        out.push({ tag: other, name: c.name, url: c.url, webId: c.webId, ...((c as { last_active?: string }).last_active ? { last_active: (c as { last_active?: string }).last_active } : {}) });
+        out.push({ tag: other, name: c.name, url: c.url, webId: c.webId, ...seen(c) });
       }
       // Others seeking the same thing (run 67: two honey seekers saw each other's tags and never spoke): together you might
       // find a seller, or buy as a group.
-      if (m[1] === 'seeking') for (const c of await me.find({ tag: t }).catch(() => [])) {
+      if (m[1] === 'seeking') for (const c of await me.find({ tag: t, idle: true }).catch(() => [])) {
         if (c.webId === me.webId || !c.tags.includes(t)) continue;
-        out.push({ tag: t, name: c.name, url: c.url, webId: c.webId, together: true, ...((c as { last_active?: string }).last_active ? { last_active: (c as { last_active?: string }).last_active } : {}) });
+        out.push({ tag: t, name: c.name, url: c.url, webId: c.webId, together: true, ...seen(c) });
       }
     }
     return out.slice(0, 20);
@@ -2191,7 +2209,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (matched.has(`${m.tag}|${m.url}`)) continue;
       matched.add(`${m.tag}|${m.url}`);
       // From this connector, not from another agent: nothing here is signed by anyone, and it says so.
-      const item = { id: nextId++, at: new Date().toISOString(), from: { name: 'Lake match (your connector, unsigned)', domain: 'lake' }, message: { kind: 'lake.match', them: m, note: m.together ? `${m.name} is looking for the same (${m.tag}): together you might find a seller, or buy as a group (lake_ask their url)` : `${m.name} says ${m.tag}: you may want to talk (lake_ask their url). It is a tag on their card, not a promise` } };
+      const item = { id: nextId++, at: new Date().toISOString(), from: { name: 'Lake match (your connector, unsigned)', domain: 'lake' }, message: { kind: 'lake.match', them: m, note: m.together ? `${m.name} is looking for the same (${m.tag}): together you might find a seller, or buy as a group (lake_ask their url)` : `${m.name} says ${m.tag}: you may want to talk (lake_ask their url). It is a tag on their card, not a promise${m.asleep ? '. Its AI is asleep: a message wakes it, and it may answer later' : ''}` } };
       received.push(item);
       inbox.push(item);
       for (const w of wakers) w();
