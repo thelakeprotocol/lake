@@ -10,7 +10,7 @@ import { push } from './nav';
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** The chats an AI can be sent into: someone with a key (or a web thread) who can be answered. */
-const reachable = (v: ListView) => chatsOf(v.notes).filter((c) => c.canMode && !c.forwarded);
+const reachable = (v: ListView) => chatsOf(v.notes, v.assistants).filter((c) => c.canMode && !c.forwarded);
 /**
  * Whom an AI's note is about: the chat of the message it names, else its sender, else the one person its text names
  * (an AI on duty writes "Opal Lumen (introduced as Sam) wrote…" and names no message).
@@ -55,7 +55,8 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
     const guess = given ? { chat: given, sure: true } : x ? aboutWhom(x, v) : undefined;
     // A name read off the AI's own words is only a suggestion: the chat is the owner's pick, the guess listed first.
     const chat = (picked ? chats.find((c) => c.key === picked) : undefined) ?? (guess?.sure ? guess.chat : undefined);
-    const a = ais.find((q) => q.kid === (aiKid ?? by ?? x?.by)) ?? (ais.length === 1 ? ais[0] : undefined), ai = a ? aiOf(a.label) : 'your AI';
+    // Someone who wrote to one of your AIs is answered by that one, from its own address: no other can.
+    const a = chat?.toAi ? ais.find((q) => q.kid === chat.toAi) : ais.find((q) => q.kid === (aiKid ?? by ?? x?.by)) ?? (ais.length === 1 ? ais[0] : undefined), ai = a ? aiOf(a.label) : 'your AI';
     const latest = chat?.notes[chat.notes.length - 1];
     // Whom it's about can be changed while it was only read off the note's words.
     const others = guess?.sure ? [] : [...(guess ? [guess.chat] : []), ...chats.filter((c) => c.key !== guess?.chat.key)].slice(0, 6);
@@ -63,12 +64,13 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
     const words = (c: Chat) => { const t = (c.notes[c.notes.length - 1]?.text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 30 ? `${t.slice(0, 28).trimEnd()}…` : t; };
     const chip = (c: Chat) => others.filter((o) => o.name === c.name).length < 2 ? c.name : `${c.name}: “${words(c)}”`;
     return h('div', { class: 'tell' },
-      ais.length > 1 ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a?.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a?.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
-      chat && latest ? h('div', { class: 'tell-about' }, h('small', {}, `About ${chat.name}'s message`), h('p', {}, latest.text)) : h('p', { class: 'muted-line' }, chats.length ? 'Who is this about?' : 'Nobody has written to you yet, so there is nobody to write to.'),
+      ais.length > 1 && !chat?.toAi ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a?.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a?.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
+      chat && latest ? h('div', { class: 'tell-about' }, h('small', {}, `About ${chat.name}'s message${chat.toAi ? ` to ${ai}` : ''}`), h('p', {}, latest.text)) : h('p', { class: 'muted-line' }, chats.length ? 'Who is this about?' : 'Nobody has written to you yet, so there is nobody to write to.'),
       others.length ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Who it is about' }, ...others.map((c) => h('button', { key: c.key, type: 'button', class: `chip${chat?.key === c.key ? ' on' : ''}`, 'aria-pressed': String(chat?.key === c.key), onClick: () => setPicked(c.key) }, chip(c)))) : null,
       h('ion-textarea', { value: text, autoGrow: true, rows: 2, maxlength: 300, placeholder: `What should ${ai} do? A few words.`, 'aria-label': 'Your instruction', class: 'tell-input', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
       h('div', { class: 'tell-chips ideas' }, ...IDEAS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))),
-      chat ? h('p', { class: 'muted-line tell-scope' }, `${cap(ai)} can read this chat and send ${chat.name} up to 5 messages, until this time tomorrow. This doesn't let it spend money or change your rules. ${starts(a, ai)}`) : null,
+      chat?.toAi && !a ? h('p', { class: 'muted-line' }, 'The AI they wrote to is no longer connected, so nobody can answer them from there.') : null,
+      chat ? h('p', { class: 'muted-line tell-scope' }, `${cap(ai)} can read this chat and send ${chat.name} up to 5 messages${chat.toAi ? ' from its own address' : ''}, until this time tomorrow. ${chat.toAi ? 'Your house counts them, and they don\'t learn where it is. ' : ''}This doesn't let it spend money or change your rules. ${starts(a, ai)}`) : null,
       h('div', { class: 'card-actions' }, h(Btn, { label: `Send to ${ai}`, icon: 'sparkles', expand: 'block', cls: 'tell-send', disabled: !text.trim() || !chat || !a,
         run: async () => { await must({ kind: 'panel.task.set', suggestion: suggestion ?? x?.id, note: latest!.id, by: a!.kid, text: text.trim() }); setText(''); void toast(`Sent to ${ai}`); onClose(); onSent?.(); } })));
   };
@@ -109,12 +111,12 @@ export function TaskCard({ t, v }: { t: TaskV; v: ListView }) {
   const handedOver = inChat.at(-1)?.mode === 'ai';
   const acts: Child[] = open ? [h(Btn, { key: 'stop', label: 'Take it back', size: 'small', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.task.stop', id: t.id }), done: 'Taken back' }), t.did.length ? chatBtn('Open chat') : null]
     : t.state === 'done' ? [okBtn, chatBtn('Open chat'), handedOver ? null : h(Btn, { key: 'keep', label: `Let ${ai} keep answering ${name}`, size: 'small', fill: 'outline', run: ok(() => must({ kind: 'panel.chat.mode', key: t.to.key, mode: 'ai' })), done: `${Ai} replies to ${name} from now on, while it's on duty` })]
-      : [again, chatBtn('Reply yourself'), okBtn];
+      : [again, chatBtn(t.to.via ? 'Open chat' : 'Reply yourself'), okBtn];
   return h('ion-card', { class: `lake-card task-card ${t.state}` }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), `You told ${ai}`, pill),
     h('p', { class: 'task-words' }, `“${t.text}”`),
-    h('p', { class: 'muted-line' }, `About ${name}'s message.`),
-    last ? h('div', { class: 'task-did' }, h('small', {}, `${Ai} wrote to ${name}${t.did.length > 1 ? ` (${t.did.length} messages, the latest)` : ''}`), h('p', {}, last.text)) : null,
+    h('p', { class: 'muted-line' }, `About ${name}'s message${t.to.via ? ` to ${ai}` : ''}.`),
+    last ? h('div', { class: 'task-did' }, h('small', {}, last.pending ? `${Ai} is sending this to ${name}` : `${Ai} wrote to ${name}${t.to.via ? ', from its own address' : ''}${t.did.length > 1 ? ` (${t.did.length} messages, the latest)` : ''}`), h('p', {}, last.text)) : null,
     theirs ? h('div', { class: 'task-did theirs' }, h('small', {}, `${name} answered`), h('p', {}, theirs.text)) : null,
     !open && t.ended?.text ? h('div', { class: 'task-did report' }, h('small', {}, `${Ai} says`), h('p', {}, t.ended.text)) : null,
     status ? h('p', { class: 'muted-line task-status' }, status) : null,

@@ -41,7 +41,7 @@ export type Rejection = { code: 'malformed' | 'unsigned-card' | 'forged-card' | 
  */
 export async function verifyLakeData<T>(
   data: LakeData<T> | null,
-  /** `now`: check expiry as of then (seconds), for a signed message kept as evidence, as when a tally forwards consents. */
+  /** `now`: check expiry as of then (milliseconds, as Date.now()), for a signed message kept as evidence, as when a tally forwards consents. */
   opts: { replay?: ReplayGuard; sandbox?: boolean; fetch?: typeof fetch; now?: number } = {},
 ): Promise<{ ok: true; profile: LakeProfile; payload: Signed<T>['payload']; domainVia: string } | { ok: false; rejection: Rejection }> {
   if (!data?.card || !data.envelope) return { ok: false, rejection: { code: 'malformed', why: 'not a Lake message sealed for this agent (SPEC §3)' } };

@@ -102,8 +102,14 @@ const stubRun: ModelRun = async ({ lake, token, prompt }) => {
     }
     if (prompt.includes('gave you a task')) return { code: 0, out: `Did ${did} task(s) for my human.`, tokens: 0 };
     const inbox = await call('lake_inbox', { wait_seconds: 0 });
-    const said = ((inbox.messages ?? []) as { from: { name: string; url?: string }; message?: { text?: unknown } }[]).filter((m) => typeof m.message?.text === 'string');
-    for (const m of said) await call('lake_house_suggest', { text: `While you were away, ${m.from.name} wrote: "${String(m.message!.text).slice(0, 300)}". Shall I answer?`, ask: { choices: ['Yes, answer', 'Leave it'] } });
+    const said = ((inbox.messages ?? []) as { id?: number; from: { name: string; url?: string; your_house?: boolean }; message?: { text?: unknown } }[]).filter((m) => typeof m.message?.text === 'string');
+    for (const m of said) {
+      const note = { text: `While you were away, ${m.from.name} wrote: "${String(m.message!.text).slice(0, 300)}". Shall I answer?`, ask: { choices: ['Yes, answer', 'Leave it'] } };
+      // Filed with the house as they signed it (about), so its human can say what to answer; the note alone where the
+      // house won't file it (a sender its human blocked, say).
+      const filed = typeof m.id === 'number' && !m.from.your_house ? await call('lake_house_suggest', { ...note, about: m.id }) : undefined;
+      if (!filed || filed.isError) await call('lake_house_suggest', note);
+    }
     const paid = await call('lake_pay', { to: said[0]?.from?.url ?? 'https://nobody.example/a2a', amount: 1, currency: 'USD' });
     return { code: 0, out: `Left my human ${said.length} note(s); paying was ${paid.isError ? 'refused' : 'NOT refused'}.`, tokens: 0 };
   } finally {

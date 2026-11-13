@@ -167,8 +167,7 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     const kim = new Client({ name: 'Kim', version: '0' });
     await kim.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${anon.access_token}` } } }));
     await kim.callTool({ name: 'lake_ask', arguments: { to: agent.url, kind: 'message', text: 'Could your human lend me a ladder on Sunday?' } });
-    await kim.close();
-    await wait(async () => ((await owner({ kind: 'list' })).suggestions as { text: string }[]).some((x) => /lend me a ladder on Sunday/.test(x.text)) || undefined);
+    const asked = await wait(async () => ((await owner({ kind: 'list' })).suggestions as { text: string; note?: string }[]).find((x) => /lend me a ladder on Sunday/.test(x.text)));
 
     // Off duty: the house's runner stops.
     expect(await owner({ kind: 'panel.duty.off' })).toMatchObject({ ok: true });
@@ -180,7 +179,7 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     const sam = new Client({ name: 'Sam', version: '0' });
     await sam.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${(await (await fetch(`${site}/mcp/oauth/anonymous`, { method: 'POST' })).json() as { access_token: string }).access_token}` } } }));
     await sam.callTool({ name: 'lake_ask', arguments: { to: site, kind: 'note', text: 'I am selling a used hybrid bike for AUD 80. Interested?' } });
-    type Listed = { notes: { id: string; text: string }[]; assistants: { kid: string; label: string; runs?: string }[]; tasks: { id: string; state: string; left: number; did: { text: string }[]; ended?: { text?: string } }[] };
+    type Listed = { notes: { id: string; text: string; from: { via?: string; key?: string }; answered?: { text: string; by: string; task?: string } }[]; assistants: { kid: string; label: string; runs?: string }[]; tasks: { id: string; state: string; left: number; did: { text: string }[]; ended?: { text?: string } }[] };
     const bike = await wait(async () => ((await owner({ kind: 'list' })) as Listed).notes.find((n) => /hybrid bike/.test(n.text)));
     const mine = ((await owner({ kind: 'list' })) as Listed).assistants.find((a) => a.runs === 'house')!;
     expect(mine).toBeTruthy();
@@ -210,6 +209,27 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     expect(got).toMatch(/as they asked/);
     expect(got).not.toMatch(/enough bikes/);
     await sam.close();
+
+    // A message that reached only the AI (layer 2): Kim wrote to the AI's own address and doesn't know the house. The AI
+    // filed her message with its note, as she signed it, so the house checked it itself and it is a chat of its own.
+    const ladder = ((await owner({ kind: 'list' })) as Listed).notes.find((n) => /lend me a ladder/.test(n.text))!;
+    expect(ladder.from).toMatchObject({ via: mine.kid, key: expect.any(String) });
+    expect(asked.note).toBe(ladder.id);
+    // The house never answers her itself (that would tell her where it is): the owner's own reply is refused.
+    expect(await owner({ kind: 'panel.note.reply', id: ladder.id, text: 'Sure, Sunday.' })).toMatchObject({ error: expect.stringMatching(/wrote to your AI/), needs: 'task' });
+    // The owner's few words go to the AI she wrote to; it answers from its own address, and the house counts it.
+    const lend = await owner({ kind: 'panel.task.set', note: ladder.id, text: 'Yes, Sunday after ten is fine.' });
+    expect(lend).toMatchObject({ task: { state: 'open', left: 5, by: mine.kid, to: { via: true, key: `via:${ladder.from.key}` } } });
+    const lent = await wait(async () => ((await owner({ kind: 'list' })) as Listed).tasks.find((t) => t.id === lend.task.id && t.state === 'back'));
+    expect(lent).toMatchObject({ left: 4, did: [{ text: expect.stringContaining('will answer you themselves') }] });
+    expect((lent.did[0] as { pending?: boolean }).pending).toBeUndefined();
+    expect(((await owner({ kind: 'list' })) as Listed).notes.find((n) => n.id === ladder.id)!.answered).toMatchObject({ task: lend.task.id, text: expect.stringContaining('will answer you themselves') });
+    // Kim's AI has it from the AI she wrote to, as a plain message: nothing from the house, and not the owner's words.
+    const heard = await wait(async () => { const r = await kim.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 0, history: true } }); const t = (r.content as { text: string }[])[0]!.text; return /will answer you themselves/.test(t) ? t : undefined; });
+    const fromAi = (JSON.parse(heard) as { received: { from: { url?: string; name: string }; message: { kind?: string; text?: string; by?: string } }[] }).received.find((m) => /will answer you themselves/.test(String(m.message.text)))!;
+    expect(fromAi).toMatchObject({ from: { url: agent.url }, message: { kind: 'message' } });
+    expect(heard).not.toMatch(/as they asked|Sunday after ten/);
+    await kim.close();
     // With no task left the house's runner is at rest again, and still off duty.
     await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running: boolean }).running === false || undefined);
     expect(((await owner({ kind: 'panel.duty.log' })).duties as { state: { on: boolean } }[]).every((d) => !d.state.on)).toBe(true);

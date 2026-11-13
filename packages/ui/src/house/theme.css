@@ -579,3 +579,9 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .mode-note.task-note { color: var(--lake-violet); }
 .mode-note.task-note ion-icon { vertical-align: -2px; }
 .mode-note.task-note .link-btn { color: var(--lake-violet); text-decoration: underline; }
+/* Someone who wrote to your AI's own address: nothing to type into; what's said goes from that AI, on your word. */
+.composer-row.via-row { flex-direction: column; align-items: stretch; gap: 8px; }
+.mode-note.via-note { color: var(--lake-muted); margin: 2px 6px 0; }
+.via-row .via-tell { margin: 0; }
+.row-via.to-ai ion-icon { font-size: 13px; color: var(--lake-violet); }
+.newstrip.via-strip b { color: var(--lake-text); }

@@ -30,7 +30,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const [all, setAll] = useState(false);
   const data = list.data;
   if (data) seen.at = { ...(data.seen ?? {}), ...seen.at };
-  const { known, fresh } = peopleOf(data ? chatsOf(data.notes ?? []) : []);
+  const { known, fresh } = peopleOf(data ? chatsOf(data.notes ?? [], data.assistants ?? []) : []);
   const old = stale(fresh);
   const more = fresh.length > FEW;
   return h(Page, { title: 'People', big: true, status, footer: tabbar },
@@ -54,6 +54,7 @@ function ChatRow({ c }: { c: Chat }) {
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
       c.trust === 'lookalike' ? h('div', { class: 'row-via careful' }, `Says they're ${shortName(c.twin?.name ?? c.name)}, with a different key`) : null,
+      c.toAi ? h('div', { class: 'row-via to-ai' }, h('ion-icon', { name: 'sparkles-outline' }), c.via) : null,
       h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : ai ? `${ai}: ` : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));
 }
 
@@ -83,7 +84,7 @@ export function WantRow({ w }: { w: WantV }) {
 export function ChatPage({ arg }: { arg: string }) {
   const list = useHouse<ListView>({ kind: 'list' });
   if (!list.data) return h(Page, { title: '', back: () => back('#chats'), backLabel: 'People' }, h(Failed, { error: list.error }));
-  const chats = chatsOf(list.data.notes ?? []);
+  const chats = chatsOf(list.data.notes ?? [], list.data.assistants ?? []);
   const c = chats.find((x) => x.key === arg || x.keys.includes(arg) || x.notes.some((n) => n.id === arg));
   // A link to a chat that's gone (cleared, say): back to the list.
   if (!c) return h(Page, { title: 'Chat', back: () => back('#chats'), backLabel: 'People' }, h(Empty, { icon: 'chatbubble-outline', title: 'This chat isn\'t here any more', action: h('ion-button', { shape: 'round', onClick: () => back('#chats') }, 'Back to People') }));
@@ -102,7 +103,9 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const live = (duty.data?.duties ?? []).filter(dutyLive), onDuty = live.length > 0;
   // The AI by its name where there is one to name (the one on duty, or the only one connected) and the name is short.
-  const named = shortName(live[0]?.label ?? (ais.length === 1 ? ais[0]!.label : '')), ai = named && named.length <= 9 ? named : 'My AI';
+  // Someone who wrote to one of your AIs, at its own address: that AI is the one this chat is about, on duty or off.
+  const theirs = c.toAi ? ais.find((q) => q.kid === c.toAi) : undefined;
+  const named = shortName(c.toAi ? theirs?.label ?? '' : live[0]?.label ?? (ais.length === 1 ? ais[0]!.label : '')), ai = named && named.length <= 9 ? named : 'My AI';
   // The house hands a known person's chat to the owner's AI; with none connected nobody but the owner replies, and the
   // chat says that (round 18: a first-time owner answered a note and the header turned to "My AI replies").
   const hasAi = ais.length > 0;
@@ -123,7 +126,7 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
       if ((seen.at[k] ?? '') < at) { seen.at = { ...seen.at, [k]: at }; void call({ kind: 'panel.chat.seen', key: k, at }).then(bump); }
     }
   }, [c.notes.length]);
-  const setTo = async (m: 'ai' | 'me') => { setMode(m); chose.current = m; try { for (const k of c.keys) await must({ kind: 'panel.chat.mode', key: k, mode: m }); void toast(m === 'ai' ? `${ai} replies to ${c.name} now` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
+  const setTo = async (m: 'ai' | 'me') => { setMode(m); chose.current = m; try { for (const k of c.keys) await must({ kind: 'panel.chat.mode', key: k, mode: m }); void toast(m === 'ai' ? `${ai} replies to ${c.name} now` : c.toAi ? `${ai} asks you first from now on` : 'You reply from now on'); } catch (e) { setMode(c.mode); void toast((e as Error).message, { color: 'danger' }); } bump(); };
   const send = async (again?: string) => {
     const t = (again ?? draft).trim(); if (!t) return;
     // Shown at once, sending; then the house's answer redraws it as sent, or it stays, not sent, with Retry.
@@ -147,17 +150,19 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
         h('div', { class: 'bubble-foot' }, h('span', { class: 'took-back' }, 'Taken back'), h('time', {}, time(n.retracted.at)))) : null,
       // What was answered here earlier (your AI may write twice under a task; your own answer isn't written over).
       ...(n.answered?.before ?? []).map((b, i) => h('div', { key: `${n.id}-b${i}`, class: `bubble ${b.by === 'you' ? 'me' : 'ai'}` },
-        b.by === 'you' ? null : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(b.by)}, your AI${b.task ? ', as you asked' : ''}`),
+        b.by === 'you' ? null : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(b.by)}, ${b.task && n.from.via ? 'from its own address, as you asked' : `your AI${b.task ? ', as you asked' : ''}`}`),
         h('p', {}, b.text), h('div', { class: 'bubble-foot' }, h('time', {}, time(b.at))))),
       n.answered ? ((e) => h('div', { key: `${n.id}-a`, class: `bubble ${n.answered!.by === 'you' ? 'me' : n.answered!.fixed ? 'ai house' : 'ai'}` },
         // Whose words: yours, your AI's by its name, or your house's own (a held time is told in fixed words).
         n.answered!.by === 'you' ? (n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ' Your house, on your answer') : null)
           : n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ` Your house, for ${shortName(n.answered!.by)}`)
-            : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered!.by)}, your AI${n.answered!.task ? ', as you asked' : ''}`),
+            : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.answered!.by)}, ${n.answered!.task && n.from.via ? 'from its own address, as you asked' : `your AI${n.answered!.task ? ', as you asked' : ''}`}`),
         h('p', {}, n.answered!.text),
         h('div', { class: 'bubble-foot' },
           e ? h('button', { type: 'button', class: 'link-btn bubble-undo', onClick: () => void undo(e) }, 'Undo') : null,
           n.answered!.at ? h('time', {}, time(n.answered!.at)) : null)))(entryOf(n)) : null,
+      // An answer your AI is sending from its own address: the house gave it the go, and hears back when it landed.
+      ...(task?.did ?? []).filter((d) => d.pending && d.note === n.id).map((d, i) => h('div', { key: `${n.id}-p${i}`, class: 'bubble ai sending' }, h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${ai}, from its own address, as you asked`), h('p', {}, d.text), h('time', {}, h('ion-spinner', { name: 'dots' })))),
       // A time your AI pencilled in while answering this: yours to confirm, here as on Today.
       ...held.filter((x) => x.note === n.id).map((x) => h('div', { key: `${n.id}-h`, class: 'chat-card' }, h(SuggestionCard, { x })))];
   });
@@ -165,11 +170,12 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
     h(Avatar, { name: c.name, ring: c.trust, size: 34 }), h('span', { class: 'chatwho-text' }, h('b', {}, c.name), h('small', {}, c.via))));
   // Who replies: one control, at the top, saying who does now.
   const shown: 'ai' | 'me' = mode === 'ai' && !hasAi ? 'me' : mode;
-  const who = c.canMode ? h('button', { type: 'button', class: `replymode ${shown}`, onClick: () => setPick(true), 'aria-label': `Who replies: ${shown === 'ai' ? `${ai} replies` : 'I reply'}. Change`, 'aria-haspopup': 'dialog' },
+  const who = c.canMode ? h('button', { type: 'button', class: `replymode ${shown}`, onClick: () => setPick(true), 'aria-label': `Who replies: ${shown === 'ai' ? `${ai} replies` : c.toAi ? `${ai} asks me first` : 'I reply'}. Change`, 'aria-haspopup': 'dialog' },
     // Beside the name there's room for a dozen letters: a longer AI name stands alone, with its mark.
-    shown === 'ai' ? h('ion-icon', { name: 'sparkles' }) : null, h('span', {}, shown !== 'ai' ? 'I reply' : ai.length <= 5 ? `${ai} replies` : ai), h('ion-icon', { name: 'chevron-down' })) : null;
+    shown === 'ai' ? h('ion-icon', { name: 'sparkles' }) : null, h('span', {}, shown !== 'ai' ? (c.toAi ? 'Ask me first' : 'I reply') : ai.length <= 5 ? `${ai} replies` : ai), h('ion-icon', { name: 'chevron-down' })) : null;
   // What the other choice gives an AI, said before it's chosen: this chat's words and the answering, never where a web sender asked to be answered.
-  const aiNote = !hasAi ? 'No AI is connected yet. Tap to connect one in My AI.'
+  const aiNote = c.toAi ? `It answers from its own address ${onDuty ? 'while it\'s on duty' : 'once it\'s on duty, which is off now (My AI)'}, and doesn't name your house.`
+    : !hasAi ? 'No AI is connected yet. Tap to connect one in My AI.'
     : c.web ? `An AI you've connected can read this chat and answer it.${c.replyTo ? ` It doesn't get the ${c.replyTo.kind === 'email' ? 'email address' : 'phone number'} they left.` : ''}` : onDuty ? 'It answers while it\'s on duty. A time it only holds, for you to confirm.' : 'It answers once it\'s on duty, which is off now (My AI).';
   const opt = (m: 'ai' | 'me', icon: string, label: string, sub: string) => h('ion-item', { key: m, button: true, detail: false, lines: m === 'me' ? 'full' : 'none', class: `mode-opt${shown === m ? ' on' : ''}`, 'aria-current': shown === m ? 'true' : undefined, onClick: () => { setPick(false); if (m === 'ai' && !hasAi) push('#ai'); else if (shown !== m) void setTo(m); } },
     h('ion-icon', { slot: 'start', name: icon }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, sub)), shown === m ? h('ion-icon', { slot: 'end', name: 'checkmark', color: 'primary', 'aria-label': 'Chosen' }) : null);
@@ -179,10 +185,16 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
     task ? h('p', { class: 'mode-note task-note' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(task.label)} is on it: “${task.text.length > 60 ? `${task.text.slice(0, 58)}…` : task.text}” `,
       h('button', { type: 'button', class: 'link-btn', onClick: async () => { try { await must({ kind: 'panel.task.stop', id: task.id }); void toast('Taken back'); } catch (e) { void toast((e as Error).message, { color: 'danger' }); } bump(); } }, 'Take it back'))
       : c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
-    h('div', { class: 'composer-row' },
+    // They wrote to your AI and don't know your house: an answer from here would tell them where it is, so there is
+    // nothing to type into. What's said to them is said by that AI, on your word.
+    c.toAi ? h('div', { class: 'composer-row via-row' },
+      h('p', { class: 'mode-note via-note' }, `${c.name} wrote to ${ai}, not to your house, so answers go from ${ai}.`),
+      theirs && !task ? h('ion-button', { shape: 'round', class: 'lake-btn via-tell', onClick: () => setTell(true) }, h('ion-icon', { name: 'sparkles-outline', slot: 'start' }), `Tell ${ai === 'My AI' ? 'my AI' : ai} what to do`) : null)
+    : h('div', { class: 'composer-row' },
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
       h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: () => void send(), 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
   return h(Page, { title: c.name, titleNode, back: () => back('#chats'), cls: `chat-page${who ? ' has-mode' : ''}`, footer: composer, end: who },
+    c.toAi ? h('div', { class: 'newstrip via-strip', role: 'note' }, h('p', {}, h('b', {}, `Wrote to ${ai}, at its own address.`), ` ${ai === 'My AI' ? 'It' : ai} passed it on to you. They don't know where your house is.`)) : null,
     h(NewStrip, { c, latest }),
     h('div', { class: 'bubbles' }, ...bubbles,
       sending ? h('div', { class: 'bubble me sending' }, h('p', {}, sending), h('time', {}, h('ion-spinner', { name: 'dots' }))) : null,
@@ -191,12 +203,12 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
         h('div', { class: 'bubble-foot' }, h('button', { type: 'button', class: 'link-btn', onClick: () => void send(failed.text) }, 'Retry'), h('button', { type: 'button', class: 'link-btn', onClick: () => { setDraft(failed.text); setFailed(null); } }, 'Edit'))) : null,
       h('div', { ref: end })),
     h(Sheet, { open: pick, onClose: () => setPick(false), title: `Who replies to ${c.name}?`, short: !hasAi || !!c.forwarded, half: hasAi && !c.forwarded },
-      h(Section, {}, opt('me', 'person-outline', 'I reply', hasAi ? 'Their messages wait for you. Your AI doesn\'t get their words.' : 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote)),
+      h(Section, {}, c.toAi ? opt('me', 'person-outline', 'Ask me first', `Their messages wait here until you tell ${ai === 'My AI' ? 'your AI' : ai} what to answer.`) : opt('me', 'person-outline', 'I reply', hasAi ? 'Their messages wait for you. Your AI doesn\'t get their words.' : 'Their messages wait for you.'), opt('ai', 'sparkles-outline', `${ai} replies`, aiNote)),
       // One instruction about this chat, in place of handing the whole chat over.
       hasAi && !c.forwarded ? h(Section, {}, h('ion-item', { button: true, detail: true, lines: 'none', class: 'mode-opt tell-opt', onClick: () => { setPick(false); setTell(true); } },
         h('ion-icon', { slot: 'start', name: 'create-outline' }), h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, `Tell ${ai === 'My AI' ? 'my AI' : ai} what to do`), h('p', {}, 'One instruction about this chat. It writes to them for you and reports back.')))) : null),
     h(TellSheet, { open: tell, onClose: () => setTell(false), note: latest.id }),
-    h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, who: shown === 'ai' ? `${ai} replies` : 'You reply', change: () => { setInfo(false); setPick(true); }, latest, close: () => setInfo(false) })));
+    h(Sheet, { open: info, onClose: () => setInfo(false), title: c.name }, h(ChatInfo, { c, all, who: shown === 'ai' ? `${ai} replies` : c.toAi ? `${ai} asks you first` : 'You reply', change: () => { setInfo(false); setPick(true); }, latest, close: () => setInfo(false) })));
 }
 
 /**
@@ -238,6 +250,7 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
     h(Section, {},
       c.web ? h(Row, { icon: 'globe-outline', tint: 'muted', label: 'From your public page', sub: 'Nothing checked about who wrote it' })
         : h(Row, { icon: 'shield-checkmark-outline', label: `${c.agent}${c.vendor ? ` · ${c.vendor}` : ''}`, sub: 'Its key is checked on every message' }),
+      c.toAi ? h(Row, { icon: 'sparkles-outline', label: c.via, sub: 'At its own address, not at your house. Answers go from there, and they don\'t learn where your house is.', cls: 'wrote-to-ai' }) : null,
       c.name !== c.agent && !c.web ? h(Row, { icon: 'person-outline', tint: 'amber', label: `"${c.name}"`, sub: 'The name its AI gives. Not checked.' }) : null,
       c.replyTo ? h(Row, { icon: c.replyTo.kind === 'email' ? 'mail-outline' : 'call-outline', tint: 'muted', label: c.replyTo.value, sub: 'Where they asked to be answered. Not checked; your AI doesn\'t get it.', cls: 'reach-row', below: h(ReachLinks, { r: c.replyTo, plain: true }) }) : null,
       f.speaks_for ? h(Row, { icon: 'home-outline', label: 'Speaks for a house', sub: `${f.speaks_for.house}${f.speaks_for.checked ? ' (checked)' : ' (not checked)'}` }) : null,

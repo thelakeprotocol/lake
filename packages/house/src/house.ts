@@ -1072,6 +1072,15 @@ function panelFor(x: {
     async replyAgent(url, payload) {
       return (await send(url, payload)).payload as Record<string, any>;
     },
+    // A message one of the owner's AIs received and passes on as signed: checked like one at the door, as of when it
+    // arrived, but for replay (the AI's own connector took it once already).
+    async verifySigned(signed, arrived) {
+      const v = await verifyLakeData<Record<string, unknown>>(signed as LakeData<Record<string, unknown>>, { sandbox: x.o.sandbox, now: arrived });
+      if (!v.ok) return { error: v.rejection.why };
+      const c = (signed as LakeData).card, p = v.payload as Record<string, unknown>;
+      const url = c.supportedInterfaces?.[0]?.url;
+      return { from: { name: c.name, domain: v.profile.ownerDomain, webId: v.profile.webId, ...(url ? { url } : {}), key: await keyThumbprint(v.profile.publicJwk), checked: v.domainVia !== 'sandbox' }, text: typeof p.text === 'string' ? p.text : typeof p.body === 'string' ? p.body : '' };
+    },
     async circleSend(tally, payload) {
       return (await send(tally, payload)).payload as Record<string, any>;
     },
