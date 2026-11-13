@@ -144,8 +144,12 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   const bump = useBump();
   const [more, setMore] = useState(false);
   const [reply, setReply] = useState('');
+  const [replying, setReplying] = useState(false);
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
-  const kicker = x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.sender ? 'A warning' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
+  // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
+  const kicker = x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const block = !!x.sender && /^https?:\/\//.test(x.sender);
   const advice = x.advice ? h(Pill, { text: x.sender && x.advice === 'dont' ? 'Warning' : { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice], tone: x.advice === 'do' ? 'mint' : x.advice === 'dont' ? 'red' : 'muted' }) : null;
   const acts: Child[] = [];
   // A time your AI pencilled in: yours to confirm (the house tells them either way). Nothing else to do with it.
@@ -155,8 +159,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   else if (x.ask && !x.ask.answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: c }) })));
   if (x.offer) acts.push(h(Btn, { key: 'of', label: 'Accept the offer', run: async () => { const r = await call<{ error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: x.offer, even_over_allowance: true }); if (r.error) throw new Error(r.error); await dismiss(); }, ask: { header: 'Accept this offer?', sub: 'What it needs goes to that one agent.', button: 'Accept', destructive: false } }));
   if (x.allowance && x.by) acts.push(h(Btn, { key: 'al', label: `Give ${money$(x.allowance.amount, x.allowance.currency)} for ${x.allowance.days} day${x.allowance.days === 1 ? '' : 's'}`, run: async () => { const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.allowance.draft', kid: x.by, amount: x.allowance!.amount, currency: x.allowance!.currency, days: x.allowance!.days }); await must({ kind: 'panel.allowance.set', id: d.id, credential: await signDraft(d.draft) }); await dismiss(); } }));
-  if (x.sender && /^https?:\/\//.test(x.sender)) acts.push(h(Btn, { key: 'bl', label: 'Block them', color: 'danger', run: () => call({ kind: 'panel.assistant.block', id: x.id }), ask: { header: 'Block this agent?', sub: 'Its messages are turned away.', button: 'Block' } }));
-  if (x.note && x.mute) acts.push(h(Btn, { key: 'mu', label: 'Mute this sender', fill: 'outline', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); } }));
+  if (block) acts.push(h(Btn, { key: 'bl', label: 'Block them', color: 'danger', run: () => call({ kind: 'panel.assistant.block', id: x.id }), ask: { header: 'Block this agent?', sub: 'Its messages are turned away.', button: 'Block' } }));
   if (x.rules) acts.push(h(Btn, { key: 'ru', label: 'Apply these rules', run: async () => { await must({ kind: 'panel.rules.set', text: x.rules }); await dismiss(); } }));
   if (x.door) acts.push(h(Btn, { key: 'do', label: 'Use this line', run: async () => { const cur = await call<{ name?: string; handle?: string }>({ kind: 'panel.door' }); await must({ kind: 'panel.door.set', open: true, about: x.door!.about, ...(cur.name ? { name: cur.name } : {}), ...(cur.handle ? { handle: cur.handle } : {}) }); await dismiss(); } }));
   if (x.favourPay && !x.favourPay.paid) acts.push(h(Btn, { key: 'fp', label: 'Pay with a favour you\'re owed', run: () => must({ kind: 'panel.favour.pay', note: x.id }) }));
@@ -166,7 +169,6 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   if (x.pledge && !x.pledge.quorum) acts.push(h(Btn, { key: 'pl', label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); }, ...(x.pledge.money ? { ask: { header: `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)}?`, sub: `Held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}: paid on only if ${x.pledge.money.threshold} sign; otherwise back to you.`, button: 'Put in and sign', destructive: false } } : {}) }));
   return h('ion-card', { class: 'lake-card sug' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.booking ? 'calendar-outline' : x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
-    x.sender ? h('p', { class: 'muted-line' }, `About: ${x.sender}`) : null,
     x.invitedBy ? h('p', { class: `private-line${x.invitedBy.known ? '' : ' warn-text'}` }, h('ion-icon', { name: x.invitedBy.known ? 'person-outline' : 'alert-circle-outline' }), x.invitedBy.known ? ` From ${x.invitedBy.name}, someone your side knows. The terms below are the tally's own.` : ` From ${x.invitedBy.name}, someone your side hasn't dealt with: their words are unchecked. The terms below are the tally's own.`) : null,
     // A held time, from its own fields and in this phone's time (the house's own sentence names the free hours' zone).
     x.booking?.what ? [h('h3', { class: 'held-what', key: 'hw' }, x.booking.what), h('p', { class: 'held-when', key: 'hn' }, `${dayTime(x.booking.start)} · with ${x.booking.with}`),
@@ -185,10 +187,15 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
     acts.length ? h('div', { class: 'card-actions wrap' }, ...acts) : null,
     // One instruction and your AI does it: it writes to them for you and reports back (13 Nov).
     h(TellButton, { x, onSent: onDone }),
-    x.booking ? null : x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : h('div', { class: 'card-reply' },
-      h('ion-input', { value: reply, placeholder: 'Reply in your own words', 'aria-label': 'Reply', class: 'reply-input', onionInput: (e: CustomEvent) => setReply(String(e.detail.value ?? '')) }),
-      reply.trim() ? h(Btn, { label: 'Send', size: 'small', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, text: reply.trim() }); setReply(''); void toast('Sent to your AI'); } }) : null),
-    x.booking ? null : h('div', { class: 'card-foot' }, h('ion-button', { fill: 'clear', size: 'small', color: 'medium', onClick: async () => { await dismiss(); onDone?.(); bump(); } }, 'Dismiss'))));
+    !x.booking && x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : null,
+    replying && !x.reply ? h('div', { class: 'card-reply' },
+      h('ion-input', { value: reply, placeholder: 'Reply in your own words', 'aria-label': 'Reply', class: 'reply-input', autofocus: true, onionInput: (e: CustomEvent) => setReply(String(e.detail.value ?? '')) }),
+      reply.trim() ? h(Btn, { label: 'Send', size: 'small', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, text: reply.trim() }); setReply(''); setReplying(false); void toast('Sent to your AI'); } }) : null) : null,
+    // The quiet ways out, on one line under the card's own answers.
+    x.booking ? null : h('div', { class: 'card-foot quiet' },
+      !x.reply && !replying ? h('ion-button', { fill: 'clear', size: 'small', color: 'medium', onClick: () => setReplying(true) }, 'Reply') : null,
+      x.note && x.mute && !block ? h(Btn, { label: 'Mute', fill: 'clear', size: 'small', color: 'medium', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); }, ask: { header: 'Mute this sender?', sub: 'Their messages are turned away.', button: 'Mute' } }) : null,
+      h('ion-button', { fill: 'clear', size: 'small', color: 'medium', class: 'foot-end', onClick: async () => { await dismiss(); onDone?.(); bump(); } }, 'Dismiss'))));
 }
 
 function Quorum({ x }: { x: Note }) {

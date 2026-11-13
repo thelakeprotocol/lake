@@ -236,6 +236,9 @@ ion-card.lake-card ion-card-content p { margin: 4px 0; font-size: 15px; }
 .card-actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 .card-actions.wrap { flex-wrap: wrap; }
 .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; color: var(--lake-muted); font-size: 13px; }
+.card-foot.quiet { justify-content: flex-start; gap: 4px; margin-top: 6px; }
+.card-foot.quiet ion-button { margin: 0; --padding-start: 8px; --padding-end: 8px; }
+.card-foot.quiet .foot-end { margin-left: auto; }
 .hero-card { background: linear-gradient(135deg, var(--lake-mint-soft), var(--lake-violet-soft)), var(--lake-surface); border: 1px solid color-mix(in srgb, var(--lake-mint) 30%, transparent); }
 .hero-card h2 { font-size: 22px; }
 .warn-card { border-color: color-mix(in srgb, var(--lake-amber) 45%, transparent); background: linear-gradient(0deg, var(--lake-amber-soft), var(--lake-amber-soft)), var(--lake-surface); }

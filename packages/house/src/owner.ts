@@ -706,7 +706,9 @@ export class OwnerDesk {
     // What an AI sent on the owner's own instruction (a task): one line a task, at its last message.
     for (const t of this.tasks.filter((x) => x.did.length && after(x.did.at(-1)!.at)).slice(0, 5)) lines.push({ by: 'ai', text: `${shortLabel(this.assistants.get(t.by)?.label ?? 'Your AI')} wrote to ${t.to.name.replace(/ \(.*\)$/, '')} for you, as you asked`, at: t.did.at(-1)!.at, to: `#note=${t.note}` });
     // Money in: amounts by currency, held ones said so.
-    const money = (await panel.money().catch(() => null)) as { receipts?: { amount: number; currency: string; at: string; settlement?: string }[] } | null;
+    // At most a second and a half: Money reads receipts from the pod, and a house with many (or a pod that's busy) left
+    // Today blank for half a minute and more (13 Nov). The line is left out then; the reading carries on and is cached.
+    const money = (await Promise.race([panel.money().catch(() => null), new Promise((r) => setTimeout(r, 1500).unref?.())])) as { receipts?: { amount: number; currency: string; at: string; settlement?: string }[] } | null | undefined;
     const inToday = (money?.receipts ?? []).filter((r) => after(r.at) && r.settlement !== 'voided');
     if (inToday.length) {
       const by = new Map<string, number>();

@@ -625,6 +625,15 @@ describe('what an attacker tried (round 16)', () => {
   const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, url: `https://${key}.example/a2a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
+  it('Today answers without Money when Money is slow (13 Nov: a reused house never showed Handled for you)', async () => {
+    const h = await house({ panel: { activity: () => [], money: () => new Promise(() => {}) } });
+    const t0 = Date.now();
+    const today = await h.owner({ kind: 'panel.today', tz_offset: 0 });
+    expect(Date.now() - t0).toBeLessThan(2500);
+    expect(today.lines).toEqual([]);
+    h.close();
+  });
+
   it('a stranger\'s words stay with the owner until they hand the chat to their AI; nobody else marks it answered', async () => {
     const h = await house();
     const ai = await h.connect('Helper');

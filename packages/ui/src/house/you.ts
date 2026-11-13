@@ -142,7 +142,8 @@ export function DoorPage({ backTo }: { backTo: () => void }) {
     h(Section, {},
       d.handle ? h(Row, { icon: 'share-outline', label: 'Share how to reach you', cls: 'share-row', detail: false, onClick: () => setShare(true) }) : null,
       h(Row, { icon: 'time-outline', tint: 'blue', label: 'When you can meet', onClick: () => push('#free') }),
-      h(Row, { icon: 'person-add-outline', tint: 'violet', label: 'Invite someone', detail: false, onClick: () => setInvite(true) })),
+      // A house claimed for a day can't invite (the host keeps invites to houses that stay someone's): no row to be refused by.
+      state.leaseUntil ? null : h(Row, { icon: 'person-add-outline', tint: 'violet', label: 'Invite someone', detail: false, onClick: () => setInvite(true) })),
     h(Sheet, { open: share, onClose: () => setShare(false), title: 'How people reach you' }, h(ShareSheet, { d })),
     h(Sheet, { open: invite, onClose: () => setInvite(false), title: 'Invite someone' }, h(InviteSheet, {})),
     d.open ? h(Section, {},

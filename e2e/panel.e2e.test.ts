@@ -1271,6 +1271,17 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await one.call('lake_house_suggest', { text: `${shopperName} keeps sending "fees": looks like a scam.`, advice: 'dont', sender: shopperUrl });
     await tab('Today');
     const warning = page.locator('ion-card.sug', { hasText: 'looks like a scam' });
+    // The AI's name once with one pill, no raw address, its answer and Tell, and the quiet ways out on one line (13 Nov:
+    // the owner found the card cluttered: "A warning" beside "Warning", the address, and five buttons one under another).
+    await warning.scrollIntoViewIfNeeded();
+    expect((await warning.locator('.card-kicker').innerText()).match(/warning/gi)).toHaveLength(1);
+    expect(await warning.getByText(shopperUrl).count()).toBe(0);
+    expect(await warning.getByRole('button', { name: /mute/i }).count()).toBe(0);
+    expect(await warning.locator('.reply-input').count()).toBe(0);
+    expect(await warning.locator('.card-foot.quiet ion-button').allInnerTexts()).toEqual(['REPLY', 'DISMISS'].map((t) => expect.stringMatching(new RegExp(t, 'i'))));
+    await warning.getByRole('button', { name: 'Reply', exact: true }).click();
+    await warning.locator('.reply-input').waitFor();
+    await tidy();
     await warning.getByRole('button', { name: 'Block them' }).click();
     await confirmSheet('Block');
     await warning.waitFor({ state: 'detached', timeout: 10_000 });
