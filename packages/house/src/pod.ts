@@ -22,6 +22,8 @@ export interface OwnerSession {
   webId: string;
   podRoot: string;
   fetch: typeof fetch;
+  /** The pod's own folder on disk, for a pod this house runs itself (the pod server's file backend): unset for a pod elsewhere. */
+  disk?: string;
 }
 
 interface Secrets {
@@ -62,8 +64,9 @@ export async function kept(o: OwnerSession, path: string, waits = [500, 1000, 20
 /**
  * The pod server's environment: the house's, with a heap limit of its own. A limit set for the house in NODE_OPTIONS was
  * inherited, so the two together could grow to twice it: the sandbox's pod server, allowed 448 MB of heap in a 780 MB
- * container, was killed at the container's limit four times in a week before it ever collected (12 Nov). 256 MB lists a
- * folder of ten thousand files; LAKE_POD_HEAP (in MB) says otherwise.
+ * container, was killed at the container's limit four times in a week before it ever collected (12 Nov). 256 MB does not
+ * list a folder of ten thousand files (13 Nov), so a house never asks it to: its first listing is read from disk (filed.ts).
+ * LAKE_POD_HEAP (in MB) says otherwise.
  */
 export function podEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const heap = Number(env.LAKE_POD_HEAP) > 0 ? Math.round(Number(env.LAKE_POD_HEAP)) : 256;
@@ -135,7 +138,7 @@ export async function tenantSessions(o: { dataDir: string; baseUrl: string; name
   const out = new Map<string, OwnerSession>();
   await pool(o.names, o.concurrency ?? 16, async (name) => {
     const fetch = await sessionFetch(o.baseUrl, { clientId: s.clients[name]!.id, clientSecret: s.clients[name]!.secret });
-    out.set(name, { webId: `${o.baseUrl}${name}/profile/card#me`, podRoot: `${o.baseUrl}${name}/`, fetch });
+    out.set(name, { webId: `${o.baseUrl}${name}/profile/card#me`, podRoot: `${o.baseUrl}${name}/`, fetch, disk: join(o.dataDir, 'pod', name) });
   });
   return out;
 }
@@ -223,7 +226,7 @@ export async function ownerSession(o: PodOptions): Promise<OwnerSession> {
     secrets.clientSecret = secret;
     await saveSecrets(o, secrets);
   }
-  return { webId, podRoot: `${o.baseUrl}${o.owner}/`, fetch: await sessionFetch(o.baseUrl, { clientId: secrets.clientId!, clientSecret: secrets.clientSecret! }) };
+  return { webId, podRoot: `${o.baseUrl}${o.owner}/`, fetch: await sessionFetch(o.baseUrl, { clientId: secrets.clientId!, clientSecret: secrets.clientSecret! }), disk: join(o.dataDir, 'pod', o.owner) };
 }
 
 /** An authenticated fetch for one WebID's client credentials (DPoP), logging in again when a token expires. */

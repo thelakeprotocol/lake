@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { Parser } from 'n3';
 import type { OwnerSession } from './pod.js';
 
@@ -56,6 +57,18 @@ export async function filedIndex(pod: OwnerSession, file: string, folders: strin
       if (!k) throw new Error(`${folder} isn't indexed`);
       if (!k.listed && Date.now() - k.failedAt >= (o.retryMs ?? 10 * 60_000)) {
         await (k.listing ??= inTurn(async () => {
+          // A pod this house runs itself: its folder is read from disk. The pod server builds a listing in memory, and at ten
+          // thousand files that took it past its heap; it aborted, restarted and listed again (13 Nov). A file is kept as
+          // <name>, or <name>$.<ext> when the server added a type; .meta and .acl files are the server's own.
+          if (pod.disk) {
+            const files = await readdir(join(pod.disk, folder), { withFileTypes: true }).catch((e: NodeJS.ErrnoException) => (e.code === 'ENOENT' ? [] : null));
+            if (files) {
+              for (const f of files) if (f.isFile() && !/\.(meta|acl)$/.test(f.name)) k.names.add(folder + f.name.split('$')[0]!);
+              k.listed = true;
+              save();
+              return;
+            }
+          }
           const res = await pod.fetch(pod.podRoot + folder, { headers: { accept: 'text/turtle' } }).catch(() => null);
           if (!res?.ok) { k.failedAt = Date.now(); return; }
           for (const q of new Parser({ baseIRI: pod.podRoot + folder }).parse(await res.text())) {

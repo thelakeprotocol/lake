@@ -761,12 +761,16 @@ function panelFor(x: {
       // waited the better part of a second for it on every look).
       if (!recordCheck || Date.now() - recordCheck.at > 60_000) recordCheck = { at: Date.now(), claims: await x.keeper().allClaims(), chain: await x.keeper().verifyOwnRecord() };
       const { claims, chain } = recordCheck;
+      // A pod too busy to answer is no failed check: said as still checking, and not kept for the minute (13 Nov: a busy pod
+      // showed "Your record failed its check" in red, then "2 agents have your yes" a few seconds later).
+      const busy = !chain.ok && 'transient' in chain && !!chain.transient;
+      if (busy) recordCheck = null;
       const view = x.desk().view();
       return {
         name: x.o.name, ...(x.keeper().rules.door?.handle ? { handle: x.keeper().rules.door!.handle } : {}), ...(x.keeper().rules.door?.name ? { shown: x.keeper().rules.door!.name } : {}), webId: owner.webId, podRoot: owner.podRoot,
         reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes,
         holds: [...new Set(claims.map((c) => c.field))], claims: claims.length,
-        record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
+        record: chain.ok ? { ok: true } : busy ? { ok: true, checking: true } : { ok: false, why: chain.why },
         knocksToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
         blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
         // Who can see something now, from the consent records in the pod (the same source as Who has access): the keys in

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -100,5 +100,20 @@ describe('the pod\'s growing folders are listed once (12 Nov: a listing of 10,00
     const lists = await Promise.all(houses.flatMap((h) => [h.list('agreements/'), h.list('audit/')]));
     expect(most).toBe(1);
     expect(lists.filter((l) => l.length === 1)).toHaveLength(4);
+  });
+  it('reads the first listing of a pod it runs itself from disk, where the pod server would build it in memory (13 Nov)', async () => {
+    const disk = await mkdtemp(join(tmpdir(), 'pod-'));
+    await mkdir(join(disk, 'agreements', 'old'), { recursive: true });
+    for (const f of ['a.consent.jsonld$.json', 'b.agreement.json', 'b.agreement.json.meta', '.acl']) await writeFile(join(disk, 'agreements', f), '{}');
+    await writeFile(join(disk, 'receipts'), 'not a folder');
+    const p = pod(['receipts/r1.receipt.jwt']);
+    const filed = await filedIndex({ ...p.session, disk }, await file(), ['agreements/', 'audit/', 'receipts/']);
+    expect((await filed.list('agreements/')).sort()).toEqual(['agreements/a.consent.jsonld', 'agreements/b.agreement.json']);
+    // A folder not made yet is empty; one that can't be read as a folder is listed by the pod as before.
+    expect(await filed.list('audit/')).toEqual([]);
+    expect(p.calls.listings).toBe(0);
+    expect(await filed.list('receipts/')).toEqual(['receipts/r1.receipt.jwt']);
+    expect(p.calls.listings).toBe(1);
+    expect(filed.listed('agreements/') && filed.listed('audit/')).toBe(true);
   });
 });
