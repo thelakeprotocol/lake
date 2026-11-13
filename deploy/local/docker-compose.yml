@@ -68,7 +68,9 @@ services:
     hostname: houses
     command: ["--tenants", "${LAKE_TENANTS:-4}", "--tenant-prefix", "sb-", "--public-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}", "--pod-url", "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/pods/", "--open-pairing"]
     environment:
-      NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-320}"
+      # The houses and their pod server each have a heap limit; each takes its heap plus about 80 MB, under LAKE_HOUSES_MEM.
+      NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-256}"
+      LAKE_POD_HEAP: "${LAKE_POD_HEAP:-224}"
       LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
       LAKE_NODE_URL: "http://lake-node:7000"
       LAKE_ISSUER_URL: "http://specialists:4300/issuer"
@@ -80,8 +82,8 @@ services:
       LAKE_TELLERS: "http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s/teller-a/a2a,http://lake-${LAKE_ID}.localhost:${LAKE_PORT}/s/teller-b/a2a"
     volumes: [houses:/data]
     depends_on: [caddy, specialists]
-    mem_limit: ${LAKE_HOUSES_MEM:-500m}
-    memswap_limit: ${LAKE_HOUSES_MEM:-500m}
+    mem_limit: ${LAKE_HOUSES_MEM:-640m}
+    memswap_limit: ${LAKE_HOUSES_MEM:-640m}
 
   mcp:
     <<: *small

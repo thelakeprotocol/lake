@@ -16,7 +16,8 @@ import { openWants, type Wants } from './wants.js';
 import { Parser } from 'n3';
 import { parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
 import { createPodMcpServer } from './pod-mcp.js';
-import { pool, type OwnerSession } from './pod.js';
+import { kept, pool, type OwnerSession } from './pod.js';
+import { filedIndex, type Filed } from './filed.js';
 import { recordPaths } from './packs.js';
 import { convertRecord, fetchConverterCert, fetchRecord, type RecordPaths, type Trust } from './record.js';
 import { packFolders } from './typeindex.js';
@@ -106,7 +107,10 @@ function approvalsApp() {
 
 /** Sets up one house on a pod that is already running: folders, wallet, record, MCP door, housekeeper, owner's desk. */
 export async function startHouse(o: HouseOptions): Promise<House> {
-  const { owner, say } = o;
+  const { say } = o;
+  // What this house files in the pod's growing folders is noted on the way, so they are listed once (filed.ts).
+  const filed = await filedIndex(o.owner, join(o.dataDir, 'pod-index.json'), ['agreements/', 'receipts/', 'audit/']);
+  const owner = filed.session;
   const actor = `house:${o.name}`;
   const demoIssuers = o.packs.map((p) => p.source?.issuer.domain).filter((d): d is string => !!d);
   const demoRegulators = o.packs.map((p) => p.authority?.domain).filter((d): d is string => !!d);
@@ -156,9 +160,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // but only once someone owns the house: a hosted house nobody has claimed follows its operator's current persona, so
   // an operator's fix reaches it (the sandbox's houses kept stale trust lists from their first boot).
   let rulesText = o.rulesText;
-  const ownerKey = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`).catch(() => null);
-  const saved = o.leaseHours && !ownerKey?.ok ? { ok: false, text: async () => '' } : await owner.fetch(`${owner.podRoot}settings/rules.yaml`);
-  if (saved.ok) {
+  // Only "not found" means there are none: a pod that stumbled at start read as a house with no owner and no rules, and
+  // the start file was written over the owner's (kept, in pod.ts).
+  const saved = o.leaseHours && !(await kept(owner, 'wallet/owner.jwk.json')) ? null : await kept(owner, 'settings/rules.yaml');
+  if (saved) {
     const text = await saved.text();
     try {
       parseRules(text);
@@ -270,19 +275,19 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // Consent records that are settled (withdrawn, or past their date), so the panel doesn't re-read them on every refresh.
   // The consent records, kept in the house's own data folder as an index of the pod's (the pod stays the record).
   const indexFile = join(o.dataDir, 'consent-index.json');
-  const consentCache = new Map<string, Record<string, unknown>>(Object.entries(JSON.parse(await readFile(indexFile, 'utf8').catch(() => '{}')) as Record<string, Record<string, unknown>>));
+  const consentCache = new Map<string, Record<string, unknown>>(Object.entries(await readFile(indexFile, 'utf8').then((t) => JSON.parse(t), () => ({})).catch(() => ({})) as Record<string, Record<string, unknown>>));
   let indexSaving: ReturnType<typeof setTimeout> | undefined;
   const saveIndex = () => { clearTimeout(indexSaving); indexSaving = setTimeout(() => void writeFile(indexFile, JSON.stringify(Object.fromEntries(consentCache))).catch(() => {}), 2000); };
   const consentIndex = {
-    listedAt: 0, listing: null as Promise<void> | null,
-    /** Lists the pod's folder and reads what the index lacks, a dozen at a time; one listing at a time. */
+    listedAt: 0, saidAt: 0, listing: null as Promise<void> | null,
+    /** Reads the consent records the index lacks, a dozen at a time; one look at a time. */
     relist() {
       return (this.listing ??= (async () => {
-        // A listing that fails is no listing: the index isn't marked fresh, and the next look tries again (11 Nov: a failed
+        const files = (await filed.list('agreements/')).filter((f) => f.endsWith('.consent.jsonld'));
+        // A listing that fails is no listing: the index isn't marked fresh, and a later look tries again (11 Nov: a failed
         // listing read as an empty folder, and the demo house showed nobody with access for ten minutes).
-        const res = await owner.fetch(owner.podRoot + 'agreements/', { headers: { accept: 'text/turtle' } }).catch((e: Error) => ({ ok: false, status: 0, statusText: e.message, text: async () => '' }) as unknown as Response);
-        if (!res.ok) { say(`consent index: listing agreements/ failed (${res.status} ${res.statusText}); keeping what it has`); return; }
-        const files = new Parser({ baseIRI: owner.podRoot + 'agreements/' }).parse(await res.text()).filter((q) => q.predicate.value === LDP_CONTAINS).map((q) => q.object.value.slice(owner.podRoot.length)).filter((f) => f.endsWith('.consent.jsonld'));
+        const listed = filed.listed('agreements/');
+        if (!listed && Date.now() - this.saidAt > 10 * 60_000) { this.saidAt = Date.now(); say('consent index: listing agreements/ failed; keeping what it has'); }
         const missing = files.filter((f) => !consentCache.has(f));
         for (let i = 0; i < missing.length; i += 12) await Promise.all(missing.slice(i, i + 12).map(async (f) => {
           const r = await owner.fetch(owner.podRoot + f).catch(() => null);
@@ -290,12 +295,14 @@ export async function startHouse(o: HouseOptions): Promise<House> {
           if (rec) consentCache.set(f, rec);
         }));
         if (missing.length) saveIndex();
-        this.listedAt = Date.now();
+        if (listed) this.listedAt = Date.now();
       })().finally(() => { this.listing = null; }));
     },
   };
-  const panel = panelFor({ o, owner, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
-  // The pod's folder listed a little after start, so the first look at Who has access has a fresh index.
+  // A record written again (withdrawn, or by a study that ran) is read again at the next look.
+  filed.onChange((path) => { if (path.endsWith('.consent.jsonld')) consentCache.delete(path); });
+  const panel = panelFor({ o, owner, filed, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
+  // Looked at a little after start, so the first look at Who has access has a fresh index.
   setTimeout(() => void consentIndex.relist().catch(() => {}), 20_000).unref();
   // The owner's AI on duty, run here when they choose (duty-runner.ts): as awake as the house.
   const dutyRunner = houseRunner({ dataDir: o.dataDir, connector: o.connector ?? new URL('/mcp', o.publicUrl).href, house: o.publicUrl, operatorModel: o.dutyModel, log: say });
@@ -304,7 +311,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const desk = new OwnerDesk({
     panel, dutyRunner,
     dataDir: o.dataDir, webId: owner.webId, actor, openPairing: !!o.openPairing && o.sandbox, emit, publicUrl: o.publicUrl, ownerUrl: o.ownerUrl,
-    readOwnerKey: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`); return r.ok ? r.json() : null; },
+    readOwnerKey: async () => (await kept(owner, 'wallet/owner.jwk.json'))?.json() ?? null,
     saveOwnerKey: (jwk) => put(owner, 'wallet/owner.jwk.json', JSON.stringify(jwk), 'application/json'),
     writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),
     writeConsent: async (gid, record) => { await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json'); consentCache.set(`agreements/${gid}.consent.jsonld`, record as Record<string, unknown>); saveIndex(); },
@@ -317,20 +324,20 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       saveIndex();
     },
     saveRevoked: (ids) => put(owner, 'agreements/revoked.json', JSON.stringify(ids), 'application/json'),
-    loadRevoked: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/revoked.json`); return r.ok ? r.json() : []; },
+    loadRevoked: async () => (await kept(owner, 'agreements/revoked.json'))?.json() ?? [],
     saveStatus: (indexes) => put(owner, 'agreements/status-indexes.json', JSON.stringify(indexes), 'application/json'),
-    loadStatus: async () => { const r = await owner.fetch(`${owner.podRoot}agreements/status-indexes.json`); return r.ok ? r.json() : {}; },
+    loadStatus: async () => (await kept(owner, 'agreements/status-indexes.json'))?.json() ?? {},
     leaseHours: o.leaseHours,
     clearOwnerKey: async () => { await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`, { method: 'DELETE' }); },
     saveAssistants: (keys) => put(owner, 'wallet/assistants.json', JSON.stringify(keys), 'application/json'),
     saveAllowances: (a) => put(owner, 'wallet/allowances.json', JSON.stringify(a), 'application/json'),
-    loadAllowances: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/allowances.json`); return r.ok ? r.json() : []; },
+    loadAllowances: async () => (await kept(owner, 'wallet/allowances.json'))?.json() ?? [],
     // The house vouches for its owner's key (for a payments agent checking an allowance); it never signs money itself.
     vouchOwner: (ownerJwk) => ownerKeyCredential(id, owner.webId, ownerJwk, 1),
     vouchAssistant: async (a, status) => assistantKeyCredential(id, owner.webId, { webId: a.webId, jkt: await keyThumbprint(a.jwk) }, status),
     card: () => card,
     statusUrl: () => keeperRef!.statusUrl,
-    loadAssistants: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/assistants.json`); return r.ok ? r.json() : []; },
+    loadAssistants: async () => (await kept(owner, 'wallet/assistants.json'))?.json() ?? [],
     // News for the owner's assistants: a signed message from this house into their Lake inbox (the reply is just "received").
     tell: async (url, payload) => {
       const envelope = await signMessage(payload, id, { iss: owner.webId });
@@ -471,8 +478,8 @@ async function put(o: OwnerSession, path: string, body: string, contentType: str
 
 /** The housekeeper's signing key lives in the owner's pod, in /wallet/, readable only by the owner. */
 async function walletIdentity(o: OwnerSession): Promise<Identity> {
-  const res = await o.fetch(`${o.podRoot}wallet/identity.json`);
-  if (res.ok) return importIdentity(await res.json());
+  const res = await kept(o, 'wallet/identity.json');
+  if (res) return importIdentity(await res.json());
   const fresh = await generateIdentity();
   await put(o, 'wallet/identity.json', JSON.stringify(await exportIdentity(fresh)), 'application/json');
   return fresh;
@@ -513,7 +520,7 @@ const decode = (jws: string) => {
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
 
 function panelFor(x: {
-  o: HouseOptions; owner: OwnerSession; id: Identity; actor: string; activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
+  o: HouseOptions; owner: OwnerSession; filed: Filed; id: Identity; actor: string; activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
   note: (kind: string, text: string) => void;
   card: AgentCard; recard: (r: Rules) => Promise<void>; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
@@ -547,14 +554,16 @@ function panelFor(x: {
   const mine = () => { const since = x.desk().claimedAt(); return since ? x.activity.filter((a) => Date.parse(a.at) >= since) : x.activity; };
   // Blind pledges this house signed: the salt reveals it once a pledge fills (kept in the owner's wallet).
   const blindPledges = async (): Promise<BlindSignature[]> => { const r = await owner.fetch(`${owner.podRoot}wallet/pledges.json`).catch(() => null); return r?.ok ? r.json() : []; };
-  // Receipts are read a few at a time and kept a few minutes: run 32's assistant got "fetch failed" six times from a busy
-  // pod read receipt by receipt, all at once, on every look. One that can't be read now is left out, and read next time;
-  // a listing that fails falls back on the receipts already read.
+  // Receipts are read a few at a time and once each: run 32's assistant got "fetch failed" six times from a busy pod read
+  // receipt by receipt, all at once, on every look, and a house with 1,400 receipts read them all again every five
+  // minutes. One that can't be read now is left out, and read next time; one filed again (held, then released) is read
+  // again; a listing that fails falls back on what the house filed itself.
   const receiptCache = new Map<string, { vc: Record<string, any>; at: number }>();
   const leftCache = new Map<string, ReturnType<typeof leftRow>>();
+  x.filed.onChange((path) => { receiptCache.delete(path); leftCache.delete(path); });
   const readReceipts = async (files: string[]) => {
     const now = Date.now();
-    await pool(files.filter((f) => now - (receiptCache.get(f)?.at ?? 0) >= 5 * 60_000), 8, async (f) => {
+    await pool(files.filter((f) => !receiptCache.has(f)), 8, async (f) => {
       const r = await owner.fetch(owner.podRoot + f).catch(() => null);
       const vc = r?.ok ? decode(await r.text().catch(() => '')) : null;
       if (vc?.credentialSubject) receiptCache.set(f, { vc, at: now });
@@ -564,7 +573,7 @@ function panelFor(x: {
   // still be on its way (it is filed when the study runs, after the consent).
   const aboutCache = new Map<string, { at: number; about: { question?: string; purpose: string; fields: string[]; to: string } | null }>();
   const money = async () => {
-    const all = (await listContainer(owner, 'receipts/').catch(() => [...receiptCache.keys()])).filter((f) => f.endsWith('.receipt.jwt'));
+    const all = (await x.filed.list('receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
     await readReceipts(all);
     // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
     const files = all.filter((f) => !/(^|\/)spent-/.test(f));
@@ -703,11 +712,11 @@ function panelFor(x: {
       return [...by.values()].sort((a, b) => (a.last < b.last ? 1 : -1)).map((e) => ({ ...e, reputation: e.agent.startsWith('agent:') ? rep[e.agent.slice(6)] ?? null : null }));
   };
   const consents = async () => {
-      // An index of the records, kept by the house (it writes and withdraws them, so it knows); the pod's folder is listed
-      // again at most every ten minutes, in the background once there is an index, to pick up anything written elsewhere.
+      // An index of the records, kept by the house (it writes and withdraws them, so it knows). Once there is one, a look
+      // waits a moment for what it lacks (a study that just ran) and no longer: the rest is read in the background.
       // (11 Nov: the demo house's 821 records: listing the folder took 6 s, reading them all 81 s, and the page waited.)
       if (!x.consentIndex.listedAt) await x.consentIndex.relist();
-      else if (Date.now() - x.consentIndex.listedAt > 10 * 60_000) void x.consentIndex.relist();
+      else await Promise.race([x.consentIndex.relist().catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
       const read = [...x.consentCache.values()].map((rec) => readConsentRecord(rec));
       // On a leased house, the list starts at this owner's claim: the last owner's consents were theirs, not this one's.
       const since = x.desk().claimedAt();
@@ -897,7 +906,8 @@ function panelFor(x: {
         };
       }));
       const folders: Record<string, number> = {};
-      for (const f of [...x.records.map((r) => r.paths.folder), 'agreements/', 'receipts/', 'audit/', 'wallet/', 'settings/']) folders[f] = (await listContainer(owner, f)).length;
+      for (const f of [...x.records.map((r) => r.paths.folder), 'wallet/', 'settings/']) folders[f] = (await listContainer(owner, f)).length;
+      for (const f of ['agreements/', 'receipts/', 'audit/']) folders[f] = (await x.filed.list(f)).length;
       return {
         claims: claims.map((c) => ({ ...c, label: fieldSpec(c.field)?.label ?? c.field })), record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
         sources, folders,
@@ -906,7 +916,7 @@ function panelFor(x: {
     // What left this house, newest first, from the pod's /audit/ log: each study answered (as shares), what an accepted
     // offer sent, an address that went with a payment. An entry never changes, so each is read once.
     async left() {
-      const files = (await listContainer(owner, 'audit/')).filter((f) => f.endsWith('.json'));
+      const files = (await x.filed.list('audit/')).filter((f) => f.endsWith('.json'));
       const domains = new Map((await consents()).map((c) => [c.visitorWebId, c.visitor] as const));
       const recent = leftWindow(files);
       await pool(recent.filter((f) => !leftCache.has(f)), 8, async (f) => {

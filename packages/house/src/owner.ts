@@ -799,16 +799,16 @@ export class OwnerDesk {
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
     for (const id of await this.o.loadRevoked()) this.revokedIds.add(id);
-    for (const [id, i] of Object.entries((await this.o.loadStatus?.().catch(() => ({}))) ?? {})) this.statusIndexes.set(id, Number(i));
+    for (const [id, i] of Object.entries((await this.o.loadStatus?.()) ?? {})) this.statusIndexes.set(id, Number(i));
     // Assistants connected before the owner chose what each reads keep what they had (everything), until the owner changes it.
-    for (const a of (await this.o.loadAssistants?.().catch(() => [])) ?? []) this.assistants.set(a.kid, a.reads || a.duty ? a : { ...a, reads: [...READS] });
+    for (const a of (await this.o.loadAssistants?.()) ?? []) this.assistants.set(a.kid, a.reads || a.duty ? a : { ...a, reads: [...READS] });
     // Kept from before round 16: an answer signed "you" is the owner's unless an AI here took that name; then every AI
     // gets a name of its own that isn't the owner's or the house's.
     const posed = [...this.assistants.values()].some((x) => RESERVED_LABELS.has(x.label.trim().toLowerCase()));
     if (!posed) for (const n of this.notes) if (n.answered?.by === 'you' && !n.from.web) n.answered.own = true;
     for (const x of this.assistants.values()) x.label = this.labelFor(x.label, x.kid);
     // Allowances saved before they had a currency were in dollars.
-    for (const a of (await this.o.loadAllowances?.().catch(() => [])) ?? []) this.allowances.set(a.kid, { ...a, amount: a.amount ?? (a as unknown as { amountUsd: number }).amountUsd, currency: a.currency ?? 'USD' });
+    for (const a of (await this.o.loadAllowances?.()) ?? []) this.allowances.set(a.kid, { ...a, amount: a.amount ?? (a as unknown as { amountUsd: number }).amountUsd, currency: a.currency ?? 'USD' });
     return { paired: !!this.ownerJwk, token: this.token };
   }
 

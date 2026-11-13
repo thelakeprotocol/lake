@@ -42,6 +42,35 @@ export async function startPod(o: PodOptions): Promise<{ proc: ChildProcess; sto
   return startPodServer({ ...o, seed: [{ email: secrets.email, password: secrets.password, pods: [{ name: o.owner }] }] });
 }
 
+/**
+ * Reads what the house keeps in the pod and must never take for missing: its key, its owner's key, the rules, the keys
+ * given out and taken back. Only "not found" means there is none. Any other answer (a pod server that stumbled, a login
+ * it hasn't caught up with) read as "none" too: the house then made itself a new key, put the start file over the
+ * owner's rules, or opened as a house nobody owns. It asks again for a quarter of a minute, then stops with the reason,
+ * so whatever runs the house starts it again with nothing written over.
+ */
+export async function kept(o: OwnerSession, path: string, waits = [500, 1000, 2000, 4000, 8000]): Promise<Response | null> {
+  for (let i = 0; ; i++) {
+    const res = await o.fetch(o.podRoot + path).catch(() => null);
+    if (res?.ok) return res;
+    if (res?.status === 404) return null;
+    if (i >= waits.length) throw new Error(`could not read ${path} from the pod (${res ? res.status : 'no answer'}); stopping here, so nothing there is written over`);
+    await new Promise((r) => setTimeout(r, waits[i]));
+  }
+}
+
+/**
+ * The pod server's environment: the house's, with a heap limit of its own. A limit set for the house in NODE_OPTIONS was
+ * inherited, so the two together could grow to twice it: the sandbox's pod server, allowed 448 MB of heap in a 780 MB
+ * container, was killed at the container's limit four times in a week before it ever collected (12 Nov). 256 MB lists a
+ * folder of ten thousand files; LAKE_POD_HEAP (in MB) says otherwise.
+ */
+export function podEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const heap = Number(env.LAKE_POD_HEAP) > 0 ? Math.round(Number(env.LAKE_POD_HEAP)) : 256;
+  const rest = (env.NODE_OPTIONS ?? '').split(/\s+/).filter((f) => f && !/^--max[-_]old[-_]space[-_]size=/.test(f));
+  return { ...env, NODE_ENV: 'production', NODE_OPTIONS: [...rest, `--max-old-space-size=${heap}`].join(' ') };
+}
+
 /** Runs the pod server with these accounts and pods seeded on first start. */
 async function startPodServer(o: { dataDir: string; port: number; baseUrl: string; seed: { email: string; password: string; pods: { name: string }[] }[] }) {
   await assertPortFree(o.port);
@@ -52,7 +81,7 @@ async function startPodServer(o: { dataDir: string; port: number; baseUrl: strin
   const proc = spawn(process.execPath, [bin, '-c', '@css:config/file.json', '-f', join(o.dataDir, 'pod'), '-p', String(o.port), '-b', o.baseUrl, '--seedConfig', seed, '-l', 'warn'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     // CSS's OIDC provider fails discovery under NODE_ENV=test; the pod server always runs as production.
-    env: { ...process.env, NODE_ENV: 'production' },
+    env: podEnv(process.env),
   });
   const tail: string[] = [];
   const keep = (b: Buffer) => { tail.push(b.toString()); if (tail.length > 40) tail.shift(); };

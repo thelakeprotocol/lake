@@ -2,9 +2,12 @@
 # Sized by default for a small shared server (2 GB RAM): every container has a hard memory cap and no swap, so if
 # something misbehaves Docker restarts it rather than starving whatever else runs on the machine. Keep the caps'
 # sum below the machine's RAM with room for the OS: on 1 GB, ten houses plus the grocers didn't fit (the host
-# swapped until it stopped answering). Each cap is an env var (LAKE_<SERVICE>_MEM, LAKE_HOUSES_HEAP, LAKE_MCP_HEAP);
-# on a 2 GB server: houses 780m (heap 448: the pod server alone settles near 520 MB with ten pods), mcp 300m (heap 200), specialists 240m, node 180m, sponsor 120m,
-# grocers 110m, swarm 100m.
+# swapped until it stopped answering). Each cap is an env var (LAKE_<SERVICE>_MEM, LAKE_HOUSES_HEAP, LAKE_POD_HEAP,
+# LAKE_MCP_HEAP); on a 2 GB server: houses 780m (heap 352, pod heap 256), mcp 300m (heap 200), specialists 240m,
+# node 180m, sponsor 120m, grocers 110m, swarm 100m.
+# The houses container is two processes, the houses and their pod server, each with a heap limit of its own: a process
+# takes its heap plus about 80 MB, and the two together must stay under LAKE_HOUSES_MEM. (Until 13 Nov the pod server
+# inherited the houses' limit: with 448 each inside 780m, Docker killed it four times in a week.)
 #
 #   LAKE_DOMAIN=sandbox.lake.example docker compose -f deploy/docker-compose.sandbox.yml up -d
 #
@@ -58,6 +61,7 @@ services:
     command: ["--tenants", "${LAKE_TENANTS:-6}", "--tenant-prefix", "sb-", "--public-url", "https://${LAKE_DOMAIN}", "--pod-url", "https://${LAKE_DOMAIN}/pods/", "--open-pairing"]
     environment:
       NODE_OPTIONS: "--max-old-space-size=${LAKE_HOUSES_HEAP:-256}"
+      LAKE_POD_HEAP: "${LAKE_POD_HEAP:-224}"
       # Two houses start at a time: ten pods starting together overloaded the 1 GB droplet after deploys (run 28).
       LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
       # Houses kept for someone: no lease, not on the claim list, paired with the token in their data folder.
@@ -79,8 +83,8 @@ services:
     ports: ["127.0.0.1:4000:4000", "127.0.0.1:4310:3000"]
     depends_on: [specialists]
     # ~200 MB of pod server plus a little per house; give 50 MB more for every 4 houses past 6.
-    mem_limit: ${LAKE_HOUSES_MEM:-400m}
-    memswap_limit: ${LAKE_HOUSES_MEM:-400m}
+    mem_limit: ${LAKE_HOUSES_MEM:-640m}
+    memswap_limit: ${LAKE_HOUSES_MEM:-640m}
 
   # Sandbox life: a paid, certified study every 15 minutes, rotating questions and prices.
   sponsor:

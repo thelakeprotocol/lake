@@ -8,6 +8,10 @@ services:
     environment:
       NODE_ENV: production
       TZ: Australia/Brisbane
+      # Two processes share the memory limit below, each with a heap limit of its own: the house (NODE_OPTIONS) and its
+      # pod (LAKE_POD_HEAP, in MB). Each takes its heap plus about 80 MB; keep the two together under mem_limit.
+      NODE_OPTIONS: "--max-old-space-size=320"
+      LAKE_POD_HEAP: "256"
     volumes:
       - ./house:/data
       - ./rules.yaml:/rules.yaml:ro

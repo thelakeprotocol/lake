@@ -134,7 +134,7 @@ See [Build an agent](/docs/build-an-agent). The sandbox skips domain proof and s
 
 ## Run your own sandbox
 
-Everything runs in a few containers with hard memory caps (about 1.2 GB in total by default; each is an env var), all on `127.0.0.1`:
+Everything runs in a few containers with hard memory caps (about 1.5 GB in total by default; each is an env var), all on `127.0.0.1`:
 
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
