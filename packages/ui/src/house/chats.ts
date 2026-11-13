@@ -145,6 +145,10 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
       // What your AI said here and you took back stays, struck through: they did read it.
       n.retracted ? h('div', { key: `${n.id}-r`, class: 'bubble ai undone' }, h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.retracted.by)}, your AI`), h('p', {}, n.retracted.text),
         h('div', { class: 'bubble-foot' }, h('span', { class: 'took-back' }, 'Taken back'), h('time', {}, time(n.retracted.at)))) : null,
+      // What was answered here earlier (your AI may write twice under a task; your own answer isn't written over).
+      ...(n.answered?.before ?? []).map((b, i) => h('div', { key: `${n.id}-b${i}`, class: `bubble ${b.by === 'you' ? 'me' : 'ai'}` },
+        b.by === 'you' ? null : h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(b.by)}, your AI${b.task ? ', as you asked' : ''}`),
+        h('p', {}, b.text), h('div', { class: 'bubble-foot' }, h('time', {}, time(b.at))))),
       n.answered ? ((e) => h('div', { key: `${n.id}-a`, class: `bubble ${n.answered!.by === 'you' ? 'me' : n.answered!.fixed ? 'ai house' : 'ai'}` },
         // Whose words: yours, your AI's by its name, or your house's own (a held time is told in fixed words).
         n.answered!.by === 'you' ? (n.answered!.fixed ? h('span', { class: 'who' }, h('ion-icon', { name: 'home-outline' }), ' Your house, on your answer') : null)

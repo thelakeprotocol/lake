@@ -175,7 +175,8 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     expect(await owner({ kind: 'panel.duty.runner' })).toMatchObject({ running: false });
 
     // A task (13 Nov): off duty, someone new leaves a note at the door; the owner tells their AI what to do in a few
-    // words, and the house's runner starts for that alone: it answers them through the house and says it's done.
+    // words, and the house's runner starts for that alone: it answers them through the house and says how it ended.
+    // (The stand-in has no model: it sends fixed words, never its human's instruction, and hands the chat back.)
     const sam = new Client({ name: 'Sam', version: '0' });
     await sam.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp`), { requestInit: { headers: { authorization: `Bearer ${(await (await fetch(`${site}/mcp/oauth/anonymous`, { method: 'POST' })).json() as { access_token: string }).access_token}` } } }));
     await sam.callTool({ name: 'lake_ask', arguments: { to: site, kind: 'note', text: 'I am selling a used hybrid bike for AUD 80. Interested?' } });
@@ -189,13 +190,25 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     const refused = await off.callTool({ name: 'lake_house_reply', arguments: { note: bike.id, text: 'Yes please!' } });
     expect(refused.isError).toBe(true);
     await off.close();
+    // A task's run connects at its own address: three tools, and nothing else answers there, under the same sign-in.
+    const walled = new Client({ name: 'task', version: '0' });
+    await walled.connect(new StreamableHTTPClientTransport(new URL(`${site}/mcp?tools=task`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
+    expect((await walled.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_house', 'lake_house_reply', 'lake_house_suggest']);
+    for (const [name, args] of [['lake_inbox', { wait_seconds: 0 }], ['lake_house', { view: 'requests' }], ['lake_house_reply', { note: bike.id, text: 'Yes please!' }]] as const) {
+      const r = await walled.callTool({ name, arguments: args });
+      expect(r.isError, name).toBe(true);
+      expect(JSON.stringify(r.content), name).toContain('one task from your human');
+    }
+    expect(JSON.parse(((await walled.callTool({ name: 'lake_house', arguments: { view: 'tasks' } })).content as { text: string }[])[0]!.text)).toMatchObject({ tasks: [] });
+    await walled.close();
     const set = await owner({ kind: 'panel.task.set', note: bike.id, by: mine.kid, text: 'Thanks, but no: we have enough bikes.' });
     expect(set).toMatchObject({ task: { state: 'open', left: 5 } });
-    const done = await wait(async () => ((await owner({ kind: 'list' })) as Listed).tasks.find((t) => t.id === set.task.id && t.state === 'done'));
-    expect(done).toMatchObject({ left: 4, did: [{ text: 'Thanks, but no: we have enough bikes.' }], ended: { text: 'Sent what you said.' } });
-    // Sam's AI has the answer, said to be from the owner's AI on their instruction.
-    const got = await wait(async () => { const r = await sam.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 0 } }); const t = (r.content as { text: string }[])[0]!.text; return /we have enough bikes/.test(t) ? t : undefined; });
+    const done = await wait(async () => ((await owner({ kind: 'list' })) as Listed).tasks.find((t) => t.id === set.task.id && t.state === 'back'));
+    expect(done).toMatchObject({ left: 4, did: [{ text: expect.stringContaining('will answer you themselves') }], ended: { text: expect.stringContaining('yours to write') } });
+    // Sam's AI has the answer, said to be from the owner's AI on their instruction; the instruction itself stayed in the house.
+    const got = await wait(async () => { const r = await sam.callTool({ name: 'lake_inbox', arguments: { wait_seconds: 0 } }); const t = (r.content as { text: string }[])[0]!.text; return /will answer you themselves/.test(t) ? t : undefined; });
     expect(got).toMatch(/as they asked/);
+    expect(got).not.toMatch(/enough bikes/);
     await sam.close();
     // With no task left the house's runner is at rest again, and still off duty.
     await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running: boolean }).running === false || undefined);

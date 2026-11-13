@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { asAddress, blueprintList, foldFyi, inboxBatch, lakeMcpAgent, listedOnly, TOOL_SETS, toolSet } from './mcp.js';
-import { DUTY_TOOLS } from './duty.js';
+import { DUTY_TOOLS, TASK_TOOLS, taskPrompt, taskUrl } from './duty.js';
 
 const agent = lakeMcpAgent({ name: 'Test assistant', domain: 'assistant.example', node: 'http://127.0.0.1:9' });
 async function connect(tools?: string) {
@@ -50,6 +50,28 @@ describe('tool sets (SPEC §6.1)', () => {
     const what = { trade: ['lake_sell { item }', 'lake_buy'], rooms: 'lake_room { action: "open" }', house: 'lake_house_connect, then lake_house', plain: 'no tool named' };
     expect(Object.keys(listedOnly(what, toolSet('trade')!))).toEqual(['trade', 'house', 'plain']);
     expect(Object.keys(listedOnly(what, toolSet('')!))).toEqual(['house', 'plain']);
+  });
+});
+
+describe('a run for one task (SPEC §6.1)', () => {
+  it('lists three tools, and nothing else answers there', async () => {
+    expect(new URL(taskUrl('https://lake.example/mcp?x=1')).searchParams.get('tools')).toBe('task');
+    const c = await connect('task');
+    expect(await names(c)).toEqual([...TASK_TOOLS].sort());
+    // What it is told first, and its prompt, name only those three.
+    for (const text of [c.getInstructions()!, taskPrompt('https://house.example')]) expect([...new Set(text.match(/lake_[a-z_]+/g))].sort()).toEqual([...TASK_TOOLS].sort());
+    // Unlike a list, this is a wall: a tool by name is refused before it runs, whatever its input.
+    for (const [name, args] of [['lake_inbox', {}], ['lake_pay', { agent_url: 'https://x.example/a2a', amount: 5, memo: 'deposit' }], ['lake_ask', { agent_url: 'https://x.example/a2a', message: { kind: 'note', text: 'hi' } }], ['lake_overview', {}], ['lake_house_connect', { code: 'x' }]] as const) {
+      const r = await c.callTool({ name, arguments: args });
+      expect(r.isError, name).toBe(true);
+      expect(JSON.stringify(r.content), name).toContain('one task from your human');
+    }
+    // Of the house, its tasks only; a note for its human only with the task it is about.
+    expect(JSON.stringify((await c.callTool({ name: 'lake_house', arguments: { view: 'requests' } })).content)).toContain('your tasks only');
+    expect(JSON.stringify((await c.callTool({ name: 'lake_house', arguments: { view: 'money' } })).content)).toContain('your tasks only');
+    expect(JSON.stringify((await c.callTool({ name: 'lake_house_suggest', arguments: { text: 'Shall I pay them?' } })).content)).toContain('goes with the task');
+    // No house connected here: an answer finds no task and is refused by the wall, not sent.
+    expect(JSON.stringify((await c.callTool({ name: 'lake_house_reply', arguments: { note: 'n1', text: 'hello' } })).content)).toContain('only in the conversation');
   });
 });
 

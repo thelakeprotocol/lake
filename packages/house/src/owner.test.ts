@@ -757,7 +757,12 @@ describe('what an attacker tried (round 16)', () => {
     expect(mine.tasks).toHaveLength(1);
     expect((await b.call({ kind: 'list' })).notes.every((n: { hidden?: boolean }) => n.hidden)).toBe(true);
     const tasks = await a.call({ kind: 'assistant.tasks' });
-    expect(tasks.tasks[0]).toMatchObject({ id: set.task.id, your_humans_words: 'Say no thanks, politely', left: 5, conversation: [{ note: id, text: expect.stringContaining('bike') }] });
+    expect(tasks.tasks[0]).toMatchObject({ id: set.task.id, your_humans_words: 'Say no thanks, politely', left: 5, conversation: [{ note: id, they_wrote: expect.stringContaining('bike') }] });
+    expect(JSON.stringify(tasks.how)).toContain('they_wrote');
+    // Asked of a key (before the connector lets money go to it): whether a task of this AI writes to them.
+    expect(await a.call({ kind: 'assistant.tasks', key: from('sam').key })).toMatchObject({ task: { id: set.task.id } });
+    expect(await a.call({ kind: 'assistant.tasks', key: from('kim').key })).toEqual({ task: null });
+    expect(await b.call({ kind: 'assistant.tasks', key: from('sam').key })).toEqual({ task: null });
     expect((await b.call({ kind: 'assistant.tasks' })).tasks).toEqual([]);
     expect(await a.call({ kind: 'assistant.tasks', note: id })).toMatchObject({ task: { id: set.task.id, left: 5 } });
     expect(await b.call({ kind: 'assistant.tasks', note: id })).toEqual({ task: null });
@@ -786,6 +791,10 @@ describe('what an attacker tried (round 16)', () => {
     for (let left = 3; left >= 0; left--) expect(await a.call({ kind: 'assistant.reply', note: again, text: `Still no (${left})` })).toMatchObject({ sent: true, left });
     expect(await a.call({ kind: 'assistant.reply', note: again, text: 'A sixth' })).toMatchObject({ error: expect.stringContaining('5 messages are used') });
     expect(h.sent).toHaveLength(5);
+    // Each message stays in the chat, and in what the AI reads next time: a second answer doesn't write over the first.
+    const kept = (await h.owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === again);
+    expect(kept.answered).toMatchObject({ text: 'Still no (0)', before: [{ text: 'Still no (3)', task: set.task.id }, { text: 'Still no (2)' }, { text: 'Still no (1)' }] });
+    expect((await a.call({ kind: 'assistant.tasks' })).tasks[0].conversation.map((c: { answered?: { text: string }[] }) => (c.answered ?? []).map((x) => x.text))).toEqual([['Thanks, but no.'], ['Still no (3)', 'Still no (2)', 'Still no (1)', 'Still no (0)']]);
     // Its report ends it; nothing more goes out under it, and the owner's OK clears the card.
     expect(await h.owner({ kind: 'panel.task.ok', id: set.task.id })).toMatchObject({ error: expect.stringContaining('still open') });
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'maybe', text: 'x' })).toHaveProperty('error');
@@ -830,7 +839,7 @@ describe('what an attacker tried (round 16)', () => {
     h.desk.tasks.find((t) => t.id === t4.id)!.until = new Date(Date.now() - 1000).toISOString();
     expect(await a.call({ kind: 'assistant.reply', note: dee, text: 'Late' })).toHaveProperty('error');
     (h.desk as unknown as { sweepTasks: () => void }).sweepTasks();
-    expect(await state(t4.id)).toMatchObject({ state: 'cant', ended: { why: 'Time ran out.' } });
+    expect(await state(t4.id)).toMatchObject({ state: 'cant', ended: { why: 'Time ran out before anything was sent.' } });
     // Blocking the sender ends it; so does removing the AI.
     const t5 = await task(dee);
     await h.desk.mute(from('dee').key);
@@ -845,6 +854,107 @@ describe('what an attacker tried (round 16)', () => {
     expect(await state(t6.id)).toMatchObject({ state: 'stopped', ended: { why: 'That AI is no longer connected.' } });
     h.close();
   });
+
+  // Fable's review of the task feature, 13 Nov: what it does under strain.
+    const slow = async () => {
+      const sent: string[] = [];
+      let gate: Promise<void> = Promise.resolve(), fail = false;
+      const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (_url: string, m: Record<string, any>) => { await gate; if (fail) return { kind: 'unreached' }; sent.push(m.text); return { kind: 'ok' }; } } });
+      const a = await h.connect('Helper');
+      const task = async (note: string, text = 'Say no') => (await h.owner({ kind: 'panel.task.set', note, text })).task as { id: string };
+      const state = async (id: string) => (await h.owner({ kind: 'list' })).tasks.find((t: { id: string }) => t.id === id) as { state: string; left: number; ended?: { why?: string } };
+      return { ...h, a, sent, task, state, hold: () => { let open!: () => void; gate = new Promise((r) => (open = r)); return open; }, failing: (v: boolean) => { fail = v; } };
+    };
+
+    it('answers sent at once share the count; one that fails gives its place back; one on its way when the task ends says so', async () => {
+      const h = await slow();
+      const id = h.desk.addNote({ from: from('sam'), text: 'Selling a bike' })!;
+      const t = await h.task(id);
+      h.desk.tasks.find((x) => x.id === t.id)!.left = 2;
+      let open = h.hold();
+      const all = [1, 2, 3, 4].map((i) => h.a.call({ kind: 'assistant.reply', note: id, text: `No ${i}` }));
+      await settle();
+      open();
+      const out = await Promise.all(all);
+      expect(out.filter((r) => r.sent)).toHaveLength(2);
+      expect(out.filter((r) => String(r.error).includes('messages are used'))).toHaveLength(2);
+      expect(h.sent).toHaveLength(2);
+      expect((await h.state(t.id)).left).toBe(0);
+      // A send that doesn't land takes no place.
+      const t2 = await h.task(id);
+      h.failing(true);
+      expect(await h.a.call({ kind: 'assistant.reply', note: id, text: 'Lost' })).toMatchObject({ error: expect.stringContaining('can\'t be reached') });
+      expect((await h.state(t2.id)).left).toBe(5);
+      h.failing(false);
+      // Taken back while an answer was on its way: it went (nothing unsends it), and its AI is told to stop.
+      open = h.hold();
+      const flying = h.a.call({ kind: 'assistant.reply', note: id, text: 'On my way' });
+      await settle();
+      expect(await h.owner({ kind: 'panel.task.stop', id: t2.id })).toEqual({ ok: true });
+      open();
+      expect(await flying).toMatchObject({ sent: true, left: 0, note: expect.stringContaining('ended while it was on its way') });
+      expect(await h.a.call({ kind: 'assistant.reply', note: id, text: 'More' })).toHaveProperty('error');
+      h.close();
+    });
+
+    it('time running out says what the house knows: done only when nothing waits for an answer', async () => {
+      const h = await slow();
+      const run = async (who: string, then?: () => void) => {
+        const id = h.desk.addNote({ from: from(who), text: 'Hello' })!;
+        const t = await h.task(id);
+        expect(await h.a.call({ kind: 'assistant.reply', note: id, text: 'No thanks' })).toMatchObject({ sent: true });
+        await new Promise((r) => setTimeout(r, 5));
+        then?.();
+        h.desk.tasks.find((x) => x.id === t.id)!.until = new Date(Date.now() - 1000).toISOString();
+        (h.desk as unknown as { sweepTasks: () => void }).sweepTasks();
+        return h.state(t.id);
+      };
+      expect(await run('sam')).toMatchObject({ state: 'done', ended: { why: 'Time ran out. They didn\'t write back.' } });
+      expect(await run('dee', () => h.desk.addNote({ from: from('dee'), text: 'Are you sure? 60?' }))).toMatchObject({ state: 'back', ended: { why: 'Time ran out, and their last message has no answer.' } });
+      h.close();
+    });
+
+    it('a note its AI read and left unanswered isn\'t asked of its runner again; a new one is', async () => {
+      const h = await slow();
+      const stamps = () => (h.desk as unknown as { taskStamps: (kid: string) => string[] }).taskStamps(h.a.id.publicJwk.kid!);
+      const id = h.desk.addNote({ from: from('sam'), text: 'Selling a bike' })!;
+      const t = await h.task(id);
+      // New, and read without a word sent: still to do (two runs at most are the runner's to count).
+      expect(stamps()).toHaveLength(1);
+      await h.a.call({ kind: 'assistant.tasks' });
+      expect(stamps()).toHaveLength(1);
+      await h.a.call({ kind: 'assistant.reply', note: id, text: 'What size is the frame?' });
+      expect(stamps()).toEqual([]);
+      await new Promise((r) => setTimeout(r, 5));
+      h.desk.addNote({ from: from('sam'), text: 'Let me measure it.' });
+      expect(stamps()).toEqual([expect.stringContaining(`${t.id}:`)]);
+      await new Promise((r) => setTimeout(r, 5));
+      await h.a.call({ kind: 'assistant.tasks' });
+      expect(stamps()).toEqual([]);
+      await new Promise((r) => setTimeout(r, 5));
+      h.desk.addNote({ from: from('sam'), text: '54 cm.' });
+      expect(stamps()).toHaveLength(1);
+      h.close();
+    });
+
+    it('ends for the person, whichever of their keys the owner answered or blocked', async () => {
+      const h = await slow();
+      const known = h.desk.addNote({ from: from('alex'), text: 'Hi, Alex here' })!;
+      await h.owner({ kind: 'panel.note.reply', id: known, text: 'Hi Alex' });
+      const other = h.desk.addNote({ from: from('alex2'), text: 'Alex again, new phone. Coffee?' })!;
+      expect(await h.owner({ kind: 'panel.person.same', key: from('alex2').key, as: from('alex').key })).toMatchObject({ ok: true });
+      const t = await h.task(other, 'Say yes to coffee');
+      // Answered on the other key of the same person: theirs again.
+      expect(await h.owner({ kind: 'panel.note.reply', id: known, text: 'Coffee on Friday?' })).not.toHaveProperty('error');
+      expect(await h.state(t.id)).toMatchObject({ state: 'stopped', ended: { why: 'You answered yourself.' } });
+      // A sender blocked from the AI's warning: the task about them ends.
+      const spam = h.desk.addNote({ from: from('prize'), text: 'You won! Pay a release fee.' })!;
+      const t2 = await h.task(spam, 'Say no');
+      const sug = await h.a.call({ kind: 'assistant.suggest', text: 'This looks like a scam.', sender: from('prize').url, warn: true });
+      expect(await h.owner({ kind: 'panel.assistant.block', id: sug.id })).not.toHaveProperty('error');
+      expect(await h.state(t2.id)).toMatchObject({ state: 'stopped', ended: { why: 'You blocked them.' } });
+      h.close();
+    });
 });
 
 describe('people (step 3 of the app design)', () => {

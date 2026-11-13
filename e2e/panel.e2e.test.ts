@@ -791,9 +791,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await expect.poll(badge, { timeout: 5000 }).toBe(before - 1);
       await tidy();
       // The AI finds it with the conversation, and the house sends what it writes: to Sam's AI, marked as on the owner's instruction.
-      const mine = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string; your_humans_words: string; left: number; conversation: { note: string; text: string }[] }[] };
+      const mine = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string; your_humans_words: string; left: number; conversation: { note: string; they_wrote: string }[] }[] };
       expect(mine.tasks).toHaveLength(1);
-      expect(mine.tasks[0]).toMatchObject({ your_humans_words: 'Say no thanks, politely', left: 5, conversation: [{ note: left.note, text: expect.stringContaining('hybrid bike') }] });
+      expect(mine.tasks[0]).toMatchObject({ your_humans_words: 'Say no thanks, politely', left: 5, conversation: [{ note: left.note, they_wrote: expect.stringContaining('hybrid bike') }] });
       await card.getByText('Nova is working on it.').waitFor({ timeout: 6000 });
       expect(await asAssistant({ kind: 'assistant.reply', note: left.note, text: 'Thanks for thinking of us, Sam, but no: we have enough bikes.' })).toMatchObject({ ok: true, sent: true, left: 4 });
       expect(replies()).toHaveLength(1);
@@ -862,6 +862,32 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.locator('.bubble.me:not(.sending)', { hasText: 'Pick-up is fine' }).waitFor({ timeout: 6000 });
       await tab('Today');
       await card.waitFor({ state: 'detached', timeout: 6000 });
+      await tidy();
+      // A note from the AI that names nobody's message: a name in its words is only a suggestion. The owner picks the
+      // chat before anything can be sent (the AI's text mustn't choose whom the owner's words go to).
+      expect(await asAssistant({ kind: 'assistant.suggest', text: 'Sam wrote again about the bike. Shall I answer?', advice: 'your_call', ask: { choices: ['Yes, answer', 'Leave it'] } })).toMatchObject({ ok: true });
+      const loose = page.locator('ion-card.sug', { hasText: 'Sam wrote again' });
+      await loose.getByRole('button', { name: 'Tell Nova what to do' }).click({ timeout: 8000 });
+      await sheet().getByText('Who is this about?').waitFor();
+      expect(await sheet().locator('.tell-about').count()).toBe(0);
+      await sheet().getByRole('button', { name: 'Say no thanks, politely' }).click();
+      await page.waitForTimeout(300);
+      expect(await send.evaluate((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+      await tidy();
+      // Two chats here are with an Alex: each chip carries that chat's latest words, so they can be told apart.
+      const who = sheet().getByRole('group', { name: 'Who it is about' });
+      const alexes = await who.getByRole('button', { name: /^Alex: “/ }).allTextContents();
+      expect(alexes.length).toBe(2);
+      expect(alexes[0]).not.toBe(alexes[1]);
+      await who.getByRole('button', { name: 'Sam', exact: true }).click();
+      await sheet().locator('.tell-about', { hasText: 'About Sam\'s message' }).waitFor();
+      await expect.poll(() => send.evaluate((b) => (b as HTMLButtonElement).disabled)).toBe(false);
+      await send.click();
+      await card.getByText('With Nova').waitFor({ timeout: 6000 });
+      await card.getByRole('button', { name: 'Take it back' }).click();
+      await card.waitFor({ state: 'detached', timeout: 6000 });
+      // Taken back, the AI's question is the owner's to answer again.
+      await loose.getByRole('button', { name: 'Tell Nova what to do' }).waitFor({ timeout: 6000 });
       await tidy();
     } finally { await sam.close().catch(() => {}); }
   });

@@ -89,14 +89,15 @@ const stubRun: ModelRun = async ({ lake, token, prompt }) => {
     try { return { ...(JSON.parse(text) as Record<string, any>), isError: !!r.isError } as Record<string, any>; } catch { return { text, isError: !!r.isError } as Record<string, any>; }
   };
   try {
-    // A task from its human: their words are sent as they are, and it says it's done (a model would word it).
+    // A task from its human: with no model to word an answer, it sends fixed words (never its human's instruction, which
+    // is for it alone) and hands the conversation back.
     const tasks = ((await call('lake_house', { view: 'tasks' })).tasks ?? []) as { id: string; your_humans_words: string; conversation: { note: string }[]; you_sent: unknown[] }[];
     let did = 0;
     for (const t of tasks) {
       const note = t.conversation.at(-1)?.note;
       if (!note || t.you_sent.length) continue;
-      const sent = await call('lake_house_reply', { note, text: t.your_humans_words });
-      await call('lake_house_suggest', { text: sent.isError ? 'I couldn\'t send it.' : 'Sent what you said.', task: t.id, outcome: sent.isError ? 'cant' : 'done' });
+      const sent = await call('lake_house_reply', { note, text: 'Thanks for your message. They\'ve seen it and will answer you themselves.' });
+      await call('lake_house_suggest', { text: sent.isError ? 'I couldn\'t send it.' : 'I told them you\'ve seen their message and will answer. This house runs a stand-in with no model, so the answer itself is yours to write.', task: t.id, outcome: sent.isError ? 'cant' : 'back' });
       did++;
     }
     if (prompt.includes('gave you a task')) return { code: 0, out: `Did ${did} task(s) for my human.`, tokens: 0 };

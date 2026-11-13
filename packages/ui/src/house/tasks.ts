@@ -53,15 +53,19 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
     const chats = reachable(v);
     const given = note ? chats.find((c) => c.notes.some((n) => n.id === note)) : undefined;
     const guess = given ? { chat: given, sure: true } : x ? aboutWhom(x, v) : undefined;
-    const chat = (picked ? chats.find((c) => c.key === picked) : undefined) ?? guess?.chat;
+    // A name read off the AI's own words is only a suggestion: the chat is the owner's pick, the guess listed first.
+    const chat = (picked ? chats.find((c) => c.key === picked) : undefined) ?? (guess?.sure ? guess.chat : undefined);
     const a = ais.find((q) => q.kid === (aiKid ?? by ?? x?.by)) ?? (ais.length === 1 ? ais[0] : undefined), ai = a ? aiOf(a.label) : 'your AI';
     const latest = chat?.notes[chat.notes.length - 1];
     // Whom it's about can be changed while it was only read off the note's words.
-    const others = guess?.sure ? [] : chats.slice(0, 6);
+    const others = guess?.sure ? [] : [...(guess ? [guess.chat] : []), ...chats.filter((c) => c.key !== guess?.chat.key)].slice(0, 6);
+    // Two people by one name are told apart by their latest words.
+    const words = (c: Chat) => { const t = (c.notes[c.notes.length - 1]?.text ?? '').replace(/\s+/g, ' ').trim(); return t.length > 30 ? `${t.slice(0, 28).trimEnd()}…` : t; };
+    const chip = (c: Chat) => others.filter((o) => o.name === c.name).length < 2 ? c.name : `${c.name}: “${words(c)}”`;
     return h('div', { class: 'tell' },
       ais.length > 1 ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a?.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a?.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
       chat && latest ? h('div', { class: 'tell-about' }, h('small', {}, `About ${chat.name}'s message`), h('p', {}, latest.text)) : h('p', { class: 'muted-line' }, chats.length ? 'Who is this about?' : 'Nobody has written to you yet, so there is nobody to write to.'),
-      others.length > 1 || (others.length && !chat) ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Who it is about' }, ...others.map((c) => h('button', { key: c.key, type: 'button', class: `chip${chat?.key === c.key ? ' on' : ''}`, 'aria-pressed': String(chat?.key === c.key), onClick: () => setPicked(c.key) }, c.name))) : null,
+      others.length ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Who it is about' }, ...others.map((c) => h('button', { key: c.key, type: 'button', class: `chip${chat?.key === c.key ? ' on' : ''}`, 'aria-pressed': String(chat?.key === c.key), onClick: () => setPicked(c.key) }, chip(c)))) : null,
       h('ion-textarea', { value: text, autoGrow: true, rows: 2, maxlength: 300, placeholder: `What should ${ai} do? A few words.`, 'aria-label': 'Your instruction', class: 'tell-input', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
       h('div', { class: 'tell-chips ideas' }, ...IDEAS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))),
       chat ? h('p', { class: 'muted-line tell-scope' }, `${cap(ai)} can read this chat and send ${chat.name} up to 5 messages, until this time tomorrow. This doesn't let it spend money or change your rules. ${starts(a, ai)}`) : null,
