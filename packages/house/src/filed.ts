@@ -4,6 +4,10 @@ import { Parser } from 'n3';
 import type { OwnerSession } from './pod.js';
 
 const LDP_CONTAINS = 'http://www.w3.org/ns/ldp#contains';
+// One listing at a time in this process. Hosted houses share one pod server, and right after the deploy that brought
+// this index (none written yet) ten houses listed at once and took it past its heap, again at each restart (13 Nov).
+let turn: Promise<unknown> = Promise.resolve();
+const inTurn = <T>(fn: () => Promise<T>): Promise<T> => { const p = turn.then(fn, fn); turn = p.catch(() => {}); return p; };
 
 /**
  * The names in the pod's folders that only grow (agreements, receipts, the log), kept beside the house so those folders
@@ -51,7 +55,7 @@ export async function filedIndex(pod: OwnerSession, file: string, folders: strin
       const k = known.get(folder);
       if (!k) throw new Error(`${folder} isn't indexed`);
       if (!k.listed && Date.now() - k.failedAt >= (o.retryMs ?? 10 * 60_000)) {
-        await (k.listing ??= (async () => {
+        await (k.listing ??= inTurn(async () => {
           const res = await pod.fetch(pod.podRoot + folder, { headers: { accept: 'text/turtle' } }).catch(() => null);
           if (!res?.ok) { k.failedAt = Date.now(); return; }
           for (const q of new Parser({ baseIRI: pod.podRoot + folder }).parse(await res.text())) {
@@ -59,7 +63,7 @@ export async function filedIndex(pod: OwnerSession, file: string, folders: strin
           }
           k.listed = true;
           save();
-        })().finally(() => { k.listing = null; }));
+        }).finally(() => { k.listing = null; }));
       }
       return [...k.names];
     },

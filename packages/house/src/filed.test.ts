@@ -82,4 +82,23 @@ describe('the pod\'s growing folders are listed once (12 Nov: a listing of 10,00
     expect(seen).toEqual(['receipts/r.receipt.jwt', 'receipts/r.receipt.jwt']);
     expect(await filed.list('receipts/')).toEqual(['receipts/r.receipt.jwt']);
   });
+  it('lists one folder at a time across the houses of one process, since they share a pod server', async () => {
+    let now = 0, most = 0;
+    const slow = (files: string[]) => {
+      const p = pod(files);
+      const fetch = p.session.fetch;
+      p.session.fetch = (async (input: unknown, init?: RequestInit) => {
+        if (!String(input).endsWith('/')) return fetch(input as string, init);
+        most = Math.max(most, ++now);
+        await new Promise((r) => setTimeout(r, 20));
+        now--;
+        return fetch(input as string, init);
+      }) as typeof globalThis.fetch;
+      return p;
+    };
+    const houses = await Promise.all([1, 2, 3, 4].map(async (i) => filedIndex(slow([`agreements/${i}.consent.jsonld`]).session, await file(), ['agreements/', 'audit/'])));
+    const lists = await Promise.all(houses.flatMap((h) => [h.list('agreements/'), h.list('audit/')]));
+    expect(most).toBe(1);
+    expect(lists.filter((l) => l.length === 1)).toHaveLength(4);
+  });
 });
