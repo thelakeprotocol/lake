@@ -76,9 +76,10 @@ function RequestCard({ all }: { all: Request[] }) {
   const a = adviceOf(r.recommendation);
   const suggest = a.suggest || (risky ? 'deny' : '');
   const [terms, setTerms] = useState(false);
-  const after = (allowed: boolean) => void toast(`${allowed ? 'Allowed' : 'Declined'} ${r.visitor.domain}`, { buttons: [{ text: allowed ? 'Always allow' : 'Always decline', handler: async () => { await call({ kind: 'panel.request.always', request: r.id, answer: allowed ? 'allow' : 'decline' }); void toast(allowed ? `${r.visitor.domain} gets a yes for this from now on (90 days)` : `You won't hear from ${r.visitor.domain} again`); } }] });
+  const after = (allowed: boolean) => void toast(`${allowed ? 'Allowed' : 'Declined'} ${r.visitor.domain}`, { buttons: [{ text: allowed ? 'Always allow' : 'Always decline', handler: async () => { try { await must({ kind: 'panel.request.always', request: r.id, answer: allowed ? 'allow' : 'decline' }); void toast(allowed ? `${r.visitor.domain} gets a yes for this from now on (90 days)` : `You won't hear from ${r.visitor.domain} again`); } catch (e) { void toast(`Not set: ${(e as Error).message}`, { color: 'danger', duration: 6000 }); } } }] });
   const allow = async () => { for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'allow', grant: await grantFor(q) }); after(true); };
-  const deny = async () => { for (const q of all) await call({ kind: 'answer', request: q.id, answer: 'deny' }).catch(() => {}); after(false); };
+  // Each answer must land: a failure was swallowed, the toast said "Declined" and the card stayed (14 Nov: denied again and again).
+  const deny = async () => { for (const q of all) await must({ kind: 'answer', request: q.id, answer: 'deny' }); after(false); };
   const allowBtn = h(Btn, { key: 'a', label: n > 1 ? `Allow all ${n}` : 'Allow', fill: suggest === 'deny' ? 'outline' : 'solid', color: suggest === 'deny' ? 'medium' : 'primary', run: allow, ...(risky ? { ask: { header: `Let ${r.visitor.domain} use your ${r.fields.map(nice).join(', ')}?`, sub: 'Your rules advise against it.', button: 'Allow anyway' } } : {}) });
   const denyBtn = h(Btn, { key: 'd', label: n > 1 ? `Deny all ${n}` : 'Deny', fill: suggest === 'deny' ? 'solid' : 'outline', color: suggest === 'deny' ? 'primary' : 'medium', run: deny });
   const pays = r.price ? money$(r.price.amount, r.price.currency) : `$${r.priceUsd}`;

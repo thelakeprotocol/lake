@@ -6,7 +6,7 @@ import '@ionic/core/css/palettes/dark.system.css';
 import './house/theme.css';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { CACHE, Version, api, cached, call, houseBase, key, reachWatchers, reachable, remember, state } from './house/api';
+import { CACHE, Version, api, cached, call, houseBase, key, reachWatchers, reachable, remember, shared, state } from './house/api';
 import { h, toast } from './house/ion';
 import { knownWaiting, type ListView } from './house/logic';
 import { back, goTab, parse, UNDER, type Tab } from './house/nav';
@@ -69,7 +69,7 @@ function App() {
   const [list, setList] = useState<ListView | undefined>(() => cached<ListView>(JSON.stringify({ kind: 'list' })));
   const seenReq = useRef<Set<string> | null>(null);
   useEffect(() => {
-    void call<ListView>({ kind: 'list' }).then((v) => {
+    void shared<ListView>({ kind: 'list' }, version).then((v) => {
       if (seenReq.current && v.requests.some((r) => !seenReq.current!.has(r.id))) navigator.vibrate?.([120, 60, 120]);
       seenReq.current = new Set(v.requests.map((r) => r.id));
       setList(v);

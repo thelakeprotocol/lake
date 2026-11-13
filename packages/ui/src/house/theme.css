@@ -569,7 +569,10 @@ ion-button.button-outline.ion-color-danger { --border-color: var(--lake-red); }
 .tell { padding: 4px 20px 0; }
 .tell-about, .task-did { background: var(--lake-surface-2); border-radius: 14px; padding: 10px 12px; margin: 10px 0; }
 .tell-about small, .task-did small { display: block; font-size: 12px; font-weight: 700; color: var(--lake-muted); margin-bottom: 2px; }
-.tell-about p, .task-did p { margin: 0; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* The whole message where the owner decides what to say (14 Nov: it was cut at three lines); on a card, three lines and a tap opens it. */
+.tell-about p { margin: 0; font-size: 15px; line-height: 1.4; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; }
+.task-did p { margin: 0; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.task-did.open p { display: block; -webkit-line-clamp: unset; }
 ion-card.lake-card ion-card-content .task-did p { margin: 0; }
 .task-did.report { background: color-mix(in srgb, var(--lake-violet) 10%, var(--lake-surface)); }
 .tell-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }

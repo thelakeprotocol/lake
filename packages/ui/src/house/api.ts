@@ -69,6 +69,17 @@ export const useRedraw = () => { const [, set] = useState(0); return () => set((
 /** Kept off the phone's quick-start cache: what the house holds about its owner, their money, an export (round 10). */
 const PRIVATE = new Set(['panel.data', 'panel.money', 'panel.export', 'panel.address', 'panel.consents', 'panel.left']);
 
+/** The same look asked again for the same change, while it is still on its way, waits for that one: every screen asking at
+ *  once made a slow house slower (14 Nov). Never across a change (an answer from before it would be stale), and only for
+ *  looks (useHouse and the list), never for something done. */
+const inflight = new Map<string, Promise<unknown>>();
+export function shared<T>(payload: Record<string, unknown>, version: number): Promise<T> {
+  const k = `${version}|${JSON.stringify(payload)}`;
+  let p = inflight.get(k) as Promise<T> | undefined;
+  if (!p) { p = call<T>(payload).finally(() => inflight.delete(k)); inflight.set(k, p); }
+  return p;
+}
+
 /** One signed call, fetched again whenever something changed; keeps what it had while it fetches, so nothing flickers. */
 export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {
   const { version } = useContext(Version);
@@ -76,7 +87,7 @@ export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error
   const [s, set] = useState<{ data?: T; error?: string }>(() => ({ data: cached<T>(k) }));
   useEffect(() => {
     let live = true;
-    call<T>(payload).then((data) => { if (!PRIVATE.has(String(payload.kind))) remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((x) => ({ ...x, error: e.message })));
+    shared<T>(payload, version).then((data) => { if (!PRIVATE.has(String(payload.kind))) remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((x) => ({ ...x, error: e.message })));
     return () => { live = false; };
   }, [k, version]);
   return s;

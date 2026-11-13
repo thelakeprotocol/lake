@@ -281,7 +281,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   let indexSaving: ReturnType<typeof setTimeout> | undefined;
   const saveIndex = () => { clearTimeout(indexSaving); indexSaving = setTimeout(() => void writeFile(indexFile, JSON.stringify(Object.fromEntries(consentCache))).catch(() => {}), 2000); };
   const consentIndex = {
-    listedAt: 0, saidAt: 0, listing: null as Promise<void> | null,
+    listedAt: 0, saidAt: 0, listing: null as Promise<void> | null, failedAt: new Map<string, number>(),
     /** Reads the consent records the index lacks, a dozen at a time; one look at a time. */
     relist() {
       return (this.listing ??= (async () => {
@@ -290,11 +290,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         // listing read as an empty folder, and the demo house showed nobody with access for ten minutes).
         const listed = filed.listed('agreements/');
         if (!listed && Date.now() - this.saidAt > 10 * 60_000) { this.saidAt = Date.now(); say('consent index: listing agreements/ failed; keeping what it has'); }
-        const missing = files.filter((f) => !consentCache.has(f));
+        // One that didn't read is tried again in ten minutes, not at every look (14 Nov).
+        const missing = files.filter((f) => !consentCache.has(f) && Date.now() - (this.failedAt.get(f) ?? 0) > 10 * 60_000);
         for (let i = 0; i < missing.length; i += 12) await Promise.all(missing.slice(i, i + 12).map(async (f) => {
           const r = await owner.fetch(owner.podRoot + f).catch(() => null);
           const rec = r?.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null;
-          if (rec) consentCache.set(f, rec);
+          if (rec) consentCache.set(f, rec); else this.failedAt.set(f, Date.now());
         }));
         if (missing.length) saveIndex();
         if (listed) this.listedAt = Date.now();
@@ -574,21 +575,38 @@ function panelFor(x: {
   // receipt by receipt, all at once, on every look, and a house with 1,400 receipts read them all again every five
   // minutes. One that can't be read now is left out, and read next time; one filed again (held, then released) is read
   // again; a listing that fails falls back on what the house filed itself.
-  const receiptCache = new Map<string, { vc: Record<string, any>; at: number }>();
+  const receiptCache = new Map<string, { vc: Record<string, any> | null; at: number }>();
   const leftCache = new Map<string, ReturnType<typeof leftRow>>();
   x.filed.onChange((path) => { receiptCache.delete(path); leftCache.delete(path); });
+  // One reading at a time, which every caller waits for; and a receipt that doesn't read as one is noted too, and tried
+  // again in ten minutes. Without both, each look at Today or Money started its own reading of every receipt not yet
+  // kept, and a phone refetching on every change made seven hundred reads a minute (14 Nov: the owner's app wouldn't open).
+  let reading: Promise<void> | null = null;
   const readReceipts = async (files: string[]) => {
+    while (reading) await reading;
     const now = Date.now();
-    await pool(files.filter((f) => !receiptCache.has(f)), 8, async (f) => {
+    const todo = files.filter((f) => { const c = receiptCache.get(f); return !c || (!c.vc && now - c.at > 10 * 60_000); });
+    if (!todo.length) return;
+    reading = pool(todo, 4, async (f) => {
       const r = await owner.fetch(owner.podRoot + f).catch(() => null);
       const vc = r?.ok ? decode(await r.text().catch(() => '')) : null;
-      if (vc?.credentialSubject) receiptCache.set(f, { vc, at: now });
-    });
+      receiptCache.set(f, { vc: vc?.credentialSubject ? vc : null, at: now });
+    }).finally(() => { reading = null; });
+    await reading;
   };
   // Read once when complete (both files never change); looked at again after ten minutes while a study's question may
   // still be on its way (it is filed when the study runs, after the consent).
   const aboutCache = new Map<string, { at: number; about: { question?: string; purpose: string; fields: string[]; to: string } | null }>();
-  const money = async () => {
+  let moneyMemo: { at: number; v: Promise<unknown> } | null = null;
+  const money = (): Promise<any> => {
+    // Asked by Today, Money and the overview at once: one answer serves them for a few seconds.
+    if (moneyMemo && Date.now() - moneyMemo.at < 5_000) return moneyMemo.v;
+    const v = moneyNow();
+    moneyMemo = { at: Date.now(), v };
+    v.catch(() => { moneyMemo = null; });
+    return v;
+  };
+  const moneyNow = async () => {
     const all = (await x.filed.list('receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
     await readReceipts(all);
     // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
