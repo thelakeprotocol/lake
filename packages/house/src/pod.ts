@@ -320,10 +320,10 @@ async function waitFor(url: string, ms: number) {
   throw new Error(`pod server did not start at ${url}`);
 }
 
-function assertPortFree(port: number): Promise<void> {
+export function assertPortFree(port: number, flag = '--pod-port'): Promise<void> {
   return new Promise((ok, fail) => {
     const srv = createServer()
-      .once('error', () => fail(new Error(`port ${port} is already in use; pick another with --pod-port`)))
+      .once('error', () => fail(new Error(`port ${port} is already in use; pick another with ${flag}`)))
       .once('listening', () => srv.close(() => ok()))
       .listen(port);
   });

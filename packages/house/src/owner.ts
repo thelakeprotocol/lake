@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
-import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import webpush from 'web-push';
+import { loadJson, saveWhole } from './state.js';
 import { join } from 'node:path';
 import express from 'express';
 import type { WantOfferRecord, WantRecord } from './wants.js';
@@ -374,7 +375,7 @@ export class OwnerDesk {
    * answers an ask that fits, and tells the owner; anything else still comes to their phone.
    */
   circleRules: { tally: string; id: string; kinds?: string[]; perWeek: number; at: number[] }[] = [];
-  private saveCircleRules = () => writeFile(join(this.o.dataDir, 'circle-rules.json'), JSON.stringify(this.circleRules)).catch(() => {});
+  private saveCircleRules = () => saveWhole(join(this.o.dataDir, 'circle-rules.json'), JSON.stringify(this.circleRules));
   /** Who answers each conversation, by the sender's key (8 Nov): 'ai' (the owner's AI on duty may reply) or 'me'. Unset: AI for someone known, the owner for someone new. */
   chatModes: Record<string, 'ai' | 'me'> = {};
   /**
@@ -404,16 +405,16 @@ export class OwnerDesk {
     return any;
   }
   private buyDrafts = new Map<string, { want: string; offer: string; draft: ReturnType<typeof purchaseDraft> }>();
-  private saveChatModes = () => writeFile(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes)).catch(() => {});
+  private saveChatModes = () => saveWhole(join(this.o.dataDir, 'chat-modes.json'), JSON.stringify(this.chatModes));
   /** How far the owner has read each conversation (the newest message's time when they last opened it), on every device. */
   chatSeen: Record<string, string> = {};
-  private saveChatSeen = () => writeFile(join(this.o.dataDir, 'chat-seen.json'), JSON.stringify(this.chatSeen)).catch(() => {});
+  private saveChatSeen = () => saveWhole(join(this.o.dataDir, 'chat-seen.json'), JSON.stringify(this.chatSeen));
   /**
    * Keys the owner said belong to someone they already know ("This is Alex": a new phone, another AI app), each with the
    * key it was joined to. Only the owner's tap writes here: a name alone never joins two keys (SPEC §6.1).
    */
   sameAs: Record<string, string> = {};
-  private saveSameAs = () => writeFile(join(this.o.dataDir, 'same-as.json'), JSON.stringify(this.sameAs)).catch(() => {});
+  private saveSameAs = () => saveWhole(join(this.o.dataDir, 'same-as.json'), JSON.stringify(this.sameAs));
   /** The key a sender's notes are filed under: the one the owner joined it to, else its own. */
   personOf(key: string) { let k = key; for (let i = 0; i < 8 && this.sameAs[k]; i++) k = this.sameAs[k]!; return k; }
   /** Notes the owner cleared in the last ten minutes, to put back on Undo (kept in memory only). */
@@ -421,7 +422,7 @@ export class OwnerDesk {
   standingUsed(jkt: string, purpose: string) {
     const k = `${jkt}|${purpose}`;
     this.standingUses.set(k, (this.standingUses.get(k) ?? 0) + 1);
-    void writeFile(join(this.o.dataDir, 'standing-uses.json'), JSON.stringify([...this.standingUses])).catch(() => {});
+    void saveWhole(join(this.o.dataDir, 'standing-uses.json'), JSON.stringify([...this.standingUses]));
   }
   readonly grants = new Map<string, GrantRecord>();
   private replay = new ReplayGuard();
@@ -460,7 +461,7 @@ export class OwnerDesk {
     // Thirty days is all the counts look at, and five thousand senders all a house keeps: the rest goes, here and on disk.
     const fresh = [...this.firstContacts].filter(([, c]) => Date.parse(c.at) > Date.now() - 30 * 86_400_000).slice(-5000);
     if (fresh.length !== this.firstContacts.size) this.firstContacts = new Map(fresh);
-    return writeFile(join(this.o.dataDir, 'first-contacts.json'), JSON.stringify(fresh)).catch(() => {});
+    return saveWhole(join(this.o.dataDir, 'first-contacts.json'), JSON.stringify(fresh));
   };
   /** A web sender for the door note's counts: its address, hashed with a salt that changes daily and is never kept. */
   private webSalt = { day: '', salt: '' };
@@ -498,8 +499,7 @@ export class OwnerDesk {
   tasks: Task[] = [];
   private saveTasks = async () => {
     this.tasks = this.tasks.slice(0, 40);
-    const file = join(this.o.dataDir, 'tasks.json'), tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-    await writeFile(tmp, JSON.stringify(this.tasks)).then(() => rename(tmp, file)).catch(() => rm(tmp, { force: true }).catch(() => {}));
+    await saveWhole(join(this.o.dataDir, 'tasks.json'), JSON.stringify(this.tasks));
   };
   /** A conversation's name, as chatModes holds it: the sender's key, or a web thread's own name. */
   private static conv(from: { key?: string; web?: boolean; webId?: string }): string | undefined { return from.key ?? (from.web ? from.webId : undefined); }
@@ -653,7 +653,7 @@ export class OwnerDesk {
     // Kept across restarts, written at most every ten minutes: the finest bucket is an hour wide.
     if (this.ownerSeen - this.ownerSeenSaved < 600_000) return;
     this.ownerSeenSaved = this.ownerSeen;
-    void writeFile(join(this.o.dataDir, 'owner-seen'), String(this.ownerSeen)).catch(() => {});
+    void saveWhole(join(this.o.dataDir, 'owner-seen'), String(this.ownerSeen));
   }
 
   /** Back to nobody's: keys revoked, requests dropped, owner forgotten, house reset. Anyone can claim it again. */
@@ -733,7 +733,7 @@ export class OwnerDesk {
     await this.o.dutyRunner?.forget();
     await this.revoke('all');
     this.standingUses.clear();
-    await writeFile(join(this.o.dataDir, 'standing-uses.json'), '[]').catch(() => {});
+    await saveWhole(join(this.o.dataDir, 'standing-uses.json'), '[]');
     this.pending.clear();
     this.assistants.clear();
     this.suggestions = [];
@@ -751,7 +751,7 @@ export class OwnerDesk {
     this.webNotes.clear();
     await this.saveWebNotes();
     this.muted.clear();
-    await writeFile(join(this.o.dataDir, 'muted.json'), '[]').catch(() => {});
+    await saveWhole(join(this.o.dataDir, 'muted.json'), '[]');
     // Who answers each chat, how far each was read and who was joined to whom name the last owner's people.
     this.chatModes = {}; this.chatSeen = {}; this.sameAs = {}; this.cleared = [];
     await this.saveChatModes(); await this.saveChatSeen(); await this.saveSameAs();
@@ -771,20 +771,20 @@ export class OwnerDesk {
   async init() {
     this.ownerJwk = await this.o.readOwnerKey();
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
-    for (const k of JSON.parse(await readFile(join(this.o.dataDir, 'muted.json'), 'utf8').catch(() => '[]')) as string[]) this.muted.add(k);
-    for (const [k, n] of JSON.parse(await readFile(join(this.o.dataDir, 'standing-uses.json'), 'utf8').catch(() => '[]')) as [string, number][]) this.standingUses.set(k, n);
-    this.agenda = JSON.parse(await readFile(join(this.o.dataDir, 'agenda.json'), 'utf8').catch(() => '[]'));
-    this.circleRules = JSON.parse(await readFile(join(this.o.dataDir, 'circle-rules.json'), 'utf8').catch(() => '[]'));
-    this.chatModes = JSON.parse(await readFile(join(this.o.dataDir, 'chat-modes.json'), 'utf8').catch(() => '{}'));
-    this.chatSeen = JSON.parse(await readFile(join(this.o.dataDir, 'chat-seen.json'), 'utf8').catch(() => '{}'));
-    this.sameAs = JSON.parse(await readFile(join(this.o.dataDir, 'same-as.json'), 'utf8').catch(() => '{}'));
-    this.suggestions = JSON.parse(await readFile(join(this.o.dataDir, 'suggestions.json'), 'utf8').catch(() => '[]'));
-    this.tasks = JSON.parse(await readFile(join(this.o.dataDir, 'tasks.json'), 'utf8').catch(() => '[]'));
-    this.webNotes = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'web-notes.json'), 'utf8').catch(() => '[]')));
-    const kept = JSON.parse(await readFile(join(this.o.dataDir, 'notes.json'), 'utf8').catch(() => '{}')) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
+    for (const k of await loadJson(join(this.o.dataDir, 'muted.json'), []) as string[]) this.muted.add(k);
+    for (const [k, n] of await loadJson(join(this.o.dataDir, 'standing-uses.json'), []) as [string, number][]) this.standingUses.set(k, n);
+    this.agenda = await loadJson(join(this.o.dataDir, 'agenda.json'), []);
+    this.circleRules = await loadJson(join(this.o.dataDir, 'circle-rules.json'), []);
+    this.chatModes = await loadJson(join(this.o.dataDir, 'chat-modes.json'), {});
+    this.chatSeen = await loadJson(join(this.o.dataDir, 'chat-seen.json'), {});
+    this.sameAs = await loadJson(join(this.o.dataDir, 'same-as.json'), {});
+    this.suggestions = await loadJson(join(this.o.dataDir, 'suggestions.json'), []);
+    this.tasks = await loadJson(join(this.o.dataDir, 'tasks.json'), []);
+    this.webNotes = new Map(await loadJson(join(this.o.dataDir, 'web-notes.json'), []));
+    const kept = await loadJson(join(this.o.dataDir, 'notes.json'), {}) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
     this.notes = kept.notes ?? [];
     this.closedNotes = new Map(kept.closed ?? []);
-    this.ownerNos = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'owner-nos.json'), 'utf8').catch(() => '[]')));
+    this.ownerNos = new Map(await loadJson(join(this.o.dataDir, 'owner-nos.json'), []));
     this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'));
     if (this.o.leaseHours) {
       const check = () => { const until = this.leaseUntil(); if (until && until.getTime() <= Date.now()) void this.release(); };
@@ -792,9 +792,9 @@ export class OwnerDesk {
       setInterval(check, 60_000).unref();
     }
     setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); }, 60_000).unref();
-    this.dutyLog = JSON.parse(await readFile(join(this.o.dataDir, 'duty-log.json'), 'utf8').catch(() => '[]'));
-    this.contacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'contacts.json'), 'utf8').catch(() => '[]')));
-    this.firstContacts = new Map(JSON.parse(await readFile(join(this.o.dataDir, 'first-contacts.json'), 'utf8').catch(() => '[]')));
+    this.dutyLog = await loadJson(join(this.o.dataDir, 'duty-log.json'), []);
+    this.contacts = new Map(await loadJson(join(this.o.dataDir, 'contacts.json'), []));
+    this.firstContacts = new Map(await loadJson(join(this.o.dataDir, 'first-contacts.json'), []));
     setInterval(() => this.morningPush(), 60_000).unref();
     this.token = await secret(join(this.o.dataDir, 'pairing-token'));
     this.operatorToken = await secret(join(this.o.dataDir, 'operator-token'));
@@ -920,7 +920,7 @@ export class OwnerDesk {
   private async pushes() {
     if (this.pushState) return this.pushState;
     const f = join(this.o.dataDir, 'push.json');
-    const st = JSON.parse(await readFile(f, 'utf8').catch(() => '{"subs":[]}')) as PushState;
+    const st = await loadJson<PushState>(f, { subs: [] });
     this.pushState = st;
     if (!st.keys) {
       st.keys = webpush.generateVAPIDKeys();
@@ -928,7 +928,7 @@ export class OwnerDesk {
     }
     return st;
   }
-  private savePushes = () => writeFile(join(this.o.dataDir, 'push.json'), JSON.stringify(this.pushState), { mode: 0o600 }).catch(() => {});
+  private savePushes = () => saveWhole(join(this.o.dataDir, 'push.json'), JSON.stringify(this.pushState), 0o600);
   /** A promise circle's news for the owner: a note of its own (not an assistant's), and a nudge on their phones. */
   async circleNote(c: CircleItem, text: string) {
     // An ask that fits the owner's standing yes is answered by the house, within its weekly limit; the owner is told.
@@ -1033,7 +1033,7 @@ export class OwnerDesk {
     for (const n of this.notes.filter((x) => x.from.key === key)) this.closedNotes.set(n.id, { by: n.from.webId, state: 'seen and set aside by the owner' });
     this.notes = this.notes.filter((n) => n.from.key !== key);
     void this.saveNotes();
-    await writeFile(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted])).catch(() => {});
+    await saveWhole(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted]));
   }
 
   /**
@@ -1069,8 +1069,8 @@ export class OwnerDesk {
     return st ? `a standing yes names it (${st.domain})` : undefined;
   }
   private saveDuty = async () => {
-    await writeFile(join(this.o.dataDir, 'duty-log.json'), JSON.stringify(this.dutyLog.slice(-2000))).catch(() => {});
-    await writeFile(join(this.o.dataDir, 'contacts.json'), JSON.stringify([...this.contacts].slice(-500))).catch(() => {});
+    await saveWhole(join(this.o.dataDir, 'duty-log.json'), JSON.stringify(this.dutyLog.slice(-2000)));
+    await saveWhole(join(this.o.dataDir, 'contacts.json'), JSON.stringify([...this.contacts].slice(-500)));
   };
   /** Where the clock is in a time zone, as minutes since its midnight, and that midnight in UTC ms. */
   private static local(tz: string, at = Date.now()) {
@@ -1246,11 +1246,9 @@ export class OwnerDesk {
     // Capped by size as well as count (a note may carry a whole rules file): the oldest go first.
     let text = JSON.stringify(this.suggestions);
     while (text.length > 256_000 && this.suggestions.length > 1) { this.suggestions = this.suggestions.slice(0, -1); text = JSON.stringify(this.suggestions); }
-    // Written whole and renamed into place, so a crash mid-write never leaves half a file.
-    const file = join(this.o.dataDir, 'suggestions.json'), tmp = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-    await writeFile(tmp, text).then(() => rename(tmp, file)).catch(() => rm(tmp, { force: true }).catch(() => {}));
+    await saveWhole(join(this.o.dataDir, 'suggestions.json'), text);
   };
-  private saveAgenda = () => writeFile(join(this.o.dataDir, 'agenda.json'), JSON.stringify(this.agenda)).catch(() => {});
+  private saveAgenda = () => saveWhole(join(this.o.dataDir, 'agenda.json'), JSON.stringify(this.agenda));
 
   /** Notes the owner set aside, so their senders can ask what became of them. */
   private closedNotes = new Map<string, { by: string; state: string }>();
@@ -1261,16 +1259,16 @@ export class OwnerDesk {
    */
   private webNotes = new Map<string, { key: string; answers?: { text: string; at: string; by: string; final: boolean }[]; from?: NoteSender; thread?: string; reply_to?: ReplyTo }>();
   /** Kept on disk: a restart mustn't break every answer link given out. */
-  private saveWebNotes = () => writeFile(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes])).catch(() => {});
+  private saveWebNotes = () => saveWhole(join(this.o.dataDir, 'web-notes.json'), JSON.stringify([...this.webNotes]));
   /** Notes and what became of them, kept on disk: a restart (a deploy) lost both, for the owner and for every sender. */
-  private saveNotes = () => writeFile(join(this.o.dataDir, 'notes.json'), JSON.stringify({ notes: this.notes, closed: [...this.closedNotes].slice(-500) })).catch(() => {});
+  private saveNotes = () => saveWhole(join(this.o.dataDir, 'notes.json'), JSON.stringify({ notes: this.notes, closed: [...this.closedNotes].slice(-500) }));
   /**
    * The owner's own No, held against the asker's key and the purpose (run 62: denied a study, the owner's standing rule
    * let the same sender in four minutes later with the postcode left out). While it lasts, a standing rule that would let
    * that key in for that purpose asks the owner instead. Seven days; a second No makes it thirty; Allow lifts it.
    */
   private ownerNos = new Map<string, { offerId: string; at: number; until: number }>();
-  private saveOwnerNos = () => writeFile(join(this.o.dataDir, 'owner-nos.json'), JSON.stringify([...this.ownerNos])).catch(() => {});
+  private saveOwnerNos = () => saveWhole(join(this.o.dataDir, 'owner-nos.json'), JSON.stringify([...this.ownerNos]));
   /** The assistant that pays an accepted offer: one with an allowance in its currency, else any that can hold one. */
   payerFor(currency?: string): { webId: string; url: string } | undefined {
     const can = [...this.assistants.values()].filter((a) => a.webId && a.url);

@@ -42,6 +42,8 @@ export interface HouseOptions {
   /** Where the door page sends people to build their own house. */
   joinUrl?: string;
   ownerUrl?: string;
+  /** This machine's address on its own network, when the caller knows it: a phone can't open a link to localhost. */
+  lanHost?: string;
   /** The use cases this house takes part in (loaded and registered by the caller). */
   packs: LakePack[];
   /** Where each pack's issuer is, by pack id. */
@@ -364,10 +366,19 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const ownerUrl = `${(o.ownerUrl ?? o.publicUrl).replace(/\/$/, '')}/owner/`;
   if (pairing.paired) say(`owner paired. Approvals app: ${ownerUrl}`);
   else if (!o.quiet) {
-    const pairLink = `${ownerUrl}#pair=${pairing.token}`;
-    say(`no owner yet. On your phone, open ${pairLink}${o.openPairing && o.sandbox ? ' (sandbox: the first device to open it becomes the owner)' : ''}`);
-    const { default: qrcode } = await import('qrcode-terminal');
-    qrcode.generate(pairLink, { small: true }, (q: string) => console.log(q));
+    const pairLink = `${ownerUrl}#pair=${pairing.token}`, first = o.openPairing && o.sandbox ? ' (sandbox: the first device to open it becomes the owner)' : '';
+    // A link to localhost opens on this machine only (a house started with --join printed one "for your phone", with
+    // a code a phone couldn't use): a phone gets this machine's address on its network, when that is known.
+    const at = new URL(ownerUrl), local = ['localhost', '127.0.0.1', '[::1]'].includes(at.hostname);
+    if (local && o.lanHost) at.hostname = o.lanHost;
+    const phoneLink = local && !o.lanHost ? null : `${at.href}#pair=${pairing.token}`;
+    if (!local) say(`no owner yet. On your phone, open ${pairLink}${first}`);
+    else if (phoneLink) say(`no owner yet. On this machine, open ${pairLink}${first}. On your phone, on the same Wi-Fi: ${phoneLink}`);
+    else say(`no owner yet. On this machine, open ${pairLink}${first}. On your phone, on the same Wi-Fi, put this machine's address where the link says localhost; started with --owner-url http://<that address>:${at.port || 80}, the house prints the link and a code to scan`);
+    if (phoneLink) {
+      const { default: qrcode } = await import('qrcode-terminal');
+      qrcode.generate(phoneLink, { small: true }, (q: string) => console.log(q));
+    }
   }
 
   const keeper = new Housekeeper({

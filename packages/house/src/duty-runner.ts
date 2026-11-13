@@ -5,6 +5,7 @@
  * the model and who pays: the owner's own key, or the operator's model if the house offers one.
  */
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { loadJson } from './state.js';
 import { join } from 'node:path';
 import { modelDriver, runDuty, DEFAULT_MODEL, type ModelSpec } from '@thelakeprotocol/agent';
 
@@ -38,7 +39,7 @@ export function houseRunner(o: HouseRunnerOptions) {
   let stop: AbortController | null = null, loop: Promise<void> | null = null, since: string | undefined, lastError: string | undefined;
   // Off duty, it still runs for a task its owner gave it (SPEC §6.1): a loop for tasks only, which ends when none is left.
   let forTasks = false, look: (() => void) | null = null, starting: Promise<void> | null = null;
-  const owners = async (): Promise<ModelSpec | null> => JSON.parse(await readFile(modelFile, 'utf8').catch(() => 'null')) as ModelSpec | null;
+  const owners = async (): Promise<ModelSpec | null> => loadJson<ModelSpec | null>(modelFile, null);
   const spec = async (): Promise<{ spec: ModelSpec; whose: 'yours' | 'house' } | null> => {
     const mine = await owners();
     if (mine) return { spec: mine, whose: 'yours' };
@@ -63,7 +64,7 @@ export function houseRunner(o: HouseRunnerOptions) {
     await mkdir(dir, { recursive: true });
     // A new grant starts a new sign-in (its code pairs a fresh agent); a restart resumes the one it has.
     if (code) for (const f of await readdir(dir)) if (f.startsWith('duty-') && f.endsWith('.json')) await rm(join(dir, f), { force: true });
-    const saved = JSON.parse(await readFile(onFile, 'utf8').catch(() => '{}')) as { runs?: number[]; spent?: [number, number][] };
+    const saved = await loadJson<{ runs?: number[]; spent?: [number, number][] }>(onFile, {});
     if (!counters.runs.length && saved.runs) counters.runs.push(...saved.runs);
     if (!counters.spent.length && saved.spent) counters.spent.push(...saved.spent);
     const ctl = new AbortController();

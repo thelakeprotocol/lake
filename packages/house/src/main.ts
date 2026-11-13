@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { hostname } from 'node:os';
+import { loadJson, saveWhole } from './state.js';
+import { hostname, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import { page } from './page.js';
@@ -10,7 +11,7 @@ import { randomBytes } from 'node:crypto';
 
 import { startHouse, type House } from './house.js';
 import { loadPacks } from './packs.js';
-import { closePodRoot, externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
+import { assertPortFree, closePodRoot, externalSession, ownerSession, startPod, startProvider, tenantSessions, type OwnerSession } from './pod.js';
 
 const { values: a } = parseCli({
   name: 'lake-house',
@@ -92,9 +93,13 @@ if (a.join) {
 }
 const port = Number(a.port);
 const podPort = Number(a['pod-port']);
+// Its own port before anything starts: a taken one was a stack trace a minute in, with the pod server already up.
+await assertPortFree(port, '--port').catch((e: Error) => { console.error(`lake-house: ${e.message} (or LAKE_PORT)`); process.exit(2); });
 // In Docker, other containers reach us by our hostname (set it with --hostname); elsewhere, localhost.
 const inDocker = existsSync('/.dockerenv');
 // Joining from home, only you open this address (your control panel); everyone else comes through the relay.
+// The first address this machine has on a network of its own (in Docker that is the container's, which no phone reaches).
+const lanHost = inDocker ? undefined : Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address;
 const baseUrl = (a['public-url'] ?? `http://${inDocker && !a.join ? hostname() : 'localhost'}:${port}`).replace(/\/$/, '');
 const podUrl = (a['pod-url'] ?? `http://localhost:${podPort}`).replace(/\/?$/, '/');
 // Solid-OIDC only trusts HTTPS issuers, or plain HTTP on localhost (solid.github.io/solid-oidc/#security-tls).
@@ -146,7 +151,7 @@ async function single() {
   }
 
   if (a.relay && !a.lake) throw new Error('--relay needs at least one Lake node (--lake or LAKE_NODE_URL) to relay through');
-  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], openPairing: a['open-pairing'], leaseHours: a['open-pairing'] && a['lease-hours'] ? Number(a['lease-hours']) || undefined : undefined, emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
+  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], lanHost, openPairing: a['open-pairing'], leaseHours: a['open-pairing'] && a['lease-hours'] ? Number(a['lease-hours']) || undefined : undefined, emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
   const server = house.app.listen(port, async () => {
     say(a.relay ? `reached through the Lake's relay: ${house.card.supportedInterfaces.map((i) => i.url).join(' · ')}` : `A2A on ${baseUrl}/a2a · card at ${baseUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
     await house.join();
@@ -174,8 +179,8 @@ async function hosted(n: number) {
   // Houses people were invited into: kept (no lease), and back after a restart. Invites: one-time codes, a few per owner.
   type Invite = { code: string; by: string; at: string; used?: string };
   const invitedFile = join(dataDir, 'invited.json'), invitesFile = join(dataDir, 'invites.json');
-  const invited: { name: string; by: string; at: string }[] = existsSync(invitedFile) ? JSON.parse(await readFile(invitedFile, 'utf8')) : [];
-  const invites: Invite[] = existsSync(invitesFile) ? JSON.parse(await readFile(invitesFile, 'utf8')) : [];
+  const invited: { name: string; by: string; at: string }[] = await loadJson(invitedFile, []);
+  const invites: Invite[] = await loadJson(invitesFile, []);
   for (const i of invited) kept.add(i.name);
   // An invited house is open to pair until its new owner's phone pairs it (then it's theirs, with no lease).
   const isInvited = (name: string) => invited.some((i) => i.name === name) || invites.some((i) => i.used === name);
@@ -230,7 +235,7 @@ async function hosted(n: number) {
     if (houses.length + invites.filter((x) => !x.used).length >= (Number(a['max-houses']) || 0)) return { error: 'this Lake is full for now: they can run a house of their own (lake.doneinfifty.com/docs/join)' };
     const code = randomBytes(9).toString('base64url');
     invites.push({ code, by, at: new Date().toISOString() });
-    await writeFile(invitesFile, JSON.stringify(invites));
+    await saveWhole(invitesFile, JSON.stringify(invites));
     return { link: `${baseUrl}/t/join/${code}`, left: each - mine - 1 };
   };
   // The door opens before the houses do: each answers as soon as it's up, and one still starting says so (503 with
@@ -270,7 +275,7 @@ ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
     const taken = await fetch(`${String(a.lake ?? '').split(',')[0]!.trim().replace(/\/$/, '')}/handles/${handle}`, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok).catch(() => false);
     if (taken) return fail(409, `"${handle}" is taken on this Lake; choose another`);
     inv.used = `h-${randomBytes(4).toString('hex')}`;
-    await writeFile(invitesFile, JSON.stringify(invites));
+    await saveWhole(invitesFile, JSON.stringify(invites));
     try {
       await tenantSessions({ dataDir, baseUrl: podUrl, names: [inv.used] }).then((m) => sessions.set(inv.used!, m.get(inv.used!)!));
       await closePodRoot(sessions.get(inv.used)!).catch(() => false);
@@ -278,7 +283,7 @@ ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
       const house = await startOne(inv.used, { handle, ...(shown ? { name: shown } : {}) });
       await house.join();
       invited.push({ name: inv.used, by: inv.by, at: new Date().toISOString() });
-      await writeFile(invitedFile, JSON.stringify(invited));
+      await saveWhole(invitedFile, JSON.stringify(invited));
       log(`${inv.by} invited ${inv.used} (${handle})`);
       const panel = `${baseUrl}/t/${inv.used}/owner/`;
       return void (wantsJson ? res.json({ house: `${baseUrl}/t/${inv.used}`, panel, handle }) : res.redirect(303, panel));
