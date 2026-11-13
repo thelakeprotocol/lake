@@ -128,7 +128,7 @@ An offer is an ODRL 2.2 `Offer`. Its targets are canonical Lake fields. It MUST 
 
 Offers carry the visitor's credentials (ethics approval, audit certificate) as Verifiable Credentials.
 
-A house MUST reject a malformed offer (`rejected`, code `malformed`) before reading it further: the purpose is one of the Lake's purposes below, never prose or a made-up code; fields are 1 to 32 field names (`^[a-z][a-z0-9_]{0,39}$`); retention is `none` or an ISO 8601 duration; the price is zero or more. Its reasons MUST NOT repeat what the sender wrote, and a decision MAY say which of the asked fields the house holds only when it joins or counters, never when it declines or asks.
+A house MUST reject a malformed offer (`rejected`, code `malformed`) before reading it further: its `id` is 1 to 120 letters, digits, dots, dashes, underscores or colons, starting with a letter or digit (it names files in the owner's pod, so nothing that a URL would read as another path: no `/`, `#`, `?`, `%` or `..`); the purpose is one of the Lake's purposes below, never prose or a made-up code; fields are 1 to 32 field names (`^[a-z][a-z0-9_]{0,39}$`); retention is `none` or an ISO 8601 duration; the price is zero or more. Its reasons MUST NOT repeat what the sender wrote, and a decision MAY say which of the asked fields the house holds only when it joins or counters, never when it declines or asks.
 
 **Purposes** are a short shared list, following the W3C Data Privacy Vocabulary (DPV) where it has a term, so that a rule about one can't be dodged with a new word. A narrower purpose sits inside a broader one, and a rule about the broader one covers it: a rule that declines `marketing` also declines `advertising` and `personalised-advertising`.
 

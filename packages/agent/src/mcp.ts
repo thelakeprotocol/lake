@@ -310,7 +310,7 @@ export interface LakeMcpAgent {
   snapshot(): Promise<AgentSnapshot>;
   /** How many messages wait unread, and since when, and for an AI on duty whether it is on now (the runner's cheap look). */
   /** With `waitMs`, an answer with nothing to do waits up to that long for the next message, then counts again (`live`). */
-  pending(look?: { host: string; since: string; every: number }, waitMs?: number): Promise<{ waiting: number; to_deliver?: number; oldest?: string; duty?: { on: boolean; why?: string }; tasks?: string[]; live?: true }>;
+  pending(look?: { host: string; since: string; every: number }, waitMs?: number, signal?: AbortSignal): Promise<{ waiting: number; to_deliver?: number; oldest?: string; duty?: { on: boolean; why?: string }; tasks?: string[]; live?: true }>;
   /** Back on the Lake from its saved state, with no conversation open: a message came for it while it slept. */
   wake(): Promise<void>;
   /** Its passport: what it did on the Lake, each deal with the receipt that proves it, and its record on the logs. */
@@ -2202,6 +2202,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     }
     return out.slice(0, 20);
   };
+  const forwarded = { day: '', n: 0 };
   const matchWatch = setInterval(() => void (async () => {
     if (!me || !tags.some((t) => /^(seeking|offering):/.test(t))) return;
     const a = await me;
@@ -2215,7 +2216,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       for (const w of wakers) w();
       // Its assistant gone quiet, the match goes to its human, as a note from the card it matched (run 76: a neighbour
       // with a car and an old woman who needed a lift were never introduced, because her AI had finished in 44 s).
-      if (house && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) await houseCall({ kind: 'assistant.forward', from: { name: m.name, domain: 'a Lake match (from their card, not their words)', webId: m.webId, url: m.url }, text: `${item.message.note}. Your assistant left this standing (${tags.filter((t) => t.endsWith(m.tag.split(':').slice(1).join(':'))).join(', ')}) and isn't reading right now.` }).catch(() => null);
+      // Only a card that is here goes on to the human, three a day at most: a sleeping card costs nothing to leave behind,
+      // and a hundred of them tagged offering:<everything> reached phones as notes nobody could block (14 Nov, an attacker's read).
+      const today = new Date().toISOString().slice(0, 10);
+      if (forwarded.day !== today) Object.assign(forwarded, { day: today, n: 0 });
+      if (house && !m.asleep && forwarded.n < 3 && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS && ++forwarded.n) await houseCall({ kind: 'assistant.forward', from: { name: m.name, domain: 'a Lake match (from their card, not their words)', webId: m.webId, url: m.url }, text: `${item.message.note}. Your assistant left this standing (${tags.filter((t) => t.endsWith(m.tag.split(':').slice(1).join(':'))).join(', ')}) and isn't reading right now.` }).catch(() => null);
     }
   })().catch(() => {}), Number(process.env.LAKE_MATCH_EVERY_MS) || 180_000);
   matchWatch.unref();
@@ -2969,14 +2974,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       return mcp;
     },
     snapshot,
-    pending: async (look, waitMs = 0) => {
+    pending: async (look, waitMs = 0, signal) => {
       const counted = await count(look);
       if (!waitMs) return counted;
       // Live (the runner on its human's computer answers within seconds): with nothing to do, the answer waits for the
       // next message to arrive, or the end of the wait, and is counted again. Something to do is answered at once.
       if (!counted.waiting && !counted.to_deliver && !counted.tasks?.length) {
         let w = () => {};
-        const came = await new Promise<boolean>((ok) => { const t = setTimeout(() => ok(false), waitMs); t.unref?.(); w = () => { clearTimeout(t); ok(true); }; wakers.add(w); });
+        const came = await new Promise<boolean>((ok) => { const t = setTimeout(() => ok(false), waitMs); t.unref?.(); w = () => { clearTimeout(t); ok(true); }; wakers.add(w); signal?.addEventListener('abort', () => { clearTimeout(t); ok(false); }, { once: true }); });
         wakers.delete(w);
         if (came) return { ...(await count(look)), live: true as const };
       }

@@ -15,7 +15,7 @@ import { leftWindow, OwnerDesk, type PanelProvider } from './owner.js';
 import { openWants, type Wants } from './wants.js';
 import { Parser } from 'n3';
 import { parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
-import { createPodMcpServer } from './pod-mcp.js';
+import { createPodMcpServer, unsafePath } from './pod-mcp.js';
 import { kept, pool, type OwnerSession } from './pod.js';
 import { filedIndex, type Filed } from './filed.js';
 import { recordPaths } from './packs.js';
@@ -481,6 +481,7 @@ async function ensureContainer(o: OwnerSession, path: string) {
 }
 
 async function put(o: OwnerSession, path: string, body: string, contentType: string) {
+  if (unsafePath(path)) throw new Error(`refused to write ${JSON.stringify(path.slice(0, 80))}: no #, ?, %, backslash or . / .. parts in a pod path`);
   // A pod server just started can refuse an owner it has only just logged in (403), or stumble (5xx): a PUT is safe to
   // send again, so a few tries a moment apart before giving up (sandbox, 5 Nov: the houses crashed once on start-up).
   let res = await o.fetch(o.podRoot + path, { method: 'PUT', headers: { 'content-type': contentType }, body });

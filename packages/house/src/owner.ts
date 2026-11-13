@@ -1360,8 +1360,8 @@ export class OwnerDesk {
 
   /** Whether the owner's side knows this sender: only they hear when the owner was last here (13 Nov: any stranger who left
    *  a note could ask, where a knock already said it only to someone the house had dealt with). */
-  senderKnown(sender: string): boolean {
-    return [...this.contacts.values()].some((c) => c.webId === sender) || this.notes.some((n) => n.from.webId === sender && !!this.knownBy(n.from.key));
+  senderKnown(key: string): boolean {
+    return !!this.knownBy(key);
   }
 
   noteState(id: string, sender: string): string | null {

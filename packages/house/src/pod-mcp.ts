@@ -27,10 +27,16 @@ export type PodClaim = Claim;
  * The only door from an agent to a pod. The housekeeper uses it in-process; any MCP-capable
  * assistant can use the same tools over stdio (see pod-mcp-stdio.ts). Read-only in v0.
  */
+/** A path that a URL would read otherwise than it is written: refused wherever a path is built from something received. */
+export const unsafePath = (p: string) => /[#?%\\]/.test(p) || p.split('/').some((s) => s === '.' || s === '..');
+
 export function createPodMcpServer(o: PodMcpOptions): McpServer {
   const server = new McpServer({ name: 'lake-pod', version: '0.1.0' });
 
   const resolve = (path: string) => {
+    // A fetch drops what follows a #, and a URL resolves ../: "agreements/x#" or "agreements/../wallet/k" would reach
+    // another file than the one checked. Such paths are refused, never cleaned.
+    if (unsafePath(path)) throw new Error('path: no #, ?, %, backslash or . / .. parts');
     const url = new URL(path.replace(/^\/+/, ''), o.podRoot).href;
     if (!url.startsWith(o.podRoot)) throw new Error('path is outside this pod');
     const rel = url.slice(o.podRoot.length);

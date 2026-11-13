@@ -3,7 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
 import { registerPack } from '@thelakeprotocol/core';
 import health from '@thelakeprotocol/usecase-health';
-import { createPodMcpServer } from './pod-mcp.js';
+import { createPodMcpServer, unsafePath } from './pod-mcp.js';
 
 registerPack(health);
 
@@ -47,5 +47,22 @@ describe('pod MCP door', () => {
     expect(await call('pod_read', { path: 'wallet/identity.json' })).toMatchObject({ error: true });
     await call('pod_read', { path: 'health/claims.ttl' });
     expect(seen).toEqual(['health/claims.ttl']);
+  });
+
+  it('refuses a path that a URL would read as another file: a #, ../, or an encoded part (14 Nov)', async () => {
+    const puts: string[] = [];
+    const server = createPodMcpServer({ podRoot: root, fetch: (async (url: string, init?: RequestInit) => { if (init?.method === 'PUT') puts.push(url); return new Response('', { status: 201 }); }) as unknown as typeof fetch, allowWrite: ['agreements/'], claimsDocs: [] });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    const client = new Client({ name: 't', version: '0' });
+    await client.connect(a);
+    for (const path of ['agreements/revoked.json#.agreement.json', 'agreements/../wallet/owner.jwk.json', 'agreements/x%2F..%2Fy', 'agreements/./x', 'agreements/x?y']) {
+      expect((await client.callTool({ name: 'pod_write', arguments: { path, content: '{}' } })).isError).toBe(true);
+      expect((await client.callTool({ name: 'pod_read', arguments: { path } })).isError).toBe(true);
+    }
+    expect(puts).toEqual([]);
+    expect((await client.callTool({ name: 'pod_write', arguments: { path: 'agreements/urn:lake:7f1c.agreement.json', content: '{}' } })).isError).toBeFalsy();
+    expect(puts).toEqual([`${root}agreements/urn:lake:7f1c.agreement.json`]);
+    expect([unsafePath('a/b.json'), unsafePath('a/..'), unsafePath('a\\b')]).toEqual([false, true, true]);
   });
 });

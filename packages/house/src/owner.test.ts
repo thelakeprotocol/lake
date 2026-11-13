@@ -629,10 +629,12 @@ describe('what an attacker tried (round 16)', () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'ok' }) } });
     const kim = h.desk.addNote({ from: from('kim'), text: 'Hi, it\'s Kim' })!;
     const lee = h.desk.addNote({ from: from('lee'), text: 'Hi, it\'s Lee' })!;
-    expect(h.desk.senderKnown(from('kim').webId)).toBe(false);
+    expect(h.desk.senderKnown(from('kim').key)).toBe(false);
     expect(await h.owner({ kind: 'panel.note.reply', id: kim, text: 'Hello Kim' })).not.toHaveProperty('error');
-    expect(h.desk.senderKnown(from('kim').webId)).toBe(true);
-    expect(h.desk.senderKnown(from('lee').webId)).toBe(false);
+    expect(h.desk.senderKnown(from('kim').key)).toBe(true);
+    expect(h.desk.senderKnown(from('lee').key)).toBe(false);
+    // Known by the key that signed: Kim's WebID on another key is a stranger.
+    expect(h.desk.senderKnown('someone-elses-key-0123456789')).toBe(false);
     await h.owner({ kind: 'panel.notes.clear', ids: [kim, lee] });
     expect([h.desk.noteState(kim, from('kim').webId), h.desk.noteState(lee, from('lee').webId)]).toEqual(['set aside by the owner', 'set aside by the owner']);
     h.close();

@@ -437,6 +437,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
   app.get(path, ...signedIn, stream);
   // For the owner's AI on duty (`lake duty`): how many messages wait unread for this agent, without reading them, so its
   // runner starts the owner's model only when there is something to do.
+  const held = new Map<string, AbortController>();
   app.get(`${path}/duty/pending`, ...signedIn, async (req, res) => {
     const principal = principalOf(req);
     if (!principal) return void res.status(401).json({ error: 'sign in first (Authorization: Bearer)' });
@@ -449,8 +450,17 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
     if (!l) { try { l = await agentFor(principal); await l.agent.wake(); } catch (e) { return void res.status(503).json({ error: (e as Error).message }); } }
     // ?wait=N (at most 25 s): with nothing to do, the answer waits for the next message (a long poll), so a runner on its
     // human's computer starts within seconds of someone writing, without asking every few seconds.
-    const wait = Math.max(0, Math.min(25, Number(req.query.wait) || 0)) * 1000;
-    res.json(await l.agent.pending(look.host ? look : undefined, wait).catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
+    // One held look a principal (a new one answers the older at once), 64 in all, and none past its client hanging up:
+    // anonymous sign-ins are free, and each held look was a socket and a timer (14 Nov, an attacker's read).
+    held.get(principal)?.abort();
+    const stop = new AbortController();
+    const wait = held.size < 64 ? Math.max(0, Math.min(25, Number(req.query.wait) || 0)) * 1000 : 0;
+    if (wait) { held.set(principal, stop); res.on('close', () => stop.abort()); }
+    try {
+      res.json(await l.agent.pending(look.host ? look : undefined, wait, stop.signal).catch(() => ({ waiting: null, why: 'this connector couldn\'t count unread messages: the runner looks anyway' })));
+    } finally {
+      if (held.get(principal) === stop) held.delete(principal);
+    }
   });
   app.delete(path, ...signedIn, stream);
   app.get('/health', (_req, res) => void res.json({ ok: true, sessions: sessions.size, agents: live.size }));

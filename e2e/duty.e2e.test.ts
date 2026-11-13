@@ -106,6 +106,14 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     let t0 = Date.now();
     expect(await lookKim(2)).toMatchObject({ waiting: 0, live: true });
     expect(Date.now() - t0).toBeGreaterThanOrEqual(1900);
+    // One held look an agent: a second answers the first at once (anonymous sign-ins are free).
+    t0 = Date.now();
+    const first = lookKim(20);
+    await new Promise((r) => setTimeout(r, 300));
+    const second = lookKim(1);
+    expect(await first).toMatchObject({ waiting: 0 });
+    expect(Date.now() - t0).toBeLessThan(5000);
+    await second;
     t0 = Date.now();
     const held = lookKim(20);
     await new Promise((r) => setTimeout(r, 500));

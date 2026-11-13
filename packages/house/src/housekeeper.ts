@@ -254,7 +254,7 @@ export class Housekeeper {
       return this.reply({ kind: 'received' } as never);
     }
     // Asking what became of its own request or note reaches nobody: a muted sender may still learn it was set aside.
-    if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId);
+    if (v.payload.kind === 'status') return this.status(v.payload as StatusPayload, v.profile.webId, await keyThumbprint(v.profile.publicJwk), v.profile.ownerDomain);
     // A sender the owner muted, by key: nothing from it reaches them: no note, and no knock either (run 66: a muted sender's
     // knock was still weighed). Its own payments still file: a receipt is handled above.
     // Its key's fingerprint (RFC 7638), from the verified card: what a standing yes and a mute hold (a kid is a label the
@@ -752,7 +752,7 @@ export class Housekeeper {
   }
 
   /** A visitor waiting on an "ask" checks back: has the owner answered? */
-  private async status(p: StatusPayload, requester: string): Promise<LakeData> {
+  private async status(p: StatusPayload, requester: string, jkt: string, domain: string): Promise<LakeData> {
     // A note's status, for its sender only (run 45: "no such request from you" on a note id).
     // Asked by either id (run 62: a sender checked its notes as requests and heard "no such request" for every one).
     const noteId = String(p.note ?? (this.o.desk.pending.has(String(p.offerId ?? '')) ? '' : p.offerId ?? ''));
@@ -760,7 +760,8 @@ export class Housekeeper {
       const state = this.o.desk.noteState(noteId, requester);
       // When the owner last looked is said to a sender their side knows (they can tell waiting a day from waiting in vain),
       // and to anyone when nobody owns the house; never to a stranger, as for a knock (run 44).
-      const active = this.o.desk.senderKnown(requester) || this.o.desk.ownerActive() === 'no owner';
+      // Known by the key that signed, never by the WebID it names: anyone can copy a WebID off a card (14 Nov).
+      const active = this.o.desk.senderKnown(jkt) || this.o.desk.ownerActive() === 'no owner';
       if (state) return this.reply({ kind: 'note.status', note: noteId, status: state, ...(active ? { ownerActive: lastActive(this.o.desk.ownerActive()) } : {}) } as never);
       if (p.note) return this.reply({ kind: 'rejected', code: 'malformed', why: 'no such note from you (notes are kept by the key that sent them)' });
     }
@@ -776,7 +777,10 @@ export class Housekeeper {
       return this.reply({ ...base, decision: 'join', reason: 'the owner tapped Allow', grant: req.grant, grantHours: 48, agreement });
     }
     if (req.status === 'denied') return this.reply({ ...base, decision: 'decline', reason: 'the owner said no' });
+    // When the owner was last here, only to a visitor they've dealt with, as at the knock (run 44); a stranger polling its
+    // own request heard it at every look (14 Nov, an attacker's read).
     const ownerActive = this.o.desk.ownerActive();
+    if (!this.o.desk.knows({ webId: requester, domain }) && ownerActive !== 'no owner') return this.reply({ ...base, decision: 'ask', reason: 'still waiting for the owner' });
     return this.reply({ ...base, decision: 'ask', reason: `still waiting for the owner; ${lastActive(ownerActive)}`, ownerActive });
   }
 
@@ -825,10 +829,14 @@ function toVisitor(decision: Decision, counter?: { fields: string[]; priceUsd: n
 
 const lastActive = (a: OwnerActive) => (a === 'no owner' ? 'nobody has claimed this house, so no owner will answer' : `owner last active: ${a}`);
 
+const OFFER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 /** Why an offer isn't a well-formed Lake offer (SPEC §5.1), in our words, or null. Purposes and fields are codes, not prose. */
 function offerProblem(o: unknown): string | null {
   const x = o as Offer;
   if (!x || typeof x.id !== 'string' || typeof x.requester !== 'string') return 'expected a Lake offer';
+  // The id names files in the owner's pod (agreements/<id>.agreement.json): "revoked.json#" or "../wallet/…" from an
+  // outside agent would have written over the house's own files (14 Nov, an attacker's read).
+  if (!OFFER_ID.test(x.id)) return 'id: 1 to 120 letters, digits, dots, dashes, underscores or colons, starting with a letter or digit';
   if (typeof x.purpose !== 'string' || !CODE.test(x.purpose)) return 'purpose must be a short code like "research" (lowercase letters, digits, dashes)';
   // A made-up purpose ("totally-not-marketing") would slip past every rule about a real one.
   if (!isPurpose(x.purpose)) return `purpose must be one of the Lake's purposes: ${Object.keys(PURPOSES).join(', ')}`;
