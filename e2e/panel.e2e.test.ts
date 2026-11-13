@@ -1396,7 +1396,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const req = page.locator('ion-card.req', { hasText: 'research.example' });
     await req.locator('.req-q').waitFor({ timeout: 10_000 });
     expect((await req.locator('.req-q').innerText()).replace(/\s+/g, ' ')).toBe('Their question Does a daily walk help?');
-    expect((await req.locator('.req-counts').innerText()).replace(/\s+/g, ' ')).toMatch(/^What your house would answer, yes or no, to each: .* Only the yes or no leaves, as two unreadable shares\.$/);
+    expect((await req.locator('.req-counts').innerText()).replace(/\s+/g, ' ')).toMatch(/^What your house would answer, yes or no, to each: .* Only the yes or no leaves, as two unreadable shares\. The two tellers publish totals only, from 3 or more answers, with no noise added\.$/);
     expect(await req.locator('.req-counts li').allInnerTexts()).toEqual(['medications: Drug Y (drug-y)', 'conditions: Hypertension (38341003)', 'age band: 50 or more']);
     // Their names for the parts are nowhere on the card.
     expect(await req.innerText()).not.toMatch(/walks daily|feels better/);

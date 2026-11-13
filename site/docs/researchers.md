@@ -47,8 +47,8 @@ A study in its short form:
 
 - `question` is one sentence, up to 200 characters. Owners who are asked see it, marked as your words.
 - `predicates` are the one to four yes/no parts. Each `name` (up to 60 characters) labels a row of your result; put the outcome last and the exposure before it, and the answer compares the outcome with and without the exposure, among the houses the earlier parts hold for.
-- `min` (optional, default 3) is the fewest houses a table may come from. The tellers refuse fewer than their own floor: 3 on a sandbox, 20 elsewhere.
-- `noise_epsilon` (optional) asks the two tellers to add noise to the table they release (DAP's differential-privacy option). The answer then says how much each cell may be off.
+- `min` (optional, default 3) is the fewest answers a table may come from. Both tellers hold the count to it, and refuse a study whose `min` is under their own floor: 3 on a sandbox, 20 elsewhere.
+- `noise_epsilon` (optional) asks the two tellers to add noise to the table they release: above 0 and at most 2, and smaller is more noise (at 1 a cell is off by about four, at 2 by about two). The answer then says how much each cell may be off. Owners are told whether a study has it.
 
 Two tellers are picked from the Lake when you name none.
 
@@ -69,9 +69,9 @@ A study that can't be asked is refused before the Lake hears of it, with the rea
 
 ## What an owner sees
 
-A house whose rules leave your study to its owner puts a card on their phone. It shows your question as "Their question", and under it what their house would answer yes or no to, written by the house from the packs' own labels: the lines in `each_house_counts`. Your names for the parts are not shown, and no rule reads your question. What you call a part and what it counts can't come apart on the owner's screen.
+A house whose rules leave your study to its owner puts a card on their phone. It shows your question as "Their question", and under it what their house would answer yes or no to, written by the house from the packs' own labels: the lines in `each_house_counts`. Your names for the parts are not shown, and no rule reads your question. What you call a part and what it counts can't come apart on the owner's screen. The card also says what the table is held to: the fewest answers it is published from, and whether noise is added.
 
-After a house answers, its owner finds the same lines under My data → What left your house: who asked, what was counted, and that the answer left as two unreadable shares.
+After a house answers, its owner finds the same lines under My data → What left your house: who asked, what was counted, that the answer left as two unreadable shares, and what both tellers said the count was held to.
 
 ## Run it
 
@@ -102,5 +102,5 @@ It knocks on every house, bargains with those that counter together, signs agree
 - **No intervals.** The result gives counts and rates, and says when numbers are small; it gives no confidence interval, and no response rate beyond the decisions it lists.
 - **The evidence lives in the conversation that ran the study.** A later conversation can't fetch the bundle again.
 - **Several studies can be differenced.** Each is certified on its own. The auditor notes repeats of the same study, and nothing yet stops two different studies over the same houses from narrowing down one answer; ask for noise when tables are small.
-- **The minimum and the noise are yours to honour.** They are in the certified study, but the count is opened by your own client, and neither teller nor house yet checks that it was opened with the study's values (beyond the tellers' own floor).
+- **Answers that aren't from houses are not kept out.** The count is opened with your study, both tellers hold it to the study's minimum and noise, and a house answers only into such a count. But a teller takes an answer from any signed agent and doesn't yet check that it is a house with a signed record: the minimum is a number of answers. From an exact table, someone who added answers of their own can subtract them and work out one house's. If your result has to stand up to that, ask for noise, and say so when you publish.
 - **Ethics is a checklist**, run by a program: the purpose is research, nothing is kept, no identifying field is asked for, and only the fields the study reads are declared. It is not a review board.

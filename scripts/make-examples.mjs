@@ -79,11 +79,11 @@ write('status-list.json', { credential: statusList, decoded: decode(statusList) 
 
 const countersignature = await signAgreement(agreement, visitor.id);
 const count = 'run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13';
-write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, length: 8, min: 20, deadline: new Date(Date.now() + 36e5).toISOString(), helper: { url: 'https://teller-b.example/a2a', domain: 'teller-b.example' } }), 'Before any house answers, the visitor opens one count at the Leader teller, naming the Helper; the Leader sets it up with the Helper and a key only the two of them hold (IETF DAP; SPEC §11.5).');
+write('count-open.json', await envelope(visitor, { kind: 'count.open', id: count, deadline: new Date(Date.now() + 36e5).toISOString(), study }), 'Before any house answers, the visitor opens one count at the Leader teller, the first the study names, with the study itself: the Leader takes the size, the minimum, the noise and the Helper from it, and sets the count up with the Helper, which reads the study too (SPEC §7, §11.5).');
 write('5-compute.json', await envelope(visitor, { kind: 'compute', grant, study, countersignature, count }), 'Step 5. The visitor countersigns the agreement and asks the house to run the study inside its pod, naming the count.');
 // The house's true answer (over 60, on drug X, not readmitted: cell 0b011) as one Prio3 report: two shares and a proof.
 const report = await shardAnswer(8, 0b011);
-write('count-report.json', await envelope(house, { kind: 'count.report', id: count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[0] }), 'Step 6a. What the Leader gets from the house: one share of its answer and the public part of its proof. The Helper gets the other share. Neither share says anything on its own.');
+write('count-report.json', await envelope(house, { kind: 'count.report', id: count, study: sid, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[0] }), 'Step 6a. What the Leader gets from the house: one share of its answer and the public part of its proof, naming the study, so it goes only into a count held to that study. The Helper gets the other share. Neither share says anything on its own.');
 write('6-counted.json', await envelope(house, { kind: 'counted', study: sid, count, tellers: ['teller-a.example', 'teller-b.example'] }), 'Step 6. The house tells the visitor it sent its two shares. Nothing about its owner is in this message.');
 // Two more houses, so the aggregate below is a real (tiny) table; the tellers check each proof together, then aggregate.
 const key = newVerifyKey(8);
@@ -94,7 +94,7 @@ for (const r of reports) {
   const b = await prepareReport(8, key, 1, { ...r, share: r.shares[1] });
   leaderPrepared.push({ state: a.state, message: await settleReport(8, [a.share, b.share]) });
 }
-write('count-share.json', await envelope(tellerA, { kind: 'count.share', id: count, count: 3, rejected: 0, share: aggregateReports(8, leaderPrepared) }), "Each teller publishes one aggregate share, once, after both have checked every answer's proof. The Leader's share alone says nothing; added to the Helper's it gives the exact table.");
+write('count-share.json', await envelope(tellerA, { kind: 'count.share', id: count, study: sid, min: 20, count: 3, rejected: 0, share: aggregateReports(8, leaderPrepared) }), "Each teller publishes one aggregate share, once, after both have checked every answer's proof, and says under its signature what the count was held to (the study and its minimum). The Leader's share alone says nothing; added to the Helper's it gives the exact table. (Three answers here, to keep the example small: a real count publishes nothing under its minimum.)");
 
 const intent = await signIntentMandate(human.id, human.webId, { id: visitor.webId, natural_language_description: study.question, study: sid, budget: { currency: 'USD', amount: 5000 }, intent_expiry: new Date(Date.now() + 7 * 864e5).toISOString(), user_cart_confirmation_required: false });
 write('intent-mandate.json', { credential: intent, card: human.card, decoded: decode(intent) }, 'AP2 Intent Mandate, signed by a human at the visitor\'s organisation: this study, $5,000 at most.');

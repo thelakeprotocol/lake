@@ -407,7 +407,7 @@ export class Housekeeper {
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain, ...(key ? { key } : {}), ...(jkt ? { jkt } : {}) }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
         grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
-        priceUsd: offer.priceUsd, ...(offer.price ? { price: offerPrice(offer) } : {}), study: offer.study ?? null, question: p.study?.question, ...(p.study ? { counts: predicateLines(p.study) } : {}), warnings, ...(note ? { note } : {}),
+        priceUsd: offer.priceUsd, ...(offer.price ? { price: offerPrice(offer) } : {}), study: offer.study ?? null, question: p.study?.question, ...(p.study ? { counts: predicateLines(p.study), table: { min: Number(p.study.privacy?.min), noise: !!p.study.privacy?.noise } } : {}), warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
       // The sender hears that its newer ask replaced its older ones, not that it now has several waiting.
@@ -505,10 +505,13 @@ export class Housekeeper {
     const claims = await this.claims(fields);
     // One report, two shares and a proof that it is one cell (Prio3): each teller gets its share, neither can read it.
     const report = await shardAnswer(cellCount(p.study), cellOf(p.study, claims));
-    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
-    const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
+    // The answer names its study: a teller takes it only into a count opened with this study, whose minimum and noise
+    // are then the study's and not whatever the visitor opened the count with (SPEC §7). Each says so when it takes it.
+    const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, study: id, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
+    const failed = sent.map((r, i) => (typeof r === 'string' ? `${tellers[i]!.domain}: ${r}` : r.study !== id ? `${tellers[i]!.domain}: took my piece without saying its count is this study's` : null)).filter(Boolean);
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
-    const entry = { at: new Date().toISOString(), study: id, requester, requesterDomain: profile.ownerDomain, question: String(p.study.question ?? '').slice(0, 300), counted: predicateLines(p.study), fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
+    const held = sent.map((r) => r as { min?: number; noise?: { epsilon: number } });
+    const entry = { at: new Date().toISOString(), study: id, requester, requesterDomain: profile.ownerDomain, question: String(p.study.question ?? '').slice(0, 300), counted: predicateLines(p.study), fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}`, minimum: Math.min(...held.map((r) => Number(r.min))), ...(held.every((r) => r.noise) ? { noise: held[0]!.noise } : {}) };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     // What it was for, beside its agreement, so the owner's money can say which study paid (not just an agreement id).
     await this.tool('pod_write', { path: `agreements/${g.offer}.study.json`, content: JSON.stringify({ question: String(p.study.question ?? '').slice(0, 300), counted: entry.counted, at: entry.at }), contentType: 'application/json' }).catch(() => {});
@@ -559,12 +562,12 @@ export class Housekeeper {
     if (!checked.ok) return `its answers would go to tellers your owner doesn't trust: ${checked.why}`;
     const report = await shardAnswer(length, cell);
     const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
-    const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
+    const failed = sent.map((r, i) => (typeof r === 'string' ? `${tellers[i]!.domain}: ${r}` : null)).filter(Boolean);
     return failed.length ? failed.join('; ') : true;
   }
 
   /** Sends a signed message to a teller and checks the answer comes from the key that was checked: true, or why not. */
-  private async tell(c: { url: string; domain: string }, payload: Record<string, unknown>, kid: string): Promise<true | string> {
+  private async tell(c: { url: string; domain: string }, payload: Record<string, unknown>, kid: string): Promise<Record<string, unknown> | string> {
     try {
       const envelope = await signMessage(payload, this.o.id, { iss: this.o.webId });
       const raw = await sendLake(c.url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: this.o.card, envelope: envelope as LakeData['envelope'] }, { me: this.o.id, timeoutMs: 15_000 });
@@ -572,7 +575,7 @@ export class Housekeeper {
       if (!v.ok) return `its reply did not verify: ${v.rejection.why}`;
       if (v.profile.ownerDomain !== c.domain || v.profile.publicJwk.kid !== kid) return `answered as ${v.profile.ownerDomain} with another key than the one checked`;
       const r = v.payload as { kind?: string; problems?: string[] };
-      return r.kind === 'count.received' ? true : (r.problems ?? [String(r.kind)]).join('; ');
+      return r.kind === 'count.received' ? r : (r.problems ?? [String(r.kind)]).join('; ');
     } catch (e) {
       return (e as Error).message.slice(0, 120);
     }

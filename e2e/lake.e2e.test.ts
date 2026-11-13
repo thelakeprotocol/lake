@@ -1091,6 +1091,8 @@ describe('money', () => {
     expect(left.left).toContainEqual(expect.objectContaining({ kind: 'study', to: 'uni.example', fields: expect.arrayContaining(['hospital readmissions']), question: expect.any(String) }));
     // And what was counted, in the pack's words as the house wrote them down when it answered (never the researcher's own names for it).
     expect(left.left.find((x) => x.kind === 'study' && x.to === 'uni.example')).toMatchObject({ counts: ['age band: 60 or more', 'medications: Drug X (drug-x)', 'hospital readmissions: any on record'] });
+    // And what both tellers said they held the count to when they took the answer: the study's minimum, and no noise (round 24).
+    expect(left.left.find((x) => x.kind === 'study' && x.to === 'uni.example')).toMatchObject({ table: { min: readmissionStudy().privacy.min, noise: false } });
     expect(left.left.map((x) => x.kind).filter((k) => k !== 'study')).toEqual([]);
     expect(left.left.map((x) => x.at)).toEqual(left.left.map((x) => x.at).sort().reverse());
     expect(left.total).toBeGreaterThanOrEqual(left.left.length);

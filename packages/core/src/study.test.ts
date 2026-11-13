@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addNoise, aggregateReports, auditStudy, draftStudy, predicateLines, questionProblems, studyCatalog, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, summarizeTable, type Study } from './index.js';
+import { MAX_EPSILON, addNoise, aggregateReports, auditStudy, countTerms, studyId, draftStudy, predicateLines, questionProblems, studyCatalog, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, summarizeTable, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
@@ -86,6 +86,23 @@ describe('studies', () => {
     expect(auditStudy({ ...study, privacy: { ...study.privacy, tellers: [one] } }).ok).toBe(false);
     expect(auditStudy({ ...study, privacy: { mechanism: 'unary-randomized-response', epsilon: 2 } as never }).ok).toBe(false);
     expect(auditStudy({ ...study, predicates: [{ name: 'postcode', field: 'postcode' as never, op: 'present' }] }).ok).toBe(false);
+  });
+
+  it('says what a count for it is held to, from the study alone (what a teller opens it with)', () => {
+    expect(countTerms(study)).toEqual({ ok: true, study: studyId(study), length: 8, min: 20, tellers: study.privacy.tellers });
+    expect(countTerms({ ...study, privacy: { ...study.privacy, noise: { epsilon: 1 } } })).toMatchObject({ ok: true, noise: { epsilon: 1 } });
+    // It reads no pack: a field no pack declares is the auditor's and the house's to refuse, and a teller needs none loaded.
+    expect(countTerms({ ...study, predicates: [{ name: 'x', field: 'nowhere' as never, op: 'present' }] })).toMatchObject({ ok: true, length: 2 });
+    const one = study.privacy.tellers[0]!;
+    for (const privacy of [{ ...study.privacy, min: 1 }, { ...study.privacy, tellers: [one, one] }, { ...study.privacy, noise: { epsilon: 0 } }, { mechanism: 'unary-randomized-response' }]) expect(countTerms({ ...study, privacy: privacy as never }).ok).toBe(false);
+    expect(countTerms({ question: 'x' } as never).ok).toBe(false);
+  });
+
+  it('noise is noise: an epsilon above 2 is refused (at 10 a teller left a cell as it was 98.7% of the time)', () => {
+    expect(MAX_EPSILON).toBe(2);
+    expect(auditStudy({ ...study, privacy: { ...study.privacy, noise: { epsilon: 2 } } }).ok).toBe(true);
+    expect(auditStudy({ ...study, privacy: { ...study.privacy, noise: { epsilon: 2.5 } } }).problems).toEqual(['noise.epsilon: above 0 and at most 2']);
+    expect(countTerms({ ...study, privacy: { ...study.privacy, noise: { epsilon: 10 } } })).toMatchObject({ ok: false });
   });
 
   it("are refused when they read a register's fields, unless its pack lets studies read them (run 28)", () => {

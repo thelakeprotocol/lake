@@ -33,7 +33,7 @@
             ],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "xGcmtMbKJJBG6WOTJ2hb2v-_VOd9Lzu5gz-yUbtUUXA",
+              "x": "KMj0Zhxl0pPh9GOyHy60rVbgiVg5S-MhTyzgs7UIjHo",
               "kty": "OKP",
               "kid": "house-pods.example",
               "alg": "EdDSA"
@@ -66,7 +66,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6IkpPU0UifQ",
-        "signature": "sGjjdJHmo8fbfBAK3bWyFu-Frsgs9T71X26r12cJUYix8v2P6qNBVv-zJjm-2PIx2FdeLlQxVBUzuv7rumVyAQ"
+        "signature": "LeAoK6RGxj2PyQvwe11Mkmt80-McYkpnb7IjYqazOIVLzY-1KFwm3snYJwucPPvg5t93zJF4j9orwV3FXEV6CA"
       }
     ]
   },
@@ -74,103 +74,104 @@
     "payload": {
       "kind": "count.report",
       "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
-      "reportId": "dnJMFxaC9MPOLtYTABW+tg==",
+      "study": "urn:lake:study:sha256-slhrds4gtu26Mu1YnKCyL2hMAKJTzMCwXe+swqHj3FE=",
+      "reportId": "+nSgvkmf8FtvBebOAOzOOA==",
       "publicShare": {
         "jointRandParts": [
           {
-            "$b": "UGUywqSkFwSH25dFoeNAuQ=="
+            "$b": "Su2MGQL7mts7wMME9UkJZw=="
           },
           {
-            "$b": "JQMJUrwHQxkFkDtEZHf9Nw=="
+            "$b": "p28vBKibytiaz2iLp6O0oA=="
           }
         ]
       },
       "share": {
         "blind": {
-          "$b": "0FSUANs+CCLhtg0Fh1KkyA=="
+          "$b": "ym2cjfr2uEJLi7JS0ypX0w=="
         },
         "measurementShare": [
           {
-            "$n": "259824207472457805098388785343539466941"
+            "$n": "13031136136370908038400035991905111359"
           },
           {
-            "$n": "148662787189633085392472695422658885311"
+            "$n": "262734036497749230547247285558936583959"
           },
           {
-            "$n": "31958541317855876403309465048086799596"
+            "$n": "149580470720540242976367817535003247662"
           },
           {
-            "$n": "123458815771937500823922762123551609372"
+            "$n": "46455086587033868591321001054432046673"
           },
           {
-            "$n": "261144280643883537536132263085566804315"
+            "$n": "170534931785910279413070485434108985807"
           },
           {
-            "$n": "45841138456984181511522614617534433570"
+            "$n": "54564515357161912994570655305671467809"
           },
           {
-            "$n": "18690131157023320423731958651135994350"
+            "$n": "301856718569063780818859425649584551312"
           },
           {
-            "$n": "61266412062948749616565087752486202766"
+            "$n": "329396013682445909357654398731822908789"
           }
         ],
         "wireMeasurementShare": {
-          "$b": "vVL00Xo4ntECmbQUeFJ4w782yd+P/BXnVhdhAE5p12/s5IjiLaLcrqZENVa9/QoYHJJ23s8Tg877p4atkk3hXFtBG9qMeiEAXFrP8xmPdsQiCU3oi6g0Q0NUMKyfrnwi7il4PFroUFli+hqInJYPDo4tnahz9wqQkCZUeVR7Fy4="
+          "$b": "Pw045V99RFydLtmTnbTNCRe/6/0H2ta/C73h0h28qMUuRIeoqSXdNPeyapOYJohwUa5OnQkvUTl+ncKDmuzyIs/BmyB0/ouZAQ4mkUrVS4AhYwW1e0rofN5GPKRPvgwpkLVgHhy4KYfLD3UeRH0X43VFWQmO47lDrxfDeVhdz/c="
         },
         "wireProofShare": {
-          "$b": "5+iaYDGrqfY4+RiCIPL52PDTGBTVrWtf9rMkTzXDKGGt8Iokncs6etIB6eLLQB+cWgp0dFldtdHaKtqIDJLDCI1fAjrPiyoDt2Y59kwZcxeVNk5OhdwUVI4vVeFrffy525aTa8fioyNc0q/3MX2zbSWg5can/rmG8yUwNJPs9bgobk8Vmz405LIN68SkoCLP0Hh9noE/WB7Glicgza27pGyAS3AGHWxbiGjHTvOXRNOHp3plJGtK1HCIy/2IcihPwCkXODfwL84bcUfDueOnEQ=="
+          "$b": "6W+DFW9ZTtKlhkHKyCLa6DprHnopEbyp9OdZTnsDXhsWYfaAkQKNLOAbMjhrqjgbFnK8CTMJsVUxzRZIx3gl0ALLdeE4UsU9ncCCgQYe6/YzAoe6FXRzIjYzrjBRRIDVVHZzl0qQKJ+/Sp2iFQ/CmJmqkQAbycR3JvOL1kgIckxWBcKPY5ixZPRAsbdY3WVIoea4OcRp15Ik75wEtGSyMLscuzutxipR2xhQh6DWNtend54zoxdWN5HIwD/6Uwg2pQ/GgcMtTIYb+ynJzNG8uA=="
         },
         "proofsShare": [
           {
-            "$n": "288411039926005527203919255171512330471"
+            "$n": "309513521247415289964527098703225516009"
           },
           {
-            "$n": "129146766758937245062320710137570448368"
+            "$n": "36377302407436323118913836918304041786"
           },
           {
-            "$n": "207521842772818380472630519278661726381"
+            "$n": "36183381014708427206008682195952492822"
           },
           {
-            "$n": "11649284078587411226120344551592036954"
+            "$n": "276673987784895554795664093045870850582"
           },
           {
-            "$n": "31169871199567718875051312670128103309"
+            "$n": "328210885712583710081197947858602806018"
           },
           {
-            "$n": "247218181876911169015872054289270453909"
+            "$n": "283791562736479626237297751423694864947"
           },
           {
-            "$n": "145817811938269336790712258949582919387"
+            "$n": "203050266900125162750574861570928768596"
           },
           {
-            "$n": "245854862266123332944246340825198731301"
+            "$n": "101613417551630087966093645666908744345"
           },
           {
-            "$n": "275329991460566230620398925981674335784"
+            "$n": "96233327120676712121075231654871696726"
           },
           {
-            "$n": "218967875929858343516794447473833507024"
+            "$n": "64729215141952440739282825869033793185"
           },
           {
-            "$n": "280823265217672160475538726037991686252"
+            "$n": "286068756278156284879955905579985870011"
           },
           {
-            "$n": "105219026589620429044276455849376524167"
+            "$n": "71821553414022083940736024491545491367"
           },
           {
-            "$n": "23468608328344924910104942891895302592"
+            "$n": "245558358282238623071928715357943369637"
           }
         ]
       },
-      "nonce": "1f4407f1-fa80-4db5-bfb1-404e994aaf98",
-      "iat": 1792921637,
-      "exp": 1792921937,
+      "nonce": "800a02f4-a66f-43be-bac6-364b3537f1bc",
+      "iat": 1794549229,
+      "exp": 1794549529,
       "iss": "https://pods.example/stan/profile/card#me"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhvdXNlLXBvZHMuZXhhbXBsZSIsInR5cCI6Imxha2UrandzIn0",
-      "signature": "uZloCZREP5xBRtCktXieo_jR9LyMaFz-mWW__HitRF139-L9iDDCpCNZENcKU3ljMcp7ED-MA9hyn8o05OefAw"
+      "signature": "7p3qrc0hefP8oujuVumVMvkQ6CyP79NigNYaciuBUQAjjGqT8EkoslCE1Nw5I8dEemWr8MWB9kJSsILpiIhRDw"
     }
   }
 }

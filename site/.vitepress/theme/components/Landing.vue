@@ -46,9 +46,9 @@ function togglePause() { paused.value = !paused.value; lake?.setPaused(paused.va
 const fmt = (n) => n.toLocaleString('en-US');
 
 const laws = [
-  { n: '01', h: 'Data never moves.', p: 'Code travels to your data, runs inside your house and leaves with an answer, not your records. Visitors never hold a key to your pod: the house reads only what you granted and sends out the answer. Each house reports every computation publicly, with what it let out.' },
-  { n: '02', h: 'Agents knock.', p: 'Every agent carries a signed card tied to a domain someone answers for. It says who it is, why it’s here and what it pays. No card, no conversation. (On the sandbox, domain proof is switched off, and every reply says so.)' },
-  { n: '03', h: 'Only humans cut keys.', p: 'Agents can use access. They can never grant it, widen it or extend it. Every key traces back to a human tap, or a rule a human wrote.' },
+  { n: '01', h: 'Data never moves.', p: 'Studies and pricing programs travel to your data and run inside your house, and only the answer leaves. Visitors never hold a key to your pod: the house reads only what you granted. When you accept an offer, your house sends that one company the documents the offer names. Each house reports every study it answers publicly, with what it let out.' },
+  { n: '02', h: 'Agents knock.', p: 'Every agent carries a signed card tied to a domain someone answers for. It says who it is, why it’s here and what it pays. No card, no conversation between agents; a person can still leave a note on a house’s page. (On the sandbox, domain proof is switched off, and every reply says so.)' },
+  { n: '03', h: 'Only humans cut keys.', p: 'Agents can use access. They can never grant it, widen it or extend it. Every key traces back to a human tap or a rule in the house’s rules. A new house starts with example rules, which join paid studies that passed the ethics and audit checks; they are its owner’s to change.' },
 ];
 
 // What the Lake is for, everyday things first; each one runs today (where: the public sandbox unless it says so).
@@ -150,7 +150,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">What it’s for</div>
       <h2>What you can do today</h2>
-      <p class="kicker">Running today on the public sandbox, with synthetic data, simulated money and real signatures. Your data stays in your house throughout, your rules answer at the door, and nothing leaves that you didn’t say yes to.</p>
+      <p class="kicker">Running today on the public sandbox, with synthetic data, simulated money and real signatures. Your records stay in your house and your rules answer at the door. What leaves is what you or your rules said yes to: a study’s yes-or-no answer as two unreadable shares, or the documents of an offer you accepted.</p>
       <div class="laws everyday">
         <a v-for="e in everyday" :key="e.h" class="law" :href="withBase(e.to)">
           <h3>{{ e.h }}</h3>
@@ -266,7 +266,7 @@ await me.study(question)</code></pre>
         </article>
         <article>
           <h3>Run the water</h3>
-          <p>Run a Lake node. Pick your peers and your blocklists. Lose any node, including ours, and the Lake keeps going.</p>
+          <p>Run a Lake node. Pick your peers and your blocklists. With two or more nodes, stopping one in the middle of a study doesn’t stop the study (tested). The public Lake has one node today.</p>
           <pre><code>docker run \
   ghcr.io/thelakeprotocol/lake-node \
   --follow https://lake.example</code></pre>
@@ -279,7 +279,7 @@ await me.study(question)</code></pre>
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Weeks old. Built in the open.</h2>
-      <p class="kicker">Every milestone runs and is tested end to end. It is also weeks old: rough edges, open questions, a public sandbox on a 2 GB box. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">Every milestone runs, and all but the 1,000-house run are in the end-to-end tests. It is also weeks old, with no outside security review and no real users yet: rough edges, open questions, a public sandbox on a 2 GB box. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>
@@ -294,7 +294,7 @@ await me.study(question)</code></pre>
         <a class="btn ghost" :href="withBase('/docs/contributing')">How to contribute</a>
         <a class="btn ghost" :href="GH + '/discussions'">Say something</a>
       </div>
-      <p class="fine">Apache-2.0 · Synthetic data only, everywhere · No company, no token, no sign-up.</p>
+      <p class="fine">Apache-2.0 · The records in every demo house are synthetic · No company, no token, no sign-up.</p>
     </section>
   </div>
 </template>

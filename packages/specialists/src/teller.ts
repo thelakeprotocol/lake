@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { addNoise, aggregateReports, newVerifyKey, prepareReport, sendLake, settleReport, signMessage, verifyLakeData, type LakeData, type TellerRef } from '@thelakeprotocol/core';
+import { MAX_EPSILON, addNoise, aggregateReports, countTerms, newVerifyKey, prepareReport, sendLake, settleReport, signMessage, verifyLakeData, type LakeData, type Study, type TellerRef } from '@thelakeprotocol/core';
 import { specialist, type Specialist, type SpecialistOptions } from './review.js';
 
 /**
@@ -9,11 +9,17 @@ import { specialist, type Specialist, type SpecialistOptions } from './review.js
  * At close, the Leader and the Helper check every answer's proof together without seeing it, drop the invalid ones,
  * and each publishes its aggregate share once, over at least a minimum batch. A count is collected once and never
  * reopened, so nobody can subtract one participant out of two totals. Quiet: who reports is nobody's business.
+ *
+ * A count for a study is opened with the study itself: each teller takes the size of the table, the fewest houses and
+ * the noise from it, never from the opener, and takes an answer to a study only into that study's count. A house names
+ * the study it answers, so what its owner agreed to (this study, with its minimum and noise) is what the count keeps.
  */
 interface Report { reportId: string; publicShare: unknown; share: unknown }
 interface Count {
   id: string;
   role: 'leader' | 'helper';
+  /** The study this count is for (its id), when it was opened with one: its length, min and noise are the study's. */
+  study?: string;
   opener: string;
   length: number;
   min: number;
@@ -55,17 +61,39 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
     return { reply: v.payload as Record<string, any>, webId: v.profile.webId };
   };
   const refused = (...problems: string[]) => ({ kind: 'refused', problems });
+  // Said with each share, under the teller's signature: what the count was held to.
+  const heldTo = (c: Count) => ({ ...(c.study ? { study: c.study } : {}), min: Math.max(c.min, floor), ...(c.noise ? { noise: c.noise } : {}) });
   const at = (u: string) => String(u ?? '').replace(/\/+$/, '').replace(/\/a2a$/, '');
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  // What a count opened with a study must be: the study's own numbers, at the tellers it names, in the place it names them.
+  // Numbers the sender also passed must be the study's: a count is never opened looser than the study says.
+  const forStudy = (p: Record<string, any>, place: 0 | 1): { terms?: Extract<ReturnType<typeof countTerms>, { ok: true }>; problems: string[] } => {
+    const terms = countTerms(p.study as Study);
+    if (!terms.ok) return { problems: terms.problems };
+    const noise = p.noise === undefined ? undefined : { epsilon: Number((p.noise as { epsilon?: number }).epsilon) };
+    return { terms, problems: [
+      ...(terms.tellers[place].domain.toLowerCase() === o.domain.toLowerCase() ? [] : [`study: it names ${terms.tellers[place].domain} as its ${place ? 'Helper' : 'Leader'}, and this is ${o.domain}`]),
+      ...(terms.min >= floor ? [] : [`min: the study says ${terms.min}, and this teller publishes nothing from fewer than ${floor} answers`]),
+      ...(p.length === undefined || Number(p.length) === terms.length ? [] : [`length: the study has ${terms.length} cells`]),
+      ...(p.min === undefined || Number(p.min) === terms.min ? [] : [`min: the study says ${terms.min}`]),
+      ...(noise === undefined || same(noise, terms.noise) ? [] : [`noise: the study says ${terms.noise ? `epsilon ${terms.noise.epsilon}` : 'none'}`]),
+    ] };
+  };
 
-  const s: Specialist = await specialist(o, o.name, `A teller: one of two aggregators that count without looking (IETF DAP with Prio3). Open a count at the Leader with { kind: "count.open", id, length, min, deadline, helper: { url, domain } }; participants send each teller { kind: "count.report", id, reportId, publicShare, share }; the opener sends the Leader { kind: "count.members", id } and { kind: "count.close", id, members }, then the Helper { kind: "count.collect", id }. Totals come from at least ${floor} valid answers, once.`, 'teller', async (p, from): Promise<{ kind: string; [k: string]: unknown }> => {
+  const s: Specialist = await specialist(o, o.name, `A teller: one of two aggregators that count without looking (IETF DAP with Prio3). Open a count at the Leader with { kind: "count.open", id, length, min, deadline, helper: { url, domain } } (for a study: { kind: "count.open", id, deadline, study }, and its size, minimum, noise and Helper are the study's); participants send each teller { kind: "count.report", id, reportId, publicShare, share }; the opener sends the Leader { kind: "count.members", id } and { kind: "count.close", id, members }, then the Helper { kind: "count.collect", id }. Totals come from at least ${floor} valid answers, once.`, 'teller', async (p, from): Promise<{ kind: string; [k: string]: unknown }> => {
     const id = String(p.id ?? '');
     const c = counts.get(id);
     switch (p.kind) {
       case 'count.open': {
-        const length = Number(p.length), min = Number(p.min), deadline = Date.parse(String(p.deadline ?? ''));
-        const helper = p.helper as TellerRef | undefined;
-        const noise = p.noise as { epsilon?: number } | undefined;
+        // For a study, everything but the id and the deadline comes from the study (SPEC §7).
+        const bound = p.study === undefined ? undefined : forStudy(p, 0);
+        if (bound?.problems.length) return refused(...bound.problems);
+        const terms = bound?.terms;
+        const length = terms?.length ?? Number(p.length), min = terms?.min ?? Number(p.min), deadline = Date.parse(String(p.deadline ?? ''));
+        const helper = terms ? terms.tellers[1] : p.helper as TellerRef | undefined;
+        const noise = terms ? terms.noise : p.noise as { epsilon?: number } | undefined;
         const problems = [
+          ...(terms && p.helper && String((p.helper as TellerRef).domain).toLowerCase() !== helper!.domain.toLowerCase() ? [`helper: the study names ${helper!.domain}`] : []),
           ...(ID.test(id) ? [] : ['id: a short code']),
           ...(c ? [`id: "${id}" is taken`] : []),
           ...(Number.isInteger(length) && length >= 2 && length <= MAX_LENGTH ? [] : [`length: 2 to ${MAX_LENGTH} cells`]),
@@ -74,16 +102,16 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
           ...(helper?.url && helper.domain ? [] : ['helper: { url, domain } of the second teller']),
           // The point of two tellers is two parties: a Leader can't be its own Helper (run 13 found one that could).
           ...(helper?.domain && (helper.domain.toLowerCase() === o.domain.toLowerCase() || at(helper.url) === at(s.card.supportedInterfaces[0]!.url)) ? ['helper: a different teller, run by a different party'] : []),
-          ...(noise === undefined || (Number(noise.epsilon) > 0 && Number(noise.epsilon) <= 10) ? [] : ['noise: { epsilon } between 0 and 10']),
+          ...(noise === undefined || (Number(noise.epsilon) > 0 && Number(noise.epsilon) <= MAX_EPSILON) ? [] : [`noise: { epsilon } above 0 and at most ${MAX_EPSILON}`]),
         ];
         if (problems.length) return refused(...problems);
         const verifyKey = newVerifyKey(length);
         // The Helper must agree before anyone reports: without it, no answer can be counted.
-        const { reply, webId }: { reply: Record<string, any>; webId: string } = await tell(helper!, { kind: 'count.setup', id, length, min, deadline: new Date(deadline).toISOString(), verifyKey, opener: from, ...(noise ? { noise } : {}), leader: { url: `${s.card.supportedInterfaces[0]!.url}`, domain: o.domain } }).catch((e: Error) => ({ reply: { kind: 'refused', problems: [e.message] }, webId: '' }));
+        const { reply, webId }: { reply: Record<string, any>; webId: string } = await tell(helper!, { kind: 'count.setup', id, length, min, deadline: new Date(deadline).toISOString(), verifyKey, opener: from, ...(noise ? { noise } : {}), ...(terms ? { study: p.study } : {}), leader: { url: `${s.card.supportedInterfaces[0]!.url}`, domain: o.domain } }).catch((e: Error) => ({ reply: { kind: 'refused', problems: [e.message] }, webId: '' }));
         if (reply.kind !== 'count.ready') return refused(`the Helper didn't set it up: ${(reply.problems ?? [reply.kind]).join('; ')}`);
-        counts.set(id, { id, role: 'leader', opener: from, length, min, deadline, verifyKey, peer: { ...helper!, webId }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
+        counts.set(id, { id, role: 'leader', ...(terms ? { study: terms.study } : {}), opener: from, length, min, deadline, verifyKey, peer: { ...helper!, webId }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
         void save();
-        return { kind: 'count.opened', id, length, min, deadline: new Date(deadline).toISOString(), helper: helper!.domain };
+        return { kind: 'count.opened', id, ...(terms ? { study: terms.study } : {}), length, min, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}), deadline: new Date(deadline).toISOString(), helper: helper!.domain };
       }
       case 'count.cancel': {
         // The Leader that set it up takes it back before anyone has reported.
@@ -98,10 +126,15 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         if (c) return refused(`id: "${id}" is taken`);
         if (!leader?.url || !leader.domain || typeof p.verifyKey !== 'string') return refused('setup: leader, verifyKey');
         if (from === s.webId || leader.domain.toLowerCase() === o.domain.toLowerCase()) return refused('a teller is never its own Leader');
-        const min = Number(p.min);
+        // The Helper reads the study itself: a Leader can't set a study's count up looser than the study says.
+        const bound = p.study === undefined ? undefined : forStudy(p, 1);
+        if (bound?.problems.length) return refused(...bound.problems);
+        const terms = bound?.terms;
+        if (terms && terms.tellers[0].domain.toLowerCase() !== leader.domain.toLowerCase()) return refused(`study: it names ${terms.tellers[0].domain} as its Leader`);
+        const min = terms?.min ?? Number(p.min);
         if (!(min >= floor)) return refused(`min: at least ${floor} answers`);
-        const noise = p.noise as { epsilon?: number } | undefined;
-        counts.set(id, { id, role: 'helper', opener: String(p.opener ?? ''), length: Number(p.length), min, deadline: Date.parse(String(p.deadline)), verifyKey: p.verifyKey, peer: { ...leader, webId: from }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
+        const noise = terms ? terms.noise : p.noise as { epsilon?: number } | undefined;
+        counts.set(id, { id, role: 'helper', ...(terms ? { study: terms.study } : {}), opener: String(p.opener ?? ''), length: terms?.length ?? Number(p.length), min, deadline: Date.parse(String(p.deadline)), verifyKey: p.verifyKey, peer: { ...leader, webId: from }, reports: {}, ...(noise ? { noise: { epsilon: Number(noise.epsilon) } } : {}) });
         void save();
         return { kind: 'count.ready', id };
       }
@@ -113,9 +146,13 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         if (c.deadline < Date.now()) return refused('this count is past its deadline');
         if (c.reports[from]) return refused('one report each, and you have sent yours');
         if (typeof p.reportId !== 'string' || !p.publicShare || !p.share) return refused('report: reportId, publicShare, share');
+        // An answer to a study goes only into that study's count, and a study's count takes nothing else: a house that
+        // agreed to a study with a minimum and noise can't be counted in one opened without them.
+        if (c.study && p.study === undefined) return refused(`this count is for a study: name it (study: "${c.study}")`);
+        if (p.study !== undefined && p.study !== c.study) return refused(c.study ? 'this count was opened for another study' : 'this count was not opened for a study: its minimum and noise are not that study\'s');
         c.reports[from] = { reportId: p.reportId, publicShare: p.publicShare, share: p.share };
         void save();
-        return { kind: 'count.received', id };
+        return { kind: 'count.received', id, ...(c.study ? { study: c.study, min: Math.max(c.min, floor), ...(c.noise ? { noise: c.noise } : {}) } : {}) };
       }
       case 'count.members':
         if (from !== c.opener) return refused('only whoever opened this count may ask');
@@ -172,13 +209,13 @@ export async function createTeller(o: SpecialistOptions & { dataDir: string; nam
         c.aggregate = { share: c.noise ? addNoise(c.length, leaderShare, c.noise.epsilon) : leaderShare, count: valid.length, rejected, at: new Date().toISOString() };
         c.reports = {};
         void save();
-        return { kind: 'count.share', id, count: valid.length, rejected, share: c.aggregate.share };
+        return { kind: 'count.share', id, ...heldTo(c), count: valid.length, rejected, share: c.aggregate.share };
       }
       case 'count.collect':
         // Helper: its aggregate share, to whoever opened the count, once it exists.
         if (from !== c.opener) return refused('only whoever opened this count may collect it');
         if (!c.aggregate) return refused('not closed yet');
-        return { kind: 'count.share', id, count: c.aggregate.count, rejected: c.aggregate.rejected, share: c.aggregate.share };
+        return { kind: 'count.share', id, ...heldTo(c), count: c.aggregate.count, rejected: c.aggregate.rejected, share: c.aggregate.share };
     }
     return refused('send count.open, count.report, count.members, count.close or count.collect');
   }, [], true);

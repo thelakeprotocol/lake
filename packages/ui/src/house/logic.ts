@@ -3,7 +3,7 @@ import { signCredential } from '../owner-crypto';
 
 // What the house says, typed, and the pure helpers the screens share (no drawing here).
 
-export interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; price?: { amount: number; currency: string }; study: string | null; question?: string; counts?: string[]; warnings?: string[]; note?: string; asked?: number; recommendation: string; grantDraft?: unknown }
+export interface Request { id: string; offerId: string; visitor: { webId: string; domain: string }; purpose: string; fields: string[]; retention: string; priceUsd: number; price?: { amount: number; currency: string }; study: string | null; question?: string; counts?: string[]; table?: { min: number; noise: boolean }; warnings?: string[]; note?: string; asked?: number; recommendation: string; grantDraft?: unknown }
 export type Decision = 'join' | 'ask' | 'decline';
 export interface Rule { match: Record<string, string | boolean | number>; allow_fields?: string[]; deny_fields?: string[]; min_price_usd?: number; retention?: string; grant_hours?: number; decision: Decision }
 export interface Rules { owner: string; device?: string; default: Decision; tags?: string[]; rules: Rule[]; negotiation?: { join_collectives?: boolean }; trust?: Record<string, string[]>; privacy?: { show_packs?: boolean }; availability?: { tz: string; free: string[]; meetings?: number } }
@@ -117,7 +117,7 @@ export const needsDecision = (x: Note) => !!(x.ask && !x.ask.answered) || !!x.of
 export function sameAsks(list: Request[]): Request[][] {
   const groups = new Map<string, Request[]>();
   for (const r of list) {
-    const k = JSON.stringify([r.visitor.webId ?? r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.counts ?? [], r.warnings ?? [], r.recommendation]);
+    const k = JSON.stringify([r.visitor.webId ?? r.visitor.domain, r.purpose, r.fields, r.retention, r.priceUsd, r.study, r.question ?? '', r.counts ?? [], r.table ?? null, r.warnings ?? [], r.recommendation]);
     groups.set(k, [...(groups.get(k) ?? []), r]);
   }
   return [...groups.values()];
@@ -179,11 +179,14 @@ export const phoneState = (p: { keyInDevice: boolean; recovery?: { at: string } 
     : !p.notify ? { text: 'Notifications off' }
     : { text: `Key held by this browser${p.recovery ? ` · recovery code made ${new Date(p.recovery.at).toLocaleDateString([], { day: 'numeric', month: 'short' })}` : ''}` });
 /** One thing that left the house (panel.left), in a sentence about the one who got it. */
-export type Left = { at: string; kind: 'study' | 'offer' | 'address'; to: string; fields?: string[]; question?: string; counts?: string[]; title?: string; released?: { facts?: string[]; files?: string[]; address?: boolean } };
+export type Left = { at: string; kind: 'study' | 'offer' | 'address'; to: string; fields?: string[]; question?: string; counts?: string[]; table?: { min: number; noise: boolean }; title?: string; released?: { facts?: string[]; files?: string[]; address?: boolean } };
+/** What two tellers hold a study's table to, as each said when it took the house's answer (or as the study asks). */
+export const tableLine = (t: { min: number; noise: boolean }) => `from ${t.min} or more answers, ${t.noise ? 'with noise added' : 'with no noise added'}`;
 export const leftLine = (x: Left) => {
+  const totals = `it got totals only${x.table ? `, ${tableLine(x.table)}` : ''}.`;
   // What was counted, in the house's own words for each yes/no part, when the entry has them (13 Nov on).
-  if (x.kind === 'study' && x.counts?.length) return `Its study asked yes or no: ${x.counts.join('; ')}. Your answer left as two unreadable shares; it got totals only.`;
-  if (x.kind === 'study') return `Its study used ${x.fields?.length ? x.fields.join(', ').toLowerCase() : 'your record'}. Your answer left as two unreadable shares; it got totals only.`;
+  if (x.kind === 'study' && x.counts?.length) return `Its study asked yes or no: ${x.counts.join('; ')}. Your answer left as two unreadable shares; ${totals}`;
+  if (x.kind === 'study') return `Its study used ${x.fields?.length ? x.fields.join(', ').toLowerCase() : 'your record'}. Your answer left as two unreadable shares; ${totals}`;
   const got = [x.released?.facts?.length ? x.released.facts.join(', ').toLowerCase() : '', x.released?.files?.length ? `${plural(x.released.files.length, 'file')} from your record (${x.released.files.join(', ')})` : '', x.released?.address ? 'your delivery address' : ''].filter(Boolean).join(', and ');
   return `${x.kind === 'address' ? 'You bought from it' : 'You accepted its offer'}: it got ${got || 'nothing from your record'}.`;
 };

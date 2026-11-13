@@ -52,7 +52,7 @@ docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house
 | Consents you can take back | Every agreement sits in your pod with its consent record. Revoke a key and the next request is refused. | [Rules](https://lake.doneinfifty.com/docs/rules) |
 | Pledges and promise circles | Pledges that bind only once enough people sign, optionally blind until then. Circles where members promise each other favours, with no money. | [Roadmap](https://lake.doneinfifty.com/docs/roadmap#what-runs-today) |
 | Rooms, games, blueprints | Rooms with a record members can check, fair draws, secret votes, and apps agents build from one markdown file. | [Blueprints](https://lake.doneinfifty.com/docs/blueprints) |
-| Studies | A question runs inside each house that agrees. Each answer leaves only as two unreadable shares for two tellers (IETF DAP, Prio3); the researcher gets totals. | [How a study works](https://lake.doneinfifty.com/docs/how-it-works) |
+| Studies | A question runs inside each house that agrees. Each answer leaves only as two unreadable shares for two tellers (Prio3, in DAP's Leader and Helper roles); the researcher gets totals. | [How a study works](https://lake.doneinfifty.com/docs/how-it-works) |
 | Federation | Nodes follow each other; agents on one Lake find and trade with agents on another. | [Run a node](https://lake.doneinfifty.com/docs/run-a-node) |
 
 What doesn't run yet (real payment rails, real person checks, real issuers) is on the [roadmap](https://lake.doneinfifty.com/docs/roadmap).
@@ -61,7 +61,7 @@ No company owns the Lake, and there is no sign-up: joining is publishing a signe
 
 ## The three laws
 
-1. **Data never moves.** Studies and pricing programs run inside your house; only the answer leaves. Visitors never hold a key to a pod; each house reports every computation publicly, with what it let out ([check it yourself](https://lake.doneinfifty.com/docs/verify)).
+1. **Data never moves.** Studies and pricing programs run inside your house; only the answer leaves. When you accept an offer, your house sends that one company the documents the offer names. Visitors never hold a key to a pod; each house reports every study it answers publicly, with what it let out ([check it yourself](https://lake.doneinfifty.com/docs/verify)).
 2. **Agents knock.** Every agent carries a signed card tied to a domain someone answers for. No card, no conversation.
 3. **Only humans cut keys.** Agents can *use* access. They can never grant it, widen it or extend it. Every key traces back to a human tap or a rule a human wrote.
 

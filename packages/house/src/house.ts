@@ -503,7 +503,7 @@ function leftRow(e: Record<string, unknown>, domains: Map<string | undefined, st
   const at = String(e.at ?? '');
   if (e.study) {
     const who = String(e.requester ?? '');
-    return { at, kind: 'study' as const, to: String(e.requesterDomain ?? domains.get(who) ?? hostOf(who)), fields: ((e.fieldsRead as string[] | undefined) ?? []).map((f) => fieldSpec(f)?.label ?? f.replace(/_/g, ' ')), ...(e.question ? { question: String(e.question) } : {}), ...(Array.isArray(e.counted) && e.counted.length ? { counts: (e.counted as unknown[]).map(String) } : {}) };
+    return { at, kind: 'study' as const, to: String(e.requesterDomain ?? domains.get(who) ?? hostOf(who)), fields: ((e.fieldsRead as string[] | undefined) ?? []).map((f) => fieldSpec(f)?.label ?? f.replace(/_/g, ' ')), ...(e.question ? { question: String(e.question) } : {}), ...(Array.isArray(e.counted) && e.counted.length ? { counts: (e.counted as unknown[]).map(String) } : {}), ...(Number(e.minimum) > 0 ? { table: { min: Number(e.minimum), noise: !!e.noise } } : {}) };
   }
   const released = ((e.released as string[] | undefined) ?? []).map(String);
   const facts = released.filter((r) => r.startsWith('claims: ')).flatMap((r) => r.slice(8).split(', ')).map((f) => fieldSpec(f)?.label ?? f.replace(/_/g, ' '));

@@ -2829,7 +2829,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             value: z.union([z.string(), z.number()]).optional().describe('A number for at_least / at_most, a code for has_code, nothing for present'),
           })).describe('1 to 4 yes/no questions. With two or more, the result compares the last (the outcome) with and without the one before it (the exposure), among houses the earlier ones hold for'),
           min: z.number().optional().describe('The fewest houses a table may come from; default 3. The tellers refuse less than their own floor'),
-          noise_epsilon: z.number().optional().describe('Have the tellers blur the table (differential privacy) at this ε, above 0 and up to 10; left out: exact counts'),
+          noise_epsilon: z.number().optional().describe('Have the tellers blur the table (differential privacy) at this ε, above 0 and at most 2 (smaller is more noise); left out: exact counts, from which someone who adds answers of its own can work out one house\'s'),
         }).optional().describe('A study of your own in place of a ready question. It is certified like any other: the auditor checks its fields and comparisons, never its wording'),
         fields: z.boolean().default(false).describe('Instead of running a study: the fields a study here may ask about, how each compares, the codes its pack names, and the ones a register keeps from studies'),
         price_usd: z.number().optional().describe('Offered per house; default $2, or $0 when the budget is 0'),

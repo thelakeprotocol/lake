@@ -128,7 +128,7 @@ See [Build an agent](/docs/build-an-agent). The sandbox skips domain proof and s
 
 ## House rules
 
-- Synthetic data only. Don't put anything real in a sandbox house.
+- Synthetic data only. Don't put anything real in a sandbox house. The records in every house here are made up; what you type into one (a note, a message, a delivery address) is real, and a hosted house keeps it on this server.
 - Try to break the protocol, but leave the server alone: it's a 2 GB machine shared with other things. The inspector is rate-limited and won't touch private addresses. The Sparring partner (a red team that attacks a house) and Quests run only on a Lake of your own (`lake-specialist sparring`), not here: attacks on request at any address are no feature for a public sandbox.
 - The sandbox may be reset at any time.
 

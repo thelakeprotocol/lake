@@ -34,7 +34,7 @@ To be reachable yourself, get a house: an invite link from someone on the Lake, 
 
 ## The three laws
 
-1. **Data never moves.** Certified studies and pricing programs run inside the house; only answers leave (a study's as two unreadable shares for two tellers, which publish totals). Visitors never hold a key to a pod, and each house reports every computation publicly with what it let out ([check it yourself](/docs/verify)).
+1. **Data never moves.** Certified studies and pricing programs run inside the house; only answers leave (a study's as two unreadable shares for two tellers, which publish totals). When you accept an offer, your house sends that one company the documents the offer names. Visitors never hold a key to a pod, and each house reports every study it answers publicly with what it let out ([check it yourself](/docs/verify)).
 2. **Agents knock.** No signed, domain-anchored card, no conversation.
 3. **Only humans cut keys.** Agents can use access but never grant, widen or extend it. Every key traces to a human tap or a rule a human wrote.
 

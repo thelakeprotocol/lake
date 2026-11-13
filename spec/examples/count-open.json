@@ -31,7 +31,7 @@
             "tags": [],
             "publicJwk": {
               "crv": "Ed25519",
-              "x": "47n_uIo4wYKrIkkAeEAO5wrOJq9e_OhTJqeuGn1uCJI",
+              "x": "cEo_Z_-4wxEbDUZx8twcSkEYBPoz9Uzg3n9vQIND1xg",
               "kty": "OKP",
               "kid": "visitor-uni.example",
               "alg": "EdDSA"
@@ -53,7 +53,7 @@
     "signatures": [
       {
         "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJKT1NFIn0",
-        "signature": "rTOTB6ngGkIn7pKdVK_WwqcCtCz0MGJEXIfH-4QkTIlPQPvhuB92qzdhqIOI8Q20iqclQxsIMstYj0UD2meyAQ"
+        "signature": "o6u8b3tAJ99RuYVxFKXQUY5zSQ8KpPAxsTPxhWGRqFFb5rKW9r67X-o2NOwBz-AoCNswUltDgi5rj2RzJVcJAA"
       }
     ]
   },
@@ -61,21 +61,54 @@
     "payload": {
       "kind": "count.open",
       "id": "run-3b1f6c2e-8f0d-4c7a-9a51-0c2e7d4b9f13",
-      "length": 8,
-      "min": 20,
-      "deadline": "2026-10-25T10:47:17.131Z",
-      "helper": {
-        "url": "https://teller-b.example/a2a",
-        "domain": "teller-b.example"
+      "deadline": "2026-11-13T06:53:49.535Z",
+      "study": {
+        "v": 1,
+        "question": "Do over-60s on drug X get readmitted less?",
+        "kind": "contingency",
+        "predicates": [
+          {
+            "name": "over 60",
+            "field": "age_band",
+            "op": "age_at_least",
+            "value": 60
+          },
+          {
+            "name": "on drug X",
+            "field": "medications",
+            "op": "has_code",
+            "value": "drug-x"
+          },
+          {
+            "name": "readmitted",
+            "field": "readmissions",
+            "op": "present"
+          }
+        ],
+        "privacy": {
+          "mechanism": "dap-prio3",
+          "tellers": [
+            {
+              "url": "https://teller-a.example/a2a",
+              "domain": "teller-a.example"
+            },
+            {
+              "url": "https://teller-b.example/a2a",
+              "domain": "teller-b.example"
+            }
+          ],
+          "min": 20
+        },
+        "minTier": "issuer-signed"
       },
-      "nonce": "c808e9ad-21ba-4a7c-861a-8ac2374d8b6d",
-      "iat": 1792921637,
-      "exp": 1792921937,
+      "nonce": "15a9e582-355d-454f-98a0-6dc8334cff9b",
+      "iat": 1794549229,
+      "exp": 1794549529,
       "iss": "https://uni.example/#agent"
     },
     "jws": {
       "protected": "eyJhbGciOiJFZERTQSIsImtpZCI6InZpc2l0b3ItdW5pLmV4YW1wbGUiLCJ0eXAiOiJsYWtlK2p3cyJ9",
-      "signature": "zjYMDLnHBPqD6vLWfeJ_9g7N_-Gv9ZZDia4C0FbnkeqPMJKOeymqnB4stI5Qw3VQRyc3O1aD7yYen0RCzySfCg"
+      "signature": "HvMsTr65VgcyjP0pxdxCUnH044sj08G_G1Du6JO8q_CoNu6L5NeLSXYIEJEsDVTlOpyfXF8aC2gQxms6tglVCg"
     }
   }
 }

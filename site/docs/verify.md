@@ -33,7 +33,7 @@ The log keeps payment receipts, rulings and published blueprints in an RFC 9162 
 
 ## "Records moved: 0", exactly
 
-A visitor never holds a key to anyone's pod. When a house joins a study, the housekeeper reads only the granted fields and sends the answer as two unreadable shares to two tellers ([how a study works](/docs/how-it-works)); for an offer, it runs the pricing program and keeps the result. With every computation the house writes `recordsOut` into its own audit log, and the map adds those up. In this code that number is always 0 (`packages/house/src/housekeeper.ts`, `packages/house/src/market.ts`).
+A visitor never holds a key to anyone's pod. When a house joins a study, the housekeeper reads only the granted fields and sends the answer as two unreadable shares to two tellers ([how a study works](/docs/how-it-works)); for an offer, it runs the pricing program and keeps the result. With every study it answers the house writes `recordsOut` into its own audit log, and the map adds those up. In this code that number is always 0 (`packages/house/src/housekeeper.ts`). Accepting an offer is not in this counter: the house then sends that one company the documents the offer names and writes them in its audit log as `released` (`packages/house/src/market.ts`); the owner finds them under My data, What left your house.
 
 So the counter is each house's own report. It shows that no house running this code let a record out; it can't show that a house whose software was changed didn't. A check from outside (houses attesting to the code they run) isn't built.
 

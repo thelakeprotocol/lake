@@ -30,6 +30,8 @@ export interface PendingRequest {
   question?: string;
   /** What the house would count for that study, a line for each yes/no part, in the packs' words (core's predicateLines). */
   counts?: string[];
+  /** What the tellers hold that study's table to: the fewest answers it is published from, and whether they add noise. */
+  table?: { min: number; noise: boolean };
   /** What to look at twice: identifying or unknown fields, keeping data for years (SPEC §5). */
   warnings?: string[];
   /** The visitor's own note to the owner: their words, unchecked, shown quoted and never read by the rules. */

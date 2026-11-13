@@ -82,10 +82,38 @@ export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
     const bad = tellersProblem(s.privacy.tellers);
     if (bad) problems.push(`tellers: ${bad}`);
     if (!(Number.isInteger(s.privacy.min) && s.privacy.min >= 2)) problems.push('min: the fewest houses a table may come from, at least 2');
-    if (s.privacy.noise !== undefined && !(s.privacy.noise.epsilon > 0 && s.privacy.noise.epsilon <= 10)) problems.push('noise.epsilon: between 0 and 10');
+    if (s.privacy.noise !== undefined && !(s.privacy.noise.epsilon > 0 && s.privacy.noise.epsilon <= MAX_EPSILON)) problems.push(`noise.epsilon: above 0 and at most ${MAX_EPSILON}`);
   }
   if (s?.minTier !== 'issuer-signed') problems.push('only issuer-signed values may be used');
   return { ok: problems.length === 0, problems };
+}
+
+/**
+ * The most a study's noise may be turned down (its epsilon; smaller is more noise). Each teller adds two-sided geometric
+ * noise with q = e^(-epsilon/2) to every cell: at 2 a cell is off by about two, and at 10 (the old limit) a teller left
+ * a cell untouched 98.7% of the time, which is noise in name only.
+ */
+export const MAX_EPSILON = 2;
+
+/**
+ * What a count for a study is opened with, from the study alone (SPEC §7, §11.5): its id, how many cells, the fewest
+ * houses a table may come from, the noise, and the two tellers it names. A teller takes these from the study and never
+ * from whoever opens the count. It reads no pack, so a teller needs none loaded: whether the study may be asked at all
+ * is the auditor's and each house's check.
+ */
+export function countTerms(s: Study): { ok: true; study: string; length: number; min: number; noise?: { epsilon: number }; tellers: [TellerRef, TellerRef] } | { ok: false; problems: string[] } {
+  const problems: string[] = [];
+  if (!Array.isArray(s?.predicates) || s.predicates.length < 1 || s.predicates.length > 4) problems.push('study: 1 to 4 yes/no questions');
+  if (s?.privacy?.mechanism !== 'dap-prio3') problems.push('study: counted by two tellers (dap-prio3)');
+  else {
+    const bad = tellersProblem(s.privacy.tellers);
+    if (bad) problems.push(`study: ${bad}`);
+    if (!(Number.isInteger(s.privacy.min) && s.privacy.min >= 2)) problems.push('study: min, the fewest houses a table may come from, at least 2');
+    if (s.privacy.noise !== undefined && !(s.privacy.noise?.epsilon > 0 && s.privacy.noise.epsilon <= MAX_EPSILON)) problems.push(`study: noise.epsilon above 0 and at most ${MAX_EPSILON}`);
+  }
+  if (problems.length) return { ok: false, problems };
+  const { min, noise, tellers } = s.privacy;
+  return { ok: true, study: studyId(s), length: cellCount(s), min, ...(noise ? { noise: { epsilon: noise.epsilon } } : {}), tellers: [tellers[0]!, tellers[1]!] };
 }
 
 /** A study as someone writes one of their own: the question, its yes/no parts, and how small or blurred a table they'd take. */

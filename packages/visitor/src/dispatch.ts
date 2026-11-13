@@ -249,9 +249,11 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   const [leader, helper] = tellers as [TellerRef, TellerRef];
   const count = `run-${randomUUID()}`;
   if (affordable.length) {
-    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) });
+    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, study, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) });
     if (from.ownerDomain !== leader.domain) throw new Error(`the teller at ${leader.domain} answered as ${from.ownerDomain}`);
     if (reply.kind !== 'count.opened') throw new Error(`${leader.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
+    // The tellers hold the count to the study (its minimum, its noise), and houses send their answers nowhere else.
+    if (reply.study !== studyId(study)) throw new Error(`${leader.domain} opened a count that isn't held to the study: no house would answer into it`);
     log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof`);
   }
   const answered: (Joined & { webId: string })[] = [];
@@ -329,6 +331,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
       const help = helpAsk?.reply ?? lead;
       if (helpAsk) tellerSigned.helper = helpAsk.signed;
       if (lead.kind !== 'count.share' || help.kind !== 'count.share') tooFew = `the tellers would not publish: ${((lead.kind !== 'count.share' ? lead : help).problems ?? ['no share']).join('; ')}`;
+      else if (lead.study !== studyId(study) || help.study !== studyId(study)) tooFew = 'a teller\'s share doesn\'t say its count was held to the study';
       else {
         cells = unshardCounts(cellCount(study), [lead.share, help.share], lead.count);
         n = lead.count;
