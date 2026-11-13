@@ -1,7 +1,7 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cartReceiptPath, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, pledgeReceiptPath, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
-  studyFields, studyId, keyThumbprint, verifyAgreementSignature, verifyCredential, verifyLakeData,
+  studyFields, studyId, predicateLines, keyThumbprint, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
 import { Market } from './market.js';
@@ -407,7 +407,7 @@ export class Housekeeper {
         offerId: offer.id, visitor: { webId: visitorWebId, domain, name: domain, ...(key ? { key } : {}), ...(jkt ? { jkt } : {}) }, purpose: offer.purpose, fields: offer.fields, retention: offer.retention,
         // What the owner's device signs if they tap Allow: the house drafts it, the device dates and signs it, the house checks it.
         grantDraft: { ...accessGrantDraft(this.o.webId, visitorWebId, { offer: offer.id, study: offer.study ?? null, fields: offer.fields, purpose: offer.purpose, authorizedBy: 'owner, live', ...(offer.study ? { uses: 1 } : {}) }, CONSENT_REQUESTED), credentialStatus: statusEntry(this.statusUrl, await this.o.desk.statusIndex(offer.id)) },
-        priceUsd: offer.priceUsd, ...(offer.price ? { price: offerPrice(offer) } : {}), study: offer.study ?? null, question: p.study?.question, warnings, ...(note ? { note } : {}),
+        priceUsd: offer.priceUsd, ...(offer.price ? { price: offerPrice(offer) } : {}), study: offer.study ?? null, question: p.study?.question, ...(p.study ? { counts: predicateLines(p.study) } : {}), warnings, ...(note ? { note } : {}),
         recommendation: [warnings.length ? "I'd deny this, for the reasons in red" : '', d.reason, d.rule === null ? nearMiss(this.o.rules, { ...offer, credentials: { sponsorVerified: true, ethicsApproved, auditCertified } }, { reputation: this.o.signals?.().reputation[domain], identifying: identifyingFields() }) ?? '' : '', ...notes].filter(Boolean).join('. '),
       });
       // The sender hears that its newer ask replaced its older ones, not that it now has several waiting.
@@ -508,13 +508,13 @@ export class Housekeeper {
     const sent = await Promise.all(tellers.map((c, i) => this.tell(c, { kind: 'count.report', id: p.count, reportId: report.reportId, publicShare: report.publicShare, share: report.shares[i] }, checked.kids[i]!)));
     const failed = sent.map((r, i) => (r === true ? null : `${tellers[i]!.domain}: ${r}`)).filter(Boolean);
     if (failed.length) return excluded(`a teller didn't take my piece (${failed.join('; ')})`);
-    const entry = { at: new Date().toISOString(), study: id, requester, requesterDomain: profile.ownerDomain, question: String(p.study.question ?? '').slice(0, 300), fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
+    const entry = { at: new Date().toISOString(), study: id, requester, requesterDomain: profile.ownerDomain, question: String(p.study.question ?? '').slice(0, 300), counted: predicateLines(p.study), fieldsRead: fields, claimsRead: claims.length, recordsOut: 0, sent: `one answer, as two unreadable shares with a proof, to ${tellers.map((c) => c.domain).join(' and ')}` };
     await this.tool('pod_write', { path: `audit/${Date.now()}-${id.slice(-12).replace(/[^a-zA-Z0-9]/g, '')}.json`, content: JSON.stringify(entry) });
     // What it was for, beside its agreement, so the owner's money can say which study paid (not just an agreement id).
-    await this.tool('pod_write', { path: `agreements/${g.offer}.study.json`, content: JSON.stringify({ question: String(p.study.question ?? '').slice(0, 300), at: entry.at }), contentType: 'application/json' }).catch(() => {});
+    await this.tool('pod_write', { path: `agreements/${g.offer}.study.json`, content: JSON.stringify({ question: String(p.study.question ?? '').slice(0, 300), counted: entry.counted, at: entry.at }), contentType: 'application/json' }).catch(() => {});
     this.o.emit(makeEvent('compute.done', this.actor, visitor, { recordsOut: entry.recordsOut, claimsRead: entry.claimsRead }));
     // And of a study it answered, under a key the owner or their rules gave.
-    this.o.desk.news({ about: 'study', question: String(p.study.question ?? '').slice(0, 300), requester, fieldsCounted: fields, recordsOut: 0, note: 'your human\'s house answered this study as two unreadable shares; no record left. Its payment comes as its own news' });
+    this.o.desk.news({ about: 'study', question: String(p.study.question ?? '').slice(0, 300), counted: entry.counted, requester, fieldsCounted: fields, recordsOut: 0, note: 'your human\'s house answered this study as two unreadable shares; no record left. Its payment comes as its own news' });
     if (g.uses === 1) await this.o.desk.spend(g.offer);
     return this.reply({ kind: 'counted', study: id, count: p.count, tellers: tellers.map((c) => c.domain) });
   }

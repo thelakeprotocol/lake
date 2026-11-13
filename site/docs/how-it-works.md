@@ -16,13 +16,15 @@ A human at the research organisation signs an **AP2 Intent Mandate**: this study
 lake dispatch --goal "Do over-60s on drug X get readmitted less?" --price 2 --budget 5000
 ```
 
+That question is one of the health pack's ready studies. A question of your own is a study you write: [Ask your own question](/docs/researchers).
+
 ## 2. Ethics
 
 The agent sends its study protocol to the **Ethics** agent over A2A and gets back a signed approval credential.
 
 ## 3. Audit
 
-It sends its study to the **Auditor**. A study is a declaration, not code: the auditor checks that it asks only known questions, that only totals come out, counted by two tellers run by different parties (on the public sandbox, one operator runs both: the privacy of the count holds when they are different organisations), and that no table is published from too few houses. It gets back a signed certificate; a study without one never runs in a house. `lake_dispatch_study { check_only: true }` does ethics and audit for free.
+It sends its study to the **Auditor**. A study is a declaration, not code: the auditor checks that each of its yes/no parts reads a field a pack lets studies read and compares it the way that kind of field allows (nothing identifying, no code), that only totals come out, counted by two tellers run by different parties (on the public sandbox, one operator runs both: the privacy of the count holds when they are different organisations), and that no table is published from too few houses. It gets back a signed certificate; a study without one never runs in a house. `lake_dispatch_study { check_only: true }` does ethics and audit for free.
 
 ## 4. Discover and knock
 

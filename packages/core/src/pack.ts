@@ -81,6 +81,8 @@ export interface PackField {
   standard?: string;
   /** Unit for numbers, e.g. AUD, months. */
   unit?: string;
+  /** For a code field: codes its claims carry, with their names, so a study can ask about one and a house can say it in words. Not a closed list. */
+  codes?: Record<string, string>;
   /** Special-category data (health, beliefs, biometrics… in data-protection law): a house warns its owner when it's asked for to make decisions about them. */
   special?: boolean;
 }

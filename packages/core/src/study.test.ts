@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { addNoise, aggregateReports, auditStudy, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, summarizeTable, type Study } from './index.js';
+import { addNoise, aggregateReports, auditStudy, draftStudy, predicateLines, questionProblems, studyCatalog, buildCard, cellOf, fromWire, generateIdentity, issueCredential, newVerifyKey, prepareReport, registerPack, settleReport, shardAnswer, signCard, checkAttachment, guardedFields, studyId, toWire, unshardCounts, summarizeTable, type Study } from './index.js';
 
 // A fixture pack: the core knows no fields of its own, so its tests bring some.
 registerPack({
   id: 'fixture', version: '1.0.0', title: 'Fixture', vocab: 'urn:fixture#', folder: 'fixture/', recordClass: 'urn:fixture#Record',
   fields: {
     age_band: { class: 'urn:fixture#AgeBand', kind: 'band', label: 'age band' },
-    medications: { class: 'urn:fixture#Medication', kind: 'code', label: 'medications' },
+    medications: { class: 'urn:fixture#Medication', kind: 'code', label: 'medications', codes: { 'drug-x': 'Drug X' } },
     readmissions: { class: 'urn:fixture#Readmission', kind: 'flag', label: 'readmissions' },
   },
   identifying: ['name'],
@@ -91,7 +91,7 @@ describe('studies', () => {
   it("are refused when they read a register's fields, unless its pack lets studies read them (run 28)", () => {
     const authority = { name: 'Fixture Register', description: 'x', domain: 'register.example', path: 'register', register: ['member.example'] };
     registerPack({ id: 'guarded', version: '1.0.0', title: 'Guarded', vocab: 'urn:guarded#', folder: 'guarded/', recordClass: 'urn:guarded#Record', fields: { basket: { class: 'urn:guarded#Basket', kind: 'code', label: 'basket' } }, authority });
-    registerPack({ id: 'open', version: '1.0.0', title: 'Open to studies', vocab: 'urn:open#', folder: 'open/', recordClass: 'urn:open#Record', fields: { balance: { class: 'urn:open#Balance', kind: 'number', label: 'balance' } }, authority: { ...authority, studies: true } });
+    registerPack({ id: 'open', version: '1.0.0', title: 'Open to studies', vocab: 'urn:open#', folder: 'open/', recordClass: 'urn:open#Record', fields: { balance: { class: 'urn:open#Balance', kind: 'number', label: 'balance', unit: 'AUD' } }, authority: { ...authority, studies: true } });
     const reads = (field: string, op: 'has_code' | 'present') => ({ ...study, predicates: [...study.predicates, op === 'has_code' ? { name: 'x', field, op, value: 'y' } : { name: 'x', field, op }] });
     const padded = auditStudy(reads('basket', 'has_code'));
     expect(padded.ok).toBe(false);
@@ -104,6 +104,54 @@ describe('studies', () => {
     expect(guardedFields(['age_band', 'basket', 'balance'], ['age_band', 'basket', 'balance']).map((g) => g.fields)).toEqual([['basket']]);
     expect(guardedFields(['balance'], ['age_band']).map((g) => g.fields)).toEqual([['balance']]);
     expect(guardedFields(['age_band', 'medications'])).toEqual([]);
+  });
+
+  it('say what a house would count in the pack\'s words, whatever the researcher called it', () => {
+    expect(predicateLines(study)).toEqual(['age band: 60 or more', 'medications: Drug X (drug-x)', 'readmissions: any on record']);
+    // A friendly question and friendly names over something else: the lines come from the fields, never from them.
+    const dressed: Study = { ...study, question: 'How many of you like tea?', predicates: [{ name: 'likes tea', field: 'medications', op: 'has_code', value: 'drug-q' }, { name: 'is cheerful', field: 'balance', op: 'at_most', value: 500 }] };
+    expect(predicateLines(dressed)).toEqual(['medications: the code drug-q', 'balance: 500 AUD or less']);
+  });
+
+  it('are refused for a question that is a page, a nameless or twice-named yes/no question, or an endless code', () => {
+    const ask = (over: Partial<Study>) => questionProblems({ ...study, ...over }).join('; ');
+    expect(questionProblems(study)).toEqual([]);
+    expect(ask({ question: 'x'.repeat(201) })).toMatch(/question: one sentence, up to 200 characters/);
+    expect(ask({ question: ' ' })).toMatch(/question: one sentence/);
+    expect(ask({ predicates: [{ name: '', field: 'readmissions', op: 'present' }] })).toMatch(/a name of up to 60 characters/);
+    expect(ask({ predicates: [{ name: 'a', field: 'readmissions', op: 'present' }, { name: 'a', field: 'age_band', op: 'at_least', value: 60 }] })).toMatch(/the same name/);
+    expect(ask({ predicates: [{ name: 'a', field: 'medications', op: 'has_code', value: 'x'.repeat(81) }] })).toMatch(/a code of up to 80 characters/);
+    // The questions alone: tellers are somebody else's check, so a study with none yet has nothing wrong here.
+    expect(questionProblems({ ...study, privacy: { ...study.privacy, tellers: [] } })).toEqual([]);
+    expect(auditStudy({ ...study, privacy: { ...study.privacy, tellers: [] } }).ok).toBe(false);
+  });
+
+  it('are written as a question and its yes/no parts, and become the declaration that gets certified', () => {
+    const own = draftStudy({ question: ' Are over-70s on drug X readmitted more? ', predicates: [{ name: 'over 70', field: 'age_band', op: 'at_least', value: '70' }, { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' }, { name: 'readmitted', field: 'readmissions', op: 'present', value: 'ignored' }], noise_epsilon: 1 });
+    expect(own).toEqual({
+      v: 1, question: 'Are over-70s on drug X readmitted more?', kind: 'contingency',
+      predicates: [{ name: 'over 70', field: 'age_band', op: 'at_least', value: 70 }, { name: 'on drug X', field: 'medications', op: 'has_code', value: 'drug-x' }, { name: 'readmitted', field: 'readmissions', op: 'present' }],
+      privacy: { mechanism: 'dap-prio3', tellers: [], min: 3, noise: { epsilon: 1 } }, minTier: 'issuer-signed',
+    });
+    expect(questionProblems(own)).toEqual([]);
+    // What can't be asked is said in words someone can act on.
+    const bad = (p: { name: string; field: string; op: string; value?: string | number }) => questionProblems(draftStudy({ question: 'q', predicates: [p] })).join('; ');
+    expect(bad({ name: 'named', field: 'name', op: 'present' })).toMatch(/"name" is identifying; no study may read it/);
+    expect(bad({ name: 'old', field: 'age_band', op: 'has_code', value: '60' })).toMatch(/can't ask "has_code" of band field "age_band": it takes at_least, at_most, present/);
+    expect(bad({ name: 'old', field: 'age_band', op: 'at_least', value: 'sixty' })).toMatch(/"at_least" needs a number as its value/);
+    expect(bad({ name: 'old', field: 'age_band', op: 'older_than', value: 60 })).toMatch(/can't ask "older_than"/);
+    expect(questionProblems(draftStudy({} as never)).length).toBeGreaterThan(0);
+  });
+
+  it('list every field a study could ask about, how, and which a register keeps to itself', () => {
+    const fields = Object.fromEntries(studyCatalog().map((f) => [f.field, f]));
+    expect(fields.age_band).toEqual({ field: 'age_band', pack: 'fixture@1', label: 'age band', kind: 'band', ask: ['at_least', 'at_most', 'present'], studies: true });
+    expect(fields.medications).toMatchObject({ kind: 'code', ask: ['has_code', 'present'], codes: { 'drug-x': 'Drug X' } });
+    expect(fields.readmissions!.ask).toEqual(['present']);
+    expect(fields.balance).toMatchObject({ pack: 'open@1', unit: 'AUD', studies: true });
+    expect(fields.basket).toMatchObject({ studies: false, why: expect.stringMatching(/Fixture Register keeps this pack's fields/) });
+    // Identifying fields aren't on the list at all.
+    expect(fields.name).toBeUndefined();
   });
 });
 

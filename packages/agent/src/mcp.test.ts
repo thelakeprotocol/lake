@@ -131,3 +131,38 @@ describe('what a newcomer reads first (round 20)', () => {
     expect(blueprintList(all, 'zebra')).toMatchObject({ blueprints: [], note: expect.stringMatching(/none mentions "zebra"/) });
   });
 });
+
+describe('a study of your own (SPEC §7)', () => {
+  const say = async (c: Client, args: Record<string, unknown>) => {
+    const r = await c.callTool({ name: 'lake_dispatch_study', arguments: args });
+    return { isError: !!r.isError, text: (r.content as { text: string }[])[0]!.text };
+  };
+
+  it('lists what a study may ask about, without the network', async () => {
+    const listed = JSON.parse((await say(await connect('research'), { fields: true })).text) as { fields: { field: string; pack: string; label: string; kind: string; ask: string[]; studies: boolean; why?: string }[]; never: string; write_one: string };
+    expect(listed.never).toMatch(/every answer is yes or no/);
+    expect(listed.write_one).toContain('check_only: true');
+    for (const f of listed.fields) {
+      expect(f, f.field).toMatchObject({ field: expect.any(String), pack: expect.any(String), label: expect.any(String), kind: expect.stringMatching(/^(band|number|code|flag)$/), studies: expect.any(Boolean) });
+      expect(f.ask, f.field).toContain('present');
+      // A field no study may read says who keeps it.
+      if (!f.studies) expect(f.why, f.field).toMatch(/no study may read them/);
+    }
+  });
+
+  it('is refused with the reason before anything is asked of the Lake; a question in words alone is no study', async () => {
+    const c = await connect('research');
+    const unknown = await say(c, { study: { question: 'Who keeps a pet?', predicates: [{ name: 'has a pet', field: 'pets_of_the_house', op: 'present' }] } });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toMatch(/that study can't be asked: question "has a pet" reads "pets_of_the_house", which no pack here declares.*\{ fields: true \} lists what can/);
+    const page = await say(c, { study: { question: 'Tell me everything. '.repeat(20), predicates: [{ name: 'a', field: 'pets_of_the_house', op: 'present' }, { name: 'a', field: 'pets_of_the_house', op: 'present' }] }, check_only: true });
+    expect(page.text).toMatch(/one sentence, up to 200 characters/);
+    expect(page.text).toMatch(/two yes\/no questions have the same name/);
+    const none = await say(c, { study: { question: 'Nothing at all?', predicates: [] } });
+    expect(none.isError).toBe(true);
+    // The old answer to any wording was the first ready study, run and paid for: now it says how to write one.
+    const words = await say(c, { question: 'Is this a real study?' });
+    expect(words.isError).toBe(true);
+    expect(words.text).toMatch(/isn't one of the ready questions.*write it as a study: lake_dispatch_study \{ fields: true \}/);
+  });
+});

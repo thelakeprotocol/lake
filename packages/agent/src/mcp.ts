@@ -3,9 +3,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as jose from 'jose';
 import { z } from 'zod';
 import { followCheckpoint, menuHash, sumRecords, cartParty, deedDigest, DEED_ASSET, FAVOUR_ASSET, type LogRecord, type SeenCheckpoint, type MenuPrice } from '@thelakeprotocol/core';
-import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, checkSplitConsent, splitHash, keyThumbprint, type CartShare, type DeliveryTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
+import { allFields, b64, blueprintHeader, canonicalize, leafHash, unb64, verifyCheckpoint, verifyInclusion, checkCart, cartTerms, checkSplitConsent, splitHash, keyThumbprint, type CartShare, type DeliveryTerms, deliveryMisses, isParty, type CartMandate, type CartParty, type MenuItem, openSeal, sealUntil, cardUrlFor, fetchPasses, revealBlind, signBlind, withdrawBlind, type BlindSignature, type Pass, checkCredentialStatus, parseBlueprint, exampleStudies, draftStudy, questionProblems, studyCatalog, identifyingFields, packs, getBeacon, order, pick, shardAnswer, unshardCounts, PURPOSES, generateIdentity, roundAfter, roundTimeMs, verifyBeacon, lakeProfile, loadOrCreateIdentity, loadPacks, checkSpeaksFor, type SpeaksFor, signMessage, exportIdentity, importIdentity, verifyCredential, verifyLakeCard, verifyMessage, type AgentCard, type LakeProfile } from '@thelakeprotocol/core';
 
-// The studies an assistant may run are the ones the loaded packs offer (certifiable, written in advance).
+// Studies to try are the ones the loaded packs offer; an assistant may also write one of its own over the same fields.
 // Packs are optional installs: one asked for by name must load; the default, if it isn't installed, is left out.
 await loadPacks((process.env.LAKE_PACKS ?? 'health').split(','), (n) => import(n)).catch((e: Error) => { if (process.env.LAKE_PACKS) throw e; });
 const SANDBOX_STUDIES = exampleStudies();
@@ -1047,7 +1047,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
             in_the_world: 'The Lake can\'t water a plant or take a walk. What it can do: with your human\'s house, put it in their agenda (lake_house_suggest { agenda: { what, start } }), which reaches their own calendar; or find company (seeking:<thing> tags, rooms). Has your human a house? They give you a key from its control panel (My AI). No house yet? See start_here.their_house.',
             invent: 'Anything two parties can agree on can run here. Write a blueprint (one markdown file of messages) and any agent can build it. Ideas: https://lake.doneinfifty.com/docs/ideas.md',
             test: 'the Inspector checks your own card and signatures',
-            studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question) },
+            studies: { how: 'lake_dispatch_study: a certified question runs inside each house that agrees, the houses bargain as a bloc and are paid, and only totals come out (records moved: 0)', questions: SANDBOX_STUDIES.map((x) => x.question), your_own: 'or ask your own: lake_dispatch_study { fields: true } lists what a study may ask about, then { study: { question, predicates } }' },
           },
           you: { name: me.card.name, domain: me.domain, webId: me.webId, url: me.card.supportedInterfaces[0]?.url, ...(x.passportUrl ? { passport: x.passportUrl, passport_note: 'your public record on the Lake: what you sold, bought and invented, each deal with its signed receipt. Give your human this link to share' } : {}) },
           // Lake times are UTC (runs 56-60: assistants told their humans times a day off). Their human's zone, when their house knows it.
@@ -1889,7 +1889,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         url: z.string().optional().describe('Same as house_url'),
         // A plain string, checked below: run 68's agents sent free-text purposes and got a bare enum error back.
         purpose: z.string().default('contact').describe('Default contact (getting in touch). One of the Lake\'s purposes. Narrower ones sit inside broad ones (advertising is part of marketing): a house\'s rule about the broad one covers them.'),
-        fields: z.array(z.string()).default([]).describe('Canonical fields (the loaded packs name them: lake_ask_around build_something_new), e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
+        fields: z.array(z.string()).default([]).describe('Canonical fields (the loaded packs name them: lake_dispatch_study { fields: true } lists the ones programs read), e.g. age_band, medications, readmissions; none: a note to the owner (say what you want in note)'),
         price_usd: z.number().default(0),
         retention: z.string().default('none').describe('"none" or an ISO 8601 duration'),
         currency: z.string().regex(/^[A-Za-z]{3}$/).optional().describe('The currency of price_usd\'s amount, when not US dollars (e.g. AUD): nothing converts; a house rule in another currency won\'t take it'),
@@ -2817,9 +2817,21 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     'lake_dispatch_study',
     {
       description:
-        'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (each answer leaves only as two unreadable pieces, to two tellers; you get exact totals), pay under a signed budget, and return the answer. Records moved stays 0.',
+        'Run a whole study across the Lake: ethics approval, audit, knock on every house, bargain, sign agreements, compute inside each house (each answer leaves only as two unreadable pieces, to two tellers; you get exact totals), pay under a signed budget, and return the answer. Records moved stays 0. Ask one of the ready questions (question), or write your own (study): up to four yes/no questions about fields the houses hold, which every house that agrees answers; you get how many houses fall in each combination. { fields: true } lists the fields; check_only tries a study for free.',
       inputSchema: {
-        question: z.string().default(SANDBOX_STUDIES[0]!.question).describe(`One of the questions this Lake's auditor certifies: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`),
+        question: z.string().default(SANDBOX_STUDIES[0]?.question ?? '').describe(`A ready question: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}. Left alone when you pass study`),
+        study: z.object({
+          question: z.string().describe('Your question in one sentence (up to 200 characters). Owners asked to decide see it as your words, beside what their house would count'),
+          predicates: z.array(z.object({
+            name: z.string().describe('What a yes means, in a few words: "over 60", "on drug X". The table\'s cells are named from these'),
+            field: z.string().describe('A field from { fields: true }'),
+            op: z.enum(['at_least', 'at_most', 'has_code', 'present']).describe('at_least / at_most: a band or number against value; has_code: a code field holds this code; present: anything on record'),
+            value: z.union([z.string(), z.number()]).optional().describe('A number for at_least / at_most, a code for has_code, nothing for present'),
+          })).describe('1 to 4 yes/no questions. With two or more, the result compares the last (the outcome) with and without the one before it (the exposure), among houses the earlier ones hold for'),
+          min: z.number().optional().describe('The fewest houses a table may come from; default 3. The tellers refuse less than their own floor'),
+          noise_epsilon: z.number().optional().describe('Have the tellers blur the table (differential privacy) at this ε, above 0 and up to 10; left out: exact counts'),
+        }).optional().describe('A study of your own in place of a ready question. It is certified like any other: the auditor checks its fields and comparisons, never its wording'),
+        fields: z.boolean().default(false).describe('Instead of running a study: the fields a study here may ask about, how each compares, the codes its pack names, and the ones a register keeps from studies'),
         price_usd: z.number().optional().describe('Offered per house; default $2, or $0 when the budget is 0'),
         budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid (then it offers $0 and accepts no counter-offer with a price)'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
@@ -2836,11 +2848,25 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (!kept) throw new Error('no study of yours with that id in this conversation');
           return json(compactBundle(kept, a.name_houses));
         }
-        const study = SANDBOX_STUDIES.find((x) => x.question.toLowerCase() === a.question.trim().toLowerCase());
-        if (!study) throw new Error(`studies here are declarative and certified in advance; pick one of: ${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}`);
-        if (a.check_only) return json(await (await agent()).checkStudy(a.question, { study, extraFields: a.extra_fields }));
+        if (a.fields) {
+          return json({
+            fields: studyCatalog(),
+            never: `no study reads what identifies someone (${identifyingFields().join(', ')}), and every answer is yes or no: a study gets how many houses fall in each combination, never a value`,
+            write_one: 'lake_dispatch_study { study: { question, predicates: [{ name, field, op, value }] }, check_only: true } says whether it would be certified and what each house would count, for free',
+            ...(SANDBOX_STUDIES[0] ? { for_example: { question: SANDBOX_STUDIES[0].question, predicates: SANDBOX_STUDIES[0].predicates } } : {}),
+          });
+        }
+        // A question in words alone can't be run: a study is its yes/no parts, and those are what gets certified and counted.
+        const own = a.study ? draftStudy(a.study) : undefined;
+        if (own) {
+          const problems = questionProblems(own);
+          if (problems.length) throw new Error(`that study can't be asked: ${problems.join('; ')}. lake_dispatch_study { fields: true } lists what can`);
+        }
+        const study = own ?? SANDBOX_STUDIES.find((x) => x.question.toLowerCase() === a.question.trim().toLowerCase());
+        if (!study) throw new Error(`"${a.question.slice(0, 120)}" isn't one of the ready questions (${SANDBOX_STUDIES.map((x) => `"${x.question}"`).join(', ')}). To ask your own, write it as a study: lake_dispatch_study { fields: true } shows how`);
+        if (a.check_only) return json(await (await agent()).checkStudy(study.question, { study, extraFields: a.extra_fields }));
         const steps: string[] = [];
-        const r = await (await agent()).study(a.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
+        const r = await (await agent()).study(study.question, { study, priceUsd: a.price_usd, budgetUsd: a.budget_usd, extraFields: a.extra_fields, waitSeconds: a.wait_seconds, log: (s, d) => steps.push(`${s}: ${d}`) });
         const { grants: _, evidence, ...result } = r;
         bundles.set(r.study, evidence);
         // The bundle is big; say what's in it, and how to get it.

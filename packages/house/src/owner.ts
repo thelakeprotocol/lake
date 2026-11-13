@@ -26,7 +26,10 @@ export interface PendingRequest {
   /** Its price in its own currency, when it named one. */
   price?: { amount: number; currency: string };
   study: string | null;
+  /** A study's question: the researcher's own sentence, shown as their words and read by no rule. */
   question?: string;
+  /** What the house would count for that study, a line for each yes/no part, in the packs' words (core's predicateLines). */
+  counts?: string[];
   /** What to look at twice: identifying or unknown fields, keeping data for years (SPEC §5). */
   warnings?: string[];
   /** The visitor's own note to the owner: their words, unchecked, shown quoted and never read by the rules. */

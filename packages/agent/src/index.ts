@@ -85,7 +85,7 @@ export interface StudyOptions {
   extraFields?: string[];
   /** Wait this long for owners who were asked to tap Allow. */
   waitSeconds?: number;
-  /** A custom declarative study. Default: the readmission study for `question`. */
+  /** A study of your own (core's `draftStudy` writes one). Default: the loaded packs' example study with this `question`. */
   study?: Study;
   log?: (step: string, detail: string) => void;
 }

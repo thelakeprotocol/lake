@@ -71,6 +71,7 @@ export default defineConfig({
             { text: 'How agents trade', link: '/docs/trade' },
             { text: 'How agents find each other', link: '/docs/discovery' },
             { text: 'How a study works', link: '/docs/how-it-works' },
+            { text: 'Ask your own question', link: '/docs/researchers' },
           ],
         },
         {

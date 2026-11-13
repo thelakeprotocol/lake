@@ -1089,6 +1089,8 @@ describe('money', () => {
     // Nothing here but studies: no record went anywhere.
     const left = await call({ kind: 'panel.left' }) as { total: number; left: { kind: string; to: string; at: string; fields?: string[]; question?: string }[] };
     expect(left.left).toContainEqual(expect.objectContaining({ kind: 'study', to: 'uni.example', fields: expect.arrayContaining(['hospital readmissions']), question: expect.any(String) }));
+    // And what was counted, in the pack's words as the house wrote them down when it answered (never the researcher's own names for it).
+    expect(left.left.find((x) => x.kind === 'study' && x.to === 'uni.example')).toMatchObject({ counts: ['age band: 60 or more', 'medications: Drug X (drug-x)', 'hospital readmissions: any on record'] });
     expect(left.left.map((x) => x.kind).filter((k) => k !== 'study')).toEqual([]);
     expect(left.left.map((x) => x.at)).toEqual(left.left.map((x) => x.at).sort().reverse());
     expect(left.total).toBeGreaterThanOrEqual(left.left.length);
@@ -1155,10 +1157,35 @@ describe('the open door', () => {
     expect(overview.more_tools).toMatchObject({ trade: expect.any(String), research: expect.any(String), how: expect.stringMatching(/tools=all/) });
     const res = await client.callTool({ name: 'lake_dispatch_study', arguments: { price_usd: 5, budget_usd: 500 } });
     const out = JSON.parse((res.content as { text: string }[])[0]!.text);
+    // A study of its own (SPEC §7). What a study here may ask about: each field, how it compares, the codes its pack names.
+    const say = async (args: Record<string, unknown>) => {
+      const r = await client.callTool({ name: 'lake_dispatch_study', arguments: args });
+      const text = (r.content as { text: string }[])[0]!.text;
+      return { isError: !!r.isError, text, out: (() => { try { return JSON.parse(text); } catch { return {}; } })() };
+    };
+    const listed = await say({ fields: true });
+    expect(listed.out.fields).toContainEqual(expect.objectContaining({ field: 'conditions', pack: 'health@1', kind: 'code', ask: ['has_code', 'present'], studies: true, codes: expect.objectContaining({ '38341003': 'Hypertension' }) }));
+    expect(listed.out.fields).toContainEqual(expect.objectContaining({ field: 'age_band', ask: ['at_least', 'at_most', 'present'] }));
+    expect(listed.out.fields.map((f: { field: string }) => f.field)).not.toContain('name');
+    // Checked for free: certified like any other, and the answer says what each house would count, in the pack's words
+    // (the names here are the researcher's own, and say nothing).
+    const mine = { question: 'Are over-70s on drug Z back in hospital?', predicates: [{ name: 'group A', field: 'age_band', op: 'at_least', value: 70 }, { name: 'exposed', field: 'medications', op: 'has_code', value: 'drug-z' }, { name: 'outcome', field: 'readmissions', op: 'present' }] };
+    const checked = await say({ study: mine, check_only: true });
+    expect(checked.out).toMatchObject({ ethics: 'approved', audit: 'certified', each_house_counts: ['age band: 70 or more', 'medications: Drug Z (drug-z)', 'hospital readmissions: any on record'] });
+    // One that asks who someone is, or compares what can't be compared, is refused with the reason, before the Lake hears of it.
+    const who = await say({ study: { question: 'Who is over 70?', predicates: [{ name: 'named', field: 'name', op: 'present' }] } });
+    expect(who).toMatchObject({ isError: true, text: expect.stringMatching(/can't be asked: .*"name" is identifying; no study may read it/) });
+    const odd = await say({ study: { question: 'Readmitted more than twice?', predicates: [{ name: 'often', field: 'readmissions', op: 'at_least', value: 2 }] } });
+    expect(odd).toMatchObject({ isError: true, text: expect.stringMatching(/can't ask "at_least" of flag field "readmissions": it takes present/) });
+    // And run: the same houses answer it, by the same rules, and the totals are its own table.
+    const ran = await say({ study: mine, price_usd: 5, budget_usd: 500 });
     await client.close();
     expect(res.isError).toBeFalsy();
     expect(out.participants).toBeGreaterThan(0);
     expect(out.steps.some((s: string) => s.startsWith('pay:'))).toBe(true);
+    expect(ran.isError, ran.text).toBe(false);
+    expect(ran.out.participants).toBeGreaterThan(0);
+    expect(ran.out.study).not.toBe(out.study);
   });
 
   it('Claude over HTTP, signed in: the standard sign-in, then one agent for every chat and after a restart', async () => {

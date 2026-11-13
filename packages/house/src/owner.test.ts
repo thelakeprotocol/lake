@@ -358,6 +358,12 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(mine.tonight).toBeUndefined();
     expect(mine.notes.some((n: { answered_since?: string }) => n.answered_since)).toBe(false);
     expect((await post('/api', await signMessage({ kind: 'list' }, day, { iss: 'assistant' }))).tonight).toBeUndefined();
+    // A study waiting for the owner: an AI that may read the records is told the researcher's question as theirs and what
+    // the house would count, as the phone is; the one on duty is told of no request.
+    const asked = desk.ask({ offerId: 'r-study', visitor: { webId: 'https://uni.example/#agent', domain: 'uni.example', name: 'uni.example' }, purpose: 'research', fields: ['steps'], retention: 'none', priceUsd: 2, study: 'sha256:steps', question: 'Do walkers sleep better?', counts: ['steps: 8000 or more'], recommendation: 'ask' });
+    expect((await post('/api', await signMessage({ kind: 'list' }, day, { iss: 'assistant' }))).requests.find((r: { id: string }) => r.id === asked.id)).toMatchObject({ question: 'Do walkers sleep better?', counts: ['steps: 8000 or more'] });
+    expect((await asAi({ kind: 'list' })).requests).toEqual([]);
+    desk.withdraw(asked.id, 'https://uni.example/#agent');
     // The connector naming an older note afterwards moves the reply there: said once, in one place.
     expect(await asAi({ kind: 'assistant.answered', note: first, text: 'Robin will answer in the morning.' })).toMatchObject({ ok: true });
     const after = (await owner({ kind: 'list' })).notes;

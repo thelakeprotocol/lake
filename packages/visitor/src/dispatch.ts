@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  buildCard, cardUrlFor, cellCount, cellLabels, summarizeTable, unshardCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
+  buildCard, cardUrlFor, cellCount, cellLabels, predicateLines, summarizeTable, unshardCounts, fieldSpec, collectiveCounter, makeEvent, signAgreement, signCard, signIntentMandate, signPaymentMandate, studyFields, studyId,
   pickTellers, type AgentCard, type Attachment, type Identity, type LakeEvent, type Offer, type SignedAgreement, type TellerRef, type Study, type TableSummary,
 } from '@thelakeprotocol/core';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -441,6 +441,8 @@ export async function checkStudy(o: Pick<DispatchOptions, 'visitor' | 'node' | '
   const houses = await discover(o as DispatchOptions, log);
   return {
     study: studyId(study), question: study.question, fields,
+    // What an owner asked to decide is shown beside the question: the pack's words for each yes/no part.
+    each_house_counts: predicateLines(study),
     ethics: ethics.reply.kind === 'approved' ? 'approved' : `refused: ${((ethics.reply.problems as string[] | undefined) ?? []).join('; ')}`,
     audit: audit.reply.kind === 'certified' ? 'certified' : `refused: ${((audit.reply.problems as string[] | undefined) ?? []).join('; ')}`,
     notes: (audit.reply.notes as string[] | undefined) ?? [],

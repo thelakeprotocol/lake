@@ -8,14 +8,14 @@ import { rng } from '@thelakeprotocol/core';
 
 export const DEMO_DRUGS = 'https://lake.doneinfifty.com/demo/drugs';
 
-const CONDITIONS = [
+export const CONDITIONS = [
   { code: '84114007', display: 'Heart failure' },
   { code: '44054006', display: 'Type 2 diabetes mellitus' },
   { code: '13645005', display: 'Chronic obstructive lung disease' },
   { code: '38341003', display: 'Hypertension' },
 ];
 // Fictional drugs: the demo asks about "drug X" and must never look like medical advice about a real one.
-const DRUGS = [
+export const DRUGS = [
   { code: 'drug-x', display: 'Drug X' },
   { code: 'drug-y', display: 'Drug Y' },
   { code: 'drug-z', display: 'Drug Z' },

@@ -9,8 +9,8 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import { generateIdentity, importIdentity, signMessage, type Identity } from '../packages/core/src/index.js';
-import { createECDH, createPrivateKey, randomBytes } from 'node:crypto';
+import { draftStudy, generateIdentity, importIdentity, pickTellers, signMessage, studyFields, studyId, type AgentCard, type Identity, type Study } from '../packages/core/src/index.js';
+import { createECDH, createPrivateKey, randomBytes, randomUUID } from 'node:crypto';
 import { ask, knock, makeVisitor } from '../packages/visitor/src/knock.js';
 import { joinLake } from '../packages/agent/src/index.js';
 import { startShop } from '../packages/visitor/src/shop.js';
@@ -114,7 +114,7 @@ beforeAll(async () => {
   house = site;
   // A sandbox house: the first device to open its panel becomes its owner, as on the public sandbox.
   await start(['packages/house/dist/main.js', '--name', 'panel', '--rules', 'personas/stan.yaml', '--data', join(dir, 'house'), '--issuer-url', `http://localhost:${sp}/issuer`,
-    '--auditor-url', `http://localhost:${sp}/auditor`, '--person-url', `http://localhost:${sp}/person`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site, '--duty-model', 'stub'], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
+    '--auditor-url', `http://localhost:${sp}/auditor`, '--person-url', `http://localhost:${sp}/person`, '--tellers', `http://localhost:${sp}/teller-a/a2a,http://localhost:${sp}/teller-b/a2a`, '--pod-port', String(pp), '--port', String(hp), '--lake', node, '--seed', '7', '--open-pairing', '--public-url', site, '--duty-model', 'stub'], /joined the Lake/, { LAKE_PUSH_ALLOW_HTTP: '1' });
   // The connector, with sign-in on.
   await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp), '--public-url', site], /Lake MCP over HTTP/, { LAKE_NODE_URL: node, LAKE_MCP_DATA: join(dir, 'mcp'), LAKE_PAYMENTS_URL: `http://localhost:${sp}/payments`, LAKE_ALLOWANCE_USD: '20', LAKE_MCP_QUIET_MS: '3000', LAKE_MCP_FORWARD_MS: '3000', LAKE_MATCH_EVERY_MS: '500', LAKE_MCP_SLEEP_MS: '3000' });
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
@@ -1376,6 +1376,35 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(got.length).toBe(2);
     expect(await asOwner({ kind: 'panel.push.off' })).toMatchObject({ ok: true, devices: 0 });
     svc.close();
+  });
+
+  it('a study someone wrote themselves: the card gives their question as theirs, and what your house would answer in its own words (round 23)', async () => {
+    // A researcher's own study, certified by the auditor this house trusts. Its question and the names of its parts are
+    // the researcher's, and here they say nothing true: what the house would count comes from the pack's labels.
+    const uni = await makeVisitor(await generateIdentity(), 'research.example');
+    const tellers = pickTellers(((await (await fetch(`${nodeUrl}/cards?skill=teller`)).json()) as { card: AgentCard }[]).map((c) => c.card));
+    expect(tellers).toHaveLength(2);
+    const drafted = draftStudy({ question: 'Does a daily walk help?', predicates: [{ name: 'walks daily', field: 'medications', op: 'has_code', value: 'drug-y' }, { name: 'feels better', field: 'conditions', op: 'has_code', value: '38341003' }, { name: 'older', field: 'age_band', op: 'at_least', value: '50' }] });
+    const study: Study = { ...drafted, privacy: { ...drafted.privacy, tellers } };
+    const audit = await ask(`${specialists}/auditor`, uni, { kind: 'audit-study', study });
+    expect(audit.reply, JSON.stringify(audit.reply)).toMatchObject({ kind: 'certified' });
+    const card = await (await fetch(`${specialists}/auditor/.well-known/agent-card.json`)).json();
+    // No ethics approval with it, so the owner's research rule doesn't answer: it is theirs to weigh.
+    const offer = { id: randomUUID(), requester: uni.domain, purpose: 'research', fields: studyFields(study), retention: 'none', priceUsd: 5, study: studyId(study), credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: true } };
+    expect((await ask(house, uni, { kind: 'offer', offer, study, attachments: { audit: { credential: audit.reply.credential, card } } })).reply).toMatchObject({ decision: 'ask' });
+    await tab('Today');
+    const req = page.locator('ion-card.req', { hasText: 'research.example' });
+    await req.locator('.req-q').waitFor({ timeout: 10_000 });
+    expect((await req.locator('.req-q').innerText()).replace(/\s+/g, ' ')).toBe('Their question Does a daily walk help?');
+    expect((await req.locator('.req-counts').innerText()).replace(/\s+/g, ' ')).toMatch(/^What your house would answer, yes or no, to each: .* Only the yes or no leaves, as two unreadable shares\.$/);
+    expect(await req.locator('.req-counts li').allInnerTexts()).toEqual(['medications: Drug Y (drug-y)', 'conditions: Hypertension (38341003)', 'age band: 50 or more']);
+    // Their names for the parts are nowhere on the card.
+    expect(await req.innerText()).not.toMatch(/walks daily|feels better/);
+    await tidy();
+    await req.getByRole('button', { name: /^Deny/ }).click();
+    await req.waitFor({ state: 'detached', timeout: 10_000 });
+    await page.waitForTimeout(6500); // the toast goes by itself
+    await tidy();
   });
 
   it('next time: "Always allow" makes a standing yes for exactly that ask, listed in Keys and removable; "Always decline" mutes (1-2 Nov)', async () => {

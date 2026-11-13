@@ -86,7 +86,10 @@ function RequestCard({ all }: { all: Request[] }) {
     h('div', { class: 'req-who' }, h(Avatar, { name: r.visitor.domain, size: 42 }),
       h('div', { class: 'req-who-text' }, h('h3', {}, r.visitor.domain), h('p', {}, `Wants your data · for ${r.purpose}${times > 1 ? ` · asked ${times}×` : ''}`)),
       h('span', { class: 'req-pay' }, pays)),
-    r.question ? h('p', { class: 'req-q' }, r.question) : null,
+    // A study: the question is the researcher's own sentence and nothing checks it against what is counted, so the
+    // card shows both, the counted lines in the house's words (from the packs' labels).
+    r.question ? h('p', { class: 'req-q' }, r.counts?.length ? h('span', { class: 'req-q-by' }, 'Their question') : null, r.question) : null,
+    r.counts?.length ? h('div', { class: 'req-counts' }, h('p', {}, `What your house would answer, yes or no, to ${r.counts.length === 1 ? 'this' : 'each'}:`), h('ul', {}, ...r.counts.map((c) => h('li', { key: c }, c))), h('p', { class: 'req-counts-note' }, 'Only the yes or no leaves, as two unreadable shares.')) : null,
     h('div', { class: 'field-tags', 'aria-label': 'What it wants' }, ...r.fields.map((f) => h('span', { key: f, class: 'field-tag' }, nice(f)))),
     h('div', { class: `advice ${suggest === 'deny' ? 'deny' : suggest === 'allow' ? 'allow' : ''}` }, h('ion-icon', { name: suggest === 'deny' ? 'shield-outline' : 'shield-checkmark-outline' }),
       h('div', {}, h('b', {}, a.verdict), [...a.why, ...(r.warnings ?? []).map((w) => `It ${w}`)].map((w) => h('p', { key: w }, w)))),

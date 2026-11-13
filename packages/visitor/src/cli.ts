@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { cardUrlFor, didWebDocument, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
 import { dispatch, makeHuman } from './dispatch.js';
-import { exampleStudies, loadPacks, packs, type Study } from '@thelakeprotocol/core';
+import { draftStudy, exampleStudies, loadPacks, packs, questionProblems, studyCatalog, type Study, type StudyDraft } from '@thelakeprotocol/core';
 import { attack, houseUrls, swarm } from './attack.js';
 import { ask, knock, makeVisitor, presets, type Tamper } from './knock.js';
 import { startQuoter } from './quoter.js';
@@ -17,10 +17,12 @@ const HELP = `lake — talk to the Lake
              [--tamper forge-card|unsigned|replay|impersonate] [--json]
 
   lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--budget 5000] [--as uni.example]
+                [--study my-study.json]   your own: { "question", "predicates": [{ "name", "field", "op", "value" }], "min"?, "noise_epsilon"? }
                 [--extra-fields postcode] [--node http://lake-node:7000]
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
                 [--wait 30] [--unpaid] [--concurrency 32] [--port 4800] [--json]
 
+  lake fields                      what a study may ask about: each loaded pack's fields, how they compare, their codes
   lake demo [--pace 2000]          the on-stage script: dispatch (bloc, owner's tap), then an attacker
   lake reset                       demo reset: every node's counters, history and quarantines (needs LAKE_RESET_TOKEN)
   lake card <agent-url>            fetch and verify any agent's card from its own .well-known path (no node needed)
@@ -48,7 +50,8 @@ const { positionals, values: a } = parseArgs({
     retention: { type: 'string' },
     note: { type: 'string' },
     tamper: { type: 'string', default: 'none' },
-    goal: { type: 'string', default: 'Do over-60s on drug X get readmitted less?' },
+    goal: { type: 'string' },
+    study: { type: 'string' },
     'extra-fields': { type: 'string' },
     node: { type: 'string', default: process.env.LAKE_NODE_URL ?? 'http://lake-node:7000' },
     ethics: { type: 'string', default: process.env.LAKE_ETHICS_URL ?? 'http://ethics:4500' },
@@ -78,6 +81,10 @@ await loadPacks(a.packs!.split(','), (n) => import(n));
 
 if (cmd === 'knock') await knockCmd();
 else if (cmd === 'dispatch') await dispatchCmd();
+else if (cmd === 'fields') {
+  if (a.json) console.log(JSON.stringify(studyCatalog(), null, 2));
+  else for (const f of studyCatalog()) console.log(`${f.field.padEnd(22)} ${f.pack.padEnd(12)} ${f.kind.padEnd(7)} ${f.studies ? f.ask.join(', ') : `no study may read it (${f.why})`}${f.unit ? `  [${f.unit}]` : ''}${f.codes ? `\n${' '.repeat(23)}codes: ${Object.entries(f.codes).map(([c, n]) => `${c} (${n})`).join(', ')}` : ''}`);
+}
 else if (cmd === 'demo') {
   // The on-stage script (spec, "On-stage script"): pace it so people can follow on the map.
   const node = a.node!.split(',')[0]!.trim();
@@ -214,7 +221,28 @@ async function knockCmd() {
   for (const n of reply.notes as string[]) console.log(`  note: ${n}`);
 }
 
+/**
+ * The study to run. A study is its yes/no parts, which are what gets certified: one of your own from a file (--study,
+ * the short form or a whole declaration), one the loaded packs offer by its question (--goal), or the first of those.
+ * Its tellers come from the Lake. Said in one line, before anything starts, when it can't be asked.
+ */
+function chooseStudy(): Study {
+  const stop = (why: string): never => { console.error(`lake: ${why}`); process.exit(2); };
+  const known = exampleStudies();
+  if (a.study) {
+    let raw: Study & StudyDraft;
+    try { raw = JSON.parse(readFileSync(a.study, 'utf8')) as Study & StudyDraft; } catch (e) { return stop(`can't read ${a.study} as JSON (${(e as Error).message})`); }
+    const study = raw.v && raw.privacy ? raw : draftStudy(raw);
+    const problems = questionProblems(study);
+    return problems.length ? stop(`${a.study} can't be asked: ${problems.join('; ')}. lake fields lists what a study may ask about`) : study;
+  }
+  // A goal in words nobody wrote a study for used to run the first example in its place, under the other question.
+  const found = a.goal ? known.find((s) => s.question.toLowerCase() === a.goal!.trim().toLowerCase()) : known[0];
+  return found ?? stop(a.goal ? `"${a.goal}" isn't a question the loaded packs offer (${known.map((s) => `"${s.question}"`).join(', ')}). Write your own as a file and pass --study; lake fields lists what it may ask about` : 'no pack loaded offers a study; try --packs health, or --study');
+}
+
 async function dispatchCmd(chosen?: Study) {
+  const study = chosen ?? chooseStudy();
   const domain = a.as ?? 'uni.example';
   const port = Number(a.port);
   // Serve our card while the study runs, so a node can verify it and show us on the map.
@@ -227,11 +255,6 @@ async function dispatchCmd(chosen?: Study) {
   await link.register(6);
 
   const say = (step: string, detail: string) => { if (!a.json) console.log(`${step.toUpperCase().padEnd(9)} ${detail}`); };
-  // Studies are certified in advance: run one the loaded packs offer (by its question). Its tellers come from the Lake.
-  const known = exampleStudies();
-  const base = chosen ?? known.find((s) => s.question.toLowerCase() === a.goal!.toLowerCase()) ?? known[0];
-  if (!base) throw new Error('no pack loaded offers a study; try --packs health');
-  const study = chosen ?? base;
   // Unpaid means offering nothing: an agent never promises money it can't pay.
   const price = Number(a.price ?? (a.unpaid ? 0 : 2));
   say('dispatch', `"${study.question}"  (as ${domain}, $${price} per participant)`);

@@ -1,6 +1,6 @@
 import { canonicalize } from './canonical.js';
 import { tellersProblem, type TellerRef } from './count.js';
-import { fieldSpec, type Claim, type PackField } from './pack.js';
+import { fieldSpec, identifyingFields, packId, packs, type Claim, type PackField } from './pack.js';
 import { digestSRI } from './vc.js';
 
 /**
@@ -45,21 +45,38 @@ export const studyId = (s: Study) => `urn:lake:study:${digestSRI(canonicalize(s)
 export const studyFields = (s: Study): Field[] => [...new Set(s.predicates.map((p) => p.field))];
 export const cellCount = (s: Study) => 2 ** s.predicates.length;
 
-/** What an Auditor checks, and what a house re-checks before running anything. */
-export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
+/**
+ * What's wrong with what a study asks, tellers aside: its shape, its words, and each yes/no question against the
+ * field it reads. What someone writing a study of their own checks before they pick tellers and ask an auditor.
+ */
+export function questionProblems(s: Study): string[] {
   const problems: string[] = [];
   if (s?.v !== 1 || s.kind !== 'contingency') problems.push('only v1 contingency studies are understood');
+  // The question is the researcher's own sentence, shown to each owner as their words: a sentence, not a page.
+  if (typeof s?.question !== 'string' || !s.question.trim() || s.question.length > 200) problems.push('question: one sentence, up to 200 characters');
   if (!Array.isArray(s?.predicates) || s.predicates.length < 1 || s.predicates.length > 4) problems.push('a study asks 1 to 4 yes/no questions');
+  const names = (s?.predicates ?? []).map((p) => p?.name);
+  if (names.some((n) => typeof n !== 'string' || !n.trim() || n.length > 60)) problems.push('each yes/no question has a name of up to 60 characters ("over 60", "on drug X")');
+  else if (new Set(names).size !== names.length) problems.push('two yes/no questions have the same name');
   for (const p of s?.predicates ?? []) {
     const spec = fieldSpec(p?.field);
     const valueOk = p?.op === 'present' || (p?.op === 'has_code' ? typeof p.value === 'string' : typeof (p as { value?: unknown }).value === 'number');
-    if (!spec) problems.push(`question "${p?.name}" reads "${p?.field}", which no pack here declares`);
-    else if (!OPS[spec.kind].includes(p.op) || !valueOk) problems.push(`question "${p.name}" can't ask "${p.op}" of ${spec.kind} field "${p.field}"`);
-    if (spec?.pack.identifying?.includes(p?.field)) problems.push(`"${p.field}" is identifying; no study may read it`);
+    // A pack names what identifies someone without declaring it as a field: said as what it is, not as a field nobody knows.
+    if (identifyingFields().includes(p?.field)) problems.push(`"${p.field}" is identifying; no study may read it`);
+    else if (!spec) problems.push(`question "${p?.name}" reads "${p?.field}", which no pack here declares`);
+    else if (!OPS[spec.kind].includes(p.op)) problems.push(`question "${p.name}" can't ask "${p.op}" of ${spec.kind} field "${p.field}": it takes ${OPS[spec.kind].filter((op) => op !== 'age_at_least').join(', ')}`);
+    else if (!valueOk) problems.push(`question "${p.name}": "${p.op}" needs a ${p.op === 'has_code' ? 'code (text)' : 'number'} as its value`);
     // A register's fields go only to agents on it, unless its pack lets studies read them (SPEC §5.2): run 28's rogue
     // padded a study with shopping fields and got it certified.
     if (spec?.pack.authority && !spec.pack.authority.studies) problems.push(`question "${p.name}" reads "${p.field}", which ${spec.pack.id}'s register (${spec.pack.authority.name}) keeps for agents on it: its pack lets no study read it`);
+    if (p?.op === 'has_code' && typeof p.value === 'string' && (!p.value || p.value.length > 80)) problems.push(`question "${p.name}": a code of up to 80 characters`);
   }
+  return problems;
+}
+
+/** What an Auditor checks, and what a house re-checks before running anything. */
+export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
+  const problems = questionProblems(s);
   if (s?.privacy?.mechanism !== 'dap-prio3') problems.push('answers must be counted by two tellers, Leader and Helper, with Prio3 proofs (dap-prio3)');
   else {
     const bad = tellersProblem(s.privacy.tellers);
@@ -69,6 +86,84 @@ export function auditStudy(s: Study): { ok: boolean; problems: string[] } {
   }
   if (s?.minTier !== 'issuer-signed') problems.push('only issuer-signed values may be used');
   return { ok: problems.length === 0, problems };
+}
+
+/** A study as someone writes one of their own: the question, its yes/no parts, and how small or blurred a table they'd take. */
+export interface StudyDraft {
+  question: string;
+  predicates: { name: string; field: Field; op: string; value?: string | number }[];
+  /** The fewest houses a table may come from (the tellers have a floor of their own). Default 3. */
+  min?: number;
+  /** Have the tellers add noise to the table, at this ε. */
+  noise_epsilon?: number;
+}
+
+/**
+ * A written study as the declaration that gets certified, with no tellers yet: whoever runs it picks two from the
+ * Lake first (they are part of what is certified). Says nothing about whether it may be asked: `questionProblems` does.
+ */
+export function draftStudy(d: StudyDraft): Study {
+  const predicates = (Array.isArray(d?.predicates) ? d.predicates : []).map((p) => {
+    const base = { name: String(p?.name ?? '').trim(), field: String(p?.field ?? '') };
+    if (p?.op === 'has_code') return { ...base, op: p.op, value: String(p.value ?? '') };
+    // A number written as text ("60") is the number.
+    if (p?.op === 'at_least' || p?.op === 'at_most' || p?.op === 'age_at_least') return { ...base, op: p.op, value: typeof p.value === 'string' && p.value.trim() !== '' && Number.isFinite(Number(p.value)) ? Number(p.value) : p.value };
+    return { ...base, op: p?.op };
+  }) as Predicate[];
+  return {
+    v: 1, question: String(d?.question ?? '').trim(), kind: 'contingency', predicates,
+    privacy: { mechanism: 'dap-prio3', tellers: [], min: d?.min ?? 3, ...(d?.noise_epsilon !== undefined ? { noise: { epsilon: d.noise_epsilon } } : {}) },
+    minTier: 'issuer-signed',
+  };
+}
+
+/**
+ * What a house would count for a study, one line for each yes/no question, worded from the pack's own labels and
+ * never from the researcher's: "age band: 60 or more", "medications: Drug X (drug-x)", "hospital readmissions: any on
+ * record". A study's question and the names of its questions are free text; this is what its answer is made of.
+ */
+export function predicateLines(s: Study): string[] {
+  return (s?.predicates ?? []).map((p) => {
+    const spec = fieldSpec(p.field);
+    const label = spec?.label ?? String(p.field).replaceAll('_', ' ');
+    const amount = (v: number) => `${v}${spec?.unit ? ` ${spec.unit}` : ''}`;
+    switch (p.op) {
+      case 'at_least': case 'age_at_least': return `${label}: ${amount(p.value)} or more`;
+      case 'at_most': return `${label}: ${amount(p.value)} or less`;
+      case 'has_code': { const known = spec?.codes?.[p.value]; return known ? `${label}: ${known} (${p.value})` : `${label}: the code ${String(p.value).slice(0, 80)}`; }
+      default: return `${label}: any on record`;
+    }
+  });
+}
+
+/** One field a study may ask about: how it compares, and whether its pack lets studies read it at all. */
+export interface StudyField {
+  field: Field;
+  /** The pack that declares it, with its major version (`health@1`). */
+  pack: string;
+  label: string;
+  kind: PackField['kind'];
+  /** The comparisons a yes/no question may make of it (`op`). */
+  ask: string[];
+  unit?: string;
+  /** Codes the pack names for a `has_code` question; others it doesn't name can be asked too. */
+  codes?: Record<string, string>;
+  special?: boolean;
+  /** False when the field's pack has a register that keeps its fields for agents on it (SPEC §5.2). */
+  studies: boolean;
+  why?: string;
+}
+
+/** Every field of the loaded packs, as someone writing a study needs it. Identifying fields aren't listed: no study reads them. */
+export function studyCatalog(): StudyField[] {
+  return packs().flatMap((pk) => Object.entries(pk.fields).map(([field, f]) => {
+    const open = !pk.authority || !!pk.authority.studies;
+    return {
+      field, pack: packId(pk), label: f.label, kind: f.kind, ask: OPS[f.kind].filter((op) => op !== 'age_at_least'),
+      ...(f.unit ? { unit: f.unit } : {}), ...(f.codes ? { codes: f.codes } : {}), ...(f.special ? { special: true } : {}),
+      studies: open, ...(open ? {} : { why: `${pk.authority!.name} keeps this pack's fields for agents on its register; no study may read them` }),
+    };
+  }));
 }
 
 /** A band ("60-69", "90+") compares by its lower bound; a number by itself. */

@@ -404,6 +404,11 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .req-who-text p { margin: 0 !important; font-size: 13px !important; color: var(--lake-muted); }
 .req-pay { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; color: var(--lake-mint); background: var(--lake-mint-soft); padding: 4px 10px; border-radius: 12px; }
 .req-q { font-size: 16px !important; line-height: 1.4; margin: 0 0 12px !important; padding-left: 12px; border-left: 3px solid var(--lake-violet); }
+.req-q-by { display: block; font-size: 12px; color: var(--lake-muted); margin-bottom: 2px; }
+.req-counts { margin: 0 0 12px; }
+.req-counts p { font-size: 13px !important; color: var(--lake-muted); margin: 0 0 4px !important; }
+.req-counts ul { margin: 0 0 4px; padding-left: 20px; }
+.req-counts li { font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
 .field-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .field-tag .tag-k { color: var(--lake-muted); font-weight: 500; }
 .field-tag { font-size: 13px; font-weight: 600; padding: 5px 10px; border-radius: 10px; background: var(--lake-surface-2); color: var(--lake-text); }

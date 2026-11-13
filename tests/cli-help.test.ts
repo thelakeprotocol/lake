@@ -27,3 +27,28 @@ describe('server commands', { timeout: 30_000 }, () => {
     expect(r.stderr).toMatch(/^lake-house: can't write to .*a-file\/house \(ENOTDIR\): pass --data/);
   });
 });
+
+// A study is what gets certified and counted, never a sentence: the CLI used to run its first example for any --goal
+// (round 23). It now says what it can run, and how to write one, before anything is started or paid.
+describe('lake dispatch', { timeout: 30_000 }, () => {
+  const lake = (...args: string[]) => spawnSync(process.execPath, ['packages/visitor/dist/cli.js', ...args], { encoding: 'utf8', timeout: 20_000 });
+  it('lists what a study may ask about', () => {
+    const listed = JSON.parse(lake('fields', '--json').stdout) as { field: string; ask: string[]; studies: boolean }[];
+    expect(listed.length).toBeGreaterThan(0);
+    for (const f of listed) expect(f, f.field).toMatchObject({ ask: expect.arrayContaining(['present']), studies: expect.any(Boolean) });
+    expect(lake('fields').stdout).toContain(listed[0]!.field);
+  });
+  it('a question it has no study for, or a study that can\'t be asked, is one line and exit 2', () => {
+    const words = lake('dispatch', '--goal', 'Is this a real study?');
+    expect(words.status).toBe(2);
+    expect(words.stderr.trim()).toMatch(/^lake: "Is this a real study\?" isn't a question the loaded packs offer \(.*\)\. Write your own as a file and pass --study; lake fields lists what it may ask about$/);
+    const file = join(mkdtempSync(join(tmpdir(), 'lake-cli-')), 'study.json');
+    writeFileSync(file, JSON.stringify({ question: 'Who keeps a pet?', predicates: [{ name: 'has a pet', field: 'pets_of_the_house', op: 'present' }] }));
+    const bad = lake('dispatch', '--study', file);
+    expect(bad.status).toBe(2);
+    expect(bad.stderr.trim()).toMatch(/^lake: .*study\.json can't be asked: question "has a pet" reads "pets_of_the_house", which no pack here declares\. lake fields lists what a study may ask about$/);
+    const missing = lake('dispatch', '--study', join(file, 'nowhere.json'));
+    expect(missing.status).toBe(2);
+    expect(missing.stderr.trim().split('\n')).toHaveLength(1);
+  });
+});

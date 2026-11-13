@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { LAKE_MODEL, seedFrom, type LakePack } from '@thelakeprotocol/core';
 import { CONVERTER, extractClaims } from './convert.js';
 import { readmissionStudy, SANDBOX_STUDIES } from './studies.js';
-import { syntheticPatient } from './synthetic.js';
+import { CONDITIONS, DRUGS, syntheticPatient } from './synthetic.js';
 
 // Health claims keep the classes they had in the v0.1 model, so pods written before packs existed still read.
 const L = (c: string) => LAKE_MODEL + c;
+const named = (list: { code: string; display: string }[]) => Object.fromEntries(list.map((c) => [c.code, c.display]));
 
 /** Health research: age band, medications, conditions, readmissions, from a FHIR record a trusted hospital signs. */
 export const health: LakePack = {
@@ -17,8 +18,8 @@ export const health: LakePack = {
   recordClass: L('HealthRecord'),
   fields: {
     age_band: { class: L('AgeBand'), kind: 'band', label: 'age band', standard: 'http://hl7.org/fhir/Patient.birthDate' },
-    medications: { class: L('Medication'), kind: 'code', label: 'medications', standard: 'http://hl7.org/fhir/MedicationRequest', special: true },
-    conditions: { class: L('Condition'), kind: 'code', label: 'conditions', standard: 'http://hl7.org/fhir/Condition', special: true },
+    medications: { class: L('Medication'), kind: 'code', label: 'medications', standard: 'http://hl7.org/fhir/MedicationRequest', special: true, codes: named(DRUGS) },
+    conditions: { class: L('Condition'), kind: 'code', label: 'conditions', standard: 'http://hl7.org/fhir/Condition', special: true, codes: named(CONDITIONS) },
     readmissions: { class: L('Readmission'), kind: 'flag', label: 'hospital readmissions', standard: 'http://hl7.org/fhir/Encounter', special: true },
   },
   // Directly identifying: no study may read them.
