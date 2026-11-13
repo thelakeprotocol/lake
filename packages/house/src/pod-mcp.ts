@@ -13,6 +13,8 @@ export interface PodMcpOptions {
   deny?: string[];
   /** Called for every pod access, for the audit trail. */
   onAccess?: (tool: string, path: string) => void;
+  /** A folder's files as the house keeps them, where it does (its growing folders): no listing asked of the pod server. */
+  listed?: (path: string) => Promise<string[] | null>;
   /** Path prefixes this door may write to (e.g. agreements/, audit/). None by default: read-only. */
   allowWrite?: string[];
   /** The converted claims documents, one per pack (e.g. health/claims.ttl), relative to the pod root. */
@@ -45,6 +47,10 @@ export function createPodMcpServer(o: PodMcpOptions): McpServer {
       try {
         const { url, rel } = resolve(path.endsWith('/') || path === '' ? path : `${path}/`);
         o.onAccess?.('pod_list', rel);
+        // A folder the house keeps a list of is answered from that list: listing ten thousand files takes the pod server
+        // past its memory (13 Nov).
+        const kept = await o.listed?.(rel);
+        if (kept) return text(JSON.stringify(kept));
         const res = await o.fetch(url, { headers: { accept: 'text/turtle' } });
         if (!res.ok) throw new Error(`${rel}: ${res.status}`);
         const quads = new Parser({ baseIRI: url }).parse(await res.text());

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { houseRunner } from './duty-runner.js';
@@ -262,7 +262,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   }
 
   // The housekeeper and its MCP door to the pod: reads anything; writes only agreements, receipts and its audit log.
-  const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/', 'offers/'], claimsDocs: records.map((r) => r.paths.claims) });
+  const mcp = createPodMcpServer({ podRoot: owner.podRoot, fetch: owner.fetch, allowWrite: ['agreements/', 'audit/', 'receipts/', 'offers/'], claimsDocs: records.map((r) => r.paths.claims), listed: (rel) => (['agreements/', 'receipts/', 'audit/'].includes(rel) ? filed.list(rel) : Promise.resolve(null)) });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await mcp.connect(serverSide);
   const podClient = new Client({ name: `housekeeper-${o.name}`, version: '0.1.0' });
@@ -468,7 +468,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 
 async function ensureContainer(o: OwnerSession, path: string) {
   const url = o.podRoot + path;
-  if ((await o.fetch(url, { method: 'HEAD' })).ok) return;
+  // A pod this house runs: the folder on disk says. A HEAD on a container makes the pod server build its whole listing in
+  // memory, and three folders of ten thousand agreements, checked at every start, took it past its heap again and again
+  // (13 Nov). Elsewhere, a folder is made with a conditional PUT, which needs no listing; only the pod's root is asked.
+  if (o.disk && (await stat(join(o.disk, path)).then((s) => s.isDirectory(), () => false))) return;
+  if (!path && (await o.fetch(url, { method: 'HEAD' })).ok) return;
   // The portable way to make a container on any Solid server (CSS, ESS, …): PUT with the container type.
   const res = await o.fetch(url, { method: 'PUT', headers: { 'content-type': 'text/turtle', link: '<http://www.w3.org/ns/ldp#BasicContainer>; rel="type"', 'if-none-match': '*' } });
   // 412 (If-None-Match) and 409 ("existing containers cannot be updated via PUT", CSS) both say it is already there: a

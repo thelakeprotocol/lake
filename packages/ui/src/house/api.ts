@@ -20,7 +20,8 @@ const reached = (ok: boolean) => { if (ok !== reachable) { reachable = ok; for (
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function call<T = any>(payload: Record<string, unknown>): Promise<T> {
   let res: Response;
-  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signEnvelope({ ...payload, aud: houseBase() }, key, state.webId || 'owner')) }); } catch (e) { reached(false); throw e; }
+  // Never a button that spins for ever: a house that restarted mid-call (13 Nov, a pledge answer) leaves the request hanging.
+  try { res = await fetch(`${api}api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signEnvelope({ ...payload, aud: houseBase() }, key, state.webId || 'owner')), signal: AbortSignal.timeout(45_000) }); } catch (e) { reached(false); throw (e as Error).name === 'TimeoutError' ? new Error('Your house didn\'t answer in time. Try again in a moment.') : e; }
   reached(true);
   if (!res.ok) {
     // No words from the house (it threw, or the proxy in front answered for it): say so, never a bare number.
