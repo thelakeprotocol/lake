@@ -158,7 +158,9 @@ export const rulesState = (r?: Rules): RowState => {
   return { text: r.rules.length ? `${plural(r.rules.length, 'rule')} · otherwise ${rest}` : { join: 'No rules: every request gets a yes', ask: 'No rules: every request asks you', decline: 'No rules: every request is declined' }[r.default], ...(r.default === 'join' ? { tone: 'amber' as const } : {}) };
 };
 /** What a yes lets an agent do: have its study use these fields here. It never sees them (SPEC §7). */
-export const useLine = (open: Consent[]) => `May use ${[...new Set(open.flatMap((c) => c.fields.map((f) => f.label)))].join(', ').toLowerCase() || 'nothing'} in a study`;
+// For what each yes was given: a GP's yes for care read "in a study" (14 Nov).
+const forLine = (c: Consent) => c.purpose.split(' or ').map((p, i) => (/research/.test(p) ? 'in a study' : `for ${(c.purposeLabel.split(' or ')[i] ?? p).replace(/ \(.*\)$/, '')}`));
+export const useLine = (open: Consent[]) => `May use ${[...new Set(open.flatMap((c) => c.fields.map((f) => f.label)))].join(', ').toLowerCase() || 'nothing'} ${[...new Set(open.flatMap(forLine))].join(' and ') || 'in a study'}`;
 /** Agents with a yes that still stands, and when the first of them is left with none. */
 export const yesNow = (agents: AccessRow[] = []) => { const ends = agents.filter((r) => r.canSee).map((r) => r.yeses.filter((c) => c.status === 'active').map((c) => c.until).sort().pop()).filter((u): u is string => !!u); return { agents: agents.filter((r) => r.canSee).length, next: ends.sort()[0] }; };
 export const dataState = (a?: { agents: AccessRow[] }, record?: { ok: boolean }): RowState => {

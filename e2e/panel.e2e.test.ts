@@ -1444,7 +1444,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await req.locator('.req-q').waitFor({ timeout: 10_000 });
     expect((await req.locator('.req-q').innerText()).replace(/\s+/g, ' ')).toBe('Their question Does a daily walk help?');
     expect((await req.locator('.req-counts').innerText()).replace(/\s+/g, ' ')).toMatch(/^What your house would answer, yes or no, to each: .* Only the yes or no leaves, as two unreadable shares\. The two tellers publish totals only, from 3 or more answers, with no noise added\.$/);
-    expect(await req.locator('.req-counts li').allInnerTexts()).toEqual(['medications: Drug Y (drug-y)', 'conditions: Hypertension (38341003)', 'age band: 50 or more']);
+    expect(await req.locator('.req-counts li').allInnerTexts()).toEqual(['medications: Drug Y', 'conditions: Hypertension', 'age band: 50 or more']);
     // Their names for the parts are nowhere on the card.
     expect(await req.innerText()).not.toMatch(/walks daily|feels better/);
     await tidy();
@@ -1481,10 +1481,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       for (let j = 0; j < 20 && (await page.locator('ion-card.req', { hasText: 'clinic.example' }).count()) >= n; j++) await page.waitForTimeout(250);
     }
     await page.waitForTimeout(6500); // the toasts go by themselves: nothing was set for next time
-    // You says how My data stands; My data says who has a yes and what it lets them do (a study may use it: nobody sees it).
+    // You says how My data stands; My data says who has a yes and what it lets them do, for what it was given (14 Nov: a
+    // yes for care read "in a study").
     await tab('You');
     await page.locator('.you-row.mydata', { hasText: /agents? ha(s|ve) your yes · (next )?ends in/ }).click();
-    await page.locator('ion-item.holder', { hasText: 'clinic.example' }).first().getByText(/May use medications in a study · .+ left/).waitFor({ timeout: 10_000 });
+    await page.locator('ion-item.holder', { hasText: 'clinic.example' }).first().getByText(/May use medications for care · .+ left/).waitFor({ timeout: 10_000 });
     await tidy();
     // Listed in Who has access, with how often it was used; removed, it asks again.
     await page.locator('ion-item.lake-row', { hasText: 'Who has access' }).click();

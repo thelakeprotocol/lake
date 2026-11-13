@@ -32,7 +32,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       : h('ion-card', { class: 'lake-card hero-card' }, h('ion-card-content', {},
         h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'sparkles' })),
         h('h2', {}, 'Bring your own AI'),
-        h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It reads the messages at your door and suggests; you choose whether it also sees your records or money. Only you decide.'),
+        h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It sees who writes to you and suggests what to do; it reads a chat\'s words only when you hand it that chat. You choose whether it also sees your records or money. Only you decide.'),
         h('ion-button', { shape: 'round', onClick: () => setConnect(true) }, 'Give my AI a key'))),
     h(Section, { title: 'AI on duty' },
       live.length ? live.map((d) => h('ion-item', { key: d.kid, lines: 'full', class: 'lake-row duty-row' },
@@ -159,7 +159,8 @@ export function AiKeyPage({ arg }: { arg: string }) {
     h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${dayTime(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: 'Replies and bookings only, never money' }) : null),
     // On duty it reads the notes and its errands only, whatever is switched on here.
     onDuty ? null : h(Section, { title: 'What it can read', cls: 'reads' },
-      h(Row, { icon: 'chatbubbles-outline', label: 'Messages at your door', sub: 'Always: notes, its own errands, your agenda and free hours', detail: false }),
+      // The same words wherever it's said (14 Nov: four screens said four things about what it reads).
+      h(Row, { icon: 'chatbubbles-outline', label: 'Who writes to you', sub: 'Always: who wrote and when, its own errands, your agenda and free hours. Their words only in chats you hand it or tell it about', detail: false }),
       h(ReadsToggles, { value: a.reads ?? [], bare: true, onChange: async (reads: Reads[]) => { await must({ kind: 'panel.assistant.reads', kid: a.kid, reads }); void toast(readsLine(reads)); } })),
     onDuty ? null : h(Allowance, { a }),
     h('div', { class: 'pad' }, h(Btn, { label: 'Remove this AI', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); back('#ai'); }, ask: { header: `Remove ${shortName(a.label)}?`, sub: 'Its key stops working.', button: 'Remove' }, done: 'Removed' })));

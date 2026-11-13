@@ -1095,7 +1095,7 @@ describe('money', () => {
     const left = await call({ kind: 'panel.left' }) as { total: number; left: { kind: string; to: string; at: string; fields?: string[]; question?: string }[] };
     expect(left.left).toContainEqual(expect.objectContaining({ kind: 'study', to: 'uni.example', fields: expect.arrayContaining(['hospital readmissions']), question: expect.any(String) }));
     // And what was counted, in the pack's words as the house wrote them down when it answered (never the researcher's own names for it).
-    expect(left.left.find((x) => x.kind === 'study' && x.to === 'uni.example')).toMatchObject({ counts: ['age band: 60 or more', 'medications: Drug X (drug-x)', 'hospital readmissions: any on record'] });
+    expect(left.left.find((x) => x.kind === 'study' && x.to === 'uni.example')).toMatchObject({ counts: ['age band: 60 or more', 'medications: Drug X', 'hospital readmissions: any on record'] });
     // And what both tellers said they held the count to when they took the answer: the study's minimum, and no noise (round 24).
     expect(left.left.find((x) => x.kind === 'study' && x.to === 'uni.example')).toMatchObject({ table: { min: readmissionStudy().privacy.min, noise: false } });
     expect(left.left.map((x) => x.kind).filter((k) => k !== 'study')).toEqual([]);
@@ -1178,7 +1178,7 @@ describe('the open door', () => {
     // (the names here are the researcher's own, and say nothing).
     const mine = { question: 'Are over-70s on drug Z back in hospital?', predicates: [{ name: 'group A', field: 'age_band', op: 'at_least', value: 70 }, { name: 'exposed', field: 'medications', op: 'has_code', value: 'drug-z' }, { name: 'outcome', field: 'readmissions', op: 'present' }] };
     const checked = await say({ study: mine, check_only: true });
-    expect(checked.out).toMatchObject({ ethics: 'approved', audit: 'certified', each_house_counts: ['age band: 70 or more', 'medications: Drug Z (drug-z)', 'hospital readmissions: any on record'] });
+    expect(checked.out).toMatchObject({ ethics: 'approved', audit: 'certified', each_house_counts: ['age band: 70 or more', 'medications: Drug Z', 'hospital readmissions: any on record'] });
     // One that asks who someone is, or compares what can't be compared, is refused with the reason, before the Lake hears of it.
     const who = await say({ study: { question: 'Who is over 70?', predicates: [{ name: 'named', field: 'name', op: 'present' }] } });
     expect(who).toMatchObject({ isError: true, text: expect.stringMatching(/can't be asked: .*"name" is identifying; no study may read it/) });

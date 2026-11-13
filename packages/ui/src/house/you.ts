@@ -60,7 +60,7 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
     h(Section, { title: 'Who can use it', cls: 'data-who' },
       ...holders.slice(0, 5).map((r) => {
         const open = r.yeses.filter((c) => c.status === 'active'), latest = [...open].sort((x, y) => y.until.localeCompare(x.until))[0]!;
-        return h(Row, { key: r.id, icon: 'eye-outline', tint: 'blue', label: r.domain ?? r.id.replace(/^key:/, 'unverified key '), sub: `${useLine(open)} · ${hoursLeft(latest.until)} left`, cls: 'holder', onClick: () => push('#access') });
+        return h(Row, { key: r.id, icon: 'eye-outline', tint: 'blue', label: r.domain ?? 'An agent with no proven name', sub: `${useLine(open)} · ${hoursLeft(latest.until)} left`, cls: 'holder', onClick: () => push('#access') });
       }),
       ...ais.map((a) => h(Row, { key: a.kid, icon: 'sparkles-outline', tint: stale(a) ? 'amber' : 'violet', label: shortName(a.label), sub: stale(a) ? `Not here for ${Math.round((Date.now() - Date.parse(a.seenAt!)) / 86_400_000)} days. Still reads your records.` : `Your AI · reads your records · ${lastHere(a.seenAt).text.toLowerCase()}`, cls: 'reader', onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`) })),
       h(Row, { icon: 'people-outline', tint: 'muted', label: 'Who has access', sub: 'Everyone who asked, and every yes you gave', onClick: () => push('#access') })),

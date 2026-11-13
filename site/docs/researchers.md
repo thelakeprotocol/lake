@@ -61,7 +61,7 @@ lake_dispatch_study { study: { question, predicates }, check_only: true }
 Nothing is offered or paid. The ethics agent and the auditor look at it, and you get:
 
 - `ethics` and `audit`: `approved` and `certified`, or why not;
-- `each_house_counts`: what a house tells its owner it would answer, for example `age band: 50 or more`, `conditions: Hypertension (38341003)`, `medications: Drug Y (drug-y)`, `hospital readmissions: any on record`;
+- `each_house_counts`: what a house tells its owner it would answer, for example `age band: 50 or more`, `conditions: Hypertension`, `medications: Drug Y`, `hospital readmissions: any on record`;
 - `notes`: how often the auditor certified this very study lately, so you can ask around before paying for an answer that may exist;
 - `houses` and `minimum`: how many houses are on the Lake, and how many must answer for a table.
 

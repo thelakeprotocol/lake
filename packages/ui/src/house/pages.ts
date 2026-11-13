@@ -165,7 +165,7 @@ export function AccessPage({ backTo }: P) {
       return [
         h('ion-item', { key: r.id, button: true, detail: false, lines: expanded ? 'none' : 'full', class: 'access-row', onClick: () => setOpenRow(expanded ? null : r.id) },
           h('div', { slot: 'start', class: `row-icon tint-${r.canSee ? 'blue' : 'muted'}` }, h('ion-icon', { name: r.canSee ? 'eye-outline' : 'eye-off-outline' })),
-          h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, r.domain ?? r.id.replace(/^key:/, 'unverified key ')),
+          h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, r.domain ?? 'An agent with no proven name'),
             h('p', {}, latest ? `${useLine(open)} · ${hoursLeft(latest.until)} left · ${why(latest)}` : 'No yes from you now'),
             r.asked || r.last ? h('p', {}, [r.asked ? `Asked ${r.asked}×${r.lastAsked ? `, ${ago(r.lastAsked)}` : ''}` : '', r.last ? `your house ${said(r.last.decision)}` : ''].filter(Boolean).join(' · ')) : null,
             open.length ? h('div', { class: 'row-below', onClick: (e: Event) => e.stopPropagation() }, h(Btn, { label: 'Take it back', size: 'small', fill: 'outline', color: 'danger', run: async () => { for (const c of open) await call({ kind: 'revoke', revoke: c.id }); }, ask: { header: `Take back ${r.domain ?? 'this agent'}'s access?`, button: 'Take back' }, done: 'Taken back' })) : null)),
@@ -359,7 +359,8 @@ export function AboutPage({ backTo }: P) {
   return page('About this house', backTo,
     h(Section, {},
       h(Row, { icon: o.data.record.ok ? 'shield-checkmark-outline' : 'alert-circle-outline', tint: o.data.record.ok ? 'mint' : 'red', label: o.data.record.ok ? 'Your record checks out' : 'Your record failed its check', sub: o.data.record.ok ? `${o.data.claims} claims, signed and unchanged` : o.data.record.why }),
-      h(Row, { icon: 'git-network-outline', tint: 'blue', label: o.data.relayed ? 'Reached through the Lake' : 'Reached at its own address' }),
+      // Said as what it means to the owner (14 Nov: "Reached at its own address" meant nothing to someone new).
+      h(Row, { icon: 'git-network-outline', tint: 'blue', label: o.data.relayed ? 'Others reach it through the Lake' : 'Others reach it directly', sub: o.data.relayed ? 'Your house keeps one line open to the Lake, so nothing on your router has to change' : 'At its own web address' }),
       p ? h(Row, { icon: 'finger-print-outline', tint: p.stamped ? 'mint' : 'muted', label: p.stamped ? 'One person, one house: stamped' : 'One person, one house', sub: p.stamped ? `By ${p.by ?? 'a person checker'}` : p.checker ? 'A stamp counts you once in pledges' : 'No person checker set', below: !p.stamped && p.checker ? h(Btn, { label: 'Get a person stamp', size: 'small', run: async () => must({ kind: 'panel.person.request', consent: await signEnvelope({ kind: 'personhood.consent', house: state.webId }, key, state.webId || 'owner') }) }) : undefined }) : null),
     state.leaseUntil ? h(Section, { title: 'Sandbox lease' }, h(Row, { icon: 'hourglass-outline', tint: 'amber', label: `Yours until ${new Date(state.leaseUntil).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` }),
       h('div', { class: 'pad' }, h(Btn, { label: 'Hand it back now', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'release' }); location.reload(); }, ask: { header: 'Hand this house back?', sub: 'Every key is revoked and the rules reset.', button: 'Hand it back' } }))) : null,
@@ -369,7 +370,8 @@ export function AboutPage({ backTo }: P) {
       h('ion-input', { value: tally, placeholder: 'tally address, e.g. https://…/s/tally', 'aria-label': 'Tally address', onionInput: (e: CustomEvent) => setTally(String(e.detail.value ?? '')) }),
       h('ion-input', { value: pid, placeholder: 'pledge id', 'aria-label': 'Pledge id', onionInput: (e: CustomEvent) => setPid(String(e.detail.value ?? '')) }),
       h(Btn, { label: 'Sign this pledge', fill: 'outline', run: async () => { const r = await signPledge(tally.trim(), pid.trim()); void toast(r.kind === 'tally.triggered' ? `Signed: that was the last one needed (${r.count} of ${r.threshold}).` : `Signed: ${r.count} of ${r.threshold}.`); } })))),
-    h('p', { class: 'mono small pad' }, state.webId));
+    // Its WebID, for Solid apps that ask for one: labelled, never a bare address at the foot of the page.
+    h(Info, {}, h('p', {}, 'Your house\'s address for Solid apps (a WebID): ', h('code', {}, state.webId))));
 }
 
 // ---- delivery address ----

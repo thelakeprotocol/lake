@@ -124,7 +124,7 @@ describe('studies', () => {
   });
 
   it('say what a house would count in the pack\'s words, whatever the researcher called it', () => {
-    expect(predicateLines(study)).toEqual(['age band: 60 or more', 'medications: Drug X (drug-x)', 'readmissions: any on record']);
+    expect(predicateLines(study)).toEqual(['age band: 60 or more', 'medications: Drug X', 'readmissions: any on record']);
     // A friendly question and friendly names over something else: the lines come from the fields, never from them.
     const dressed: Study = { ...study, question: 'How many of you like tea?', predicates: [{ name: 'likes tea', field: 'medications', op: 'has_code', value: 'drug-q' }, { name: 'is cheerful', field: 'balance', op: 'at_most', value: 500 }] };
     expect(predicateLines(dressed)).toEqual(['medications: the code drug-q', 'balance: 500 AUD or less']);

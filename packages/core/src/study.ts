@@ -147,7 +147,7 @@ export function draftStudy(d: StudyDraft): Study {
 
 /**
  * What a house would count for a study, one line for each yes/no question, worded from the pack's own labels and
- * never from the researcher's: "age band: 60 or more", "medications: Drug X (drug-x)", "hospital readmissions: any on
+ * never from the researcher's: "age band: 60 or more", "medications: Drug X", "hospital readmissions: any on
  * record". A study's question and the names of its questions are free text; this is what its answer is made of.
  */
 export function predicateLines(s: Study): string[] {
@@ -158,7 +158,9 @@ export function predicateLines(s: Study): string[] {
     switch (p.op) {
       case 'at_least': case 'age_at_least': return `${label}: ${amount(p.value)} or more`;
       case 'at_most': return `${label}: ${amount(p.value)} or less`;
-      case 'has_code': { const known = spec?.codes?.[p.value]; return known ? `${label}: ${known} (${p.value})` : `${label}: the code ${String(p.value).slice(0, 80)}`; }
+      // The pack's name for a code, alone: "Hypertension (38341003)" read as a database to an owner (14 Nov); a code with no
+      // name is said as one.
+      case 'has_code': { const known = spec?.codes?.[p.value]; return known ? `${label}: ${known}` : `${label}: the code ${String(p.value).slice(0, 80)}`; }
       default: return `${label}: any on record`;
     }
   });

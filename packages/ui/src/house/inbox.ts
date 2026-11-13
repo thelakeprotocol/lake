@@ -106,7 +106,7 @@ function ConnectCard({ c }: { c: Connect }) {
   return h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'link-outline' }), 'Wants to connect'),
     h('h3', {}, `${c.app} wants to connect to your house`),
-    h('p', {}, `As your assistant${c.from ? `, from ${c.from}` : ''}: it reads the messages at your door and suggests; only you decide. Connect only if your sign-in page shows:`),
+    h('p', {}, `As your assistant${c.from ? `, from ${c.from}` : ''}: it sees who writes to you and suggests what to do, and reads a chat's words only when you hand it that chat; only you decide. Connect only if your sign-in page shows:`),
     h('div', { class: 'connect-number' }, c.number),
     h(ReadsToggles, { value: reads, onChange: setReads }),
     h('div', { class: 'card-actions' },
