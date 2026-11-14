@@ -640,6 +640,13 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('tells whoever hosts it when a phone becomes its key (14 Nov: the operator asked to hear of a second person)', async () => {
+    const got: { claimed: boolean }[] = [];
+    const h = await house({ onPaired: (x: { claimed: boolean }) => got.push(x) });
+    expect(got).toEqual([{ claimed: true }]);
+    h.close();
+  });
+
   it('Today answers without Money when Money is slow (13 Nov: a reused house never showed Handled for you)', async () => {
     const h = await house({ panel: { activity: () => [], money: () => new Promise(() => {}) } });
     const t0 = Date.now();

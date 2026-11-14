@@ -64,6 +64,9 @@ services:
       LAKE_POD_HEAP: "${LAKE_POD_HEAP:-224}"
       # Two houses start at a time: ten pods starting together overloaded the 1 GB droplet after deploys (run 28).
       LAKE_START_CONCURRENCY: "${LAKE_START_CONCURRENCY:-2}"
+      # A hosted house whose owner runs this sandbox: told (a note from the Lake) when someone claims a house, uses an
+      # invite or pairs a phone with the house they were invited into. Empty: nobody is told.
+      LAKE_OPERATOR: "${LAKE_OPERATOR:-}"
       # Houses kept for someone: no lease, not on the claim list, paired with the token in their data folder.
       LAKE_KEPT: "${LAKE_KEPT:-}"
       # Invites: each owner may bring this many people in, each with a house that stays theirs, up to this many houses in all
@@ -118,6 +121,8 @@ services:
       # Signed-in agents (an AI keeps one agent from chat to chat and across deploys), their keys sealed with LAKE_MCP_KEK.
       LAKE_MCP_DATA: "/data/mcp"
       LAKE_MCP_KEK: "${LAKE_MCP_KEK:-}"
+      # The operator's house address: told (a signed note) when an AI app signs in as itself, not a script's anonymous token.
+      LAKE_OPERATOR_HOUSE: "${LAKE_OPERATOR_HOUSE:-}"
       # Play money each conversation's agent may pay other agents (lake_pay), signed by the sandbox in its human's place.
       LAKE_ALLOWANCE_USD: "50"
       # And in the currencies the sandbox's shops price in (nothing converts): "USD:50,AUD:80".

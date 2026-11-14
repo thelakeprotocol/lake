@@ -1202,8 +1202,16 @@ describe('the open door', () => {
 
   it('Claude over HTTP, signed in: the standard sign-in, then one agent for every chat and after a restart', async () => {
     const port = String(await freePort()), url = `http://localhost:${port}/mcp`, data = join(dir, 'mcp-signed-in');
-    const env = { LAKE_NODE_URL: node, LAKE_MCP_DATA: data, LAKE_MCP_KEK: 'a test secret' };
-    await start(['packages/agent/dist/cli.js', 'mcp', '--http', port], /Lake MCP over HTTP/, env);
+    // Whoever runs this Lake hears when an AI app signs in as itself (LAKE_OPERATOR_HOUSE): a note to a house of theirs.
+    const env = { LAKE_NODE_URL: node, LAKE_MCP_DATA: data, LAKE_MCP_KEK: 'a test secret', LAKE_OPERATOR_HOUSE: houses.stan! };
+    let connectorSaid = '';
+    await new Promise<void>((ok, fail) => {
+      const p = spawn(process.execPath, ['packages/agent/dist/cli.js', 'mcp', '--http', port], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+      procs.push(p);
+      const on = (b: Buffer) => { connectorSaid += b; if (/Lake MCP over HTTP/.test(connectorSaid)) ok(); };
+      p.stdout!.on('data', on); p.stderr!.on('data', on);
+      p.once('exit', (c) => fail(new Error(`exited ${c}:\n${connectorSaid}`)));
+    });
     // No token: 401, and where to learn how to get one (RFC 9728).
     const bare = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '0' } } }) });
     expect(bare.status).toBe(401);
@@ -1227,6 +1235,11 @@ describe('the open door', () => {
     expect((await signIn('https://elsewhere.example/mcp')).status).toBe(400);
     const back = new URL((await signIn()).headers.get('location')!);
     expect(back.searchParams.get('state')).toBe('st8');
+    // One note to the operator's house, signed by the connector's own key, and the house took it: an AI app ("Claude")
+    // signed in. None for the refused sign-in before it.
+    for (let i = 0; i < 100 && !/told the operator/.test(connectorSaid); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(connectorSaid).toMatch(/told the operator \(noted\): Claude signed in/);
+    expect(connectorSaid.match(/told the operator/g)).toHaveLength(1);
     const tokenCall = async (body: Record<string, string>) => (await fetch(as.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: client.client_id, ...body }) })).json();
     // The code works once, and only with its verifier.
     expect(await tokenCall({ grant_type: 'authorization_code', code: back.searchParams.get('code')!, code_verifier: 'wrong'.repeat(9), redirect_uri: cb })).toMatchObject({ error: 'invalid_grant' });

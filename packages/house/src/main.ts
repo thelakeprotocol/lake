@@ -54,6 +54,9 @@ const { values: a } = parseCli({
     seed: { type: 'string', default: process.env.LAKE_SEED },
     'owner-url': { type: 'string', default: process.env.LAKE_OWNER_URL },
     'open-pairing': { type: 'boolean', default: process.env.LAKE_OPEN_PAIRING === '1' },
+    // A hosted house whose owner runs this Lake: told, as a note from the Lake, when someone claims a house, uses an invite
+    // or pairs a phone with the house they were invited into (14 Nov: "how do we know when a real second human uses the Lake?").
+    operator: { type: 'string', default: process.env.LAKE_OPERATOR },
     domain: { type: 'string', default: process.env.LAKE_DOMAIN },
     // The demo specialists' domain(s) on this deployment (SPEC §5.1): trusted by default on a sandbox. Comma-separated.
     'demo-domain': { type: 'string', default: process.env.LAKE_DEMO_DOMAIN ?? 'lake.local' },
@@ -201,6 +204,17 @@ async function hosted(n: number) {
   const TAGS = ['research-volunteers', 'carers', 'renters', 'energy-buyers', 'cyclists'];
   const app = express();
   const houses: House[] = [];
+  // Ten a day at most, so a busy day can't fill the operator's list.
+  let told = { day: '', n: 0 };
+  const tellOperator = (text: string) => {
+    const to = a.operator ? houses.find((h) => h.name === a.operator) : undefined;
+    if (!to) return;
+    const day = new Date().toISOString().slice(0, 10);
+    if (told.day !== day) told = { day, n: 0 };
+    if (++told.n > 10) return;
+    to.desk.addNote({ from: { name: 'This Lake', domain: new URL(baseUrl).host, webId: `${baseUrl}/#lake`, url: baseUrl, checked: true }, text, purpose: 'contact' });
+    log(`told ${a.operator}: ${text}`);
+  };
   let warnings = 0;
   const at = Math.max(1, Number(a['start-concurrency']) || 8);
   const startOne = async (name: string, door?: { handle: string; name?: string }) => {
@@ -221,6 +235,7 @@ async function hosted(n: number) {
       ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'] && (!kept.has(name) || isInvited(name)),
       leaseHours: a['open-pairing'] && !kept.has(name) ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
       emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true, invite: () => inviteFor(name)(),
+      onPaired: ({ claimed }) => { if (!claimed || name === a.operator) return; tellOperator(isInvited(name) ? `Someone paired a phone with ${name}, the house they were invited into: a person is using it.` : `Someone claimed the sandbox house ${name} and paired a phone with it.`); },
     });
     app.use(`/t/${name}`, house.app);
     houses.push(house);
@@ -285,6 +300,7 @@ ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
       invited.push({ name: inv.used, by: inv.by, at: new Date().toISOString() });
       await saveWhole(invitedFile, JSON.stringify(invited));
       log(`${inv.by} invited ${inv.used} (${handle})`);
+      tellOperator(`An invite from ${inviterOf(inv.by) || inv.by} was used: a new house, ${handle} (${inv.used}). It counts as a person once they pair a phone.`);
       const panel = `${baseUrl}/t/${inv.used}/owner/`;
       return void (wantsJson ? res.json({ house: `${baseUrl}/t/${inv.used}`, panel, handle }) : res.redirect(303, panel));
     } catch (e) {

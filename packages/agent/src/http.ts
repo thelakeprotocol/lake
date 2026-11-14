@@ -14,6 +14,7 @@ import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middlew
 import type { AgentCard } from '@thelakeprotocol/core';
 import type { LakeAgent, LakeAgentOptions } from './index.js';
 import { lakeMcpAgent, type AgentSnapshot, type LakeMcpAgent } from './mcp.js';
+import { operatorNotes } from './operator.js';
 import { LakeOAuth } from './auth.js';
 
 /**
@@ -165,6 +166,11 @@ ul{list-style:none;padding:0;margin:0}li{background:var(--card);border:1px solid
 
   // ---- Sign-in (OAuth 2.1 for MCP): only with a data folder ----
   const auth = o.data ? new LakeOAuth({ dir: join(o.data, 'auth'), base: resource, resource, title: 'the Lake sandbox' }) : undefined;
+  // An AI app signing in as itself (Claude, ChatGPT…), not a script's anonymous token or a sign-in check: its person is
+  // likely someone new, and whoever runs this Lake asked to hear it (LAKE_OPERATOR_HOUSE).
+  const tellOperator = operatorNotes({ house: process.env.LAKE_OPERATOR_HOUSE, dataDir: o.data, publicUrl: resource, log: o.log });
+  const QUIET_APPS = new Set(['Sign-in check', ...(process.env.LAKE_OPERATOR_QUIET ?? '').split(',').map((x) => x.trim()).filter(Boolean)]);
+  const realSignIn = (app: string) => { if (!QUIET_APPS.has(app)) tellOperator(`${app} signed in to this Lake's connector: an AI app connected by a person. It may be someone new.`); };
   const kek = o.kek ? createHash('sha256').update(o.kek).digest() : undefined;
   // An agent's saved state, sealed with AES-256-GCM when there's a key to seal it with.
   const seal = (s: AgentSnapshot): Record<string, unknown> => {
@@ -255,6 +261,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
       if (q.refused) { w.state = 'refused'; auth.cancel(String(q.ask)); return void res.json({ ok: true }); }
       const r = auth.approve(String(q.ask));
       if ('error' in r) { w.state = 'failed'; w.error = r.error; return void res.status(400).json({ error: r.error }); }
+      realSignIn(r.app);
       try {
         const l = await agentFor(r.principal);
         const { name } = await l.agent.connectHouse(w.house, String(q.code ?? ''), r.app);
@@ -277,6 +284,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
     app.post(`${path}/oauth/approve`, form, async (req, res) => {
       const r = auth.approve(String(req.body?.ask ?? ''));
       if ('error' in r) return page(res, 400, 'Not connected', r.error);
+      realSignIn(r.app);
       // From the house: its panel made a one-time assistant code with the owner's key; this agent takes it now.
       const house = typeof req.body?.house === 'string' ? req.body.house : '', code = typeof req.body?.code === 'string' ? req.body.code : '';
       if (house && code) {

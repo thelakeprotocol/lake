@@ -63,6 +63,8 @@ export interface HouseOptions {
   leaseHours?: number;
   /** A hosted Lake's invites: the owner makes a one-time link that gives someone a house of their own. */
   invite?: () => Promise<{ link: string; left: number } | { error: string }>;
+  /** A phone paired with this house (not a recovery). */
+  onPaired?: (how: { claimed: boolean }) => void;
   domain?: string;
   /** The demo domain(s) the deployment's demo specialists are named under (default lake.local), its own first. */
   demoDomains?: string[];
@@ -332,6 +334,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     saveStatus: (indexes) => put(owner, 'agreements/status-indexes.json', JSON.stringify(indexes), 'application/json'),
     loadStatus: async () => (await kept(owner, 'agreements/status-indexes.json'))?.json() ?? {},
     leaseHours: o.leaseHours,
+    onPaired: o.onPaired,
     clearOwnerKey: async () => { await owner.fetch(`${owner.podRoot}wallet/owner.jwk.json`, { method: 'DELETE' }); },
     saveAssistants: (keys) => put(owner, 'wallet/assistants.json', JSON.stringify(keys), 'application/json'),
     saveAllowances: (a) => put(owner, 'wallet/allowances.json', JSON.stringify(a), 'application/json'),

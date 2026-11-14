@@ -634,6 +634,8 @@ export class OwnerDesk {
        * the house back), every key is revoked, the house forgets its owner, and `onRelease` resets it.
        */
       leaseHours?: number;
+      /** A phone became this house's key (not a recovery): whoever hosts it may want to know (a claim, an invited person's first pairing). */
+      onPaired?: (how: { claimed: boolean }) => void;
       clearOwnerKey?: () => Promise<void>;
       onRelease?: () => Promise<void>;
       /** Where the owner's assistant keys are kept (the pod's wallet). */
@@ -1557,6 +1559,7 @@ export class OwnerDesk {
       this.seen();
       // Said in the log too: the link printed at start is spent now (round 6: pairing left no trace).
       console.log(`[owner] ${recovered ? 'recovered with the recovery code' : 'paired'}: that device holds this house's key now; the pairing link printed earlier is spent`);
+      if (!recovered) this.o.onPaired?.({ claimed: firstCome });
       res.json({ paired: true, webId: this.o.webId, until: this.leaseUntil()?.toISOString() });
     });
 
