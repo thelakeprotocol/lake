@@ -33,9 +33,9 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   const { values: a } = parseArgs({ args: process.argv.slice(3), options: {
     lake: { type: 'string', default: 'https://sandbox.lake.doneinfifty.com/mcp' }, house: { type: 'string' }, code: { type: 'string' },
     agent: { type: 'string', default: 'claude -p' }, every: { type: 'string', default: '600' }, 'max-runs': { type: 'string', default: '30' },
-    'max-tools': { type: 'string', default: '40' }, state: { type: 'string' }, menu: { type: 'string' }, live: { type: 'boolean', default: false },
+    'max-tools': { type: 'string', default: '40' }, state: { type: 'string' }, menu: { type: 'string' }, live: { type: 'boolean', default: false }, 'keep-logs': { type: 'string', default: '7' },
   } });
-  if (!a.house) { console.error('usage: lake duty --house <your house> --code <the code from your panel> [--lake <connector>/mcp] [--agent "claude -p"] [--live | --every 600] [--max-runs 30] [--max-tools 40] [--menu menu.json]'); process.exit(2); }
+  if (!a.house) { console.error('usage: lake duty --house <your house> --code <the code from your panel> [--lake <connector>/mcp] [--agent "claude -p"] [--live | --every 600] [--max-runs 30] [--max-tools 40] [--menu menu.json] [--keep-logs 7]'); process.exit(2); }
   const { runDuty } = await import('./duty.js');
   const { readFileSync } = await import('node:fs');
   // The menu its agent sells from while on duty (with "deliver" in the grant), set at first sign-in: a JSON list of items,
@@ -47,7 +47,7 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
   process.once('SIGTERM', () => stop.abort());
   // --live: it starts within seconds of someone writing (the connector holds each look open until a message comes), with
   // twenty seconds at least between two runs, so a burst of messages is one run. The day's cap on runs still holds.
-  await runDuty({ lake: a.lake!, house: a.house, code: a.code, agent: a.agent, every: Number(process.env.LAKE_DUTY_EVERY_MS) || (a.live ? 20 : Number(a.every)) * 1000, maxRuns: Number(a['max-runs']), maxTools: Number(a['max-tools']), state: a.state, ...menu, signal: stop.signal })
+  await runDuty({ lake: a.lake!, house: a.house, code: a.code, agent: a.agent, every: Number(process.env.LAKE_DUTY_EVERY_MS) || (a.live ? 20 : Number(a.every)) * 1000, maxRuns: Number(a['max-runs']), maxTools: Number(a['max-tools']), state: a.state, keepLogs: Number.isFinite(Number(a['keep-logs'])) ? Math.max(0, Number(a['keep-logs'])) : 7, ...menu, signal: stop.signal })
     .catch((e: Error) => { console.error(`lake duty: ${e.message}`); process.exit(1); });
 } else if (process.argv[2] === 'mcp') {
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');

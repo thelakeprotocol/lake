@@ -349,7 +349,7 @@ export function MovePage({ backTo }: P) {
 
 // ---- about this house ----
 export function AboutPage({ backTo }: P) {
-  const o = useHouse<{ record: { ok: boolean; why?: string }; claims: number; holds: string[]; relayed: boolean; person?: { stamped: boolean; by?: string; person?: string; checker?: boolean } }>({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() });
+  const o = useHouse<{ record: { ok: boolean; why?: string }; claims: number; holds: string[]; relayed: boolean; host?: { by: string; tells?: boolean }; person?: { stamped: boolean; by?: string; person?: string; checker?: boolean } }>({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() });
   const feed = useHouse<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
   const [tally, setTally] = useState(''), [pid, setPid] = useState('');
   const [all, setAll] = useState(false);
@@ -361,6 +361,9 @@ export function AboutPage({ backTo }: P) {
       h(Row, { icon: o.data.record.ok ? 'shield-checkmark-outline' : 'alert-circle-outline', tint: o.data.record.ok ? 'mint' : 'red', label: o.data.record.ok ? 'Your record checks out' : 'Your record failed its check', sub: o.data.record.ok ? `${o.data.claims} claims, signed and unchanged` : o.data.record.why }),
       // Said as what it means to the owner (14 Nov: "Reached at its own address" meant nothing to someone new).
       h(Row, { icon: 'git-network-outline', tint: 'blue', label: o.data.relayed ? 'Others reach it through the Lake' : 'Others reach it directly', sub: o.data.relayed ? 'Your house keeps one line open to the Lake, so nothing on your router has to change' : 'At its own web address' }),
+      // Who could read what it keeps (round 39, a privacy-minded owner): a hosted house runs on someone else's server.
+      o.data.host ? h(Row, { icon: 'server-outline', tint: 'amber', label: 'Runs on a server someone else runs', sub: o.data.host.by, cls: 'host-row', below: h('p', { class: 'muted-line' }, `Whoever runs it could read what your house keeps${o.data.host.tells ? ', and hears when someone claims a house or pairs a phone (only that it happened)' : ''}. For data only you can read, run your own house.`) })
+        : h(Row, { icon: 'server-outline', label: 'Runs where you started it', cls: 'host-row', below: h('p', { class: 'muted-line' }, 'What it keeps stays on that machine, readable by whoever can open it.') }),
       p ? h(Row, { icon: 'finger-print-outline', tint: p.stamped ? 'mint' : 'muted', label: p.stamped ? 'One person, one house: stamped' : 'One person, one house', sub: p.stamped ? `By ${p.by ?? 'a person checker'}` : p.checker ? 'A stamp counts you once in pledges' : 'No person checker set', below: !p.stamped && p.checker ? h(Btn, { label: 'Get a person stamp', size: 'small', run: async () => must({ kind: 'panel.person.request', consent: await signEnvelope({ kind: 'personhood.consent', house: state.webId }, key, state.webId || 'owner') }) }) : undefined }) : null),
     state.leaseUntil ? h(Section, { title: 'Sandbox lease' }, h(Row, { icon: 'hourglass-outline', tint: 'amber', label: `Yours until ${new Date(state.leaseUntil).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` }),
       h('div', { class: 'pad' }, h(Btn, { label: 'Hand it back now', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'release' }); location.reload(); }, ask: { header: 'Hand this house back?', sub: 'Every key is revoked and the rules reset.', button: 'Hand it back' } }))) : null,

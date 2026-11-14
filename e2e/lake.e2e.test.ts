@@ -3176,6 +3176,9 @@ describe('invites: a hosted Lake gives someone a house of their own, from an own
     const token = (await readFile(join(dir, 'hosted-invites', 'hosted', 'houses', 'teacher', 'pairing-token'), 'utf8')).trim();
     expect((await fetch(`${base}/t/teacher/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: phone.publicJwk, token }) })).status).toBe(200);
     const teacher = async (payload: Record<string, unknown>) => (await fetch(`${base}/t/teacher/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, phone, { iss: 'owner' })) })).json();
+    // Its About page says it runs on someone else's server (round 39); the claim page says so before anyone claims.
+    expect(await teacher({ kind: 'panel.overview' })).toMatchObject({ host: { by: `localhost:${hp}`, tells: false } });
+    expect(await (await fetch(`${base}/t/`)).text()).toMatch(/Whoever runs this sandbox runs the server your house is on: they could read what it keeps\. Keep real data in/);
     const inv = await teacher({ kind: 'panel.invite' });
     expect(inv).toMatchObject({ link: expect.stringMatching(new RegExp(`^${base}/t/join/[\\w-]+$`)), left: 1 });
     // The link's page asks for a handle; the friend picks one, and their house starts.

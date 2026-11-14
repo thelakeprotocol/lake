@@ -65,6 +65,9 @@ export interface HouseOptions {
   invite?: () => Promise<{ link: string; left: number } | { error: string }>;
   /** A phone paired with this house (not a recovery). */
   onPaired?: (how: { claimed: boolean }) => void;
+  /** Who runs the machine this house runs on, when it isn't its owner (a hosted house): its About page says so, and that
+   *  they could read what it keeps; `tells` when they also hear of a claim or a pairing (operator notes). */
+  host?: { by: string; tells?: boolean };
   domain?: string;
   /** The demo domain(s) the deployment's demo specialists are named under (default lake.local), its own first. */
   demoDomains?: string[];
@@ -813,7 +816,7 @@ function panelFor(x: {
       const view = x.desk().view();
       return {
         name: x.o.name, ...(x.keeper().rules.door?.handle ? { handle: x.keeper().rules.door!.handle } : {}), ...(x.keeper().rules.door?.name ? { shown: x.keeper().rules.door!.name } : {}), webId: owner.webId, podRoot: owner.podRoot,
-        reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes,
+        reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes, ...(x.o.host ? { host: x.o.host } : {}),
         holds: [...new Set(claims.map((c) => c.field))], claims: claims.length,
         record: chain.ok ? { ok: true } : busy ? { ok: true, checking: true } : { ok: false, why: chain.why },
         knocksToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,

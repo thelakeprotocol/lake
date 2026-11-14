@@ -6,7 +6,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -45,6 +45,8 @@ export interface DutyOptions {
   maxTools?: number;
   /** Where its sign-in and logs are kept (default ~/.lake). */
   state?: string;
+  /** Days a run's transcript (what it was asked and what it said) is kept in <state>/duty-log (default 7; 0 keeps none). */
+  keepLogs?: number;
   log?: (line: string) => void;
   /** Stops the loop (tests). */
   signal?: AbortSignal;
@@ -203,6 +205,14 @@ export async function runDuty(o: DutyOptions): Promise<void> {
   const logs = join(state, 'duty-log');
   mkdirSync(logs, { recursive: true, mode: 0o700 });
   const log = o.log ?? ((s: string) => console.log(`${hhmm()} ${s}`));
+  // A transcript holds the words of the people who wrote: a second copy outside the house, so it doesn't stay for ever
+  // (round 39, a privacy-minded owner). Older days go at start and with each run.
+  const keep = o.keepLogs ?? 7;
+  const prune = () => {
+    const oldest = new Date(Date.now() - Math.max(0, keep - 1) * 86_400_000).toISOString().slice(0, 10);
+    for (const f of readdirSync(logs)) if (/^\d{4}-\d{2}-\d{2}\.log$/.test(f) && (keep === 0 || f.slice(0, 10) < oldest)) rmSync(join(logs, f), { force: true });
+  };
+  prune();
   const file = fileFor(state, o.house);
   let s = await signIn(o, file, log);
   const every = o.every ?? 10 * 60_000, maxRuns = o.maxRuns ?? 30, maxTools = o.maxTools ?? 40;
@@ -234,11 +244,13 @@ export async function runDuty(o: DutyOptions): Promise<void> {
     const tokens = 'tokens' in r ? Number(r.tokens ?? 0) : 0;
     if (tokens) spent.push([Date.now(), tokens]);
     const day = new Date().toISOString().slice(0, 10);
-    appendFileSync(join(logs, `${day}.log`), `--- ${new Date().toISOString()} run on ${o.host ?? hostname()} (exit ${r.code}${tokens ? `, ${tokens} tokens` : ''})\n[prompt]\n${prompt}\n[said]\n${r.out}\n`, { mode: 0o600 });
+    prune();
+    if (keep > 0) appendFileSync(join(logs, `${day}.log`), `--- ${new Date().toISOString()} run on ${o.host ?? hostname()} (exit ${r.code}${tokens ? `, ${tokens} tokens` : ''})\n[prompt]\n${prompt}\n[said]\n${r.out}\n`, { mode: 0o600 });
     const said = r.out.split('\n').filter(Boolean);
     log(`run done (exit ${r.code}): ${(r.code === 0 ? said.at(-1) : said.slice(-6).join(' | '))?.slice(0, 600) ?? '(nothing said)'}`);
   };
   log(`${o.tasksOnly ? 'here for its human\'s tasks' : 'on duty'} since ${hhmm()} on ${o.host ?? hostname()}, for ${o.house}, as ${s.agent?.name ?? 'its agent'}; looking every ${Math.round(look / 1000)} s`);
+  log(keep ? `each run's transcript is kept ${keep} day${keep === 1 ? '' : 's'} in ${logs} (--keep-logs <days>; 0 keeps none)` : 'no run transcripts kept (--keep-logs 0)');
   const work = join(state, 'duty-work');
   mkdirSync(work, { recursive: true });
   while (!o.signal?.aborted) {

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer as httpServer, request, type Server } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -72,6 +72,9 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
 
     // The runner: signs in, connects to the house as its AI on duty, and looks every second.
     const state = join(dir, 'runner');
+    // A transcript from long ago: transcripts are kept a week, then go (round 39).
+    await mkdir(join(state, 'duty-log'), { recursive: true });
+    await writeFile(join(state, 'duty-log', '2026-01-01.log'), 'old words\n');
     const lines: string[] = [];
     const runner = spawn(process.execPath, ['packages/agent/dist/cli.js', 'duty', '--lake', `${site}/mcp`, '--house', site, '--code', set.code, '--agent', `${process.execPath} ${join(process.cwd(), 'e2e/duty-fake-agent.mjs')}`, '--state', state], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LAKE_DUTY_EVERY_MS: '1000' } });
     procs.push(runner);
@@ -79,6 +82,8 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     runner.stderr!.on('data', (b) => lines.push(...String(b).split('\n').filter(Boolean)));
     const until = async (re: RegExp, ms = 30_000) => { const t = Date.now(); while (!lines.some((l) => re.test(l))) { if (Date.now() - t > ms) throw new Error(`no "${re}" in:\n${lines.join('\n')}`); await new Promise((r) => setTimeout(r, 200)); } };
     await until(/on duty since \d\d:\d\d on /);
+    await until(/each run's transcript is kept 7 days in .*duty-log \(--keep-logs <days>; 0 keeps none\)/);
+    expect(await readdir(join(state, 'duty-log'))).not.toContain('2026-01-01.log');
 
     // Its sign-in is kept where only the owner's user can read it, and never printed.
     const saved = (await readdir(state)).find((f) => /^duty-[0-9a-f]{12}\.json$/.test(f))!;
@@ -128,6 +133,7 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     await sam.close();
     await until(/run 1: /);
     await until(/run done \(exit 0\): Left my human 1 note/);
+    expect(await readdir(join(state, 'duty-log'))).toEqual([`${new Date().toISOString().slice(0, 10)}.log`]);
     const list = await owner({ kind: 'list' }) as { suggestions: { text: string; ask?: { choices: string[] } }[] };
     expect(list.suggestions.some((x) => /free for a call on Monday morning/.test(x.text) && x.ask?.choices.includes('Yes, answer'))).toBe(true);
     // Each run's prompt and what the agent said are kept, without the token.

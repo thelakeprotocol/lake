@@ -235,6 +235,7 @@ async function hosted(n: number) {
       ...common, name, rulesText, owner: sessions.get(name)!, dataDir: houseDir, publicUrl: `${baseUrl}/t/${name}`, openPairing: a['open-pairing'] && (!kept.has(name) || isInvited(name)),
       leaseHours: a['open-pairing'] && !kept.has(name) ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
       emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true, invite: () => inviteFor(name)(),
+      host: { by: new URL(baseUrl).host, tells: !!a.operator && name !== a.operator },
       onPaired: ({ claimed }) => { if (!claimed || name === a.operator) return; tellOperator(isInvited(name) ? `Someone paired a phone with ${name}, the house they were invited into: a person is using it.` : `Someone claimed the sandbox house ${name} and paired a phone with it.`); },
     });
     app.use(`/t/${name}`, house.app);
@@ -320,7 +321,7 @@ ${why ? `<p class="chip">${why.replace(/[<>&]/g, '')}</p>` : ''}
     res.type('html').send(page('Claim a house', `<p class="eyebrow"><i></i>The Lake sandbox</p><h1>Claim a house</h1>
 <p class="lead">Free to try: synthetic data, simulated money, real signatures. Open one and tap <b>Use this phone</b>: your phone becomes its key.</p>
 <ul class="list">${li}</ul>
-<details><summary>What happens next</summary><ul class="small"><li>Pick a handle: then anyone can ask their AI to ping you, and the note reaches your phone. You answer there, or let your own AI answer.</li><li>Give your own AI a key, and it can also look for things you need and suggest; you decide.</li><li>${hours ? `A claim lasts ${hours} hours, then the house resets for the next person.` : 'A claim lasts until you hand it back.'} You can hand it back any time.</li></ul></details>`));
+<details><summary>What happens next</summary><ul class="small"><li>Pick a handle: then anyone can ask their AI to ping you, and the note reaches your phone. You answer there, or let your own AI answer.</li><li>Give your own AI a key, and it can also look for things you need and suggest; you decide.</li><li>${hours ? `A claim lasts ${hours} hours, then the house resets for the next person.` : 'A claim lasts until you hand it back.'} You can hand it back any time.</li><li>Whoever runs this sandbox runs the server your house is on: they could read what it keeps${a.operator ? ', and they hear when someone claims a house or pairs a phone (only that it happened)' : ''}. Keep real data in <a href="https://lake.doneinfifty.com/docs/join">a house of your own</a>.</li></ul></details>`));
   });
 
   const server = app.listen(port, async () => {

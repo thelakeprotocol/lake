@@ -1726,6 +1726,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await invite.getByRole('button', { name: 'Dismiss' }).click();
     await invite.waitFor({ state: 'detached', timeout: 10_000 });
     await tab('About this house');
+    // A house its owner runs says so, and who could read what it keeps (round 39).
+    await page.locator('ion-item.host-row', { hasText: 'Runs where you started it' }).getByText('readable by whoever can open it').waitFor({ timeout: 10_000 });
     await page.locator('ion-accordion', { hasText: 'Sign a pledge from your house' }).locator('ion-item[slot="header"]').click();
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
     await page.getByPlaceholder('pledge id').fill('street-circle');
