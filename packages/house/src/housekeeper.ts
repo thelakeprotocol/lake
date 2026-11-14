@@ -9,6 +9,10 @@ import { checkRecord, quickCheck, type RecordCheck, type RecordPaths, type Trust
 import { replyTo, type OwnerActive, type OwnerDesk } from './owner.js';
 import type { PodClaim } from './pod-mcp.js';
 
+/** A sender's chosen name, as it shows on Today, in a button and on the lock screen: one line, no control or direction
+ *  characters (a right-to-left override can make a name read as something else), at most 80 characters (round 43). */
+const cleanName = (name: string) => name.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Someone';
+
 export interface HousekeeperOptions {
   name: string;
   webId: string;
@@ -636,7 +640,7 @@ export class Housekeeper {
     const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
     // The person the AI writes for, as they name themselves ("Alex"): shown as their words, never checked.
     const as = typeof p.as === 'string' ? p.as.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) : '';
-    const kept = this.o.desk.addNote({ from: { name: card.name.slice(0, 80), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}) });
+    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}) });
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).

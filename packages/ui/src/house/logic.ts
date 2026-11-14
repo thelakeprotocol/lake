@@ -16,7 +16,7 @@ export type CircleItem = { tally: string; id: string; call: string; need: string
 export type PledgeQuorum = { text: string; options: string[]; closes: string; least: number; answered?: boolean };
 export type Note = { id: string; from: string; text: string; at: string; invitedBy?: { name: string; known: boolean }; offer?: string; pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; circle?: CircleItem; circleCall?: { need: string; help?: string; sent?: boolean }; circleVote?: { sent?: boolean }; favourPay?: { paid?: boolean; sellerName?: string }; count?: { id: string; label: string; mine?: string; answered?: boolean }; advice?: 'do' | 'dont' | 'your_call'; ask?: { choices: string[]; recommend?: number; answered?: string; private?: boolean }; reply?: string; rules?: string; door?: { about: string }; note?: string; mute?: boolean; sender?: string; allowance?: { amount: number; currency: string; days: number }; by?: string; /** A time your AI pencilled in on duty: held until then for your Confirm or Decline. */ booking?: { id: string; until: string; start: string; with: string; what?: string } };
 export type AgendaItem = { id: string; what: string; when: string; where?: string; with?: string; note?: string; start?: string; by: string; held?: { until: string }; confirmed?: string; agreed?: { by: string; said: string; speaks_for?: { house: string; checked: boolean } } };
-export type DoorNote = { id: string; reply_to?: { kind: 'email' | 'phone'; value: string }; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; twin?: { key: string; name: string }; person?: string; door_note?: string; from: { web?: boolean; as?: string; key?: string; webId?: string; /** They wrote to this AI of yours (its key id), at its own address, and it filed the message here. */ via?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string; own?: boolean; fixed?: boolean; entry?: string; /** Sent by your AI on your instruction for this chat. */ task?: string; /** Earlier answers to the same message, oldest first. */ before?: { text: string; by: string; at: string; task?: string }[] }; retracted?: { text: string; by: string; at: string; undone: string } };
+export type DoorNote = { id: string; /** Waits on nobody: the AI on duty replied or set it aside, or a task answered it (the house says). */ settled?: boolean; reply_to?: { kind: 'email' | 'phone'; value: string }; mode?: 'ai' | 'me'; known?: boolean; known_why?: string; lookalike?: boolean; twin?: { key: string; name: string }; person?: string; door_note?: string; from: { web?: boolean; as?: string; key?: string; webId?: string; /** They wrote to this AI of yours (its key id), at its own address, and it filed the message here. */ via?: string; name: string; domain: string; checked?: boolean; speaks_for?: { house: string; checked: boolean } }; text: string; at: string; answered?: { text: string; by: string; at?: string; own?: boolean; fixed?: boolean; entry?: string; /** Sent by your AI on your instruction for this chat. */ task?: string; /** Earlier answers to the same message, oldest first. */ before?: { text: string; by: string; at: string; task?: string }[] }; retracted?: { text: string; by: string; at: string; undone: string } };
 /** What else an AI may read besides the notes at your door (SPEC §6.1). */
 export type Reads = 'records' | 'money';
 /** "Messages only", "Messages, records", …: what an AI reads, in a row's few words. */
@@ -208,6 +208,12 @@ export const watching = (r: NonNullable<DutyInfo['runner']>) => {
   const late = Date.now() - Date.parse(r.last) > 3 * r.every * 1000;
   return `${r.host === 'house' ? 'Runs in your house' : `On ${r.host}`} since ${time(r.since)} · ${late ? `not looking since ${time(r.last)}${r.host === 'house' ? '' : ' (asleep?)'}` : `last looked ${time(r.last)}`}`;
 };
+/** The AI on duty in one line at the top of Today (triage, 14 Nov; wording after Grok): "Echo took care of 5 things since
+ *  10:00 PM · 2 need you". */
+export const dutyStrip = (d: { by: string; since: string; handled: number; needs: number }) => {
+  const need = d.needs ? `${d.needs} ${d.needs === 1 ? 'needs' : 'need'} you` : 'nothing needs you';
+  return d.handled ? `${d.by} took care of ${d.handled === 1 ? '1 thing' : `${d.handled} things`} since ${time(d.since)} · ${need}` : `${d.by}: ${need}`;
+};
 /** What a duty grant lets it do, in a few words: the grant's own kinds, not a fixed line (14 Nov: notes set aside joined). */
 export const dutyMay = (kinds: string[]) => {
   const w: Record<string, string> = { reply: 'replies', close: 'notes set aside', book: 'bookings', deliver: 'deliveries' };
@@ -273,5 +279,6 @@ export const ZONES: string[] = (() => { try { return (Intl as unknown as { suppo
 export function knownWaiting(v?: ListView) {
   const newest = new Map<string, DoorNote>();
   for (const n of v?.notes ?? []) { const k = n.person ?? chatKeyOf(n), p = newest.get(k); if (!p || p.at < n.at) newest.set(k, n); }
-  return [...newest.values()].filter((n) => n.known && !n.answered).length;
+  // The house's own answer for who still waits (settled), the same as Today's rows: never a badge with nothing under it.
+  return [...newest.values()].filter((n) => n.known && !n.answered && !n.settled).length;
 }

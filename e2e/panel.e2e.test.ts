@@ -1667,12 +1667,21 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tab('Today');
       const aside = page.locator('ion-list.handled ion-item.handled-row', { hasText: /Set aside .*'s note: A thanks; needs no answer/ });
       await aside.waitFor({ timeout: 10_000 });
+      // The line at the top of Today says what it took care of; a tap goes to the list of each thing it did.
+      await page.locator('.duty-strip', { hasText: /^Night AI took care of \d+ things? since .+ · (nothing needs you|\d+ needs? you)$/ }).click();
+      await page.locator('ion-list.handled').waitFor();
+      // Sam is someone it answers alone, so each of its lines about Sam offers to keep Sam for the owner.
+      await aside.getByRole('button', { name: 'Always ask me first about Sam', exact: true }).waitFor();
       await aside.getByRole('button', { name: 'Undo', exact: true }).click();
       await page.locator('ion-toast', { hasText: 'Undone' }).waitFor({ timeout: 10_000 });
       // Still on Today: the button did its own thing, not the row's.
       expect(page.url()).not.toContain('#ai');
       await page.locator('ion-list.handled ion-item.handled-row', { hasText: /needs no answer \(undone\)/ }).waitFor({ timeout: 10_000 });
       expect(await aside.getByRole('button', { name: 'Undo', exact: true }).count()).toBe(0);
+      // Always ask me first: Sam's chat is the owner's from now on, and no line offers it any more.
+      await page.locator('ion-list.handled').getByRole('button', { name: 'Always ask me first about Sam', exact: true }).first().click();
+      await page.locator('ion-toast', { hasText: 'Your AI leaves Sam to you from now on.' }).waitFor({ timeout: 10_000 });
+      await expect.poll(() => page.locator('ion-list.handled').getByRole('button', { name: 'Always ask me first about Sam', exact: true }).count(), { timeout: 10_000 }).toBe(0);
       const back = ((await asNight({ kind: 'list' })).notes as { id: string; handled?: unknown; kept?: string }[]).find((n) => n.id === thanks.note)!;
       expect(back.handled).toBeUndefined();
       expect(back.kept).toEqual(expect.any(String));

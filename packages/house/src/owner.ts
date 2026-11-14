@@ -511,6 +511,18 @@ export class OwnerDesk {
     await saveWhole(join(this.o.dataDir, 'tasks.json'), JSON.stringify(this.tasks));
   };
   /** A conversation's name, as chatModes holds it: the sender's key, or a web thread's own name. */
+  /** A card that is only words, maybe an unanswered question: one card a conversation may take its place. A warning (don't,
+   *  a sender to block, a mute) or anything to act on stays (round 43: a hostile contact's "ignore that" replaced a warning). */
+  private static wordsOnly(x: Suggestion): boolean {
+    const y = x as Suggestion & Record<string, unknown>;
+    return !x.reply && !x.ask?.answered && !x.request && !x.offer && !x.pledge && !x.errand && !x.booking && !x.rules && !x.door && !x.allowance && !x.sender && !x.mute && x.advice !== 'dont' && !y.count && !y.circleCall && !y.circleVote && !y.favourPay && !y.invitedBy;
+  }
+  /** The conversation a note is in, with keys the owner joined counted as one person. */
+  private chatOfNote(id: string): string | undefined {
+    const n = this.notes.find((x) => x.id === id);
+    const k = n ? OwnerDesk.conv(n.from) : undefined;
+    return k && n!.from.key && !n!.from.via ? this.personOf(k) : k;
+  }
   private static conv(from: { key?: string; web?: boolean; webId?: string; via?: string }): string | undefined {
     const k = from.key ?? (from.web ? from.webId : undefined);
     // Someone who wrote to the owner's AI and not to this house: a conversation of its own, even when the same key has
@@ -685,7 +697,7 @@ export class OwnerDesk {
   async today(tzOffset: number) {
     const midnight = (() => { const d = new Date(Date.now() - tzOffset * 60_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() + tzOffset * 60_000; })();
     const after = (iso?: string) => !!iso && Date.parse(iso) >= midnight;
-    type Line = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string };
+    type Line = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; /** Someone the AI on duty acts for alone: the owner may keep them ("Ask me first about …"). */ person?: { key: string; name: string } };
     const lines: Line[] = [];
     const panel = this.o.panel;
     if (!panel) return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
@@ -704,7 +716,9 @@ export class OwnerDesk {
     for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
       const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';
       const what = e.booking && e.booking !== 'confirmed' ? `Held a time with ${who}${{ held: ' for you to confirm', declined: ': you said no', expired: ': it lapsed, not confirmed', withdrawn: ', then took it back' }[e.booking]}` : e.action === 'close' ? `Set aside ${who}'s note: ${e.text ?? ''}` : e.action === 'reply' ? `Replied to ${who}` : e.action === 'book' ? `Booked ${e.text ? `"${e.text.slice(0, 60)}"` : 'a time'}${e.to?.name ? ` with ${who}` : ''}` : e.action === 'deliver' ? `Delivered an order to ${who}` : e.action === 'block' ? `Blocked ${e.to?.url ?? 'a sender'}` : `Left you a note`;
-      lines.push({ by: 'ai', text: `${what}${e.booking === 'confirmed' ? ' (you confirmed)' : e.undone ? ' (undone)' : ''}`, at: e.at, to: '#ai', ...(e.undo && !e.undone && !e.booking ? { undo: e.id } : {}) });
+      // Someone it answers or sets aside alone, while it still may: "Ask me first about <name>" keeps them for the owner.
+      const person = (e.action === 'reply' || e.action === 'close') && e.to?.key && this.modeOf({ key: e.to.key }) === 'ai' ? { key: e.to.key, name: who.replace(/ \(.*\)$/, '').replace(/'s AI$/, '') } : undefined;
+      lines.push({ by: 'ai', text: `${what}${e.booking === 'confirmed' ? ' (you confirmed)' : e.undone ? ' (undone)' : ''}`, at: e.at, to: '#ai', ...(e.undo && !e.undone && !e.booking ? { undo: e.id } : {}), ...(person ? { person } : {}) });
     }
     // What an AI sent on the owner's own instruction (a task): one line a task, at its last message.
     for (const t of this.tasks.filter((x) => x.did.length && after(x.did.at(-1)!.at)).slice(0, 5)) lines.push({ by: 'ai', text: `${shortLabel(this.assistants.get(t.by)?.label ?? 'Your AI')} wrote to ${t.to.name.replace(/ \(.*\)$/, '')} for you, as you asked`, at: t.did.at(-1)!.at, to: `#note=${t.note}` });
@@ -729,24 +743,44 @@ export class OwnerDesk {
     const noted = [...this.firstContacts.values()].filter((c) => after(c.noted));
     if (noted.length) lines.push({ by: 'house', text: `Your door note went to ${plural(noted.length, 'new person', 'new people')}`, at: noted.map((c) => c.noted!).sort().at(-1)!, to: '#door' });
     lines.sort((a, b) => b.at.localeCompare(a.at));
-    return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
+    return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople(), ...this.dutyLine() };
+  }
+  /** The AI on duty in one line for Today (triage, 14 Nov): what it handled since its night began, and how many of its cards
+   *  wait for the owner. The busiest one, if there are several; nothing when it did nothing and asks nothing. */
+  private dutyLine(): { duty?: { by: string; since: string; handled: number; needs: number } } {
+    const d = [...this.assistants.values()].filter((a) => a.duty && this.holdsDuty(a)).map((a) => {
+      const since = this.nightStart(a.duty!);
+      return { by: shortLabel(a.label), since: new Date(since).toISOString(), handled: this.dutySummary(a, since).handled, needs: this.suggestions.filter((x) => x.by === a.kid && this.waitsOnOwner(x)).length };
+    }).filter((x) => x.handled + x.needs).sort((x, y) => y.handled + y.needs - x.handled - x.needs)[0];
+    return d ? { duty: d } : {};
   }
 
   /**
    * People whose last note has no answer yet, from the owner or their AI on duty (round 15: Today said "You're all clear"
    * while strangers' notes piled up among the chats). Counted by person, the ones the owner's side knows apart.
    */
+  /** Whether a WebID is this house's own (its pod, or something under it). */
+  private ownHouse(webId?: string) { const me = this.o.webId; return !!me && !!webId && (webId === me || me.startsWith(`${webId.replace(/\/$/, '')}/`)); }
+  /** Whether a note waits on nobody: answered, set aside by the AI on duty, replied to by it since, or answered under a task
+   *  since. One answer for Today's rows, the list's notes and so the tab's badge (15 Nov: the badge counted a note the AI
+   *  had answered on duty, and Today showed nothing for it). */
+  private settled(n: OwnerDesk['notes'][number]): boolean {
+    if (n.answered || n.handled) return true;
+    if (n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && !!e.to?.key && this.personOf(e.to.key) === this.personOf(n.from.key!) && e.at >= n.at)) return true;
+    return this.tasks.some((t) => t.to.key === OwnerDesk.conv(n.from) && t.did.some((d) => d.at >= n.at));
+  }
   waitingPeople() {
     const newest = new Map<string, { at: string; key?: string; answered: boolean }>();
     for (const n of this.fullView(false).notes) {
       // One person, whatever key they wrote with ("This is Alex" joins a new key to them).
       // Someone who wrote to the owner's AI is a conversation of its own, as among the chats.
-      const who = n.from.via && n.from.key ? `via:${n.from.key}` : n.from.key ? this.personOf(n.from.key) : n.id, prev = newest.get(who);
+      // A note without a key (passed on by an AI before notes were signed) is filed under its sender's WebID, as the chats
+      // are, and the house's own news passed back that way is nobody waiting (15 Nov: "14 new people", eight of them four
+      // senders, and four the owner's own house).
+      if (this.ownHouse(n.from.webId)) continue;
+      const who = n.from.via && n.from.key ? `via:${n.from.key}` : n.from.key ? this.personOf(n.from.key) : n.from.webId ?? n.id, prev = newest.get(who);
       if (prev && prev.at >= n.at) continue;
-      const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && !!e.to?.key && this.personOf(e.to.key) === this.personOf(n.from.key!) && e.at >= n.at);
-      const underTask = this.tasks.some((t) => t.to.key === OwnerDesk.conv(n.from) && t.did.some((d) => d.at >= n.at));
-      // A note the AI on duty set aside needs no answer: nobody waits on it (Undo gives it back).
-      newest.set(who, { at: n.at, key: n.from.key, answered: !!n.answered || !!n.handled || aiReplied || underTask });
+      newest.set(who, { at: n.at, key: n.from.key, answered: this.settled(n) });
     }
     const open = [...newest.values()].filter((x) => !x.answered);
     const known = open.filter((x) => x.key && this.knownBy(x.key)).length;
@@ -1133,7 +1167,7 @@ export class OwnerDesk {
     const d = a.duty!;
     const tonight = this.dutyLog.filter((e) => e.by === a.kid && !e.refused && Date.parse(e.at) >= this.nightStart(d, at));
     const same = (e: DutyEntry) => e.action === action || (action === 'reply' && e.action === 'deliver') || (action === 'deliver' && e.action === 'reply');
-    const nightCap = action === 'book' ? Math.min(BOOKINGS_A_NIGHT, d.cap) : action === 'close' ? CLOSES_A_NIGHT : d.cap;
+    const nightCap = action === 'book' ? Math.min(BOOKINGS_A_NIGHT, d.cap) : action === 'close' ? Math.min(CLOSES_A_NIGHT, d.cap * 2) : d.cap;
     if (tonight.filter(same).length >= nightCap) return { ok: false, why: `tonight's limit of ${nightCap} ${action === 'book' ? 'bookings' : action === 'close' ? 'notes set aside' : 'replies'} is reached: back tomorrow night` };
     const mine = (e: DutyEntry) => !!who && ((!!who.key && e.to?.key === who.key) || (!who.key && !!who.name && e.to?.name === who.name));
     const perPerson = PER_PERSON[action] ?? 3;
@@ -1165,12 +1199,15 @@ export class OwnerDesk {
   dutySummary(a: AssistantKey, since: number) {
     const mine = this.dutyLog.filter((e) => e.by === a.kid && Date.parse(e.at) >= since);
     return {
-      handled: mine.filter((e) => !e.refused && COUNTED.has(e.action) && (!e.booking || e.booking === 'confirmed')).length,
-      waiting: this.suggestions.filter((x) => x.by === a.kid && Date.parse(x.at) >= since && ((x.ask && !x.ask.answered) || x.errand?.state === 'held' || (!x.ask && !x.errand))).length,
+      // A note set aside counts as handled (triage); what the owner took back doesn't.
+      handled: mine.filter((e) => !e.refused && !e.undone && (COUNTED.has(e.action) || e.action === 'close') && (!e.booking || e.booking === 'confirmed')).length,
+      waiting: this.suggestions.filter((x) => x.by === a.kid && Date.parse(x.at) >= since && this.waitsOnOwner(x)).length,
       blocked: mine.filter((e) => e.action === 'block').length,
       refused: mine.filter((e) => e.refused).length,
     };
   }
+  /** A card of an assistant's that waits for the owner: a question not answered, something held, or a note not put away. */
+  private waitsOnOwner(x: Suggestion) { return (x.ask && !x.ask.answered) || x.errand?.state === 'held' || (!x.ask && !x.errand); }
   /** An assistant's notes about a request that's gone (withdrawn, or replaced by a newer one) say nothing any more: off the
    * owner's list (6 Nov: a bot re-asking with a new price each time left a stack of "deny this" notes behind). */
   private dropNotesAbout(requestId: string) {
@@ -1653,6 +1690,10 @@ export class OwnerDesk {
           if (!n) return void res.status(404).json({ error: 'no such note: name it (note)' });
           if (n.from.web || this.modeOf(n.from) !== 'ai' || n.kept) return void res.status(403).json({ error: 'that note is your human\'s (someone new, or given back to them): leave it' });
           if (n.answered || n.handled) return void res.status(409).json({ error: 'that note was answered or set aside already' });
+          // Only what came in tonight, and never one with something to sign (round 43: a rogue or misled key could sweep a
+          // month of old notes out of sight, twenty a night).
+          if (Date.parse(n.at) < this.nightStart(d)) return void res.status(403).json({ error: 'that note came before tonight: it waits for your human' });
+          if ((n as { pledge?: unknown }).pledge) return void res.status(403).json({ error: 'that note asks your human to sign something: leave it for them' });
           if (!line) return void res.status(400).json({ error: 'handled: one line on why it needs no answer' });
           const room = this.dutyRoom(assistant, 'close', { key: n.from.key, name: n.from.name });
           if (!room.ok) return void res.status(429).json({ error: room.why });
@@ -1804,12 +1845,22 @@ export class OwnerDesk {
             // The recommendation is dropped, not the question refused (run 45: refused, the assistant reposted it as "do").
             if (!priv) ask = { choices, ...(q.advice !== 'your_call' && Number.isInteger(r) && r >= 0 && r < choices.length ? { recommend: r } : {}) };
           }
+          // One card a conversation (triage, 14 Nov): a new note about someone's message takes the place of this AI's earlier
+          // one about the same chat, while that one is only words and a question nobody has answered yet. A card that
+          // carries anything else (a request, an offer, an errand, a time) stays: it is the owner's to act on.
+          const chat = aboutNote ? this.chatOfNote(aboutNote) : undefined;
+          const before = !old && aboutNote ? this.suggestions.find((x) => x.by === assistant.kid && x.note && (x.note === aboutNote || (!!chat && this.chatOfNote(x.note) === chat)) && OwnerDesk.wordsOnly(x)) : undefined;
+          if (before) this.suggestions = this.suggestions.filter((x) => x !== before);
           const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text, ...(sender ? { sender } : {}), ...(allowance ? { allowance } : {}), ...(request ? { request } : {}), ...(offer ? { offer } : {}), ...(pledge ? { pledge } : {}), ...(count ? { count } : {}), ...(circleCall ? { circleCall } : {}), ...(circleVote ? { circleVote } : {}), ...(favourPay ? { favourPay } : {}), ...(aboutNote ? { note: aboutNote, ...(mute ? { mute: true } : {}) } : {}), ...(rules ? { rules } : {}), ...(door ? { door } : {}), ...(q.advice ? { advice: q.advice as Advice } : {}), ...(ask ? { ask } : {}), at: new Date().toISOString() };
           this.suggestions = [sug, ...this.suggestions];
           this.trimSuggestions();
           await this.saveSuggestions();
-          this.notifyOwner('suggestion', ask ? 'Your AI has a question for you.' : 'Your AI left you a note.');
-          return void res.json({ ok: true, id: sug.id, ...(old ? { replaced: old.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
+          // Who and about whom, so the owner knows from the lock screen whether it can wait (the sender's name, never their words).
+          // A web sender's name is whatever they typed: not shown, as for the note's own notification (round 43).
+          const nf = aboutNote ? this.notes.find((n) => n.id === aboutNote)?.from as { name?: string; web?: boolean; as?: string } | undefined : undefined;
+          const aboutWho = nf?.as ?? (nf?.name && !nf.web ? nf.name.replace(/ \(.*\)$/, '') : undefined), ai = shortLabel(assistant.label);
+          this.notifyOwner('suggestion', aboutWho ? `${ai} has ${ask ? 'a question' : 'a note'} about ${aboutWho}'s message.` : ask ? `${ai} has a question for you.` : `${ai} left you a note.`);
+          return void res.json({ ok: true, id: sug.id, ...(old ?? before ? { replaced: (old ?? before)!.id } : {}), note: adviceDropped ? 'your human sees it in their control panel, as words for them: advice is for a request, an offer, a pledge, a note, rules or a door line you name, so it was left off' : 'your human sees it in their control panel' });
         }
         if (p.kind === 'assistant.spent') {
           // The assistant hands back the receipt for what it spent: the owner sees it with their money, and the order turns paid.
@@ -2866,8 +2917,14 @@ export class OwnerDesk {
             const w = q as { key?: string; mode?: string };
             const key = String(w.key ?? '');
             if (!key || !['ai', 'me'].includes(String(w.mode))) return { error: 'chat.mode: { key, mode: "ai" | "me" }' };
-            this.chatModes[key] = w.mode as 'ai' | 'me';
-            if (w.mode === 'me') this.endTasksWith(key, 'You answer this chat yourself.');
+            // The person, not one key (round 43: "Always ask me first about Alex" left the key the owner had joined to Alex
+            // with the AI): every key joined to the same person, and their chat with the owner's AI at its own address.
+            const root = this.personOf(key.replace(/^via:/, ''));
+            // A chat with the owner's AI at its own address (via:) is its own: handing it over leaves the door's chat as it was.
+            const keys = new Set(key.startsWith('via:') ? [key] : [key, root, ...Object.keys(this.sameAs).filter((k) => this.personOf(k) === root)]);
+            if (w.mode === 'me' && !key.startsWith('via:')) for (const k of [...keys]) if (this.chatModes[`via:${k}`] === 'ai') keys.add(`via:${k}`);
+            for (const k of keys) this.chatModes[k] = w.mode as 'ai' | 'me';
+            if (w.mode === 'me') for (const k of keys) this.endTasksWith(k, 'You answer this chat yourself.');
             await this.saveChatModes();
             return { ok: true, mode: w.mode };
           },
@@ -3097,7 +3154,7 @@ export class OwnerDesk {
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
       wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
       seen: forAssistant ? undefined : this.chatSeen,
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && !n.from.via && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from) }; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && !n.from.via && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from), ...(!a && this.settled(n) ? { settled: true } : {}) }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { adviceOf, doorOf, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, tableLine, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
+import { adviceOf, doorOf, dutyStrip, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, tableLine, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
 import { ReadsToggles } from './ai';
 import { WantRow, WelcomeCard, blockAsk, wantNeedsYou } from './chats';
 import { push } from './nav';
@@ -13,7 +13,7 @@ import { TaskCard, TellButton } from './tasks';
 /** What the last sign-in answer did, kept past the refetch that takes the request away. */
 let connectedNote = '';
 
-type TodayLine = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string };
+type TodayLine = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; person?: { key: string; name: string } };
 const BY: Record<TodayLine['by'], { label: string; icon: string; tint: string }> = {
   rules: { label: 'Your rules', icon: 'list-outline', tint: 'mint' },
   ai: { label: 'Your AI', icon: 'sparkles-outline', tint: 'violet' },
@@ -29,7 +29,7 @@ const BY: Record<TodayLine['by'], { label: string; icon: string; tint: string }>
 export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
-  const today = useHouse<{ since: string; lines: TodayLine[]; waiting?: { people: number; known: number; since?: string; more?: boolean } }>({ kind: 'panel.today', tz_offset: new Date().getTimezoneOffset() });
+  const today = useHouse<{ since: string; lines: TodayLine[]; waiting?: { people: number; known: number; since?: string; more?: boolean }; duty?: { by: string; since: string; handled: number; needs: number } }>({ kind: 'panel.today', tz_offset: new Date().getTimezoneOffset() });
   const v = list.data;
   if (!v) return h(Page, { title: 'Today', big: true, status, footer: tabbar }, h(Failed, { error: list.error }));
   const groups = sameAsks(v.requests);
@@ -45,6 +45,9 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const lines = today.data?.lines ?? [];
   return h(Page, { title: 'Today', big: true, status, footer: tabbar },
     h(WelcomeCard, { door: door.data, key: 'welcome' }),
+    // Your AI on duty in one line; a tap shows each thing it did, with Undo (Grok: "the number stays abstract" without them).
+    today.data?.duty ? h('button', { class: 'duty-strip', key: 'duty', onClick: () => document.querySelector('ion-list.handled')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+      h('ion-icon', { name: 'moon-outline' }), h('span', {}, dutyStrip(today.data.duty))) : null,
     h('h3', { class: 'section-h', key: 'nh' }, 'Needs your attention'),
     connectedNote ? h('ion-card', { class: 'lake-card ok-card', key: 'cn' }, h('ion-card-content', {}, h('p', {}, connectedNote), h('ion-button', { size: 'small', fill: 'clear', onClick: () => { connectedNote = ''; } }, 'OK'))) : null,
     ...(v.connects ?? []).map((c) => h(ConnectCard, { key: `c-${c.id}`, c })),
@@ -61,7 +64,10 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     !any ? h('div', { class: 'all-clear', key: 'clear' }, h('ion-icon', { name: 'checkmark-done-outline' }), h('div', {}, h('b', {}, 'You\'re all clear'), h('p', {}, 'Nothing needs your attention. Your house is keeping an eye on things.'))) : null,
     h(Section, { title: 'Handled for you', key: 'handled', cls: 'handled' },
       ...(lines.length ? lines.map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => push(l.to), cls: 'handled-row',
-        below: l.undo ? h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: l.undo }), done: 'Undone' }) : undefined }))
+        below: l.undo || l.person ? h('div', { class: 'handled-acts' },
+          l.undo ? h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: l.undo }), done: 'Undone' }) : null,
+          // Keeps that person for the owner: their messages wait for them, and the AI on duty leaves them alone.
+          l.person ? h(Btn, { label: `Always ask me first about ${l.person.name}`, size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.chat.mode', key: l.person!.key, mode: 'me' }), done: `Your AI leaves ${l.person.name} to you from now on.` }) : null) : undefined }))
         : [h('ion-item', { key: 'none', lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, today.data ? h('p', {}, 'Nothing handled yet today.') : h('ion-skeleton-text', { animated: true, style: 'width:70%;height:14px' })))])),
     // Notes that need nothing from you: one short line each, the newest few; the whole note opens in a sheet (12 Nov: a
     // wall of long notes drowned the few that need you).

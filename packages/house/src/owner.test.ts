@@ -360,6 +360,8 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(seen.notes.find((n: { id: string }) => n.id === second)).toMatchObject({ answered: { by: 'Night AI', text: 'Robin will answer in the morning.', entry: said.entry } });
     expect(seen.notes.find((n: { id: string }) => n.id === first)).toMatchObject({ answered_since: expect.any(String) });
     expect(seen.notes.find((n: { id: string }) => n.id === first).answered).toBeUndefined();
+    // The owner's list: Sam's older note waits on nobody either (the AI replied since), so the badge doesn't count it.
+    expect((await owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === first)).toMatchObject({ settled: true });
     expect(seen.tonight).toEqual([expect.objectContaining({ action: 'reply', to: 'Sam\'s AI', text: 'Robin will answer in the morning.' })]);
     expect(seen.suggestions.map((x: { id: string }) => x.id)).toContain(tip.id);
     // The owner's own list has no such fields, and another AI's doesn't carry the night.
@@ -675,10 +677,19 @@ describe('what an attacker tried (round 16)', () => {
     const done = await asAi({ kind: 'assistant.suggest', note: thanks, handled: 'a thanks for Friday' });
     expect(done).toMatchObject({ ok: true, handled: thanks });
     expect(await asAi({ kind: 'assistant.suggest', note: thanks, handled: 'again' })).toMatchObject({ error: expect.stringContaining('already') });
+    // Only what came in tonight (round 43: a misled key could sweep a month of old notes out of sight).
+    const old = h.desk.addNote({ from: from('kim'), text: 'Thanks for last month' })!;
+    h.desk.notes.find((n) => n.id === old)!.at = new Date(Date.now() - 13 * 3_600_000).toISOString();
+    expect(await asAi({ kind: 'assistant.suggest', note: old, handled: 'an old thanks' })).toMatchObject({ error: expect.stringContaining('before tonight') });
     // The owner sees the line, with Undo, and nobody waits on Kim's thanks.
     const today = await h.owner({ kind: 'panel.today', tz_offset: 0 });
     const line = today.lines.find((l: { text: string }) => l.text.startsWith('Set aside'));
-    expect(line).toMatchObject({ text: expect.stringContaining('a thanks for Friday'), undo: done.entry });
+    expect(line).toMatchObject({ text: expect.stringContaining('a thanks for Friday'), undo: done.entry, person: { key: expect.any(String), name: expect.any(String) } });
+    // The list says nobody waits on it, so the tab's badge agrees with Today (15 Nov: a badge of 1 with nothing under it).
+    expect((await h.owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === thanks)).toMatchObject({ settled: true });
+    expect(today.waiting).toMatchObject({ known: 0 });
+    // Today's one line about the AI on duty: one thing taken care of, nothing waiting on the owner.
+    expect(today.duty).toMatchObject({ by: 'Night AI', handled: 1, needs: 0, since: expect.any(String) });
     // Undo: back on the owner's list, theirs from now on (the AI may not set it aside again).
     expect(await h.owner({ kind: 'panel.duty.undo', entry: done.entry })).toMatchObject({ ok: true, back: thanks });
     expect(h.desk.notes.find((n) => n.id === thanks)).toMatchObject({ kept: expect.any(String) });
@@ -686,7 +697,43 @@ describe('what an attacker tried (round 16)', () => {
     expect(after.text).toMatch(/\(undone\)$/);
     expect(after.undo).toBeUndefined();
     expect(await asAi({ kind: 'assistant.suggest', note: thanks, handled: 'a thanks' })).toMatchObject({ error: expect.stringContaining('your human') });
-    // A grant without it: refused.
+    // One card a conversation: a second note about Kim's chat takes the place of the first while nobody answered it.
+    const ask1 = h.desk.addNote({ from: from('kim'), text: 'Could you lend me 20?' })!;
+    const ask2 = h.desk.addNote({ from: from('kim'), text: 'Actually 30, if you can.' })!;
+    const c1 = await asAi({ kind: 'assistant.suggest', note: ask1, text: 'Kim asks to borrow 20.', ask: { choices: ['Lend it', 'Say no'] } });
+    const c2 = await asAi({ kind: 'assistant.suggest', note: ask2, text: 'Kim now asks for 30.', ask: { choices: ['Lend it', 'Say no'] } });
+    expect(c2).toMatchObject({ ok: true, replaced: c1.id });
+    expect(h.desk.suggestions.filter((x) => x.note === ask1 || x.note === ask2).map((x) => x.id)).toEqual([c2.id]);
+    expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).duty).toMatchObject({ handled: 0, needs: 1 });
+    // Answered, it stays: a new card is a new question.
+    expect(await h.owner({ kind: 'panel.assistant.answer', id: c2.id, choice: 'Say no' })).toMatchObject({ ok: true });
+    const c3 = await asAi({ kind: 'assistant.suggest', note: ask2, text: 'Kim asks again.', ask: { choices: ['Lend it', 'Say no'] } });
+    expect(c3.replaced).toBeUndefined();
+    // A warning stays: a later words-only card about the same chat doesn't take its place (round 43).
+    const scam = h.desk.addNote({ from: from('kim'), text: 'Send me your card number' })!;
+    const warn = await asAi({ kind: 'assistant.suggest', note: scam, text: 'This looks like a scam: don\'t send it.', advice: 'dont' });
+    const sorry = h.desk.addNote({ from: from('kim'), text: 'Sorry, ignore that' })!;
+    expect((await asAi({ kind: 'assistant.suggest', note: sorry, text: 'Kim says to ignore it.' })).replaced).toBeUndefined();
+    expect(h.desk.suggestions.some((x) => x.id === warn.id)).toBe(true);
+    // Always ask me first about Kim: her chat is the owner's, and the line no longer offers it; so is the key the owner
+    // joined to her (round 43).
+    const kimKey = h.desk.notes.find((n) => n.id === ask1)!.from.key!;
+    h.desk.addNote({ from: from('kim2'), text: 'Kim here, new phone' });
+    expect(await h.owner({ kind: 'panel.person.same', key: from('kim2').key, as: kimKey })).toMatchObject({ ok: true });
+    expect(await h.owner({ kind: 'panel.chat.mode', key: kimKey, mode: 'me' })).toMatchObject({ ok: true });
+    expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).lines.find((l: { text: string }) => l.text.startsWith('Set aside')).person).toBeUndefined();
+    expect(h.desk.modeOf({ key: from('kim2').key })).toBe('me');
+    h.close();
+  });
+
+  it('notes without a key count once a sender, and the house\'s own passed-back news is nobody waiting (15 Nov: "14 new people")', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const me = (h.desk as unknown as { o: { webId: string } }).o.webId;
+    const old = (name: string, webId: string) => ({ name: `${name} (to your assistant, while it was away)`, domain: new URL(webId).host, webId, checked: false });
+    for (let i = 0; i < 3; i++) h.desk.addNote({ from: old('Kite', 'https://kite.example/#a'), text: `Hello ${i}` });
+    h.desk.addNote({ from: old('Your house', new URL(me).origin + new URL(me).pathname.split('/').slice(0, 3).join('/')), text: 'news' });
+    h.desk.addNote({ from: old('Your house', me), text: 'more news' });
+    expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).waiting).toMatchObject({ people: 1, known: 0 });
     h.close();
   });
 

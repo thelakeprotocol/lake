@@ -27,6 +27,15 @@ describe('tool sets (SPEC §6.1)', () => {
     expect(DUTY_TOOLS.every((t) => all.includes(t))).toBe(true);
   });
 
+  it('setting a note aside needs no text: the call the runner is told to make passes the schema (round 41)', async () => {
+    const c = await connect();
+    const t = (await c.listTools()).tools.find((x) => x.name === 'lake_house_suggest')!;
+    expect((t.inputSchema as { required?: string[] }).required ?? []).not.toContain('text');
+    // Not connected to a house, so it fails after the schema, saying so: not a validation error about text.
+    const r = await c.callTool({ name: 'lake_house_suggest', arguments: { note: 'n1', handled: 'a thanks' } }) as { content: { text: string }[] };
+    expect(r.content[0]!.text).not.toMatch(/text.*Required|invalid_type/i);
+  });
+
   it('narrows the list only: a tool left off still answers when called', async () => {
     const c = await connect();
     expect(await names(c)).toEqual([...TOOL_SETS.core!].sort());

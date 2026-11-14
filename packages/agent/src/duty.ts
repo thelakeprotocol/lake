@@ -184,8 +184,9 @@ export function runAgent(o: { agent: string; lake: string; token: string; prompt
   writeFileSync(config, JSON.stringify({ mcpServers: { lake: { type: 'http', url: o.lake, headers: { Authorization: `Bearer ${o.token}` } } } }), { mode: 0o600 });
   const [cmd, ...rest] = o.agent.trim().split(/\s+/);
   const claude = /(^|\/)claude$/.test(cmd!);
-  // Claude Code: the Lake is its only MCP server, no built-in tools at all, a cap on turns, run in an empty folder.
-  const args = claude ? [...rest.filter((x) => x !== '-p'), '-p', o.prompt, '--mcp-config', config, '--strict-mcp-config', '--tools', '', '--allowedTools', ...(o.tools ?? DUTY_TOOLS).map((t) => `mcp__lake__${t}`), '--max-turns', String(o.maxTools), '--output-format', 'text'] : rest;
+  // Claude Code: the Lake is its only MCP server, no built-in tools at all, a cap on turns, run in an empty folder, and no
+  // session of its own saved (round 43: it kept every run, people's words included, for 30 days beside our 7-day transcripts).
+  const args = claude ? [...rest.filter((x) => x !== '-p'), '-p', o.prompt, '--no-session-persistence', '--mcp-config', config, '--strict-mcp-config', '--tools', '', '--allowedTools', ...(o.tools ?? DUTY_TOOLS).map((t) => `mcp__lake__${t}`), '--max-turns', String(o.maxTools), '--output-format', 'text'] : rest;
   return new Promise((done) => {
     const c = spawn(cmd!, args, { cwd: o.cwd, env: { ...process.env, LAKE_MCP_CONFIG: config, LAKE_DUTY_MAX_TOOLS: String(o.maxTools) }, stdio: [claude ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
     let out = '';
