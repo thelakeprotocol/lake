@@ -161,7 +161,11 @@ export function AiKeyPage({ arg }: { arg: string }) {
     onDuty ? null : h(Section, { title: 'What it can read', cls: 'reads' },
       // The same words wherever it's said (14 Nov: four screens said four things about what it reads).
       h(Row, { icon: 'chatbubbles-outline', label: 'Who writes to you', sub: 'Always: who wrote and when, its own errands, your agenda and free hours. Their words only in chats you hand it or tell it about', detail: false }),
-      h(ReadsToggles, { value: a.reads ?? [], bare: true, onChange: async (reads: Reads[]) => { await must({ kind: 'panel.assistant.reads', kid: a.kid, reads }); void toast(readsLine(reads)); } })),
+      // While it holds a time on duty it reads only the base, whatever is switched on: said, and the switches wait (14 Nov:
+      // they seemed to save, then sprang back off).
+      a.dutyHeld ? h('ion-item', { lines: 'full', class: 'reads-held' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, `While ${shortName(a.label)} holds a time on duty (until ${new Date(a.dutyHeld).toLocaleDateString([], { day: 'numeric', month: 'short' })}), it reads only who writes to you and its errands. Take it off duty to let it read more.`),
+        h(Btn, { label: 'Take it off duty', size: 'small', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.duty.off', kid: a.kid }), done: `${shortName(a.label)} is off duty`, ask: { header: `Take ${shortName(a.label)} off duty?`, sub: 'Its time on duty ends now. You can sign a new one any time.', button: 'Take it off duty' } }))) : null,
+      h(ReadsToggles, { value: a.readsChosen ?? a.reads ?? [], bare: true, disabled: !!a.dutyHeld, onChange: async (reads: Reads[]) => { await must({ kind: 'panel.assistant.reads', kid: a.kid, reads }); void toast(readsLine(reads)); } })),
     onDuty ? null : h(Allowance, { a }),
     h('div', { class: 'pad' }, h(Btn, { label: 'Remove this AI', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); back('#ai'); }, ask: { header: `Remove ${shortName(a.label)}?`, sub: 'Its key stops working.', button: 'Remove' }, done: 'Removed' })));
 }
@@ -200,7 +204,7 @@ const READS_SAID: [Reads, string, string][] = [
   ['money', 'Your money', 'What you\'ve earned and spent, offers priced for you, the most you\'d pay for things you want'],
 ];
 /** Besides the messages at your door, what an AI may read: off unless you switch it on. */
-export function ReadsToggles({ value, onChange, bare }: { value: Reads[]; onChange: (r: Reads[]) => void; bare?: boolean }) {
-  const items = READS_SAID.map(([r, label, sub]) => h('ion-item', { key: r, lines: 'full', class: `reads-${r}` }, h('ion-toggle', { checked: value.includes(r), justify: 'space-between', onionChange: (e: CustomEvent) => onChange(e.detail.checked ? [...new Set([...value, r])] : value.filter((x) => x !== r)) }, h('span', { class: 'toggle-title' }, label), h('span', { class: 'toggle-sub' }, sub))));
+export function ReadsToggles({ value, onChange, bare, disabled }: { value: Reads[]; onChange: (r: Reads[]) => void; bare?: boolean; disabled?: boolean }) {
+  const items = READS_SAID.map(([r, label, sub]) => h('ion-item', { key: r, lines: 'full', class: `reads-${r}` }, h('ion-toggle', { checked: value.includes(r), disabled: !!disabled, justify: 'space-between', onionChange: (e: CustomEvent) => onChange(e.detail.checked ? [...new Set([...value, r])] : value.filter((x) => x !== r)) }, h('span', { class: 'toggle-title' }, label), h('span', { class: 'toggle-sub' }, sub))));
   return bare ? items : h('ion-list', { inset: true, class: 'lake-list reads-list' }, h('ion-list-header', {}, h('ion-label', {}, 'It also sees')), ...items);
 }

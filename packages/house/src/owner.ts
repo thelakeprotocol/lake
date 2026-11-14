@@ -3028,9 +3028,15 @@ export class OwnerDesk {
     }));
   }
 
-  /** What an assistant may read beyond the base: nothing while it's on duty, else what the owner chose. */
+  /** A grant to act on its own that still stands (not taken back, not past its date): while it does, the AI reads nothing
+   *  beyond the base, whatever the owner switched on. */
+  private holdsDuty(a?: AssistantKey): boolean {
+    return !!a?.duty && !this.isRevoked(a.duty.statusId) && Date.parse(a.duty.until) > Date.now();
+  }
+
+  /** What an assistant may read beyond the base: nothing while it holds a time on duty, else what the owner chose. */
   private readsOf(a?: AssistantKey): Set<Reads> {
-    if (!a || (a.duty && !this.isRevoked(a.duty.statusId))) return new Set();
+    if (!a || this.holdsDuty(a)) return new Set();
     // Money that came with an allowance (to see the offers it pays) goes when the allowance does.
     return new Set((a.reads ?? []).filter((r) => !(r === 'money' && a.moneyWithAllowance && !this.allowanceFor(a.kid))));
   }
@@ -3049,7 +3055,7 @@ export class OwnerDesk {
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       connects: [...this.connects].filter(([, c]) => Date.now() - c.at < 15 * 60_000).map(([id, c]) => ({ id, app: c.app, from: c.from, number: c.number, at: new Date(c.at).toISOString() })),
       // Awake: something runs it and looked lately (the house's own runner, or one on a computer), so a task starts soon.
-      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId, reads, duty }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid), r = duty?.runner; return { kid, label, addedAt, seenAt, ...(r ? { runs: r.host === 'house' ? 'house' : 'computer', awake: Date.now() - Date.parse(r.last) < Math.max(3 * r.every, 180) * 1000 } : {}), reads: duty ? [] : (reads ?? []).filter((r) => !(r === 'money' && this.assistants.get(kid)?.moneyWithAllowance && !a)), ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
+      assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId, reads, duty }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid), r = duty?.runner; return { kid, label, addedAt, seenAt, ...(r ? { runs: r.host === 'house' ? 'house' : 'computer', awake: Date.now() - Date.parse(r.last) < Math.max(3 * r.every, 180) * 1000 } : {}), ...((chosen) => (this.holdsDuty(this.assistants.get(kid)) ? { reads: [], readsChosen: chosen, dutyHeld: duty!.until } : { reads: chosen }))((reads ?? []).filter((r) => !(r === 'money' && this.assistants.get(kid)?.moneyWithAllowance && !a))), ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       // What the owner told an AI to do: the open ones, and those that ended in the last two days.
       tasks: forAssistant ? [] : this.tasks.filter((t) => t.state === 'open' || Date.parse(t.ended?.at ?? t.at) > Date.now() - 48 * 3_600_000).map((t) => this.taskView(t)),
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,

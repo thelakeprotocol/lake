@@ -211,6 +211,11 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0, cap: 2 });
     // On duty it reads the notes and its errands only, whatever it asks the house for (not just what the connector allows).
     expect(await asAi({ kind: 'panel.consents' })).toMatchObject({ needs: 'records' });
+    // What the owner switches on is kept, and said as held back while the grant stands (14 Nov: the switches sprang back off).
+    const nightKid = ((await owner({ kind: 'list' })).assistants as { kid: string; label: string }[]).find((x) => x.label === 'Night AI')!.kid;
+    expect(await owner({ kind: 'panel.assistant.reads', kid: nightKid, reads: ['records'] })).toMatchObject({ ok: true, reads: ['records'] });
+    expect(((await owner({ kind: 'list' })).assistants as { kid: string }[]).find((x) => x.kid === nightKid)).toMatchObject({ reads: [], readsChosen: ['records'], dutyHeld: expect.any(String) });
+    expect(await asAi({ kind: 'panel.consents' })).toMatchObject({ needs: 'records' });
 
     // Known: a key the owner's side wrote to, or a standing yes; a stranger isn't, however often it writes.
     expect(await asAi({ kind: 'assistant.known', key: 'sam-key-0123456789abcdefgh' })).toMatchObject({ known: false });
@@ -255,6 +260,10 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     // Off duty: one tap; its status bit is set and it can't act any more.
     expect(await owner({ kind: 'panel.duty.off' })).toMatchObject({ ok: true, off: 1 });
     expect(await asAi({ kind: 'assistant.duty' })).toMatchObject({ on: false, why: expect.stringContaining('off duty') });
+    // Off duty, what the owner chose applies.
+    const after = ((await owner({ kind: 'list' })).assistants as { kid: string; dutyHeld?: string }[]).find((x) => x.kid === nightKid)!;
+    expect(after).toMatchObject({ reads: ['records'] });
+    expect(after.dutyHeld).toBeUndefined();
     server.close();
   });
 

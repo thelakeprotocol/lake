@@ -120,7 +120,7 @@ function AgendaRow({ a }: { a: AgendaItem }) {
     h('div', { slot: 'start', class: `row-icon tint-${!a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber'}` }, h('ion-icon', { name: 'calendar-outline' })),
     h('ion-label', {}, h('h3', {}, a.what), h('p', {}, [a.when, a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · '))),
     h(Pill, { text: a.held ? 'Held' : a.confirmed ? 'Confirmed' : a.agreed ? 'Agreed' : 'Proposed', tone: !a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber' }),
-    h('ion-button', { slot: 'end', fill: 'clear', color: 'medium', 'aria-label': `Remove ${a.what}`, onClick: async () => { await call({ kind: 'panel.agenda.remove', id: a.id }); void toast('Removed'); } }, h('ion-icon', { name: 'close', slot: 'icon-only' })));
+    h('div', { slot: 'end' }, h(Btn, { fill: 'clear', color: 'medium', size: 'small', label: h('ion-icon', { name: 'close', slot: 'icon-only' }), label2: `Remove ${a.what}`, cls: 'agenda-remove', run: () => must({ kind: 'panel.agenda.remove', id: a.id }), done: 'Removed' })));
 }
 
 function Notes({ notes }: { notes: Note[] }) {
@@ -143,6 +143,7 @@ const dayTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: 'sh
 /** Your AI's question or suggestion: what it says and advises, and each answer as a button. */
 export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) {
   const bump = useBump();
+  const [gone, setGone] = useState(false);
   const [more, setMore] = useState(false);
   const [reply, setReply] = useState('');
   const [replying, setReplying] = useState(false);
@@ -174,6 +175,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   if (x.circleCall && !x.circleCall.sent) acts.push(h(Btn, { key: 'cc', label: `Ask my circle${x.circleCall.help ? ` (${x.circleCall.help})` : ''}`, run: () => must({ kind: 'panel.circle.call', note: x.id }) }));
   if (x.count?.mine && !x.count.answered) acts.push(h(Btn, { key: 'ct', label: 'Count it in', run: () => must({ kind: 'panel.count.answer', note: x.id }) }));
   if (x.pledge && !x.pledge.quorum) acts.push(h(Btn, { key: 'pl', label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); }, ...(x.pledge.money ? { ask: { header: `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)}?`, sub: `Held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}: paid on only if ${x.pledge.money.threshold} sign; otherwise back to you.`, button: 'Put in and sign', destructive: false } } : {}) }));
+  if (gone) return null;
   return h('ion-card', { class: 'lake-card sug' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.booking ? 'calendar-outline' : x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
     x.invitedBy ? h('p', { class: `private-line${x.invitedBy.known ? '' : ' warn-text'}` }, h('ion-icon', { name: x.invitedBy.known ? 'person-outline' : 'alert-circle-outline' }), x.invitedBy.known ? ` From ${x.invitedBy.name}, someone your side knows. The terms below are the tally's own.` : ` From ${x.invitedBy.name}, someone your side hasn't dealt with: their words are unchecked. The terms below are the tally's own.`) : null,
@@ -201,7 +203,9 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
     x.booking ? null : h('div', { class: 'card-foot quiet' },
       h(TellButton, { x, onSent: onDone, fallback: !x.reply && !replying ? () => setReplying(true) : undefined }),
       x.note && x.mute && !block ? h(Btn, { label: 'Block', fill: 'clear', size: 'small', color: 'medium', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); }, ask: blockAsk() }) : null,
-      ownNo ? null : h('ion-button', { fill: 'clear', size: 'small', color: 'medium', class: 'foot-end', onClick: async () => { await dismiss(); onDone?.(); bump(); } }, 'Dismiss'))));
+      // A spinner while it goes, and the card leaves the moment the house has it (14 Nov: nothing showed, then a few seconds
+      // later the card was simply gone); a failure says so, like any other button.
+      ownNo ? null : h(Btn, { label: 'Dismiss', fill: 'clear', size: 'small', color: 'medium', cls: 'foot-end', run: async () => { await must({ kind: 'panel.assistant.dismiss', id: x.id }); setGone(true); onDone?.(); } }))));
 }
 
 function Quorum({ x }: { x: Note }) {

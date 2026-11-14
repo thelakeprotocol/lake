@@ -1285,6 +1285,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // This time it goes: it says so, and the question leaves Today once the house has it.
     await page.getByText(/^Sent to .+: Say yes$/).waitFor({ timeout: 10_000 });
     await swap.waitFor({ state: 'detached', timeout: 10_000 });
+    // Dismiss is a button like the others: the card leaves as soon as the house has it, not at the next refresh.
+    await one.call('lake_house_suggest', { text: 'Parcel Express keeps asking for a fee: ignore it.', advice: 'dont', sender: 'Parcel Express' });
+    const fyi = page.locator('ion-card.sug', { hasText: 'keeps asking for a fee' });
+    await fyi.waitFor({ timeout: 10_000 });
+    await fyi.getByRole('button', { name: 'Dismiss' }).click();
+    await fyi.waitFor({ state: 'detached', timeout: 3000 });
     let briefed: { message?: { text?: string } }[] = [];
     for (let i = 0; i < 10 && !briefed.some((m) => m.message?.text?.startsWith('Brief:')); i++) briefed = [...briefed, ...(await shopperInbox())];
     expect(briefed.some((m) => m.message?.text === 'Brief: 3 bullets on the Lake, plain words.')).toBe(true);
