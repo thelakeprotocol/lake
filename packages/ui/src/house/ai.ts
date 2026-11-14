@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, houseBase, must, useHouse, useRedraw } from './api';
 import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { CURRENCIES, DUTY_KINDS, dayTime, dutyLine, dutyLive, lastHere, money$, readsLine, receiptWords, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads } from './logic';
+import { CURRENCIES, DUTY_KINDS, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads } from './logic';
 import { back, push } from './nav';
 
 // My AI: your own AI with a key to your house. Your AIs first, then AI on duty, then what it did while you were away.
@@ -84,7 +84,7 @@ function ConnectSheet({ houseUrl, ais }: { houseUrl: string; ais: Assistant[] })
 
 /** What your AI on duty may do, in which hours, how many things a night, for how long; signed here; then the command. */
 function DutySetup({ houseUrl, log, done, start }: { houseUrl: string; log?: DutyLog; done: () => void; start?: 'house' | 'computer' }) {
-  const [kinds, setKinds] = useState<string[]>(['reply', 'book']);
+  const [kinds, setKinds] = useState<string[]>(['reply', 'close', 'book']);
   const [from, setFrom] = useState('22:00');
   const [to, setTo] = useState('07:00');
   const [cap, setCap] = useState(10);
@@ -152,11 +152,11 @@ export function AiKeyPage({ arg }: { arg: string }) {
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const a = v.data?.assistants.find((x) => x.kid === arg);
   if (!a) return h(Page, { title: 'Your AI', back: () => back('#ai'), backLabel: 'My AI' }, v.data ? h(Empty, { icon: 'sparkles-outline', title: 'This AI isn\'t connected any more' }) : h(Failed, { error: v.error }));
-  const onDuty = (duty.data?.duties ?? []).some((d) => d.kid === a.kid && dutyLive(d));
+  const mine = (duty.data?.duties ?? []).find((d) => d.kid === a.kid && dutyLive(d)), onDuty = !!mine;
   return h(Page, { title: shortName(a.label), back: () => back('#ai'), backLabel: 'My AI' },
     h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(a.label), size: 72 }), h('h2', {}, shortName(a.label)), a.waiting ? h(Pill, { text: 'Not reading', tone: 'amber' }) : h(Pill, { text: lastHere(a.seenAt).text, tone: lastHere(a.seenAt).now ? 'mint' : 'muted' })),
     a.waiting ? h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {}, h('p', {}, waitingLine(a)))) : null,
-    h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${dayTime(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: 'Replies and bookings only, never money' }) : null),
+    h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${dayTime(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: 'On duty', sub: dutyMay(mine?.kinds ?? []) }) : null),
     // On duty it reads the notes and its errands only, whatever is switched on here.
     onDuty ? null : h(Section, { title: 'What it can read', cls: 'reads' },
       // The same words wherever it's said (14 Nov: four screens said four things about what it reads).

@@ -131,7 +131,8 @@ export const pledgeDraft = (houseWebId: string, pledge: { tally: string; id: str
 });
 
 /** What an owner may put their AI on duty for while they're away (SPEC §6.1): never money. */
-export const DUTY_KINDS = ['reply', 'book', 'deliver'] as const;
+// close: set aside a note that needs no answer (triage, 14 Nov): marked done and listed for the owner with Undo.
+export const DUTY_KINDS = ['reply', 'book', 'deliver', 'close'] as const;
 export type DutyKind = (typeof DUTY_KINDS)[number];
 /**
  * A duty grant the owner signs on their device: what their AI may do for them while they're away, how many actions a night,

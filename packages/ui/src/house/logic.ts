@@ -201,12 +201,19 @@ export function lastHere(at?: string): { text: string; now: boolean } {
   if (ms < 15 * 60_000) return { text: 'Here now', now: true };
   return { text: `Here ${ago(at!)}`, now: false };
 }
-export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you know'], ['book', 'Book times you\'re free'], ['deliver', 'Deliver what people buy from your AI']];
+export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you know'], ['close', 'Mark notes that need no answer as done (thanks, confirmations, newsletters)'], ['book', 'Book times you\'re free'], ['deliver', 'Deliver what people buy from your AI']];
 /** Off for good (taken off, refused too often, ended): not the same as off for the night or outside its hours. */
 export const dutyLive = (d: DutyInfo) => !(d.off && !d.off.night) && Date.parse(d.until) > Date.now() && !(!d.state.on && /took you off duty|has ended/.test(d.state.why));
 export const watching = (r: NonNullable<DutyInfo['runner']>) => {
   const late = Date.now() - Date.parse(r.last) > 3 * r.every * 1000;
   return `${r.host === 'house' ? 'Runs in your house' : `On ${r.host}`} since ${time(r.since)} · ${late ? `not looking since ${time(r.last)}${r.host === 'house' ? '' : ' (asleep?)'}` : `last looked ${time(r.last)}`}`;
+};
+/** What a duty grant lets it do, in a few words: the grant's own kinds, not a fixed line (14 Nov: notes set aside joined). */
+export const dutyMay = (kinds: string[]) => {
+  const w: Record<string, string> = { reply: 'replies', close: 'notes set aside', book: 'bookings', deliver: 'deliveries' };
+  const said = kinds.map((k) => w[k]).filter(Boolean) as string[];
+  const list = said.length > 1 ? `${said.slice(0, -1).join(', ')} and ${said.at(-1)}` : said[0] ?? 'nothing';
+  return `${list[0]!.toUpperCase()}${list.slice(1)} only, never money`;
 };
 export function dutyLine(e: DutyEntry): string {
   const name = e.to?.name ? shortName(e.to.name) : e.to?.webId ? who(e.to.webId) : '';
@@ -214,7 +221,7 @@ export function dutyLine(e: DutyEntry): string {
   if (e.refused) return `Stopped${name ? ` (to ${name})` : ''}: ${e.refused}`;
   // A time on duty is held for the owner: the line says how it stands, in the house's words (the AI's own aren't repeated).
   if (e.booking) return e.booking === 'confirmed' ? `Booked with ${name || 'someone'} (you confirmed)` : `Held a time with ${name || 'someone'}${{ held: ' for you to confirm', declined: ': you said no', expired: ': it lapsed, not confirmed', withdrawn: ', then took it back' }[e.booking]}`;
-  const verbs: Record<string, string> = { reply: `Replied to ${name || 'someone'}`, book: `Booked with ${name || 'someone'}`, deliver: `Delivered to ${name || 'someone'}`, block: `Blocked ${name || 'someone'}`, note: 'Left you a note' };
+  const verbs: Record<string, string> = { reply: `Replied to ${name || 'someone'}`, book: `Booked with ${name || 'someone'}`, deliver: `Delivered to ${name || 'someone'}`, block: `Blocked ${name || 'someone'}`, note: 'Left you a note', close: `Set aside ${name ? `${name}'s` : 'a'} note` };
   return `${verbs[e.action] ?? `${e.action}${name ? ` ${name}` : ''}`}${text}`;
 }
 export const receiptWords = (e: { reply?: unknown; to?: { name?: string } }) => {

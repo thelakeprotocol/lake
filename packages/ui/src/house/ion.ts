@@ -105,7 +105,10 @@ export function Btn(p: { label: Child; run: (picked?: string) => Promise<unknown
     // Always a real boolean: Ionic reads an empty value (what an unset prop becomes after being true) as disabled.
     disabled: !!(busy || p.disabled),
     'aria-label': p.label2,
-    onClick: async () => {
+    onClick: async (ev: Event) => {
+      // A button inside a row that opens somewhere does only its own thing (14 Nov: Undo on Today also opened My AI, so
+      // the owner never saw the line change).
+      ev.stopPropagation();
       if (busy) return;
       if (p.ask && !(await confirm(p.ask))) return;
       const picked = p.pick ? await choose(p.pick) : undefined;

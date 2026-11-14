@@ -191,7 +191,7 @@ const MAX_GRANT_MS = 48 * 3_600_000;
 export interface Duty { statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean };
   /** Where its runner runs, since when, when it last looked, and the gaps when it didn't (the computer slept): said honestly. */ runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] } }
 /** One thing the AI on duty did, or was refused: what the owner's morning page shows, with its signed reply and an undo. */
-export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction'; ref: string }; undone?: string; /** A booking is a time the house held for the owner (SPEC §6.1): how it stands now. */ booking?: Booked }
+export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction' | 'close'; ref: string }; undone?: string; /** A booking is a time the house held for the owner (SPEC §6.1): how it stands now. */ booking?: Booked }
 /** A time held for the owner's own yes: still held, or how it ended. */
 export type Booked = 'held' | 'confirmed' | 'declined' | 'expired' | 'withdrawn';
 /** What else an assistant may read, beyond the notes at the door and its own errands (SPEC §6.1): the owner's choice. */
@@ -246,12 +246,13 @@ export interface Errand {
 }
 const ERRAND_KINDS = ['ask', 'order', 'cart', 'seeking'] as const;
 /** What counts against a duty's nightly cap: things done for the owner out in the world (not notes to them, not blocks). */
-const COUNTED = new Set<string>(DUTY_KINDS);
+// What counts against tonight's cap: what goes out or holds a time. Setting a note aside has limits of its own.
+const COUNTED = new Set<string>(['reply', 'book', 'deliver']);
 /**
  * Limits a night (Fable, 6 Nov): a booking commits the owner's time, a reply doesn't, so they're counted apart; and one
  * person gets a few replies and one booking, so a chatty friend (or a hijacked one) can't use up the night.
  */
-const BOOKINGS_A_NIGHT = 3, PER_PERSON = { reply: 3, book: 1, deliver: 3 } as Record<string, number>;
+const BOOKINGS_A_NIGHT = 3, CLOSES_A_NIGHT = 20, PER_PERSON = { reply: 3, book: 1, deliver: 3, close: 3 } as Record<string, number>;
 /** A held time: how far ahead it must start, how long the owner has to confirm it, and how long before it starts it lapses. */
 const HELD_AHEAD = 3 * 3_600_000, HELD_FOR = 48 * 3_600_000, HELD_BEFORE = 2 * 3_600_000;
 export const ADVICE = ['do', 'dont', 'your_call'] as const;
@@ -702,7 +703,7 @@ export class OwnerDesk {
     // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
     for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
       const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';
-      const what = e.booking && e.booking !== 'confirmed' ? `Held a time with ${who}${{ held: ' for you to confirm', declined: ': you said no', expired: ': it lapsed, not confirmed', withdrawn: ', then took it back' }[e.booking]}` : e.action === 'reply' ? `Replied to ${who}` : e.action === 'book' ? `Booked ${e.text ? `"${e.text.slice(0, 60)}"` : 'a time'}${e.to?.name ? ` with ${who}` : ''}` : e.action === 'deliver' ? `Delivered an order to ${who}` : e.action === 'block' ? `Blocked ${e.to?.url ?? 'a sender'}` : `Left you a note`;
+      const what = e.booking && e.booking !== 'confirmed' ? `Held a time with ${who}${{ held: ' for you to confirm', declined: ': you said no', expired: ': it lapsed, not confirmed', withdrawn: ', then took it back' }[e.booking]}` : e.action === 'close' ? `Set aside ${who}'s note: ${e.text ?? ''}` : e.action === 'reply' ? `Replied to ${who}` : e.action === 'book' ? `Booked ${e.text ? `"${e.text.slice(0, 60)}"` : 'a time'}${e.to?.name ? ` with ${who}` : ''}` : e.action === 'deliver' ? `Delivered an order to ${who}` : e.action === 'block' ? `Blocked ${e.to?.url ?? 'a sender'}` : `Left you a note`;
       lines.push({ by: 'ai', text: `${what}${e.booking === 'confirmed' ? ' (you confirmed)' : e.undone ? ' (undone)' : ''}`, at: e.at, to: '#ai', ...(e.undo && !e.undone && !e.booking ? { undo: e.id } : {}) });
     }
     // What an AI sent on the owner's own instruction (a task): one line a task, at its last message.
@@ -744,7 +745,8 @@ export class OwnerDesk {
       if (prev && prev.at >= n.at) continue;
       const aiReplied = !!n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && !!e.to?.key && this.personOf(e.to.key) === this.personOf(n.from.key!) && e.at >= n.at);
       const underTask = this.tasks.some((t) => t.to.key === OwnerDesk.conv(n.from) && t.did.some((d) => d.at >= n.at));
-      newest.set(who, { at: n.at, key: n.from.key, answered: !!n.answered || aiReplied || underTask });
+      // A note the AI on duty set aside needs no answer: nobody waits on it (Undo gives it back).
+      newest.set(who, { at: n.at, key: n.from.key, answered: !!n.answered || !!n.handled || aiReplied || underTask });
     }
     const open = [...newest.values()].filter((x) => !x.answered);
     const known = open.filter((x) => x.key && this.knownBy(x.key)).length;
@@ -1131,8 +1133,8 @@ export class OwnerDesk {
     const d = a.duty!;
     const tonight = this.dutyLog.filter((e) => e.by === a.kid && !e.refused && Date.parse(e.at) >= this.nightStart(d, at));
     const same = (e: DutyEntry) => e.action === action || (action === 'reply' && e.action === 'deliver') || (action === 'deliver' && e.action === 'reply');
-    const nightCap = action === 'book' ? Math.min(BOOKINGS_A_NIGHT, d.cap) : d.cap;
-    if (tonight.filter(same).length >= nightCap) return { ok: false, why: `tonight's limit of ${nightCap} ${action === 'book' ? 'bookings' : 'replies'} is reached: back tomorrow night` };
+    const nightCap = action === 'book' ? Math.min(BOOKINGS_A_NIGHT, d.cap) : action === 'close' ? CLOSES_A_NIGHT : d.cap;
+    if (tonight.filter(same).length >= nightCap) return { ok: false, why: `tonight's limit of ${nightCap} ${action === 'book' ? 'bookings' : action === 'close' ? 'notes set aside' : 'replies'} is reached: back tomorrow night` };
     const mine = (e: DutyEntry) => !!who && ((!!who.key && e.to?.key === who.key) || (!who.key && !!who.name && e.to?.name === who.name));
     const perPerson = PER_PERSON[action] ?? 3;
     if (who && tonight.filter((e) => same(e) && mine(e)).length >= perPerson) return { ok: false, person: true, why: `${who.name ?? 'they'} had ${perPerson === 1 ? 'a booking' : `${perPerson} replies`} from you tonight: that's enough until tomorrow; your human sees anything more` };
@@ -1374,7 +1376,7 @@ export class OwnerDesk {
   }
 
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
+  notes: { id: string; from: NoteSender; text: string; /** Set aside by the AI on duty as needing no answer (triage): the owner sees the line under Handled for you, with Undo. */ handled?: { by: string; at: string; line: string; entry: string }; /** Given back to the owner by an Undo: the AI on duty leaves it alone. */ kept?: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string } }): string | null {
     this.touch();
@@ -1639,6 +1641,28 @@ export class OwnerDesk {
           else this.waitingFor.delete(assistant.kid);
           this.touch();
           return void res.json({ ok: true });
+        }
+        if (p.kind === 'assistant.suggest' && typeof (p as unknown as { handled?: unknown }).handled === 'string') {
+          // Set aside (SPEC §6.1, triage): a note the AI on duty could read and that needs no answer, marked done by it and
+          // listed for the owner under Handled for you, with Undo. The house checks it may; it reads nothing in the words.
+          const q = p as unknown as { handled: string; note?: string };
+          const line = q.handled.trim().slice(0, 120);
+          const d = assistant.duty, st = d ? this.dutyState(assistant) : null;
+          if (!d || !st?.on || !d.kinds.includes('close')) return void res.status(403).json({ error: 'setting notes aside isn\'t in your duty (or you are off duty): leave your human a note instead' });
+          const n = this.notes.find((x) => x.id === String(q.note ?? ''));
+          if (!n) return void res.status(404).json({ error: 'no such note: name it (note)' });
+          if (n.from.web || this.modeOf(n.from) !== 'ai' || n.kept) return void res.status(403).json({ error: 'that note is your human\'s (someone new, or given back to them): leave it' });
+          if (n.answered || n.handled) return void res.status(409).json({ error: 'that note was answered or set aside already' });
+          if (!line) return void res.status(400).json({ error: 'handled: one line on why it needs no answer' });
+          const room = this.dutyRoom(assistant, 'close', { key: n.from.key, name: n.from.name });
+          if (!room.ok) return void res.status(429).json({ error: room.why });
+          const at = new Date().toISOString();
+          const entry: DutyEntry = { id: randomBytes(6).toString('hex'), by: assistant.kid, at, tool: 'lake_house_suggest', action: 'close', to: { name: n.from.name, webId: n.from.webId, ...(n.from.key ? { key: n.from.key } : {}) }, text: line, undo: { kind: 'close', ref: n.id } };
+          n.handled = { by: assistant.label, at, line, entry: entry.id };
+          this.dutyLog.push(entry);
+          await this.saveDuty();
+          await this.saveNotes();
+          return void res.json({ ok: true, handled: n.id, entry: entry.id });
         }
         if (p.kind === 'assistant.suggest') {
           const q = p as unknown as { text?: string; request?: string; offer?: string; replaces?: string; pledge?: { tally?: string; id?: string }; advice?: string; ask?: { choices?: unknown; recommend?: unknown }; rules?: unknown };
@@ -2300,6 +2324,16 @@ export class OwnerDesk {
           return void res.status('error' in r ? 409 : 200).json('error' in r ? r : { ok: true, declined: e.id });
         }
         const a = this.assistants.get(e.by);
+        // A note set aside comes back to the owner's list, theirs from now on (the AI on duty leaves it), and it isn't held
+        // against the AI: an Undo here mostly means "let me see it".
+        if (e.undo.kind === 'close') {
+          const n = this.notes.find((x) => x.id === e.undo!.ref);
+          if (n) { delete n.handled; n.kept = new Date().toISOString(); await this.saveNotes(); }
+          e.undone = new Date().toISOString();
+          await this.saveDuty();
+          this.news({ about: 'duty.undo', entry: { id: e.id, action: 'close', ...(e.to ? { to: e.to } : {}) }, note: 'your human took this note back: it is theirs now, leave it' });
+          return void res.json({ ok: true, undone: e.id, back: n?.id });
+        }
         if (e.undo.kind === 'agenda') { this.agenda = this.agenda.filter((x) => x.id !== e.undo!.ref); await this.saveAgenda(); }
         if (e.undo.kind === 'standing' && e.to?.key) await this.o.panel?.removeStanding?.(e.to.key);
         e.undone = new Date().toISOString();

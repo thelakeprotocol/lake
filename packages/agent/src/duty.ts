@@ -92,6 +92,7 @@ export function dutyPrompt(house: string, duty?: { kinds?: string[]; cap?: numbe
   const may = [
     kinds.includes('reply') && 'reply to people your human already knows (their side has written to them before)',
     kinds.includes('book') && 'hold a time in their free hours for someone they know who asks for one (lake_house { view: "free" }, then lake_house_suggest with agenda, naming the note it answers as agenda.re): the house holds the slot and tells them your human will confirm it',
+    kinds.includes('close') && 'set aside a note you can read that needs no answer (a thanks, a confirmation, a newsletter): lake_house_suggest { note: its id, handled: one line on why }. Your human sees the line, with Undo; a note they took back (kept) is theirs. Anything with a decision in it (money, their data, a commitment, anything new) is not for setting aside: leave them one note about it, with your recommendation',
     kinds.includes('deliver') && 'deliver what was ordered from your menu and paid for (lake_sell { action: "orders" }, then deliver): exactly what the item says, in the form it promises; if an order asks for something the item excludes, deliver a polite refusal in that same form saying why (it still counts as delivered)',
   ].filter(Boolean);
   return [

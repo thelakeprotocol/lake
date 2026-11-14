@@ -1562,7 +1562,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // The runner pairs with the code: it is the AI on duty, under exactly what was signed.
     const night = await generateIdentity('night-ai');
     const paired = await (await fetch(`${house}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: night.publicJwk, code, label: 'Night AI', url: 'https://night.example/a2a' }) })).json();
-    expect(paired).toMatchObject({ paired: true, duty: { kinds: ['reply', 'book'], cap: 10 } });
+    expect(paired).toMatchObject({ paired: true, duty: { kinds: ['reply', 'close', 'book'], cap: 10 } });
     await closeSheet();
     const asNight = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, night, { iss: 'assistant' })) })).json();
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: true, used: 0 });
@@ -1657,13 +1657,35 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tab('My AI');
       await page.locator('ion-item.slept-row', { hasText: 'Replied to Sam\'s AI: I\'ve asked for a time.' }).getByText('Undone').waitFor({ timeout: 10_000 });
       await tidy();
+      // Triage (14 Nov): a thanks needs no answer, so the AI sets it aside. The owner sees it under Handled for you; Undo
+      // puts the note back on their list, theirs from then on, and the AI may not set it aside again.
+      await page.goto(`${house}/owner/#note=${left.note}`);
+      await replyMode('ai');
+      const thanks = await sam.ask(`${house}/a2a`, { kind: 'note', text: 'Sam: thanks, all sorted!' }) as { kind: string; note: string };
+      expect(await asNight({ kind: 'assistant.suggest', handled: 'A thanks; needs no answer', note: thanks.note })).toMatchObject({ ok: true, handled: thanks.note });
+      await goBack();
+      await tab('Today');
+      const aside = page.locator('ion-list.handled ion-item.handled-row', { hasText: /Set aside .*'s note: A thanks; needs no answer/ });
+      await aside.waitFor({ timeout: 10_000 });
+      await aside.getByRole('button', { name: 'Undo', exact: true }).click();
+      await page.locator('ion-toast', { hasText: 'Undone' }).waitFor({ timeout: 10_000 });
+      // Still on Today: the button did its own thing, not the row's.
+      expect(page.url()).not.toContain('#ai');
+      await page.locator('ion-list.handled ion-item.handled-row', { hasText: /needs no answer \(undone\)/ }).waitFor({ timeout: 10_000 });
+      expect(await aside.getByRole('button', { name: 'Undo', exact: true }).count()).toBe(0);
+      const back = ((await asNight({ kind: 'list' })).notes as { id: string; handled?: unknown; kept?: string }[]).find((n) => n.id === thanks.note)!;
+      expect(back.handled).toBeUndefined();
+      expect(back.kept).toEqual(expect.any(String));
+      expect(await asNight({ kind: 'assistant.suggest', handled: 'A thanks', note: thanks.note })).toMatchObject({ error: expect.stringContaining('your human\'s') });
+      await tidy();
+      await tab('My AI');
     } finally { await sam.close(); }
     // On duty, with tonight's count; its own page says what it may do; off duty after a sheet that asks.
     const on = page.locator('ion-item.duty-row', { hasText: 'Night AI' });
     await on.locator('.lake-pill', { hasText: 'On duty' }).waitFor({ timeout: 10_000 });
     expect(await on.textContent()).toMatch(new RegExp(`${from}–${to} · 2 of 10 tonight`));
     await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).click();
-    await page.getByText('Replies and bookings only, never money').waitFor();
+    await page.getByText('Replies, notes set aside and bookings only, never money').waitFor();
     await tidy();
     await goBack();
     await on.getByRole('button', { name: 'Turn off' }).click();

@@ -629,7 +629,7 @@ describe('what an attacker tried (round 16)', () => {
       const paired = await post('/assistant', { publicJwk: id.publicJwk, code, label, url });
       return { id, paired, url, call: async (p: Record<string, unknown>) => post('/api', await signMessage(p, id, { iss: 'assistant' })) };
     };
-    return { desk, told, owner, connect, post, close: () => server.close() };
+    return { desk, told, owner, connect, post, phone, close: () => server.close() };
   }
   const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, url: `https://${key}.example/a2a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
   const settle = () => new Promise((r) => setTimeout(r, 20));
@@ -653,6 +653,40 @@ describe('what an attacker tried (round 16)', () => {
     const got: { claimed: boolean }[] = [];
     const h = await house({ onPaired: (x: { claimed: boolean }) => got.push(x) });
     expect(got).toEqual([{ claimed: true }]);
+    h.close();
+  });
+
+  it('on duty, sets aside a note it can read that needs no answer; never a new person\'s; Undo gives it back for good (14 Nov)', async () => {
+    const h = await house({ statusUrl: () => 'http://h/status', panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'ok' }) } });
+    const drafted = await h.owner({ kind: 'panel.duty.draft', kinds: ['reply', 'close'], cap: 5 });
+    expect(drafted, JSON.stringify(drafted)).toMatchObject({ id: expect.any(String) });
+    const { id, draft } = drafted;
+    const set = await h.owner({ kind: 'panel.duty.set', id, credential: await issueCredential(draft, h.phone) });
+    const night = await generateIdentity('night');
+    const pairedNight = await h.post('/assistant', { publicJwk: night.publicJwk, code: set.code, label: 'Night AI', url: 'https://night.example/a2a' });
+    expect(pairedNight, JSON.stringify({ set, pairedNight })).toMatchObject({ paired: true });
+    const asAi = async (p: Record<string, unknown>) => h.post('/api', await signMessage(p, night, { iss: 'assistant' }));
+    // Kim is known (the owner answered her), so her chat is the AI's; Lee is new.
+    const first = h.desk.addNote({ from: from('kim'), text: 'Can we talk Friday?' })!;
+    await h.owner({ kind: 'panel.note.reply', id: first, text: 'Sure' });
+    const thanks = h.desk.addNote({ from: from('kim'), text: 'Thanks so much!' })!;
+    const lee = h.desk.addNote({ from: from('lee'), text: 'Hi there' })!;
+    expect(await asAi({ kind: 'assistant.suggest', note: lee, handled: 'just a hello' })).toMatchObject({ error: expect.stringContaining('your human') });
+    const done = await asAi({ kind: 'assistant.suggest', note: thanks, handled: 'a thanks for Friday' });
+    expect(done).toMatchObject({ ok: true, handled: thanks });
+    expect(await asAi({ kind: 'assistant.suggest', note: thanks, handled: 'again' })).toMatchObject({ error: expect.stringContaining('already') });
+    // The owner sees the line, with Undo, and nobody waits on Kim's thanks.
+    const today = await h.owner({ kind: 'panel.today', tz_offset: 0 });
+    const line = today.lines.find((l: { text: string }) => l.text.startsWith('Set aside'));
+    expect(line).toMatchObject({ text: expect.stringContaining('a thanks for Friday'), undo: done.entry });
+    // Undo: back on the owner's list, theirs from now on (the AI may not set it aside again).
+    expect(await h.owner({ kind: 'panel.duty.undo', entry: done.entry })).toMatchObject({ ok: true, back: thanks });
+    expect(h.desk.notes.find((n) => n.id === thanks)).toMatchObject({ kept: expect.any(String) });
+    const after = (await h.owner({ kind: 'panel.today', tz_offset: 0 })).lines.find((l: { text: string }) => l.text.startsWith('Set aside'));
+    expect(after.text).toMatch(/\(undone\)$/);
+    expect(after.undo).toBeUndefined();
+    expect(await asAi({ kind: 'assistant.suggest', note: thanks, handled: 'a thanks' })).toMatchObject({ error: expect.stringContaining('your human') });
+    // A grant without it: refused.
     h.close();
   });
 
