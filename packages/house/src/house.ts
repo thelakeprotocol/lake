@@ -22,6 +22,7 @@ import { recordPaths } from './packs.js';
 import { convertRecord, fetchConverterCert, fetchRecord, type RecordPaths, type Trust } from './record.js';
 import { packFolders } from './typeindex.js';
 import { connectRelay } from './relay.js';
+import { loadJson, saveWhole } from './state.js';
 import { createHouseServer } from './server.js';
 
 export interface HouseOptions {
@@ -279,7 +280,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   const indexFile = join(o.dataDir, 'consent-index.json');
   const consentCache = new Map<string, Record<string, unknown>>(Object.entries(await readFile(indexFile, 'utf8').then((t) => JSON.parse(t), () => ({})).catch(() => ({})) as Record<string, Record<string, unknown>>));
   let indexSaving: ReturnType<typeof setTimeout> | undefined;
-  const saveIndex = () => { clearTimeout(indexSaving); indexSaving = setTimeout(() => void writeFile(indexFile, JSON.stringify(Object.fromEntries(consentCache))).catch(() => {}), 2000); };
+  const saveIndex = () => { clearTimeout(indexSaving); indexSaving = setTimeout(() => void saveWhole(indexFile, JSON.stringify(Object.fromEntries(consentCache))).catch(() => {}), 2000); };
   const consentIndex = {
     listedAt: 0, saidAt: 0, listing: null as Promise<void> | null, failedAt: new Map<string, number>(),
     /** Reads the consent records the index lacks, a dozen at a time; one look at a time. */
@@ -597,16 +598,32 @@ function panelFor(x: {
   // Read once when complete (both files never change); looked at again after ten minutes while a study's question may
   // still be on its way (it is filed when the study runs, after the consent).
   const aboutCache = new Map<string, { at: number; about: { question?: string; purpose: string; fields: string[]; to: string } | null }>();
-  let moneyMemo: { at: number; v: Promise<unknown> } | null = null;
+  let moneyMemo: { at: number; v: Promise<unknown>; done: boolean } | null = null;
   const money = (): Promise<any> => {
-    // Asked by Today, Money and the overview at once: one answer serves them for a few seconds.
-    if (moneyMemo && Date.now() - moneyMemo.at < 5_000) return moneyMemo.v;
-    const v = moneyNow();
-    moneyMemo = { at: Date.now(), v };
-    v.catch(() => { moneyMemo = null; });
-    return v;
+    // Asked by Today, Money and the overview at once: one reading serves them while it runs, and for five seconds after.
+    if (moneyMemo && (!moneyMemo.done || Date.now() - moneyMemo.at < 5_000)) return moneyMemo.v;
+    const memo = { at: Date.now(), v: moneyNow() as Promise<unknown>, done: false };
+    moneyMemo = memo;
+    memo.v.then(() => { memo.done = true; memo.at = Date.now(); }, () => { if (moneyMemo === memo) moneyMemo = null; });
+    return memo.v;
   };
+  // What Money has read is kept beside the house's other state, so a restart doesn't read every receipt and what each was
+  // for again: thousands of reads after each deploy kept the sandbox's one CPU busy for an hour (14 Nov). A receipt is
+  // read again when it is written again (onChange); the pod stays the record, and deleting the file makes the house read.
+  const moneyFile = join(x.o.dataDir, 'money-cache.json');
+  let moneyLoaded = false;
+  const keepMoney = () => void saveWhole(moneyFile, JSON.stringify({
+    receipts: Object.fromEntries([...receiptCache].filter(([, c]) => c.vc)),
+    about: Object.fromEntries([...aboutCache].filter(([, c]) => c.about)),
+  })).catch(() => {});
   const moneyNow = async () => {
+    if (!moneyLoaded) {
+      moneyLoaded = true;
+      const kept = await loadJson<{ receipts?: Record<string, { vc: Record<string, any>; at: number }>; about?: Record<string, { at: number; about: { question?: string; purpose: string; fields: string[]; to: string } }> }>(moneyFile, {});
+      for (const [f, c] of Object.entries(kept.receipts ?? {})) if (!receiptCache.has(f) && c?.vc) receiptCache.set(f, c);
+      for (const [k, c] of Object.entries(kept.about ?? {})) if (!aboutCache.has(k) && c?.about) aboutCache.set(k, c);
+    }
+    const before = receiptCache.size + aboutCache.size;
     const all = (await x.filed.list('receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
     await readReceipts(all);
     // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
@@ -633,7 +650,8 @@ function panelFor(x: {
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
     // What a payment for an agreement (a study, a key to some fields) was for: its consent record (who, which fields, what
     // for) and, for a study, its question, filed beside it when it ran. The owner saw only "urn:lake:agreement:d4ed…".
-    await Promise.all((receipts as { agreement?: string; about?: unknown }[]).filter((r) => r.agreement?.startsWith('urn:lake:agreement:')).map(async (r) => {
+    // Four at a time: with nothing kept, five hundred receipts asked the pod for a thousand files at once.
+    await pool((receipts as { agreement?: string; about?: unknown }[]).filter((r) => r.agreement?.startsWith('urn:lake:agreement:')), 4, async (r) => {
       const offer = r.agreement!.split(':')[3] ?? '';
       if (!/^[\w-]+$/.test(offer)) return;
       const known = aboutCache.get(offer);
@@ -650,7 +668,8 @@ function panelFor(x: {
       }
       const about = aboutCache.get(offer)?.about;
       if (about) r.about = about;
-    }));
+    });
+    if (receiptCache.size + aboutCache.size !== before) keepMoney();
     // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
     return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
   };

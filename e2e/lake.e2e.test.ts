@@ -1069,6 +1069,11 @@ describe('money', () => {
     const stanMoney = await (await fetch(`${houses.stan}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.money' }, phone, { iss: 'owner' })) })).json();
     const study = stanMoney.receipts.find((x: { agreement: string }) => x.agreement.startsWith('urn:lake:agreement:'));
     expect(study).toMatchObject({ payerName: expect.any(String), about: { question: expect.stringMatching(/\?$/), purpose: expect.any(String), fields: expect.arrayContaining([expect.any(String)]) } });
+    // What Money read is kept beside the house's state, so a restart doesn't read every receipt again (14 Nov).
+    let kept: { receipts?: Record<string, unknown>; about?: Record<string, unknown> } = {};
+    for (let i = 0; i < 20 && !Object.keys(kept.receipts ?? {}).length; i++) { await new Promise((r) => setTimeout(r, 250)); kept = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'money-cache.json'), 'utf8').catch(() => '{}')); }
+    expect(Object.keys(kept.receipts ?? {}).length).toBeGreaterThan(0);
+    expect(Object.keys(kept.about ?? {}).length).toBeGreaterThan(0);
     const agreements = await readdir(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements'));
     const signed = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'pod', 'stan', 'agreements', agreements.find((f) => f.includes('.agreement.json'))!), 'utf8'));
     expect(signed.agreement['@type']).toBe('Agreement');
