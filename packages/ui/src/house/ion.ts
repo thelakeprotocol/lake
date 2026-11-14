@@ -111,7 +111,10 @@ export function Btn(p: { label: Child; run: (picked?: string) => Promise<unknown
       const picked = p.pick ? await choose(p.pick) : undefined;
       if (p.pick && !picked) return;
       setBusy(true);
-      try { await p.run(picked); if (p.done) void toast(p.done); } catch (e) { void toast((e as Error).message, { color: 'danger', duration: 5000 }); } finally { setBusy(false); bump(); }
+      // A failure says nothing was done, for eight seconds with OK to close it: a short toast went by unseen and the button
+      // simply came back (14 Nov: "sometimes it just goes back with no communication on what happened"). Not for ever: a
+      // toast that stays covers the tab bar.
+      try { await p.run(picked); if (p.done) void toast(p.done); } catch (e) { void toast(`Not done: ${(e as Error).message}`, { color: 'danger', duration: 8000, buttons: [{ text: 'OK', handler: () => {} }] }); } finally { setBusy(false); bump(); }
     },
   }, busy ? h('ion-spinner', { name: 'crescent', slot: 'start', class: 'btn-spin' }) : p.icon ? h('ion-icon', { name: p.icon, slot: 'start' }) : null, p.label);
 }

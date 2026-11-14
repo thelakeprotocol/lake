@@ -146,20 +146,24 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   const [more, setMore] = useState(false);
   const [reply, setReply] = useState('');
   const [replying, setReplying] = useState(false);
+  // An answer the house took shows at once, before the list comes back (14 Nov: on a slow house the buttons simply
+  // came back, as if nothing had happened).
+  const [answeredNow, setAnsweredNow] = useState<string | null>(null);
+  const answered = x.ask?.answered ?? answeredNow;
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
   const kicker = x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
-  const ownNo = !!x.ask && !x.ask.answered && x.ask.choices.length > 1;
+  const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;
   const advice = x.advice ? h(Pill, { text: x.sender && x.advice === 'dont' ? 'Warning' : { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice], tone: x.advice === 'do' ? 'mint' : x.advice === 'dont' ? 'red' : 'muted' }) : null;
   const acts: Child[] = [];
   // A time your AI pencilled in: yours to confirm (the house tells them either way). Nothing else to do with it.
   if (x.booking) acts.push(
     h(Btn, { key: 'bk', label: 'Confirm', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Confirm' }), done: `Confirmed. ${x.booking.with} was told.` }),
     h(Btn, { key: 'bd', label: 'Decline', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Decline' }), done: `Declined. ${x.booking.with} was told.` }));
-  else if (x.ask && !x.ask.answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: c }) })));
+  else if (x.ask && !answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, choice: c }); setAnsweredNow(c); }, done: `Sent to ${shortName(x.from)}: ${c}` })));
   if (x.offer) acts.push(h(Btn, { key: 'of', label: 'Accept the offer', run: async () => { const r = await call<{ error?: string; code?: string }>({ kind: 'panel.offer.accept', offer: x.offer, even_over_allowance: true }); if (r.error) throw new Error(r.error); await dismiss(); }, ask: { header: 'Accept this offer?', sub: 'What it needs goes to that one agent.', button: 'Accept', destructive: false } }));
   if (x.allowance && x.by) acts.push(h(Btn, { key: 'al', label: `Give ${money$(x.allowance.amount, x.allowance.currency)} for ${x.allowance.days} day${x.allowance.days === 1 ? '' : 's'}`, run: async () => { const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.allowance.draft', kid: x.by, amount: x.allowance!.amount, currency: x.allowance!.currency, days: x.allowance!.days }); await must({ kind: 'panel.allowance.set', id: d.id, credential: await signDraft(d.draft) }); await dismiss(); } }));
   if (block) acts.push(h(Btn, { key: 'bl', label: 'Block them', color: 'danger', run: () => call({ kind: 'panel.assistant.block', id: x.id }), ask: { header: 'Block this agent?', sub: 'Your AI turns its messages away from now on.', button: 'Block' } }));
@@ -185,7 +189,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
     x.circle && ['ask', 'caller', 'pass', 'vote'].includes(x.circle.role) ? h(CircleNote, { x, c: x.circle }) : null,
     x.count ? h('p', { class: 'muted-line' }, x.count.answered ? 'Counted, privately: only totals come out.' : x.count.mine ? `Your ${x.count.label}: ${x.count.mine.replace(/:/g, ' · ')}. Counted privately; only totals come out.` : `Your record has no ${x.count.label}.`) : null,
     x.ask?.private ? h('p', { class: 'private-line' }, h('ion-icon', { name: 'lock-closed-outline' }), ' Private: your AI won\'t see your answer.') : null,
-    x.ask?.answered ? h('p', { class: 'muted-line' }, `You answered: ${x.ask.answered}`) : null,
+    answered ? h('p', { class: 'muted-line answered-line' }, `You answered: ${answered}`) : null,
     x.booking ? h('p', { class: 'muted-line held-until' }, `Held until ${dayTime(x.booking.until)}. With no answer by then it's off, and ${x.booking.with} is told.`) : null,
     acts.length ? h('div', { class: 'card-actions wrap' }, ...acts) : null,
     !x.booking && x.reply ? h('p', { class: 'muted-line' }, `You wrote: “${x.reply}”`) : null,

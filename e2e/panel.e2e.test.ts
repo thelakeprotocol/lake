@@ -1264,6 +1264,27 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Today');
     const q = page.locator('ion-card.sug', { hasText: 'send them the brief now?' });
     await q.getByRole('button', { name: 'Send the brief' }).click();
+    // It says it went, and the answers go at once (14 Nov: on a slow house the buttons just came back): the card shows
+    // what was answered until the house takes the question off Today.
+    await page.getByText(/^Sent to .+: Send the brief$/).waitFor({ timeout: 10_000 });
+    expect(await q.getByRole('button', { name: 'Not yet' }).count()).toBe(0);
+    // A tap that doesn't go through says so, and stays until closed; the answers stay to try again.
+    await one.call('lake_house_suggest', { text: 'Shall I say yes to the swap?', ask: { choices: ['Say yes', 'Say no'] } });
+    const swap = page.locator('ion-card.sug', { hasText: 'Shall I say yes to the swap?' });
+    await swap.waitFor({ timeout: 10_000 });
+    // The house answers nothing for a moment (a restart): every call to it fails while the owner taps.
+    await page.route('**/owner/api', (route) => route.fulfill({ status: 502, body: '' }));
+    await swap.getByRole('button', { name: 'Say yes' }).click();
+    const failed = page.locator('ion-toast', { hasText: /Not done: Your house couldn't do that just now \(502\)/ });
+    await failed.waitFor({ timeout: 10_000 });
+    await page.unroute('**/owner/api');
+    await page.waitForTimeout(3000);
+    expect(await failed.count()).toBe(1); // still there after the usual few seconds (eight in all)
+    await failed.getByRole('button', { name: 'OK' }).click();
+    await swap.getByRole('button', { name: 'Say yes' }).click();
+    // This time it goes: it says so, and the question leaves Today once the house has it.
+    await page.getByText(/^Sent to .+: Say yes$/).waitFor({ timeout: 10_000 });
+    await swap.waitFor({ state: 'detached', timeout: 10_000 });
     let briefed: { message?: { text?: string } }[] = [];
     for (let i = 0; i < 10 && !briefed.some((m) => m.message?.text?.startsWith('Brief:')); i++) briefed = [...briefed, ...(await shopperInbox())];
     expect(briefed.some((m) => m.message?.text === 'Brief: 3 bullets on the Lake, plain words.')).toBe(true);
