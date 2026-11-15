@@ -1240,6 +1240,11 @@ describe('the open door', () => {
     for (let i = 0; i < 100 && !/told the operator/.test(connectorSaid); i++) await new Promise((r) => setTimeout(r, 100));
     expect(connectorSaid).toMatch(/told the operator \(noted\): Claude signed in/);
     expect(connectorSaid.match(/told the operator/g)).toHaveLength(1);
+    // A notice: it says no answer is expected, so it isn't someone waiting on the operator's Today (round 46).
+    type Saved = { from: { name: string }; noReply?: boolean };
+    const opNote = async () => { const j = JSON.parse(await readFile(join(dir, 'houses', 'stan', 'notes.json'), 'utf8').catch(() => '[]')) as Saved[] | { notes: Saved[] }; return (Array.isArray(j) ? j : j.notes).find((n) => n.from.name === 'This Lake\'s connector'); };
+    for (let i = 0; i < 30 && !(await opNote()); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(await opNote()).toMatchObject({ noReply: true });
     const tokenCall = async (body: Record<string, string>) => (await fetch(as.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: client.client_id, ...body }) })).json();
     // The code works once, and only with its verifier.
     expect(await tokenCall({ grant_type: 'authorization_code', code: back.searchParams.get('code')!, code_verifier: 'wrong'.repeat(9), redirect_uri: cb })).toMatchObject({ error: 'invalid_grant' });

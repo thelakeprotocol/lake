@@ -337,7 +337,9 @@ export function KeyPage({ backTo }: P) {
 export function MovePage({ backTo }: P) {
   const [note, setNote] = useState('');
   return page('Download everything', backTo,
-    h('div', { class: 'bigwho' }, h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'download-outline' })), h('p', { class: 'muted-line' }, 'Your house is yours. Take everything, to another host or your own machine.')),
+    h('div', { class: 'bigwho' }, h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'download-outline' })), h('p', { class: 'muted-line' }, 'A copy of everything in your pod, in one file: your records and their signed originals, your rules, money and receipts, and your wallet (your AIs, their limits, your house\'s own key).')),
+    // Said as it is (round 46): the copy can't yet start a house elsewhere, and what the house keeps beside the pod isn't in it.
+    h(Info, {}, h('p', {}, 'Not in it yet: your chats and notes, the people you know, your agenda and what your AIs did on duty. Nothing can start a house from this file yet: moving a house to another host is being built. Keep the file safe: it holds your house\'s key.')),
     h('div', { class: 'pad' }, h(Btn, { label: 'Download everything', expand: 'block', run: async () => {
       const x = await call<{ files: Record<string, string> }>({ kind: 'panel.export' });
       const a = document.createElement('a');

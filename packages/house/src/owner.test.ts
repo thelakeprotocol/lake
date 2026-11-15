@@ -45,7 +45,8 @@ describe('sandbox leases', () => {
   it('an expired lease frees the house on its own', async () => {
     const old = { ...(await generateIdentity('phone')).publicJwk, claimedAt: Date.now() - 25 * 3_600_000 } as JWK;
     const d = await leasedDesk(old);
-    await new Promise((r) => setTimeout(r, 50));
+    // The release runs on its own: waited for, not timed (a fixed 50 ms failed under a full suite on a busy machine).
+    for (let i = 0; i < 40 && d.stored() !== null; i++) await new Promise((r) => setTimeout(r, 50));
     expect(d.stored()).toBeNull();
     expect(d.released()).toBe(1);
     expect(await (await fetch(`${d.base}/status`)).json()).toMatchObject({ claimed: false });
@@ -733,6 +734,8 @@ describe('what an attacker tried (round 16)', () => {
     for (let i = 0; i < 3; i++) h.desk.addNote({ from: old('Kite', 'https://kite.example/#a'), text: `Hello ${i}` });
     h.desk.addNote({ from: old('Your house', new URL(me).origin + new URL(me).pathname.split('/').slice(0, 3).join('/')), text: 'news' });
     h.desk.addNote({ from: old('Your house', me), text: 'more news' });
+    // A notice (reply: false at the door) waits on nobody either: the Lake's own alerts to its operator are sent so.
+    h.desk.addNote({ from: { name: 'This Lake', domain: 'lake.example', webId: 'https://lake.example/#lake', checked: true }, text: 'Someone claimed a house', noReply: true });
     expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).waiting).toMatchObject({ people: 1, known: 0 });
     h.close();
   });

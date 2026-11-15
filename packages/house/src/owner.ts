@@ -765,7 +765,7 @@ export class OwnerDesk {
    *  since. One answer for Today's rows, the list's notes and so the tab's badge (15 Nov: the badge counted a note the AI
    *  had answered on duty, and Today showed nothing for it). */
   private settled(n: OwnerDesk['notes'][number]): boolean {
-    if (n.answered || n.handled) return true;
+    if (n.answered || n.handled || n.noReply) return true;
     if (n.from.key && this.dutyLog.some((e) => !e.refused && !e.undone && e.action === 'reply' && !!e.to?.key && this.personOf(e.to.key) === this.personOf(n.from.key!) && e.at >= n.at)) return true;
     return this.tasks.some((t) => t.to.key === OwnerDesk.conv(n.from) && t.did.some((d) => d.at >= n.at));
   }
@@ -1413,9 +1413,9 @@ export class OwnerDesk {
   }
 
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; /** Set aside by the AI on duty as needing no answer (triage): the owner sees the line under Handled for you, with Undo. */ handled?: { by: string; at: string; line: string; entry: string }; /** Given back to the owner by an Undo: the AI on duty leaves it alone. */ kept?: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
+  notes: { id: string; from: NoteSender; text: string; /** The sender said no answer is expected (a notice). */ noReply?: true; /** Set aside by the AI on duty as needing no answer (triage): the owner sees the line under Handled for you, with Undo. */ handled?: { by: string; at: string; line: string; entry: string }; /** Given back to the owner by an Undo: the AI on duty leaves it alone. */ kept?: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
-  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string } }): string | null {
+  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string }; /** The sender expects no answer (a notice): nobody waits on it. */ noReply?: true }): string | null {
     this.touch();
     // The same words again from the same sender are the same note (run 45 got one twice).
     const again = this.notes.find((x) => x.from.webId === n.from.webId && x.from.via === n.from.via && x.text === n.text);

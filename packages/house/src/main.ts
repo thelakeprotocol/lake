@@ -212,7 +212,7 @@ async function hosted(n: number) {
     const day = new Date().toISOString().slice(0, 10);
     if (told.day !== day) told = { day, n: 0 };
     if (++told.n > 10) return;
-    to.desk.addNote({ from: { name: 'This Lake', domain: new URL(baseUrl).host, webId: `${baseUrl}/#lake`, url: baseUrl, checked: true }, text, purpose: 'contact' });
+    to.desk.addNote({ from: { name: 'This Lake', domain: new URL(baseUrl).host, webId: `${baseUrl}/#lake`, url: baseUrl, checked: true }, text, purpose: 'contact', noReply: true });
     log(`told ${a.operator}: ${text}`);
   };
   let warnings = 0;

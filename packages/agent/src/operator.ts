@@ -16,7 +16,7 @@ export function operatorNotes(o: { house?: string; dataDir?: string; publicUrl: 
     if (told.day !== day) told = { day, n: 0 };
     if (++told.n > 10) return;
     me ??= loadOrCreateIdentity(join(o.dataDir, 'operator-key.json')).then((id) => makeVisitor(id, new URL(o.publicUrl).host, "This Lake's connector", `${o.publicUrl.replace(/\/$/, '')}/operator/a2a`));
-    void me.then((v) => ask(`${o.house!.replace(/\/$/, '')}/a2a`, v, { kind: 'note', text, purpose: 'contact' }))
+    void me.then((v) => ask(`${o.house!.replace(/\/$/, '')}/a2a`, v, { kind: 'note', text, purpose: 'contact', reply: false }))
       .then((r) => { const kind = String((r.reply as { kind?: string; decision?: string } | null)?.kind ?? ''); o.log?.(kind === 'noted' ? `told the operator (noted): ${text}` : `the operator's house didn't take it (${kind || 'no answer'}): ${text}`); }, (e: Error) => o.log?.(`couldn't tell the operator: ${e.message}`));
   };
 }
