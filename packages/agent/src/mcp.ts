@@ -1926,7 +1926,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // So does a standing need or offer (seeking:/offering:): a thing for sale doesn't go away while its AI sleeps.
         const standing = /^(seeking|offering):./.exec(q.tag ?? '');
         const ask = { ...q, ...(role ? { role } : {}), ...(q.q || standing ? { idle: true } : {}) };
-        const found = q.role === 'agent' ? (await me.find({ ...ask, role: undefined })).filter((c) => c.role !== 'house') : await me.find(ask);
+        // The role as normalised ("agents" is agent: round 41 found it compared the raw word and answered nothing).
+        const found = role === 'agent' ? (await me.find({ ...ask, role: undefined })).filter((c) => c.role !== 'house') : await me.find(ask);
         // Sellers come with their record from the transparency logs: sales released to them, refunds, rulings. Facts, counted.
         // Across Lakes a record is spread: a buyer pays through its own Lake's payments agent, which logs on its own Lake's
         // log, and a ruling is on the arbiter's Lake's. So every log search lists (this Lake's and the followed Lakes') is
@@ -2935,7 +2936,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         price_usd: z.number().optional().describe('Offered per house; default $2, or $0 when the budget is 0'),
         budget_usd: z.number().default(500).describe('The most this study may spend; 0 for unpaid (then it offers $0 and accepts no counter-offer with a price)'),
         extra_fields: z.array(z.string()).optional().describe('Ask for more than the study needs, to see houses push back (e.g. postcode)'),
-        wait_seconds: z.number().default(0).describe('How long to wait for owners asked to tap Allow'),
+        wait_seconds: z.number().min(0).max(300).default(0).describe('How long to wait for owners asked to tap Allow (at most 300)'),
         check_only: z.boolean().default(false).describe('Free: only the ethics review and the audit (with how often this study was certified lately) and how many houses there are; nothing is offered or paid'),
         name_houses: z.boolean().default(false).describe('evidence_for: include the agreements and receipts themselves, which name every house that took part'),
         evidence_for: z.string().optional().describe('Instead of running a study: the signed evidence bundle of one you ran in this conversation (its study id), to show anyone'),

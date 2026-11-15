@@ -1183,7 +1183,9 @@ describe('the open door', () => {
     // (the names here are the researcher's own, and say nothing).
     const mine = { question: 'Are over-70s on drug Z back in hospital?', predicates: [{ name: 'group A', field: 'age_band', op: 'at_least', value: 70 }, { name: 'exposed', field: 'medications', op: 'has_code', value: 'drug-z' }, { name: 'outcome', field: 'readmissions', op: 'present' }] };
     const checked = await say({ study: mine, check_only: true });
-    expect(checked.out).toMatchObject({ ethics: 'approved', audit: 'certified', each_house_counts: ['age band: 70 or more', 'medications: Drug Z', 'hospital readmissions: any on record'] });
+    expect(checked.out).toMatchObject({ ethics: 'approved', audit: 'certified', tellers: 'will count it', each_house_counts: ['age band: 70 or more', 'medications: Drug Z', 'hospital readmissions: any on record'] });
+    // A minimum under the tellers' floor is refused by the tellers in the check, before any house is asked (round 47).
+    expect((await say({ study: { ...mine, min: 2 }, check_only: true })).out).toMatchObject({ tellers: expect.stringMatching(/^refused: .*fewer than 3/) });
     // One that asks who someone is, or compares what can't be compared, is refused with the reason, before the Lake hears of it.
     const who = await say({ study: { question: 'Who is over 70?', predicates: [{ name: 'named', field: 'name', op: 'present' }] } });
     expect(who).toMatchObject({ isError: true, text: expect.stringMatching(/can't be asked: .*"name" is identifying; no study may read it/) });
@@ -2187,9 +2189,8 @@ describe('a study run', () => {
   it('sends nothing to a "teller" that only borrows a trusted teller\'s name', async () => {
     // Both tellers named as the trusted ones, at addresses the operator never vouched for (on a sandbox, names aren't proven).
     const forged = readmissionStudy(undefined, [{ url: `${node}/a2a`, domain: 'teller-a.lake.local' }, { url: `${specialistsUrl}/guide/a2a`, domain: 'teller-b.lake.local' }]);
-    const r = await run({ study: forged });
-    expect(r.participants).toBe(0);
-    expect(r.decisions.join ?? 0).toBe(0);
+    // The count is opened first (round 47), and the "Leader" at that address isn't one: the run stops before any house is asked.
+    await expect(run({ study: forged })).rejects.toThrow(/didn't open a count, so no house was asked/);
   });
 
   it('cannot get uncertified study code run', async () => {

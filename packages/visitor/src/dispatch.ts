@@ -141,6 +141,21 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   const auditAtt: Attachment = { credential: audit.reply.credential, card: await cardOf(o.auditor) };
   await beat();
 
+  // One count per run, opened at the Leader, which sets it up with the Helper (DAP): each house sends each one a share.
+  // Opened before any house is knocked (round 47: a minimum below the tellers' floor failed only after every house had
+  // been asked and owners' phones had buzzed). A count nobody answers into lapses at its deadline.
+  const tellers = study.privacy.tellers;
+  const [leader, helper] = tellers as [TellerRef, TellerRef];
+  const count = `run-${randomUUID()}`;
+  {
+    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, study, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) }).catch((e: Error) => { throw new Error(`the Leader teller ${leader.domain} at ${leader.url} didn't open a count, so no house was asked: ${e.message.slice(0, 120)}`); });
+    if (from.ownerDomain !== leader.domain) throw new Error(`the teller at ${leader.domain} answered as ${from.ownerDomain}`);
+    if (reply.kind !== 'count.opened') throw new Error(`${leader.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
+    // The tellers hold the count to the study (its minimum, its noise), and houses send their answers nowhere else.
+    if (reply.study !== studyId(study)) throw new Error(`${leader.domain} opened a count that isn't held to the study: no house would answer into it`);
+    log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof`);
+  }
+
   const houses = await discover(o, log);
 
   const decisions: Record<string, number> = {};
@@ -244,18 +259,6 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
     affordable.length = 0;
   }
   log('compute', `countersigning ${affordable.length} agreement(s) and running the certified study inside each house`);
-  // One count per run, opened at the Leader, which sets it up with the Helper (DAP): each house sends each one a share.
-  const tellers = study.privacy.tellers;
-  const [leader, helper] = tellers as [TellerRef, TellerRef];
-  const count = `run-${randomUUID()}`;
-  if (affordable.length) {
-    const { reply, from } = await askPatiently(leader.url, o.visitor, { kind: 'count.open', id: count, study, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 3_600_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) });
-    if (from.ownerDomain !== leader.domain) throw new Error(`the teller at ${leader.domain} answered as ${from.ownerDomain}`);
-    if (reply.kind !== 'count.opened') throw new Error(`${leader.domain} would not open a count: ${(reply.problems ?? [reply.kind]).join('; ')}`);
-    // The tellers hold the count to the study (its minimum, its noise), and houses send their answers nowhere else.
-    if (reply.study !== studyId(study)) throw new Error(`${leader.domain} opened a count that isn't held to the study: no house would answer into it`);
-    log('count', `opened a count at ${leader.domain} (Leader) with ${helper.domain} (Helper): each house's answer goes to them as two shares with a proof`);
-  }
   const answered: (Joined & { webId: string })[] = [];
   await pool(affordable, o.concurrency ?? 32, async (j) => {
     try {
@@ -441,6 +444,11 @@ export async function checkStudy(o: Pick<DispatchOptions, 'visitor' | 'node' | '
   const fields = [...new Set([...studyFields(study), ...(o.extraFields ?? [])])];
   const ethics = await ask(o.ethics, o.visitor, { kind: 'ethics-review', protocol: { study, purpose: 'research', fields: studyFields(study), retention: 'none' } });
   const audit = await ask(o.auditor, o.visitor, { kind: 'audit-study', study });
+  // The tellers' own word, as a run would get it (round 47: a minimum below their floor passed here and failed after every
+  // house had been asked). A count opened only to ask lapses in five minutes, with nothing in it.
+  const [leader, helper] = study.privacy.tellers as [TellerRef, TellerRef];
+  const counted = await ask(leader.url, o.visitor, { kind: 'count.open', id: `check-${randomUUID()}`, study, length: cellCount(study), min: study.privacy.min, deadline: new Date(Date.now() + 300_000).toISOString(), helper, ...(study.privacy.noise ? { noise: study.privacy.noise } : {}) })
+    .then((r) => (r.reply.kind === 'count.opened' ? 'will count it' : `refused: ${((r.reply.problems as string[] | undefined) ?? [String(r.reply.kind)]).join('; ')}`), (e: Error) => `didn't answer: ${e.message}`);
   const houses = await discover(o as DispatchOptions, log);
   return {
     study: studyId(study), question: study.question, fields,
@@ -449,6 +457,7 @@ export async function checkStudy(o: Pick<DispatchOptions, 'visitor' | 'node' | '
     ethics: ethics.reply.kind === 'approved' ? 'approved' : `refused: ${((ethics.reply.problems as string[] | undefined) ?? []).join('; ')}`,
     audit: audit.reply.kind === 'certified' ? 'certified' : `refused: ${((audit.reply.problems as string[] | undefined) ?? []).join('; ')}`,
     notes: (audit.reply.notes as string[] | undefined) ?? [],
+    tellers: counted,
     houses: houses.length,
     minimum: study.privacy.min,
     note: `a table needs at least ${study.privacy.min} houses to answer; exact counts from a few houses are small numbers, read them with care`,

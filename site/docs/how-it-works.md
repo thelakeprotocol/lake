@@ -1,6 +1,6 @@
 # How a study works
 
-<p class="lead">One question, start to answer: <em>“Do over-60s on drug X get readmitted less?”</em> About a minute for a few hundred houses on a laptop, ten at a thousand ([measured](/docs/architecture#scale-measured)); no record leaves a house.</p>
+<p class="lead">One question, start to answer: <em>“Do over-60s on drug X get readmitted less?”</em> About a minute for a few hundred houses on a laptop, ten minutes at a thousand ([measured](/docs/architecture#scale-measured) on 21 Oct, before the two tellers' shares and proofs were added: slower now, not yet measured again); no record leaves a house.</p>
 
 ```
 dispatch ─▶ mandate ─▶ ethics ─▶ audit ─▶ knock ─▶ decide ─▶ bargain ─▶ grant ─▶ compute ─▶ pay ─▶ answer
@@ -13,7 +13,7 @@ Every step is a signed message over open standards, and every step emits an even
 A human at the research organisation signs an **AP2 Intent Mandate**: this study only, budget capped at $5,000. It goes into the agent's wallet. Within the cap the agent pays on its own; above it, a human must approve.
 
 ```bash
-lake dispatch --goal "Do over-60s on drug X get readmitted less?" --price 2 --budget 5000
+lake dispatch --goal "Do over-60s on drug X get readmitted less?" --price 2 --budget 5000 --extra-fields postcode
 ```
 
 That question is one of the health pack's ready studies. A question of your own is a study you write: [Ask your own question](/docs/researchers).

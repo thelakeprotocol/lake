@@ -50,7 +50,7 @@ A study in its short form:
 - `min` (optional, default 3) is the fewest answers a table may come from. Both tellers hold the count to it, and refuse a study whose `min` is under their own floor: 3 on a sandbox, 20 elsewhere.
 - `noise_epsilon` (optional) asks the two tellers to add noise to the table they release: above 0 and at most 2, and smaller is more noise (at 1 a cell is off by about four, at 2 by about two). The answer then says how much each cell may be off. Owners are told whether a study has it.
 
-Two tellers are picked from the Lake when you name none.
+Two tellers are picked from the Lake for you (through `lake_dispatch_study` you can't name others; the `lake` command takes them only inside a full study declaration). On the sandbox one operator runs both, so the two unreadable shares protect an answer only in a demonstration: tellers run by two different organisations are what makes them private.
 
 ## Check it for free
 
@@ -63,7 +63,8 @@ Nothing is offered or paid. The ethics agent and the auditor look at it, and you
 - `ethics` and `audit`: `approved` and `certified`, or why not;
 - `each_house_counts`: what a house tells its owner it would answer, for example `age band: 50 or more`, `conditions: Hypertension`, `medications: Drug Y`, `hospital readmissions: any on record`;
 - `notes`: how often the auditor certified this very study lately, so you can ask around before paying for an answer that may exist;
-- `houses` and `minimum`: how many houses are on the Lake, and how many must answer for a table.
+- `tellers`: whether the Leader teller will count it (`will count it`, or why not: a `min` under its floor is refused here, before any house is asked);
+- `houses` and `minimum`: how many houses take part in that pack's studies (on the first Lake node that answers), and how many must answer for a table.
 
 A study that can't be asked is refused before the Lake hears of it, with the reason: a field no pack declares, a comparison that field's kind doesn't take, an identifying field, a field a register keeps, a question longer than a sentence.
 
@@ -80,15 +81,18 @@ lake_dispatch_study { study: { question, predicates }, price_usd: 5, budget_usd:
 ```
 
 ```bash
-lake dispatch --study my-study.json --price 5 --budget 200
+# against the sandbox (the defaults are a local Docker Lake's own addresses); --json prints cells, paid and pending too
+lake dispatch --study my-study.json --price 5 --budget 200 --json \
+  --node https://sandbox.lake.doneinfifty.com --ethics https://sandbox.lake.doneinfifty.com/s/ethics \
+  --auditor https://sandbox.lake.doneinfifty.com/s/auditor --payments https://sandbox.lake.doneinfifty.com/s/payments
 ```
 
 It knocks on every house, bargains with those that counter together, signs agreements, has each joining house answer at home, pays each house that answered from your budget, and returns:
 
 - `participants`, and `decisions` (how many joined, declined, countered or asked their owner);
 - `cells`: the count in each combination of your parts;
-- `answer.summary`: one sentence, and `answer.table`: how many houses each part held for, the comparison with and without the exposure, whether the counts are exact or noised, and whether any cell is under 5;
-- `paid`: what was spent, to how many houses;
+- `answer.summary`: one sentence, and `answer.table`: how many houses each part held for, the comparison with and without the exposure, whether the counts are exact or noised, and whether any cell other than an empty one is under 5;
+- `paid`: what was spent, to how many houses (houses that agreed after your budget ran out are left out, and listed in `excluded` with why);
 - `pending`: houses whose owners were asked and hadn't answered (`wait_seconds` waits for them).
 
 `lake_dispatch_study { evidence_for: <study id> }` gives the signed bundle the result rests on (ethics approval, certificate, mandate, agreements as digests, both tellers' shares, receipts) to show someone else.
@@ -102,5 +106,6 @@ It knocks on every house, bargains with those that counter together, signs agree
 - **No intervals.** The result gives counts and rates, and says when numbers are small; it gives no confidence interval, and no response rate beyond the decisions it lists.
 - **The evidence lives in the conversation that ran the study.** A later conversation can't fetch the bundle again.
 - **Several studies can be differenced.** Each is certified on its own. The auditor notes repeats of the same study, and nothing yet stops two different studies over the same houses from narrowing down one answer; ask for noise when tables are small.
+- **A small exact table can show what one house answered.** You know which houses took part (the agreements are per house), so a cell or total that equals the number who answered, or zero, is every participant's answer. With few houses, ask for noise.
 - **Answers that aren't from houses are not kept out.** The count is opened with your study, both tellers hold it to the study's minimum and noise, and a house answers only into such a count. But a teller takes an answer from any signed agent and doesn't yet check that it is a house with a signed record: the minimum is a number of answers. From an exact table, someone who added answers of their own can subtract them and work out one house's. If your result has to stand up to that, ask for noise, and say so when you publish.
 - **Ethics is a checklist**, run by a program: the purpose is research, nothing is kept, no identifying field is asked for, and only the fields the study reads are declared. It is not a review board.
