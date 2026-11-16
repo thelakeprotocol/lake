@@ -72,7 +72,7 @@ const wantLine = (w: WantV) => (w.replies && !w.bought ? `${w.replies} repl${w.r
 /** A shop's cart is good for a day or so: after that it can't be bought, until the shop sends it again. */
 const ranOut = (o: WantOfferV) => Date.parse(o.expires) < Date.now();
 /** A want needs the owner while an offer waits for a yes, or what they bought is on its way (their "It arrived" pays the shop). */
-export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : !!w.replies || w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
+export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : !!w.repliesWaiting || w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
 
 export function WantRow({ w }: { w: WantV }) {
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow want-row${wantNeedsYou(w) ? ' unread' : ''}`, onClick: () => push(`#want=${encodeURIComponent(w.want.id)}`) },
@@ -271,12 +271,14 @@ export const blockAsk = (name?: string) => ({ header: `Block ${name || 'this sen
 
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
 /** A link to send to people you know: they see what you're looking for and can reply, with nothing to install. */
-function ShareWant({ id }: { id: string }) {
+function ShareWant({ id, shared }: { id: string; shared: boolean }) {
   const [link, setLink] = useState<{ link: string; until: string } | null>(null);
+  // A link forwarded too far can be stopped without closing the want (its offers stay).
+  const stop = (shared || link) ? h(Btn, { label: 'Stop sharing', fill: 'clear', color: 'medium', size: 'small', run: async () => { await must({ kind: 'panel.want.unshare', id }); setLink(null); }, ask: { header: 'Stop the link?', sub: 'Whoever has it can\'t reply any more, and the page says only that it\'s closed. Your offers stay.', button: 'Stop it' }, done: 'Link stopped' }) : null;
   return h('div', { class: 'pad share-want' },
     link ? h('div', {}, h('p', { class: 'muted-line' }, `Anyone with this link sees what you're looking for, not what you'd pay, and can reply here: 10 replies, until ${day(link.until)}.`),
-      h('div', { class: 'copybox' }, h('code', {}, link.link)), h(CopyBtn, { text: link.link, label: 'Copy the link' }))
-      : h(Btn, { label: 'Share with people you know', icon: 'share-outline', fill: 'outline', expand: 'block', run: async () => setLink(await must<{ link: string; until: string }>({ kind: 'panel.want.share', id })) }));
+      h('div', { class: 'copybox' }, h('code', {}, link.link)), h(CopyBtn, { text: link.link, label: 'Copy the link' }), stop)
+      : h('div', {}, h(Btn, { label: 'Share with people you know', icon: 'share-outline', fill: 'outline', expand: 'block', run: async () => setLink(await must<{ link: string; until: string }>({ kind: 'panel.want.share', id })) }), stop));
 }
 
 export function WantPage({ arg }: { arg: string }) {
@@ -318,11 +320,14 @@ export function WantPage({ arg }: { arg: string }) {
       h('p', { class: 'spec-limit' }, [addr.data?.address ? `To ${addressLine(addr.data.address)}` : w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
     // Send it to people you know (SPEC §6.8): a link that shows what you're looking for, never what you'd pay; replies come
     // here. Ten replies, seven days.
-    bought ? null : h(ShareWant, { key: 'share', id: w.want.id }),
+    bought ? null : h(ShareWant, { key: 'share', id: w.want.id, shared: !!w.shared }),
     ...(list.data?.notes ?? []).filter((n) => n.want === w.want.id).length ? [
       h('h3', { class: 'section-h', key: 'rh' }, `Replies (${(list.data?.notes ?? []).filter((n) => n.want === w.want.id).length})`),
+      h('p', { class: 'muted-line pad', key: 'rw' }, 'Anyone with the link can say anything, and nobody here checks who they are. Before you meet, pay or say where you live, check them yourself.'),
       ...(list.data?.notes ?? []).filter((n) => n.want === w.want.id).sort((a, b) => b.at.localeCompare(a.at)).map((n) => h('ion-card', { key: n.id, class: 'lake-card want-reply' }, h('ion-card-content', {},
         h('div', { class: 'offer-head' }, h('h3', { class: 'offer-shop' }, n.from.as ?? n.from.name), h('span', { class: 'row-time' }, when(n.at))),
+        // Private isn't checked (round 60): anyone with the link can write any name and any claim.
+        h('div', { class: 'offer-tags' }, h(Pill, { text: 'Through your link · not checked', tone: 'amber' })),
         h('p', { class: 'offer-note' }, n.text),
         h('div', { class: 'card-actions' },
           h('ion-button', { size: 'small', shape: 'round', onClick: () => push(`#note=${encodeURIComponent(n.id)}`) }, 'Reply'),

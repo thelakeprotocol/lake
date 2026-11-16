@@ -1341,13 +1341,15 @@ export class OwnerDesk {
     return l && l.want === id ? l : undefined;
   }
   /** What the page at a shared link shows: the want's public points only (what its card already says), and how it stands. */
-  wantLinkView(id: string, token: string): { want: Want; open: boolean; why?: string; name?: string } | null {
+  wantLinkView(id: string, token: string): { want?: Want; open: boolean; why?: string; name?: string } | null {
     const l = this.wantLink(id, token), r = l ? (this.o.panel?.wantsList?.() ?? []).find((x) => x.want.id === id) : undefined;
     if (!l || !r) return null;
-    const why = r.closed || r.bought ? 'the owner found what they were looking for, or closed it' : l.closed ? 'the owner closed this link' : Date.parse(l.until) <= Date.now() ? 'this link has run out' : l.left <= 0 ? 'this link has been used up' : undefined;
+    // A link that no longer takes replies says only that (round 60: it went on showing what the owner had been after, and
+    // its reason told whoever held it that they'd bought).
+    if (r.closed || r.bought || l.closed || Date.parse(l.until) <= Date.now() || l.left <= 0) return { open: false, why: 'this link is closed' };
     const { name, description, itemOffered, areaServed, availabilityEnds } = r.want;
     const shown = this.o.panel?.doorName?.();
-    return { want: { '@type': 'Demand', id, name, ...(description ? { description } : {}), itemOffered, ...(areaServed ? { areaServed } : {}), availabilityEnds } as Want, open: !why, ...(why ? { why } : {}), ...(shown ? { name: shown } : {}) };
+    return { want: { '@type': 'Demand', id, name, ...(description ? { description } : {}), itemOffered, ...(areaServed ? { areaServed } : {}), availabilityEnds } as Want, open: true, ...(shown ? { name: shown } : {}) };
   }
   /**
    * A reply at a shared link: words for the owner, from someone with no house. The link is the owner's invitation, so the
@@ -1362,11 +1364,16 @@ export class OwnerDesk {
     if (looksLikeInjection(text)) return { status: 400, body: { error: 'a reply is for the owner to read, not instructions' } };
     const given = typeof p.reply_to === 'string' && p.reply_to.trim() ? p.reply_to : undefined, reach = given ? replyTo(given) : null;
     if (given && !reach) return { status: 400, body: { error: 'reply_to: an email address or a phone number (or leave it out: the answer comes to your link either way)' } };
+    // A name is words an AI may be shown beside a hidden note: one plain line, never instructions (round 60).
+    const name = typeof p.from === 'string' ? p.from.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    if (name && looksLikeInjection(name)) return { status: 400, body: { error: 'from: your name, nothing else' } };
+    // Three an hour from one place, twenty an hour on one want: kept per want, so a flood on one doesn't stop the others,
+    // and counted only for a reply kept (round 60).
     const now = Date.now(), hour = (k: string) => (this.wantReplies.get(k) ?? []).filter((t) => now - t < 3_600_000);
-    if (hour(`ip:${ip}`).length >= 3 || hour('all').length >= 20) return { status: 429, body: { error: 'enough replies from here this hour: try again later' } };
-    for (const k of [`ip:${ip}`, 'all']) this.wantReplies.set(k, [...hour(k), now]);
-    const kept = this.addWebNote({ text, purpose: 'contact', ...(typeof p.from === 'string' ? { from: p.from } : {}), ...(reach ? { replyTo: reach } : {}), want: id });
+    if (hour(`ip:${ip}`).length >= 3 || hour(`want:${id}`).length >= 20) return { status: 429, body: { error: 'enough replies from here this hour: try again later' } };
+    const kept = this.addWebNote({ text, purpose: 'contact', ...(name ? { from: name } : {}), ...(reach ? { replyTo: reach } : {}), want: id });
     if (!kept) return { status: 429, body: { error: 'enough replies from here this hour: try again later' } };
+    for (const k of [`ip:${ip}`, `want:${id}`]) this.wantReplies.set(k, [...hour(k), now]);
     l.left -= 1;
     void this.saveWantLinks();
     return { status: 200, body: { kind: 'noted', note: kept.id, key: kept.key } };
@@ -2979,6 +2986,15 @@ export class OwnerDesk {
           'panel.want.close': async () => ((await panel.closeWant?.(String((q as { id?: string }).id ?? ''))) ? { ok: true } : { error: 'no want with that id' }),
           // A link to one of the owner's wants, for them to send to people they know (SPEC §6.8): the owner's key only, never
           // an assistant's (it isn't in ASSISTANT_MAY). Whoever opens it sees the want's public points and may reply.
+          // Stop sharing: every link of that want stops taking replies, and its page says only that it's closed; the want and
+          // its offers stay (round 60: a link forwarded too far had no way back but closing the want).
+          'panel.want.unshare': async () => {
+            const id = String((q as { id?: string }).id ?? ''), at = new Date().toISOString();
+            let n = 0;
+            for (const l of this.wantLinks.values()) if (l.want === id && !l.closed) { l.closed = at; n++; }
+            await this.saveWantLinks();
+            return { ok: true, closed: n };
+          },
           'panel.want.share': async () => {
             const id = String((q as { id?: string }).id ?? ''), r = this.liveWant(id);
             if (!r) return { error: 'no open want with that id' };
@@ -3211,7 +3227,7 @@ export class OwnerDesk {
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
-      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, replies: this.notes.filter((n) => n.want === r.want.id).length, offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
+      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, replies: this.notes.filter((n) => n.want === r.want.id).length, repliesWaiting: this.notes.filter((n) => n.want === r.want.id && !this.settled(n)).length, shared: [...this.wantLinks.values()].some((l) => l.want === r.want.id && !l.closed && l.left > 0 && Date.parse(l.until) > Date.now()), offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
       seen: forAssistant ? undefined : this.chatSeen,
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && !n.from.via && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from), ...(!a && this.settled(n) ? { settled: true } : {}) }; }),
       agenda: this.agenda,

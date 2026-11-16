@@ -473,8 +473,20 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await reply.locator('.offer-shop', { hasText: 'Neighbour Jo' }).waitFor({ timeout: 15_000 });
       await reply.getByRole('button', { name: 'Reply', exact: true }).waitFor();
       await reply.getByRole('button', { name: 'Not this one' }).waitFor();
+      // Private isn't checked: said on the card and above the replies.
+      await reply.locator('.lake-pill', { hasText: 'Through your link · not checked' }).waitFor();
+      await page.getByText(/nobody here checks who they are\. Before you meet, pay or say where you live, check them yourself\./).waitFor();
       await page.getByRole('heading', { name: 'Replies (1)' }).waitFor();
       await tidy();
+      // Stop sharing: the link's page says only that it's closed; the want and its offers stay.
+      await page.locator('.share-want').getByRole('button', { name: 'Stop sharing' }).click();
+      await confirmSheet('Stop it');
+      await page.locator('ion-toast', { hasText: 'Link stopped' }).waitFor({ timeout: 10_000 });
+      const late = await page.context().newPage();
+      await late.goto(shared);
+      await late.getByRole('heading', { name: 'This link is closed' }).waitFor();
+      expect(await late.getByText('Handheld shower head').count()).toBe(0);
+      await late.close();
       // No address yet: the one thing to add before buying, a tap away; kept in the house, given only to the shop bought from.
       await first.getByRole('button', { name: 'Add your delivery address to buy' }).click();
       await page.getByLabel('Street address').fill('12 Example St');

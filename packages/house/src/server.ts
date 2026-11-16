@@ -136,12 +136,16 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
   // the owner's invitation, so it works whether or not their door is open; the token is in the path, never a query.
   if (desk) {
     const sealedPage = (res: express.Response) => res.set({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
-    const wantHtml = (v: NonNullable<ReturnType<OwnerDesk['wantLinkView']>>) => notePage(v.want.name, `<h1>${esc(v.name ? `${v.name} is looking for` : 'Someone is looking for')}: ${esc(v.want.name)}</h1>${v.want.description ? `<p class="lead">${esc(v.want.description)}</p>` : ''}`
-      + `${v.want.itemOffered.additionalProperty.length ? `<ul class="small">${v.want.itemOffered.additionalProperty.map((x) => `<li>${esc(x.name)}: ${esc(x.value)}</li>`).join('')}</ul>` : ''}`
-      + `${v.want.areaServed ? `<p class="small">Where: ${esc(v.want.areaServed)}</p>` : ''}<p class="small">Open until ${esc(new Date(v.want.availabilityEnds).toUTCString())}.</p>`
-      + (v.open ? `<form method="post"><label class="small" for="t">Can you help? Say what you have, or who you know.</label><textarea class="say" id="t" name="text" rows="5" maxlength="1000" required></textarea>
+    const wantHtml = (v: NonNullable<ReturnType<OwnerDesk['wantLinkView']>>) => {
+      if (!v.want || !v.open) return notePage('Closed', '<h1>This link is closed</h1><p class="lead">It doesn\'t take replies any more.</p>');
+      const w = v.want;
+      return notePage(w.name, `<h1>${esc(v.name ? `${v.name} is looking for` : 'Someone is looking for')}: ${esc(w.name)}</h1>${w.description ? `<p class="lead">${esc(w.description)}</p>` : ''}`
+        + `${w.itemOffered.additionalProperty.length ? `<ul class="small">${w.itemOffered.additionalProperty.map((x) => `<li>${esc(x.name)}: ${esc(x.value)}</li>`).join('')}</ul>` : ''}`
+        + `${w.areaServed ? `<p class="small">Where: ${esc(w.areaServed)}</p>` : ''}<p class="small">Open until ${esc(new Date(w.availabilityEnds).toUTCString())}.</p>`
+        + `<form method="post"><label class="small" for="t">Can you help? Say what you have, or who you know.</label><textarea class="say" id="t" name="text" rows="5" maxlength="1000" required></textarea>
 <input class="say" name="from" maxlength="80" placeholder="Your name" style="margin-top:8px"><input class="say" name="reply_to" maxlength="254" autocomplete="off" placeholder="Email or phone, if you'd like the answer there (optional)" style="margin-top:8px">
-<p class="small" style="margin:6px 0 0">Only they see it. You'll never be asked to pay or sign in here.</p><div class="row"><button class="btn primary" type="submit">Send</button></div></form>` : `<p class="lead">${esc(v.why ?? 'This link is closed.')}</p>`));
+<p class="small" style="margin:6px 0 0">Only they see it. You'll never be asked to pay or sign in here. Nobody is checked here, on either side: before you meet, pay or say where you live, check who they are.</p><div class="row"><button class="btn primary" type="submit">Send</button></div></form>`);
+    };
     app.get('/want/:id/:token', (req, res) => {
       sealedPage(res);
       const v = desk.wantLinkView(String(req.params.id), String(req.params.token));
