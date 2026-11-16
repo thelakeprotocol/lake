@@ -627,3 +627,5 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 
 .stacked-seg .then-row { width: 100%; margin: 10px 0; }
 .chips-help { margin: 0 0 8px; }
+/* One tile, or the odd one at the end, takes the whole row. */
+.handled-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }

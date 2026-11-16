@@ -1,5 +1,5 @@
 import { createContext } from 'preact';
-import { useContext, useEffect, useState } from 'preact/hooks';
+import { useContext, useEffect, useRef, useState } from 'preact/hooks';
 import { forgetKey, loadKey, settleSpare, signEnvelope, spareKey } from '../owner-crypto';
 
 // Talking to the house. Every call is signed on this device with the owner's key, which never leaves it; the house only
@@ -80,15 +80,34 @@ export function shared<T>(payload: Record<string, unknown>, version: number): Pr
   return p;
 }
 
-/** One signed call, fetched again whenever something changed; keeps what it had while it fetches, so nothing flickers. */
+/**
+ * One signed call, fetched again whenever something changed; keeps what it had while it fetches, so nothing flickers.
+ * A call on its way is never thrown away for a newer change: whichever answer is newest so far is shown (17 Nov: on a
+ * busy house "changed" came every second or two, each threw away the call before it, and a look that took longer than
+ * that never showed: Money, What your house holds and What left your house loaded for ever).
+ */
 export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {
   const { version } = useContext(Version);
   const k = JSON.stringify(payload);
   const [s, set] = useState<{ data?: T; error?: string }>(() => ({ data: cached<T>(k) }));
+  // Each fetch numbered as it starts; an answer is shown unless a newer one already was. Two on their way at most: a
+  // change while two are out waits for one of them, then fetches once more.
+  const me = useRef({ k, payload, version, started: 0, shown: 0, flying: 0, again: false, mounted: true });
+  me.current.k = k; me.current.payload = payload; me.current.version = version;
+  useEffect(() => () => { me.current.mounted = false; }, []);
   useEffect(() => {
-    let live = true;
-    shared<T>(payload, version).then((data) => { if (!PRIVATE.has(String(payload.kind))) remember(k, data); if (live) set({ data }); }, (e: Error) => live && set((x) => ({ ...x, error: e.message })));
-    return () => { live = false; };
+    const m = me.current;
+    const run = () => {
+      if (m.flying >= 2) { m.again = true; return; }
+      const key = m.k, body = m.payload, n = ++m.started;
+      m.flying++;
+      shared<T>(body, m.version).then((data) => {
+        if (!PRIVATE.has(String(body.kind))) remember(key, data);
+        if (m.mounted && m.k === key && n > m.shown) { m.shown = n; set({ data }); }
+      }, (e: Error) => { if (m.mounted && m.k === key && n > m.shown) set((x) => ({ ...x, error: e.message })); })
+        .finally(() => { m.flying--; if (m.again && m.mounted) { m.again = false; run(); } });
+    };
+    run();
   }, [k, version]);
   return s;
 }

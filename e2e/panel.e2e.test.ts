@@ -1898,6 +1898,24 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await goBack();
   });
 
+  it('a slow look still shows on a busy house: a change while it loads never throws it away (17 Nov: pages loaded for ever)', async () => {
+    // Every look takes 2.5 s, and notes arrive every 400 ms, each a change the phone hears: before, each change threw away
+    // the look in flight, so the page never filled.
+    // A request still held when the route goes is let through by Playwright: continuing it then would be a second answer.
+    await page.route('**/owner/api', async (r) => { await new Promise((ok) => setTimeout(ok, 2500)); await r.continue().catch(() => {}); });
+    try {
+      await page.evaluate(() => { location.hash = '#data'; });
+      const writers = await Promise.all([1, 2, 3, 4, 5, 6].map(async (i) => makeVisitor(await generateIdentity(), `busy-${i}.example`)));
+      let stop = false;
+      const busy = (async () => { for (let i = 0; !stop && i < 40; i++) { await ask(`${house}/a2a`, writers[i % writers.length]!, { kind: 'note', text: `Busy note ${i}` }).catch(() => {}); await new Promise((ok) => setTimeout(ok, 400)); } })();
+      await page.locator('ion-list-header', { hasText: 'What it says about you' }).waitFor({ timeout: 20_000 });
+      stop = true;
+      await busy;
+    } finally { await page.unroute('**/owner/api'); }
+    await tidy();
+    await goBack();
+  });
+
   it('signs out on this device: back to the pairing screen', async () => {
     const keyNow = () => page.evaluate(keptKid);
     const before = await keyNow();
