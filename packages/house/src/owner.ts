@@ -366,6 +366,15 @@ const shortLabel = (label: string) => label.replace(/ \(.*\)$/, '') || 'Your AI'
 const ASSISTANT_MAY = new Set(['assistant.want.match', 'assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close', 'assistant.tasks', 'assistant.task.done']);
 // What each look needs beyond the base: the owner turns these on per assistant; the house refuses the rest (SPEC §6.1).
 const NEEDS: Record<string, Reads> = { 'panel.rules': 'records', 'panel.activity': 'records', 'panel.agents': 'records', 'panel.consents': 'records', 'panel.access': 'records', 'panel.data': 'records', 'panel.money': 'money', 'panel.market': 'money' };
+/**
+ * The looks an AI key makes that the house writes down for its owner (SPEC §6.1, "What the house gave it"): what the
+ * owner reads on that AI's page as "Your records · 14 times", with Stop when a switch turns it off. Counts, kinds and
+ * field codes only, never a value (17 Nov, a privacy-minded owner: "Last here" was all they could know).
+ */
+const READ_WHAT: Record<string, string> = { 'panel.data': 'records', 'panel.consents': 'consents', 'panel.access': 'access', 'panel.activity': 'activity', 'panel.rules': 'rules', 'panel.agents': 'visitors', 'panel.money': 'money', 'panel.market': 'offers', 'list': 'messages', 'panel.overview': 'overview' };
+const READ_SAID: Record<string, string> = { records: 'Your records', consents: 'Your yeses to agents', access: 'Who has access', activity: 'What happened at your door', rules: 'Your rules', visitors: 'Agents who came by', money: 'Your money', offers: 'Offers priced for you', messages: 'Who writes to you', overview: 'A summary of your house' };
+/** One look an AI key made, kept for the owner only: what kind, and for records the field codes it was given. */
+export interface ReadEntry { at: string; by: string; what: string; kind: string; fields?: string[] }
 /** Refused actions (limits aside) that take an AI off duty for the night. */
 const REFUSALS_A_NIGHT = 3;
 /** News that only informs an assistant: nothing for it to answer or do (SPEC §6.1, `fyi`). */
@@ -510,6 +519,8 @@ export class OwnerDesk {
   }
   /** What the AI on duty did and was refused, newest last (the morning page). */
   dutyLog: DutyEntry[] = [];
+  readLog: ReadEntry[] = [];
+  private readSave?: NodeJS.Timeout;
   private dutyPushed = new Set<string>();
   /** Keys the owner's assistants have sent signed messages to: who counts as known for the duty's novelty rule. */
   private contacts = new Map<string, { name: string; webId: string; at: string }>();
@@ -865,6 +876,7 @@ export class OwnerDesk {
     }
     setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); }, 60_000).unref();
     this.dutyLog = await loadJson(join(this.o.dataDir, 'duty-log.json'), []);
+    this.readLog = await loadJson(join(this.o.dataDir, 'read-log.json'), []);
     this.contacts = new Map(await loadJson(join(this.o.dataDir, 'contacts.json'), []));
     this.firstContacts = new Map(await loadJson(join(this.o.dataDir, 'first-contacts.json'), []));
     setInterval(() => this.morningPush(), 60_000).unref();
@@ -1736,6 +1748,7 @@ export class OwnerDesk {
       const aud = (p as { aud?: unknown }).aud;
       if (aud !== undefined && !this.isThisHouse(aud)) return void res.status(403).json({ error: 'this call was signed for another house' });
       const assistant = signer !== this.ownerJwk.kid ? this.assistants.get(signer) : undefined;
+      let readEntry: ReadEntry | undefined;
       // The owner's own key only: an assistant reading the panel isn't the owner looking.
       if (!assistant) this.seen();
       if (assistant) {
@@ -1747,6 +1760,7 @@ export class OwnerDesk {
         }
         if (!ASSISTANT_MAY.has(p.kind)) return void res.status(403).json({ error: `an assistant may look and suggest; only your human's key can do ${p.kind}` });
         const need = NEEDS[p.kind];
+        if (READ_WHAT[p.kind] && (!need || this.readsOf(assistant).has(need))) readEntry = this.logRead(assistant.kid, p.kind);
         if (need && !this.readsOf(assistant).has(need)) return void res.status(403).json({ needs: need, error: `your human hasn't let you read their ${NEEDS_SAID[need]}. If you need it, ask them (lake_house_suggest, saying why): they turn it on in My AI, under your name, What it can read.` });
         // Messages waiting for it while nobody reads (its chat ended): its human's panel says so (run 58).
         if (p.kind === 'assistant.waiting') {
@@ -2362,6 +2376,11 @@ export class OwnerDesk {
         const code = oneTimeCode();
         this.invites.set(code, { label: String((p as unknown as { label?: string }).label ?? 'my assistant').slice(0, 60), until: Date.now() + 15 * 60_000, reads: asReads((p as unknown as { reads?: unknown }).reads) });
         return void res.json({ code, until: new Date(Date.now() + 15 * 60_000).toISOString() });
+      }
+      if (p.kind === 'panel.reads') {
+        const q = p as unknown as { kid?: string; since?: number };
+        if (!this.assistants.has(String(q.kid ?? ''))) return void res.status(404).json({ error: 'no such assistant' });
+        return void res.json({ lines: this.readsFor(String(q.kid), Number(q.since) || Date.now() - 24 * 3_600_000) });
       }
       if (p.kind === 'panel.assistant.reads') {
         const q = p as unknown as { kid?: string; reads?: unknown };
@@ -3165,6 +3184,7 @@ export class OwnerDesk {
         if (Array.isArray(answer) && assistant && p.kind === 'panel.circles' && !this.readsOf(assistant).has('records')) {
           return void res.json((answer as { url: string; id: string; view?: Record<string, unknown> }[]).map((c) => ({ url: c.url, id: c.id, view: { text: c.view?.text, promise: c.view?.promise, open: c.view?.open, ...(c.view?.kinds ? { kinds: c.view.kinds } : {}) }, limited: true })));
         }
+        if (readEntry && p.kind === 'panel.data' && Array.isArray((answer as { claims?: unknown } | undefined)?.claims)) readEntry.fields = [...new Set((answer as { claims: { field: string }[] }).claims.map((c) => c.field))];
         if (answer !== undefined) return void res.status((answer as { error?: string }).error ? 400 : 200).json(answer);
       }
       res.status(400).json({ error: 'unknown request' });
@@ -3260,6 +3280,32 @@ export class OwnerDesk {
   }
 
   /** What an assistant may read beyond the base: nothing while it holds a time on duty, else what the owner chose. */
+  /**
+   * Writes a look down (kept for the owner, the last 5000), saved within half a minute. It doesn't tell open phones:
+   * an AI reading often would make every page fetch again (17 Nov: frequent changes kept pages loading).
+   */
+  private logRead(by: string, kind: string): ReadEntry {
+    const e: ReadEntry = { at: new Date().toISOString(), by, what: READ_WHAT[kind]!, kind };
+    this.readLog.push(e);
+    if (this.readLog.length > 6000) this.readLog = this.readLog.slice(-5000);
+    this.readSave ??= setTimeout(() => { this.readSave = undefined; void saveWhole(join(this.o.dataDir, 'read-log.json'), JSON.stringify(this.readLog.slice(-5000))).catch(() => {}); }, 30_000);
+    this.readSave.unref?.();
+    return e;
+  }
+
+  /** What the house gave one AI since a time, a line per kind of look: how often, when last, which fields, and the switch that stops it. */
+  private readsFor(kid: string, since: number) {
+    const lines = new Map<string, { what: string; label: string; n: number; last: string; fields: Set<string>; stop?: Reads }>();
+    for (const e of this.readLog) {
+      if (e.by !== kid || Date.parse(e.at) < since) continue;
+      const l = lines.get(e.what) ?? { what: e.what, label: READ_SAID[e.what] ?? e.what, n: 0, last: e.at, fields: new Set<string>(), ...(NEEDS[e.kind] ? { stop: NEEDS[e.kind] } : {}) };
+      l.n++; l.last = e.at;
+      for (const f of e.fields ?? []) l.fields.add(f);
+      lines.set(e.what, l);
+    }
+    return [...lines.values()].sort((x, y) => y.last.localeCompare(x.last)).map(({ fields, ...l }) => ({ ...l, ...(fields.size ? { fields: [...fields].map((f) => fieldSpec(f)?.label ?? f) } : {}) }));
+  }
+
   private readsOf(a?: AssistantKey): Set<Reads> {
     if (!a || this.holdsDuty(a)) return new Set();
     // Money that came with an allowance (to see the offers it pays) goes when the allowance does.

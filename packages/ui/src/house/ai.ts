@@ -147,9 +147,13 @@ function Night({ log }: { log?: DutyLog }) {
 }
 
 /** One AI: when it was last here, its spending money (signed here), removing it. */
+/** One kind of look an AI made today, as the house wrote it down (SPEC §6.1). */
+interface ReadLine { what: string; label: string; n: number; last: string; fields?: string[]; stop?: Reads }
+
 export function AiKeyPage({ arg }: { arg: string }) {
   const v = useHouse<ListView>({ kind: 'list' });
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
+  const gave = useHouse<{ lines: ReadLine[] }>({ kind: 'panel.reads', kid: arg, since: new Date().setHours(0, 0, 0, 0) });
   const a = v.data?.assistants.find((x) => x.kid === arg);
   if (!a) return h(Page, { title: 'Your AI', back: () => back('#ai'), backLabel: 'My AI' }, v.data ? h(Empty, { icon: 'sparkles-outline', title: 'This AI isn\'t connected any more' }) : h(Failed, { error: v.error }));
   const mine = (duty.data?.duties ?? []).find((d) => d.kid === a.kid && dutyLive(d)), onDuty = !!mine;
@@ -166,8 +170,29 @@ export function AiKeyPage({ arg }: { arg: string }) {
       a.dutyHeld ? h('ion-item', { lines: 'full', class: 'reads-held' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, `While ${shortName(a.label)} holds a time on duty (until ${new Date(a.dutyHeld).toLocaleDateString([], { day: 'numeric', month: 'short' })}), it reads only who writes to you and its errands. Take it off duty to let it read more.`),
         h(Btn, { label: 'Take it off duty', size: 'small', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.duty.off', kid: a.kid }), done: `${shortName(a.label)} is off duty`, ask: { header: `Take ${shortName(a.label)} off duty?`, sub: 'Its time on duty ends now. You can sign a new one any time.', button: 'Take it off duty' } }))) : null,
       h(ReadsToggles, { value: a.readsChosen ?? a.reads ?? [], bare: true, disabled: !!a.dutyHeld, onChange: async (reads: Reads[]) => { await must({ kind: 'panel.assistant.reads', kid: a.kid, reads }); void toast(readsLine(reads)); } })),
+    h(GaveToday, { a, lines: gave.data?.lines }),
     onDuty ? null : h(Allowance, { a }),
     h('div', { class: 'pad' }, h(Btn, { label: 'Remove this AI', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'panel.assistant.revoke', kid: a.kid }); back('#ai'); }, ask: { header: `Remove ${shortName(a.label)}?`, sub: 'Its key stops working.', button: 'Remove' }, done: 'Removed' })));
+}
+
+/**
+ * What the house gave this AI today, a line per kind of look, from the house's own record (17 Nov, a privacy-minded owner:
+ * "Last here" said when, not what). Stop turns off the switch that lets it make that look.
+ */
+function GaveToday({ a, lines }: { a: Assistant; lines?: ReadLine[] }) {
+  const reads = a.readsChosen ?? a.reads ?? [];
+  const more = (fs: string[]) => fs.length > 4 ? `${fs.slice(0, 4).join(', ')} +${fs.length - 4} more` : fs.join(', ');
+  return h(Section, { title: 'What your house gave it today', cls: 'gave' },
+    lines === undefined ? h(Row, { icon: 'time-outline', tint: 'muted', label: 'Looking…' })
+      : !lines.length ? h(Row, { icon: 'checkmark-circle-outline', tint: 'muted', label: 'Nothing yet today' })
+      : lines.map((l) => h(Row, {
+        key: l.what, icon: l.stop === 'money' ? 'wallet-outline' : l.stop ? 'folder-open-outline' : 'chatbubbles-outline', tint: l.stop ? 'violet' : 'muted', label: l.label,
+        sub: `${l.n === 1 ? 'Once' : `${l.n} times`} · last ${time(l.last)}${l.fields?.length ? ` · ${more(l.fields)}` : ''}`,
+        below: l.stop && reads.includes(l.stop) && !a.dutyHeld
+          ? h(Btn, { label: 'Stop', size: 'small', fill: 'outline', color: 'medium', destructive: false, run: () => must({ kind: 'panel.assistant.reads', kid: a.kid, reads: reads.filter((r) => r !== l.stop) }), done: readsLine(reads.filter((r) => r !== l.stop)),
+            ask: { header: `Stop ${shortName(a.label)} reading your ${l.stop}?`, sub: l.stop === 'money' ? 'It stops reading your money and the offers priced for you.' : 'It stops reading your records, your yeses to agents, your rules, who came by and what happened at your door. Who writes to you it still sees.', button: 'Stop' } })
+          : l.stop ? h('p', { class: 'muted-line' }, 'Off now') : null,
+      })));
 }
 
 /** A spending allowance (SPEC §6.2): drafted by the house, signed here. Not per day: once spent, it's gone. */

@@ -373,6 +373,22 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asAssistant({ kind: 'panel.data' })).not.toHaveProperty('needs');
     expect(await asAssistant({ kind: 'panel.money' })).toMatchObject({ needs: 'money' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // What the house gave it today, from the house's own record: the look it just made, which fields, and never a refused one.
+    await goBack();
+    await row.click();
+    const gave = page.locator('.gave');
+    const records = gave.locator('ion-item', { hasText: 'Your records' });
+    await records.waitFor({ timeout: 5000 });
+    expect(await records.textContent()).toMatch(/Once · last/);
+    expect(await gave.textContent()).not.toContain('Your money');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // Stop turns the switch off: the house refuses its next look at the records.
+    await records.getByRole('button', { name: 'Stop' }).click();
+    await confirmSheet('Stop');
+    await records.getByText('Off now').waitFor({ timeout: 5000 });
+    expect(await asAssistant({ kind: 'panel.data' })).toMatchObject({ needs: 'records' });
+    await page.locator('.reads .reads-records ion-toggle').click();
+    await page.getByText('Messages, records').first().waitFor({ timeout: 4000 });
     await goBack();
   });
 

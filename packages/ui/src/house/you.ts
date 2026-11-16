@@ -62,7 +62,7 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
         const open = r.yeses.filter((c) => c.status === 'active'), latest = [...open].sort((x, y) => y.until.localeCompare(x.until))[0]!;
         return h(Row, { key: r.id, icon: 'eye-outline', tint: 'blue', label: r.domain ?? 'An agent with no proven name', sub: `${useLine(open)} · ${hoursLeft(latest.until)} left`, cls: 'holder', onClick: () => push('#access') });
       }),
-      ...ais.map((a) => h(Row, { key: a.kid, icon: 'sparkles-outline', tint: stale(a) ? 'amber' : 'violet', label: shortName(a.label), sub: stale(a) ? `Not here for ${Math.round((Date.now() - Date.parse(a.seenAt!)) / 86_400_000)} days. Still reads your records.` : `Your AI · reads your records · ${lastHere(a.seenAt).text.toLowerCase()}`, cls: 'reader', onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`) })),
+      ...ais.map((a) => h(Row, { key: a.kid, icon: 'sparkles-outline', tint: stale(a) ? 'amber' : 'violet', label: shortName(a.label), sub: stale(a) ? `Not here for ${Math.round((Date.now() - Date.parse(a.seenAt!)) / 86_400_000)} days. May still read your records.` : `Your AI · may read your records · ${lastHere(a.seenAt).text.toLowerCase()}`, cls: 'reader', onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`) })),
       h(Row, { icon: 'people-outline', tint: 'muted', label: 'Who has access', sub: 'Everyone who asked, and every yes you gave', onClick: () => push('#access') })),
     left.error && !left.data ? null : h(Section, { title: 'What left your house', cls: 'data-left' },
       ...(out.length ? (all ? out : out.slice(0, 4)).map(({ x, n }, i) => h('ion-item', { key: i, lines: 'full', class: 'left-row' },
