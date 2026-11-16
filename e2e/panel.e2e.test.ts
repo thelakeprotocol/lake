@@ -454,6 +454,27 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await first.getByText(/Matches: Type, Spray modes, Finish, Connection/).waitFor();
       await page.locator('ion-accordion', { hasText: "1 over the most you'd pay" }).waitFor({ timeout: 20_000 });
       await tidy();
+      // Send it to people you know (16 Nov): a link that shows what they're looking for, not what they'd pay. Someone with no
+      // house replies; the reply is on the want, with Reply and Not this one, and the row counts it.
+      await page.getByRole('button', { name: 'Share with people you know' }).click();
+      const shared = (await page.locator('.share-want .copybox code').textContent({ timeout: 10_000 }))!.trim();
+      expect(shared).toMatch(/\/want\/w-[0-9a-f]{8}\/[\w-]{20,}$/);
+      await page.getByText(/sees what you're looking for, not what you'd pay, and can reply here: 10 replies/).waitFor();
+      const friend = await page.context().newPage();
+      await friend.goto(shared);
+      await friend.getByRole('heading', { name: /is looking for: Handheld shower head/ }).waitFor();
+      expect(await friend.getByText('34.50').count()).toBe(0);
+      await friend.locator('textarea[name="text"]').fill('I have a spare one in the shed, free if you want it');
+      await friend.locator('input[name="from"]').fill('Neighbour Jo');
+      await friend.getByRole('button', { name: 'Send' }).click();
+      await friend.getByRole('heading', { name: 'Reply sent ✓' }).waitFor({ timeout: 10_000 });
+      await friend.close();
+      const reply = page.locator('ion-card.want-reply', { hasText: 'I have a spare one in the shed' });
+      await reply.locator('.offer-shop', { hasText: 'Neighbour Jo' }).waitFor({ timeout: 15_000 });
+      await reply.getByRole('button', { name: 'Reply', exact: true }).waitFor();
+      await reply.getByRole('button', { name: 'Not this one' }).waitFor();
+      await page.getByRole('heading', { name: 'Replies (1)' }).waitFor();
+      await tidy();
       // No address yet: the one thing to add before buying, a tap away; kept in the house, given only to the shop bought from.
       await first.getByRole('button', { name: 'Add your delivery address to buy' }).click();
       await page.getByLabel('Street address').fill('12 Example St');

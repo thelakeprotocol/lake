@@ -132,6 +132,34 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
     app.get('/note/:id/:key', (req, res) => void thread(req, res, req.query.text));
     app.post('/note/:id/:key', express.json({ limit: '8kb' }), express.urlencoded({ extended: false, limit: '8kb' }), (req, res) => void thread(req, res, (req.body ?? {}).text));
   }
+  // A want the owner shared by link (SPEC §6.8): its public points and a reply box, for someone with no house. The link is
+  // the owner's invitation, so it works whether or not their door is open; the token is in the path, never a query.
+  if (desk) {
+    const sealedPage = (res: express.Response) => res.set({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+    const wantHtml = (v: NonNullable<ReturnType<OwnerDesk['wantLinkView']>>) => notePage(v.want.name, `<h1>${esc(v.name ? `${v.name} is looking for` : 'Someone is looking for')}: ${esc(v.want.name)}</h1>${v.want.description ? `<p class="lead">${esc(v.want.description)}</p>` : ''}`
+      + `${v.want.itemOffered.additionalProperty.length ? `<ul class="small">${v.want.itemOffered.additionalProperty.map((x) => `<li>${esc(x.name)}: ${esc(x.value)}</li>`).join('')}</ul>` : ''}`
+      + `${v.want.areaServed ? `<p class="small">Where: ${esc(v.want.areaServed)}</p>` : ''}<p class="small">Open until ${esc(new Date(v.want.availabilityEnds).toUTCString())}.</p>`
+      + (v.open ? `<form method="post"><label class="small" for="t">Can you help? Say what you have, or who you know.</label><textarea class="say" id="t" name="text" rows="5" maxlength="1000" required></textarea>
+<input class="say" name="from" maxlength="80" placeholder="Your name" style="margin-top:8px"><input class="say" name="reply_to" maxlength="254" autocomplete="off" placeholder="Email or phone, if you'd like the answer there (optional)" style="margin-top:8px">
+<p class="small" style="margin:6px 0 0">Only they see it. You'll never be asked to pay or sign in here.</p><div class="row"><button class="btn primary" type="submit">Send</button></div></form>` : `<p class="lead">${esc(v.why ?? 'This link is closed.')}</p>`));
+    app.get('/want/:id/:token', (req, res) => {
+      sealedPage(res);
+      const v = desk.wantLinkView(String(req.params.id), String(req.params.token));
+      if (!v) return void res.status(404).json({ error: 'no such link' });
+      return void (req.accepts(['json', 'html']) === 'html' ? res.type('html').send(wantHtml(v)) : res.json(v));
+    });
+    app.post('/want/:id/:token', express.json({ limit: '8kb' }), express.urlencoded({ extended: false, limit: '8kb' }), (req, res) => {
+      sealedPage(res);
+      const r = desk.replyByWantLink(String(req.params.id), String(req.params.token), req.body ?? {}, req.ip ?? '');
+      const html = req.accepts(['json', 'html']) === 'html';
+      if (r.body.kind === 'noted') {
+        const at = `${(door ? door.a2a().replace(/\/a2a$/, '') : '')}/note/${r.body.note}/${r.body.key}`;
+        return void (html ? res.type('html').send(notePage('Reply sent', `<h1>Reply sent ✓</h1><p class="lead">They'll see it on their phone. Their answer will appear at this private link; keep it:</p><p style="overflow-wrap:anywhere"><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json({ kind: 'noted', note: r.body.note, answer_at: at }));
+      }
+      res.status(r.status);
+      return void (html ? res.type('html').send(notePage('Not sent', `<h1>Not sent</h1><p class="lead">${esc(String(r.body.error))}</p>`)) : res.json(r.body));
+    });
+  }
   if (door) app.get('/', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.json({ a2a: door.a2a(), card: `${door.a2a().replace(/\/a2a$/, '')}/.well-known/agent-card.json`, ...(door.door() ? { door: door.door() } : {}) })));
   // Revocation anyone can check: the house's signed status list (W3C Bitstring Status List, SPEC §6).
   app.get('/status/revocation', async (_req, res) => { res.type('application/vc+jwt').set('cache-control', 'max-age=5').send(await keeper.statusList()); });

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
-import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
+import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, confirm, h, toast } from './ion';
 import { addressLine, chatKeyOf, chatsOf, day, dutyLive, money, peopleOf, plural, seen, shortName, shortShop, signDraft, stale, time, unseen, when, type Address, type Assistant, type Chat, type DoorNote, type DutyEntry, type DoorState, type DutyLog, type ListView, type Note, type TaskV, type WantOfferV, type WantV } from './logic';
 import { back, focusNote, push } from './nav';
 import { SuggestionCard } from './inbox';
@@ -67,17 +67,19 @@ const wantState = (w: WantV) => {
   if (!open.length) return Date.parse(w.want.availabilityEnds) < Date.now() ? (back ? `Refunded by ${shortShop(back.seller.name)}` : 'Closed: no offers') : back ? `Refunded by ${shortShop(back.seller.name)} · open again` : 'Waiting for offers';
   return `${open.length} offer${open.length === 1 ? '' : 's'} · from ${money(open.map((o) => o.total).sort((a, b) => a.value - b.value)[0]!)}`;
 };
+/** Replies through a shared link come first in the row's line while it's open: a person answered. */
+const wantLine = (w: WantV) => (w.replies && !w.bought ? `${w.replies} repl${w.replies === 1 ? 'y' : 'ies'} · ${wantState(w)}` : wantState(w));
 /** A shop's cart is good for a day or so: after that it can't be bought, until the shop sends it again. */
 const ranOut = (o: WantOfferV) => Date.parse(o.expires) < Date.now();
 /** A want needs the owner while an offer waits for a yes, or what they bought is on its way (their "It arrived" pays the shop). */
-export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
+export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : !!w.replies || w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
 
 export function WantRow({ w }: { w: WantV }) {
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow want-row${wantNeedsYou(w) ? ' unread' : ''}`, onClick: () => push(`#want=${encodeURIComponent(w.want.id)}`) },
     h('div', { slot: 'start' }, h(Avatar, { name: w.want.name, iconName: 'search' })),
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, w.want.name), h('span', { class: 'row-time' }, when(w.offers.at(-1)?.at ?? w.at))),
-      h('p', { class: 'chatlast' }, wantState(w))));
+      h('p', { class: 'chatlast' }, wantLine(w))));
 }
 
 /** One conversation, full screen: the messages as bubbles, who replies, and a reply bar. Tap the name for its details. */
@@ -268,6 +270,15 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
 export const blockAsk = (name?: string) => ({ header: `Block ${name || 'this sender'}?`, sub: 'Your house turns their messages away and tells them it doesn\'t take them. You can\'t undo this yet.', button: 'Block' });
 
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
+/** A link to send to people you know: they see what you're looking for and can reply, with nothing to install. */
+function ShareWant({ id }: { id: string }) {
+  const [link, setLink] = useState<{ link: string; until: string } | null>(null);
+  return h('div', { class: 'pad share-want' },
+    link ? h('div', {}, h('p', { class: 'muted-line' }, `Anyone with this link sees what you're looking for, not what you'd pay, and can reply here: 10 replies, until ${day(link.until)}.`),
+      h('div', { class: 'copybox' }, h('code', {}, link.link)), h(CopyBtn, { text: link.link, label: 'Copy the link' }))
+      : h(Btn, { label: 'Share with people you know', icon: 'share-outline', fill: 'outline', expand: 'block', run: async () => setLink(await must<{ link: string; until: string }>({ kind: 'panel.want.share', id })) }));
+}
+
 export function WantPage({ arg }: { arg: string }) {
   const list = useHouse<ListView>({ kind: 'list' });
   const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
@@ -305,6 +316,18 @@ export function WantPage({ arg }: { arg: string }) {
       w.want.description ? h('p', { class: 'spec-desc' }, w.want.description) : null,
       h('div', { class: 'spec-chips' }, ...w.want.itemOffered.additionalProperty.map((p) => h('span', { key: p.name, class: 'field-tag' }, h('span', { class: 'tag-k' }, `${p.name} `), p.value))),
       h('p', { class: 'spec-limit' }, [addr.data?.address ? `To ${addressLine(addr.data.address)}` : w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
+    // Send it to people you know (SPEC §6.8): a link that shows what you're looking for, never what you'd pay; replies come
+    // here. Ten replies, seven days.
+    bought ? null : h(ShareWant, { key: 'share', id: w.want.id }),
+    ...(list.data?.notes ?? []).filter((n) => n.want === w.want.id).length ? [
+      h('h3', { class: 'section-h', key: 'rh' }, `Replies (${(list.data?.notes ?? []).filter((n) => n.want === w.want.id).length})`),
+      ...(list.data?.notes ?? []).filter((n) => n.want === w.want.id).sort((a, b) => b.at.localeCompare(a.at)).map((n) => h('ion-card', { key: n.id, class: 'lake-card want-reply' }, h('ion-card-content', {},
+        h('div', { class: 'offer-head' }, h('h3', { class: 'offer-shop' }, n.from.as ?? n.from.name), h('span', { class: 'row-time' }, when(n.at))),
+        h('p', { class: 'offer-note' }, n.text),
+        h('div', { class: 'card-actions' },
+          h('ion-button', { size: 'small', shape: 'round', onClick: () => push(`#note=${encodeURIComponent(n.id)}`) }, 'Reply'),
+          h(Btn, { label: 'Not this one', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.note.dismiss', id: n.id }), done: 'Set aside' }))))),
+    ] : [],
     bought ? [
       h('h3', { class: 'section-h', key: 'bh' }, bought.state === 'arrived' ? 'Arrived' : bought.problem ? 'Problem reported' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
       card(bought, false),

@@ -20,11 +20,16 @@ You need a house on the Lake, with your AI connected to it (your house's panel: 
 
 On the sandbox, three demo shops answer (Puddle Lane Bathrooms, Washer & Wrench, Brightwater Home): bathroom fittings, light bulbs, a few household things. Their names, catalogues and prices are made up, the money is play money, and nothing is really posted.
 
+## Send it to people you know
+
+Shops aren't the only ones who might have it: a neighbour, a friend of a friend, someone in your street's group chat. On the want, **Share with people you know** gives you a link to send them however you like. Whoever opens it sees what you're looking for (its name, description, details and area) and a box to reply, with nothing to install and nothing to sign in to; never what you'd pay or where you live. Replies come to your phone under the want, each with **Reply** (the answer reaches them at the private link they're given) and **Not this one**. A link takes ten replies and lasts seven days; your AI can draft the want, but only you can make the link. A reply is a stranger's words: your AI doesn't read it unless you hand that chat to it.
+
 ## What goes where
 
 | | Who sees it |
 |---|---|
 | What you're looking for (name, properties, where, until when) | Anyone on the Lake: it's on your house's card, like a tag |
+| A reply through a link you shared | You; your AI only if you hand it that chat |
 | The most you'd pay | Only your house |
 | The photo | Only you and your AI: it never goes to the Lake |
 | Each offer | You, on your phone |

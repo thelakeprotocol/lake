@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -74,6 +74,25 @@ export function podEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return { ...env, NODE_ENV: 'production', NODE_OPTIONS: [...rest, `--max-old-space-size=${heap}`].join(' ') };
 }
 
+/**
+ * Deletes expired entries of the pod server's identity-provider store from disk (each file is { payload: { expires } }),
+ * at most `most` a run, read one at a time. Only expired ones: what the pod server would delete itself.
+ */
+export async function pruneExpired(dir: string, most = 5000, now = Date.now()): Promise<number> {
+  let gone = 0;
+  for (const kind of await readdir(dir).catch(() => [] as string[])) {
+    const sub = join(dir, kind);
+    for (const f of await readdir(sub).catch(() => [] as string[])) {
+      if (gone >= most) return gone;
+      if (!f.endsWith('.json')) continue;
+      let expires = NaN;
+      try { expires = Date.parse(String((JSON.parse(await readFile(join(sub, f), 'utf8')) as { payload?: { expires?: string } }).payload?.expires ?? '')); } catch { continue; }
+      if (Number.isFinite(expires) && expires < now) { await unlink(join(sub, f)).catch(() => {}); gone++; }
+    }
+  }
+  return gone;
+}
+
 /** Runs the pod server with these accounts and pods seeded on first start. */
 async function startPodServer(o: { dataDir: string; port: number; baseUrl: string; seed: { email: string; password: string; pods: { name: string }[] }[] }) {
   await assertPortFree(o.port);
@@ -98,6 +117,14 @@ async function startPodServer(o: { dataDir: string; port: number; baseUrl: strin
   // took down every house this process hosts, again and again (13 Nov). A thrown exception still ends the process.
   process.on('unhandledRejection', (e) => console.error('WARNING: a failure nobody waited for; the house keeps running:', e));
   const died = new Promise<never>((_, reject) => proc.once('exit', (code) => reject(new Error(`pod server exited (${code}):\n${tail.join('')}`))));
+  // The pod server keeps one record per sign-in to stop a replayed one (idp/adapter/ReplayDetection), dead after five
+  // minutes but swept only hourly, and its sweep deletes every expired one at once: past some thousands that ran it out
+  // of memory, so nothing was deleted and the next hour's sweep died the same way (16 Nov: 10,357 records, a restart
+  // every 61 minutes since the 15th). The house clears expired ones itself: a minute after start, then every ten minutes, up to five thousand at a time.
+  const sweep = () => void pruneExpired(join(o.dataDir, 'pod', '.internal', 'idp', 'adapter')).catch(() => {});
+  const first = setTimeout(sweep, 60_000), prune = setInterval(sweep, 10 * 60_000);
+  first.unref(); prune.unref();
+  proc.once('exit', () => { clearTimeout(first); clearInterval(prune); });
   // Seeding takes longer with more pods, and much longer on a busy machine.
   const pods = o.seed.reduce((n, a) => n + a.pods.length, 0);
   await Promise.race([waitFor(`${o.baseUrl}.account/`, 90_000 + pods * 2_000), died]);
@@ -230,9 +257,21 @@ export async function ownerSession(o: PodOptions): Promise<OwnerSession> {
   return { webId, podRoot: `${o.baseUrl}${o.owner}/`, fetch: await sessionFetch(o.baseUrl, { clientId: secrets.clientId!, clientSecret: secrets.clientSecret! }), disk: join(o.dataDir, 'pod', o.owner) };
 }
 
+/**
+ * Sign-ins to the pod server, one at a time across every house in this process. A house's token lasts ten minutes (the
+ * pod server's client-credentials lifetime) and is renewed on the first 401 after; twenty houses that started within a
+ * minute and a half of each other renewed together, six times an hour.
+ */
+let signInQueue: Promise<unknown> = Promise.resolve();
+const inSignInTurn = <T>(f: () => Promise<T>): Promise<T> => {
+  const run = signInQueue.then(f, f);
+  signInQueue = run.then(() => new Promise((r) => setTimeout(r, 250)), () => new Promise((r) => setTimeout(r, 250)));
+  return run;
+};
+
 /** An authenticated fetch for one WebID's client credentials (DPoP), logging in again when a token expires. */
 async function sessionFetch(baseUrl: string, c: { clientId: string; clientSecret: string }): Promise<typeof fetch> {
-  const login = async () => {
+  const login = () => inSignInTurn(async () => {
     // A pod server that just started, on one busy CPU, can take longer than a sign-in waits (3.5 s): asked again a few
     // times, a few seconds apart, before the house gives up (13 Nov: every start timed out, and the house restarted in a loop).
     for (let i = 0; ; i++) {
@@ -246,7 +285,7 @@ async function sessionFetch(baseUrl: string, c: { clientId: string; clientSecret
         await new Promise((r) => setTimeout(r, 2000 + i * 2000));
       }
     }
-  };
+  });
   let session = await login();
   // One sign-in at a time: when a token expires, every request in flight gets a 401 at once, and each signing in again
   // on a busy pod server made it busier (13 Nov: sign-ins timed out after 3.5 s, one after another).

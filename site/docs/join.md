@@ -27,12 +27,15 @@ A house is one container: a Solid pod with your data, and a housekeeper that gua
 ```bash
 git clone https://github.com/thelakeprotocol/lake && cd lake
 docker compose up -d     # two Lake nodes, the specialists, three houses, demo shops and lenders, a swarm of traders (--scale swarm=0 for a quiet Lake)
-open http://localhost:7000   # the live map
+# the live map: open http://localhost:7000 in a browser
 
 docker run -d --network lake_default --hostname house-you \
-  -v ./personas/research.yaml:/rules.yaml \
+  -v house-you:/data -v "$PWD/personas/research.yaml:/rules.yaml:ro" \
+  -e LAKE_NODE_URL=http://lake-node:7000,http://lake-node-b:7000 \
   ghcr.io/thelakeprotocol/lake-house --name you
 ```
+
+`lake_default` is the network Compose made, named after the folder you cloned into (`docker network ls` shows it). The `house-you` volume holds the house's pod and keys: without a volume they go with the container.
 
 On start, your house:
 
@@ -53,9 +56,11 @@ docker compose run --rm lake knock http://house-you:4000 --offer gp --tamper for
 **At home, behind a router?** Add `--relay`. Your house keeps one outgoing connection to each node it follows, and is reached through them: no port forwarding, no domain, no certificates. A laptop, a Raspberry Pi or a home server all work.
 
 ```bash
-docker run -d -e LAKE_NODE_URL=https://lake.example,https://lake.other.example \
-  -v ./rules.yaml:/rules.yaml ghcr.io/thelakeprotocol/lake-house --name you --relay
+docker run -d --restart unless-stopped -p 4000:4000 -v my-house:/data -v "$PWD/rules.yaml:/rules.yaml:ro" \
+  ghcr.io/thelakeprotocol/lake-house --name you --join https://sandbox.lake.doneinfifty.com
 ```
+
+`--join` takes a Lake that serves its specialists under `/s/` (the sandbox does) and turns the relay on. For another Lake, name its nodes and specialists yourself: `-e LAKE_NODE_URL=https://lake.example,https://lake.other.example` (one or more, comma-separated) with `--relay --issuer-url <its issuer> --auditor-url <its auditor>`. Port 4000 is your control panel: publish it to your own network only (`-p 192.168.1.10:4000:4000`, this machine's address), never to the internet without your own HTTPS proxy in front.
 
 Your house registers with the node and appears on the map. Every knock, decision and blocked attack shows there as it happens: ids, kinds and counts, never a record.
 
@@ -71,13 +76,14 @@ Every persona starts by declining anything that asks for a field that identifies
 
 ### Bring your own pod
 
-The house speaks the Solid protocol, so any Solid server works: run your own, use a pod provider, or point it at an enterprise Solid server you already have. Register an app with your Solid identity provider (it gives you a client ID and secret), then:
+The house speaks the Solid protocol, so another Solid server should work: run your own, use a pod provider, or point it at an enterprise Solid server you already have. Only Community Solid Server is tested so far ([open problem 6](/docs/roadmap)). Register an app with your Solid identity provider (it gives you a client ID and secret), then:
 
 ```bash
-docker run -it -p 4000:4000 -v my-house:/data ghcr.io/thelakeprotocol/lake-house --name you \
-  --webid https://id.example/you --client-id … --client-secret … \
-  --join https://sandbox.lake.doneinfifty.com
+docker run -it -p 4000:4000 -v my-house:/data -e LAKE_CLIENT_SECRET ghcr.io/thelakeprotocol/lake-house --name you \
+  --webid https://id.example/you --client-id … --join https://sandbox.lake.doneinfifty.com
 ```
+
+The secret is read from `LAKE_CLIENT_SECRET` (set it in your shell or an env file first), so it isn't in your shell history or the process list; `--client-secret` works too.
 
 The house reads your identity provider and storage from your WebID profile and keeps everything in one folder of your pod (`/lake/`, or `--pod-folder`). Nothing else in your pod is touched.
 
@@ -118,15 +124,15 @@ What the commands above leave out, for a house you keep.
 
 **What it needs.** One house is two Node processes, the housekeeper and its Solid pod: about 300 MB of memory together at rest (allow 768 MB), a little CPU when something knocks, and a data folder that starts under 1 MB and grows with your records and receipts. Each process has a memory limit of its own: the pod's is `LAKE_POD_HEAP` (in MB, 256 unless you say), the house's is Node's `--max-old-space-size` in `NODE_OPTIONS`, which the pod no longer inherits. A process takes its limit plus about 80 MB, so in a container keep the two together under the container's limit; the compose file below does. A small VPS, a Raspberry Pi 4 or 5 (ARM64), or a home server is plenty. No AI model runs in the house: your AI, if you connect one, runs wherever it runs. Hosting several houses on one machine (a family): one container each, or one process with `--tenants N` (each house its own pod, keys and owner).
 
-**Keep it running.** [`deploy/house.compose.yml`](https://github.com/thelakeprotocol/lake/blob/main/deploy/house.compose.yml) is one house as a service: restarted after a reboot or a crash, a health check on its card, a memory limit, and its folder on your disk. Edit the name, handle, time zone and `--owner-url` (this machine's address on your network: where your phone opens the control panel), put your `rules.yaml` beside it, then `docker compose -f house.compose.yml up -d`; `docker compose logs -f` to watch. `lake-house --help` lists every option.
+**Keep it running.** [`deploy/house.compose.yml`](https://github.com/thelakeprotocol/lake/blob/main/deploy/house.compose.yml) is one house as a service: restarted after a reboot or a crash, a health check on its card, a memory limit, and its folder on your disk. Edit the name, handle, time zone and `--owner-url` (this machine's address on your network: where your phone opens the control panel), put your `rules.yaml` beside it, then `docker compose -f house.compose.yml up -d`; `docker compose logs -f` to watch. `docker run --rm ghcr.io/thelakeprotocol/lake-house --help` lists every option with its current value (from the repository: `node packages/house/dist/main.js --help`).
 
-**Back it up.** The data folder is everything: the pod (your records, agreements, receipts), the house's keys in the pod's `/wallet/`, and the house's own state (its pod login, its owner key, the pairing token). Two files there are only the house's memory of the pod and can be deleted while it's stopped: `pod-index.json` (the names of what it filed under agreements, receipts and its log, so it lists those folders once, not on every look) `consent-index.json` and `money-cache.json` (what it read of your receipts and what each payment was for, so a restart doesn't read them all again); delete them if you ever change the pod's files by hand, and the house reads again. A house that runs its own pod reads that first listing from the pod's folder on disk: the pod server builds a listing in memory, and a folder of ten thousand agreements took it past its memory. A pod elsewhere (`--pod-url` with your own login) is still asked over the web. Stop the house, copy the folder, start it again: `docker compose stop && tar czf house-$(date +%F).tgz house && docker compose start`. Keep the copy somewhere else, encrypted: it holds keys. From your phone, **You → My data → Download everything** gives you the pod's contents too (wallet included) as one file.
+**Back it up.** The data folder is everything: the pod (your records, agreements, receipts), the house's keys in the pod's `/wallet/`, and the house's own state (its pod login, its owner key, the pairing token). Three files in `<data>/<name>/` are only the house's memory of the pod and can be deleted while it's stopped: `pod-index.json` (the names of what it filed under agreements, receipts and its log, so it lists those folders once, not on every look), `consent-index.json` (the consent records it has read) and `money-cache.json` (what it read of your receipts and what each payment was for, so a restart doesn't read them all again); delete them if you ever change the pod's files by hand, and the house reads again. Beside them, `model.json` holds an owner's own model key (if they added one for AI on duty in the house) and `duty-house/` that AI's state: back them up with the rest. A house that runs its own pod reads that first listing from the pod's folder on disk: the pod server builds a listing in memory, and a folder of ten thousand agreements took it past its memory. A pod elsewhere (`--webid` with your own login) is still asked over the web. Stop the house, copy the folder, start it again. With the compose file (the folder is `./house` beside it): `docker compose stop; tar czf house-$(date +%F).tgz house; docker compose start` (it starts again even if the copy fails; check the archive with `tar tzf`). With a named volume (`-v my-house:/data`): `docker run --rm -v my-house:/data -v "$PWD":/out alpine tar czf /out/house-$(date +%F).tgz -C /data .` while the house is stopped. Keep the copy somewhere else, encrypted: it holds keys. From your phone, **You → My data → Download everything** gives you the pod's contents too (wallet included) as one file.
 
-**Move it.** Put the folder on the new machine and start the house with the same `--name`. With `--relay` (or `--join`), your house is reached at an address made from its key, so it is the same house to everyone after the move. With `--public-url`, keep that URL (point its name at the new machine).
+**Move it.** Stop the old house first (two houses with the same key would both answer). Put the folder on the new machine, in the same layout (`<data>/<name>/`), and start the house with the same `--name` and `--pod-port`. If your control panel's address changes, it's a new place for your phone's key: have your recovery code ready (**You → This phone**), or pair again. With `--relay` (or `--join`), your house is reached at an address made from its key, so it is the same house to everyone after the move. With `--public-url`, keep that URL (point its name at the new machine).
 
 **Upgrade.** Images are tagged `latest` and with the commit they were built from (`lake-house:<git sha>`). Pin the commit in the compose file and change it when you choose; back up first, then `docker compose pull && docker compose up -d`. The house reads its old folder; if anything's wrong, put the old tag and the backup back.
 
-**Your AI on duty, in your house.** Set `ANTHROPIC_API_KEY` on the house (in the compose file's `environment`) and start it with `--duty-model anthropic` (or `anthropic:<model id>`): your house can then run your AI on duty itself, and **My AI → Set up AI on duty → In my house** is one tap. Without it, each owner can still add their own key from their phone. A day of duty is capped at 30 runs and 200,000 tokens.
+**Your AI on duty, in your house.** Set `ANTHROPIC_API_KEY` on the house (in the compose file's `environment`) and start it with `--duty-model anthropic` (or `anthropic:<model id>`) and `--connector https://sandbox.lake.doneinfifty.com/mcp` (the Lake's connector: a house of its own doesn't serve one): your house can then run your AI on duty itself, and **My AI → Set up AI on duty → In my house** is one tap. Without it, each owner can still add their own key from their phone. A day of duty is capped at 30 runs and 200,000 tokens.
 
 **What the relay sees.** With `--relay`, your house keeps one outgoing WebSocket to each node it follows and answers through it, so nothing is opened on your router. Every message is signed by its sender and sealed for its recipient ([SPEC §3](https://github.com/thelakeprotocol/lake/blob/main/SPEC.md)): the node passes them on but can't read, change or forge them, or see who sent them. It does see that your house is connected, and when and how much passes. If the node goes away, your house keeps reconnecting and is unreachable meanwhile; a connection that dies without a word (a router that forgot it, a laptop that slept) is noticed within a minute and made again; following two nodes (`--lake a,b`) keeps it reachable when one is down. Your control panel is the one thing reached directly: keep that port to your own network, or put it behind your own HTTPS proxy.
 

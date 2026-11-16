@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { kept, podEnv, sentAgain, type OwnerSession } from './pod.js';
+import { kept, podEnv, pruneExpired, sentAgain, type OwnerSession } from './pod.js';
 
 describe('a pod that isn\'t reached at once (13 Nov: a duty grant answered 500)', () => {
   const flaky = (fails: number) => { const calls: string[] = []; const f = (async (_u: unknown, init?: RequestInit) => { calls.push(init?.method ?? 'GET'); if (calls.length <= fails) throw new TypeError('fetch failed'); return new Response('ok'); }) as typeof fetch; return { f, calls }; };
@@ -63,5 +66,24 @@ describe('what the house keeps in its pod is never taken for missing (a pod that
   it('stops with the reason when the pod never answers properly, and doesn\'t say "none"', async () => {
     await expect(kept(pod([503]).session, 'wallet/identity.json', [1, 1])).rejects.toThrow('could not read wallet/identity.json from the pod (503)');
     await expect(kept(pod(['down']).session, 'wallet/assistants.json', [1])).rejects.toThrow('no answer');
+  });
+});
+
+describe('the pod server\'s sign-in records are cleared as they expire (16 Nov: 10,357 of them, and a restart every hour)', () => {
+  it('deletes expired entries only, skips what it can\'t read, and stops at its limit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'idp-'));
+    const replay = join(dir, 'ReplayDetection');
+    await mkdir(replay, { recursive: true });
+    const entry = (expires: string) => JSON.stringify({ key: 'k', payload: { expires, payload: { kind: 'ReplayDetection' } } });
+    for (let i = 0; i < 5; i++) await writeFile(join(replay, `old${i}$.json`), entry('2026-11-01T00:00:00.000Z'));
+    await writeFile(join(replay, 'live$.json'), entry('2999-01-01T00:00:00.000Z'));
+    await writeFile(join(replay, 'broken$.json'), '{ not json');
+    await writeFile(join(replay, 'notes.txt'), 'x');
+    expect(await pruneExpired(dir, 3)).toBe(3);
+    expect(await pruneExpired(dir)).toBe(2);
+    expect((await readdir(replay)).sort()).toEqual(['broken$.json', 'live$.json', 'notes.txt']);
+    // A pod that never ran (no folder yet) is nothing to clear.
+    expect(await pruneExpired(join(dir, 'missing'))).toBe(0);
+    await rm(dir, { recursive: true, force: true });
   });
 });

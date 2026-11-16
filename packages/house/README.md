@@ -5,26 +5,29 @@
 One container: a Solid pod (Community Solid Server, file backend) and the housekeeper that guards it.
 
 ```bash
-docker run --network lake_default --hostname house-you -v ./rules.yaml:/rules.yaml \
-  ghcr.io/thelakeprotocol/lake-house --name you
+docker run -d -p 4000:4000 -v my-house:/data -v "$PWD/rules.yaml:/rules.yaml:ro" \
+  ghcr.io/thelakeprotocol/lake-house --name you --join https://sandbox.lake.doneinfifty.com
 ```
+
+`docker run --rm ghcr.io/thelakeprotocol/lake-house --help` (or `node dist/main.js --help`) lists every option with its current value. The ones most houses need:
 
 | Flag | Env | Default | |
 |---|---|---|---|
-| `--name` | | `owner` from rules.yaml | Owner handle; also the pod name |
+| `--name` | | `owner` from rules.yaml | The house's name; also the pod name |
 | `--rules` | `LAKE_RULES` | `/rules.yaml` | The owner's rules |
-| `--data` | `LAKE_DATA` | `/data` | Pod files + local secrets (mount a volume) |
-| `--port` | `LAKE_PORT` | `4000` | A2A + signed card |
-| `--pod-port` | `LAKE_POD_PORT` | `3000` | Pod server |
-| `--public-url` | `LAKE_PUBLIC_URL` | `http://<hostname>:4000` in Docker | Where other agents reach this house |
-| `--pod-url` | `LAKE_POD_URL` | `http://localhost:3000/` | HTTPS, or HTTP on localhost only (Solid-OIDC) |
-| `--issuer-url` | `LAKE_ISSUER_URL` | `http://issuer:4300` | Who signs the synthetic record |
+| `--data` | `LAKE_DATA` | `/data` | The pod, the house's keys and state, under `<data>/<name>/`: mount a volume, back it up |
+| `--join` | `LAKE_JOIN` | none | A Lake serving its specialists under `/s/` (the sandbox): sets the node, auditor, person checker and tellers, and turns the relay on |
+| `--lake` | `LAKE_NODE_URL` | none | Node(s) to announce to, comma-separated (without it the house joins no Lake) |
+| `--relay` | `LAKE_RELAY=1` | off | Reached through the node(s): nothing to open on a home router |
+| `--handle` | `LAKE_HANDLE` | none | Open the door under this handle |
+| `--owner-url` | `LAKE_OWNER_URL` | `--public-url` | Where the owner's phone opens the control panel (this machine's address on your network) |
+| `--public-url` | `LAKE_PUBLIC_URL` | `http://<hostname>:4000` in Docker, `http://localhost:4000` with `--join` | Where other agents reach the house (not needed with the relay) |
+| `--port`, `--pod-port` | `LAKE_PORT`, `LAKE_POD_PORT` | `4000`, `3000` | The house's and its pod's ports |
+| `--packs` | `LAKE_PACKS` | `health` | The use cases it takes part in |
+| `--webid`, `--client-id`, `--client-secret` | `LAKE_CLIENT_SECRET` | none | Bring your own pod (with `--pod-folder`) |
+| `--duty-model`, `--connector` | `LAKE_DUTY_MODEL`, `LAKE_MCP_URL` (and `ANTHROPIC_API_KEY`) | none | Run the owner's AI on duty in the house, through the Lake's connector |
 | `--production` | | off | Turns sandbox off: domains must be proved |
-| `--json` | | off | Events as JSON lines |
-| `--owner-url` | `LAKE_OWNER_URL` | `--public-url` | Base URL the owner's phone uses for `/owner/` |
-| `--open-pairing` | `LAKE_OPEN_PAIRING=1` | off | Sandbox only: the first device to open the app becomes the owner |
-| `--auditor-url` | `LAKE_AUDITOR_URL` | `http://auditor:4400` | Who certifies this house's converter |
-| `--seed` | `LAKE_SEED` | none | Same seed, same synthetic records and answers |
+| | `LAKE_POD_HEAP` | `256` | The pod server's memory limit in MB |
 
 | Module | Does |
 |---|---|
