@@ -258,15 +258,18 @@ export async function ownerSession(o: PodOptions): Promise<OwnerSession> {
 }
 
 /**
- * Sign-ins to the pod server, one at a time across every house in this process. A house's token lasts ten minutes (the
+ * Sign-ins to the pod server, a few at a time across every house in this process. A house's token lasts ten minutes (the
  * pod server's client-credentials lifetime) and is renewed on the first 401 after; twenty houses that started within a
  * minute and a half of each other renewed together, six times an hour.
  */
-let signInQueue: Promise<unknown> = Promise.resolve();
-const inSignInTurn = <T>(f: () => Promise<T>): Promise<T> => {
-  const run = signInQueue.then(f, f);
-  signInQueue = run.then(() => new Promise((r) => setTimeout(r, 250)), () => new Promise((r) => setTimeout(r, 250)));
-  return run;
+// Three at a time (17 Nov): one at a time made twenty houses take six minutes to start, waiting on each other.
+const SIGN_INS_AT_ONCE = 3;
+let signingIn = 0;
+const waitingToSignIn: (() => void)[] = [];
+export const inSignInTurn = async <T>(f: () => Promise<T>): Promise<T> => {
+  if (signingIn >= SIGN_INS_AT_ONCE) await new Promise<void>((r) => waitingToSignIn.push(r));
+  signingIn++;
+  try { return await f(); } finally { signingIn--; waitingToSignIn.shift()?.(); }
 };
 
 /** An authenticated fetch for one WebID's client credentials (DPoP), logging in again when a token expires. */

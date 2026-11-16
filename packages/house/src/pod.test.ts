@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { kept, podEnv, pruneExpired, sentAgain, type OwnerSession } from './pod.js';
+import { inSignInTurn, kept, podEnv, pruneExpired, sentAgain, type OwnerSession } from './pod.js';
 
 describe('a pod that isn\'t reached at once (13 Nov: a duty grant answered 500)', () => {
   const flaky = (fails: number) => { const calls: string[] = []; const f = (async (_u: unknown, init?: RequestInit) => { calls.push(init?.method ?? 'GET'); if (calls.length <= fails) throw new TypeError('fetch failed'); return new Response('ok'); }) as typeof fetch; return { f, calls }; };
@@ -85,5 +85,16 @@ describe('the pod server\'s sign-in records are cleared as they expire (16 Nov: 
     // A pod that never ran (no folder yet) is nothing to clear.
     expect(await pruneExpired(join(dir, 'missing'))).toBe(0);
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('sign-ins to the pod server take turns, a few at a time (17 Nov)', () => {
+  it('never more than three at once, every one runs, and a failure frees its place', async () => {
+    let now = 0, most = 0;
+    const job = (fail = false) => inSignInTurn(async () => { now++; most = Math.max(most, now); await new Promise((r) => setTimeout(r, 20)); now--; if (fail) throw new Error('no'); return 1; });
+    const out = await Promise.allSettled([job(), job(true), job(), job(), job(true), job(), job(), job()]);
+    expect(most).toBe(3);
+    expect(out.filter((x) => x.status === 'fulfilled')).toHaveLength(6);
+    expect(out.filter((x) => x.status === 'rejected')).toHaveLength(2);
   });
 });
