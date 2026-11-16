@@ -88,6 +88,28 @@ describe('how a bought want ends at the payments agent', () => {
   });
 });
 
+describe('a shop hears when its offer ended unbought (SPEC §6.8 want.ended)', () => {
+  it('tells each open offer once on a purchase or a close, never the one bought, nor who or why', async () => {
+    const { w } = await open([{ want: want('w1'), offers: [offer('o1', 'washer', 'open'), offer('o2', 'tapworks', 'open')], at: new Date().toISOString() }, { want: want('w2'), offers: [offer('o3', 'washer', 'open')], at: new Date().toISOString() }]);
+    expect(w.endedUntold()).toEqual([]);
+    w.find('w1')!.bought = 'o1'; w.find('w1')!.offers[0]!.state = 'paid';
+    const told = w.endedUntold();
+    expect(told).toEqual([{ url: 'https://tapworks.example/a2a', payload: { kind: 'want.ended', want: 'w1', offer: 'o2', cart: 'cart-o2', state: 'not_bought', want_open: false, at: expect.any(String) } }]);
+    expect(JSON.stringify(told)).not.toMatch(/washer|o1|34/);
+    expect(w.endedUntold()).toEqual([]);
+    await w.close('w2');
+    expect(w.endedUntold()).toMatchObject([{ payload: { offer: 'o3', state: 'closed' } }]);
+  });
+
+  it('a cart that ran out while the want is open is told as expired, and offers that ended before are not told at all', async () => {
+    const stale = { ...offer('o1', 'washer', 'open'), expires: new Date(Date.now() - 60_000).toISOString() };
+    const { w } = await open([{ want: want('w1'), offers: [offer('o2', 'tapworks', 'open')], closed: new Date().toISOString(), at: new Date().toISOString() }, { want: want('w3'), offers: [offer('o4', 'pipes', 'open')], at: new Date().toISOString() }]);
+    expect(w.endedUntold()).toEqual([]);
+    w.find('w3')!.offers.push(stale);
+    expect(w.endedUntold()).toMatchObject([{ payload: { offer: 'o1', state: 'expired', want_open: true } }]);
+  });
+});
+
 describe('people who match a want for someone\'s help (SPEC §6.8)', () => {
   const service = (id: string): Want => ({ '@type': 'Demand', id, name: 'Help on Friday evening', availabilityEnds: new Date(Date.now() + 7 * 86_400_000).toISOString(), itemOffered: { '@type': 'Service', name: 'Help', additionalProperty: [{ '@type': 'PropertyValue', name: 'When', value: 'Friday 6-11pm' }, { '@type': 'PropertyValue', name: 'Where', value: 'AU-QLD' }, { '@type': 'PropertyValue', name: 'First aid', value: 'yes' }] } } as Want);
   const house = (name: string) => ({ profile: { webId: `https://${name}.example/#house`, ownerDomain: `${name}.example` } as LakeProfile, card: { name: `${name}'s house`, supportedInterfaces: [{ url: `https://${name}.example/a2a` }] } as never });

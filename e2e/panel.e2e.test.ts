@@ -439,7 +439,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('looks for something by a photo\'s description: shops offer, the owner buys on the phone, held until it arrives (8 Nov)', async () => {
     // Two demo shops that read the Lake's wants every second.
     const [p1, p2] = [await freePort(), await freePort()];
-    const shops = await Promise.all([[SHOPS[0]!, p1], [SHOPS[1]!, p2]].map(([ex, port]) => startShop({ example: ex as (typeof SHOPS)[number], log: (m) => console.log(`[shop] ${m}`), node: nodeUrl, payments: `${specialists}/payments`, publicUrl: `http://localhost:${port}`, port: port as number, everyMs: 1000 })));
+    const shopLog: string[] = [];
+    const shops = await Promise.all([[SHOPS[0]!, p1], [SHOPS[1]!, p2]].map(([ex, port]) => startShop({ example: ex as (typeof SHOPS)[number], log: (m) => { shopLog.push(m); console.log(`[shop] ${m}`); }, node: nodeUrl, payments: `${specialists}/payments`, publicUrl: `http://localhost:${port}`, port: port as number, everyMs: 1000 })));
     try {
       // The owner's AI looked at the photo: what it is, its properties, where it goes; the most they'd pay stays in the house.
       const posted = await asAssistant({ kind: 'assistant.want', name: 'Handheld shower head', description: 'To replace a worn one; the hose stays', properties: { Type: 'Handheld', 'Spray modes': 3, Finish: 'Chrome', Connection: '1/2 inch BSP' }, area: 'AU-QLD', currency: 'AUD', max_price: 34.5 });
@@ -532,6 +533,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.getByRole('button', { name: 'Report a problem' }).waitFor();
       await tidy();
       await page.getByRole('button', { name: 'It arrived', exact: true }).click();
+      // The shop that wasn't bought from heard its offer ended, and let its cart go: not left quoting a ghost.
+      for (let i = 0; i < 40 && !shopLog.some((m) => /ended \(not_bought\)/.test(m)); i++) await page.waitForTimeout(250);
+      expect(shopLog.filter((m) => /ended \(not_bought\)/.test(m))).toHaveLength(1);
       await page.getByRole('heading', { name: 'Arrived' }).waitFor({ timeout: 15_000 });
       await tidy();
       // Off the card now, and the receipt is with the owner's money.

@@ -19,6 +19,8 @@ export interface WantOfferRecord {
   state: 'open' | 'paid' | 'shipped' | 'arrived' | 'refunded';
   /** Why the payments agent said it ended, when it wasn't the owner's "it arrived". */
   ended?: string;
+  /** When the shop was told its offer ended unbought (SPEC §6.8 `want.ended`): once per offer. */
+  told?: string;
   hold?: string;
   receipt?: string;
   /** `again`: sent a second time, after the owner reported a problem. */
@@ -62,6 +64,11 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
   const save = () => (writing = writing.then(() => o.save(list)).catch(() => {}));
   const live = (r: WantRecord) => !r.closed && !r.bought && Date.parse(r.want.availabilityEnds) > Date.now();
   const find = (id: string) => list.find((r) => r.want.id === id);
+  /** How an open offer ended without being bought, or null while it stands. */
+  const endOf = (r: WantRecord, x: WantOfferRecord): 'not_bought' | 'closed' | 'expired' | null =>
+    x.state !== 'open' || x.id === r.bought ? null : r.bought ? 'not_bought' : r.closed ? 'closed' : !live(r) || Date.parse(x.expires) < Date.now() ? 'expired' : null;
+  // Offers that ended before shops were told are not told now, all at once (17 Nov: the first sweep after this shipped).
+  for (const r of list) for (const x of r.offers) if (!x.told && endOf(r, x)) x.told = 'before';
   return {
     /** The wants on the card: open, not bought, not past their date. */
     open: (): Want[] => list.filter(live).map((r) => r.want),
@@ -157,6 +164,22 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       Object.assign(m, patch);
       await save();
       return m;
+    },
+    /**
+     * Offers that ended unbought whose shop hasn't heard (SPEC §6.8 `want.ended`), marked told as they are handed out, for
+     * the house to send until each lands: a shop isn't left quoting a ghost (round 72, a seller). Never who was bought,
+     * why, or the owner's limit.
+     */
+    endedUntold(): { url: string; payload: Record<string, unknown> }[] {
+      const out: { url: string; payload: Record<string, unknown> }[] = [];
+      for (const r of list) for (const x of r.offers) {
+        const state = x.told ? null : endOf(r, x);
+        if (!state) continue;
+        x.told = new Date().toISOString();
+        out.push({ url: x.seller.url, payload: { kind: 'want.ended', want: r.want.id, offer: x.id, cart: x.cart.contents.id, state, want_open: live(r), at: x.told } });
+      }
+      if (out.length) void save();
+      return out;
     },
     /**
      * Where a shop's own offer for a want stands. Never whether it is over the owner's limit (that stays in the house), nor
@@ -269,7 +292,8 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       offer.state = to === 'captured' ? 'arrived' : 'refunded';
       delete offer.problem;
       if (why) offer.ended = short(why, 200);
-      if (to === 'voided' && r.bought === offer.id) delete r.bought;
+      // Open again: the other shops' offers stand again, and each hears if it ends a second time.
+      if (to === 'voided' && r.bought === offer.id) { delete r.bought; for (const x of r.offers) if (x.state === 'open') delete x.told; }
       await save();
       return { want: r.want, offer, open: live(r) };
     },

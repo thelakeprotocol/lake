@@ -8,6 +8,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   allFields, forPeople, type Want, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, cartReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type PostalAddress, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
+  deliverWithRetries,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
@@ -595,6 +596,10 @@ function panelFor(x: {
     if (!v.ok) throw new Error(v.rejection.why);
     return { payload: v.payload, card: (reply as LakeData).card, webId: v.profile.webId };
   };
+  // Every shop whose offer ended unbought hears so once, sent until it lands (SPEC §6.8 `want.ended`): after a purchase or
+  // a close at once, and a minute's sweep for offers and wants that ran out.
+  const tellEnded = () => { for (const m of x.wants.endedUntold()) deliverWithRetries(() => send(m.url, m.payload)); };
+  setInterval(tellEnded, 60_000).unref();
   // The payments agent to pay a cart through: one of this Lake's that the shop named, or this Lake's own if it named none.
   const paymentsFor = async (cart: CartMandate) => {
     const ours = (await Promise.all(x.nodes.map((n) => fetch(`${n}/cards?skill=payments`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ card: AgentCard; via?: string }[]>).catch(() => [])))).flat().filter((c) => !c.via).map((c) => String(c.card.supportedInterfaces?.[0]?.url ?? ''));
@@ -1166,7 +1171,7 @@ function panelFor(x: {
       } catch (e) { return { error: `their house didn't answer (${(e as Error).message}): your yes is kept; try again in a minute` }; }
     },
     async postWant(input, limit, by) { const w = await x.wants.post(input, limit, by); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
-    async closeWant(id) { const ok = await x.wants.close(id); if (ok) await x.recard(x.keeper().rules); return ok; },
+    async closeWant(id) { const ok = await x.wants.close(id); if (ok) { await x.recard(x.keeper().rules); tellEnded(); } return ok; },
     wantOffer: (wantId, offerId) => x.wants.find(wantId)?.offers.find((o) => o.id === offerId),
     deliveryAddress: () => x.deliveryAddress(),
     async setDeliveryAddress(a) { if (a) await put(owner, 'wallet/delivery-address.json', JSON.stringify(a), 'application/json'); else await owner.fetch(`${owner.podRoot}wallet/delivery-address.json`, { method: 'DELETE' }).catch(() => null); },
@@ -1184,6 +1189,7 @@ function panelFor(x: {
       await put(owner, `audit/${Date.now()}-address.json`, JSON.stringify({ at: new Date().toISOString(), want: r.want.id, to: offer.seller.webId, toName: offer.seller.name, toDomain: offer.seller.domain, released: ['delivery address'], consent: 'owner, live' }), 'application/json').catch(() => {});
       await x.recard(x.keeper().rules);
       x.note('want.bought', `You bought "${r.want.name}" from ${offer.seller.name} for ${offer.total.currency} ${offer.total.value.toFixed(2)}: paid, held until you say it arrived`);
+      tellEnded();
       return { ok: true, want: r.want.id, offer: offer.id };
     },
     async wantArrived(wantId) {

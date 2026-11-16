@@ -146,6 +146,12 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
       }
       return reply({ kind: 'received', note: s ? 'thank you: it goes in the post today' : 'thank you' });
     }
+    // The buyer's house says our offer ended unbought: the cart is let go (no stock held for a ghost).
+    if (m.kind === 'want.ended') {
+      const s = typeof m.cart === 'string' ? sold.get(m.cart) : undefined;
+      if (s && s.buyer === v.profile.webId) { sold.delete(String(m.cart)); log(`${ex.name}: our offer for "${s.label}" ended (${String(m.state)})`); }
+      return reply({ kind: 'received', note: 'thank you' });
+    }
     // The buyer's house says something is wrong with what we sent (only that house, about a cart it paid us for). It hasn't
     // arrived: we send it again, once. It came wrong, or still hasn't arrived: the money goes back.
     if (m.kind === 'want.problem') {
