@@ -475,7 +475,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await reply.getByRole('button', { name: 'Not this one' }).waitFor();
       // Private isn't checked: said on the card and above the replies.
       await reply.locator('.lake-pill', { hasText: 'Through your link · not checked' }).waitFor();
-      await page.getByText(/nobody here checks who they are\. Before you meet, pay or say where you live, check them yourself\./).waitFor();
+      await page.getByText(/^Nobody checks who replies\. Check them yourself before you meet, pay or say where you live\.$/).waitFor();
       await page.getByRole('heading', { name: 'Replies (1)' }).waitFor();
       await tidy();
       // Stop sharing: the link's page says only that it's closed; the want and its offers stay.
@@ -1831,6 +1831,70 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('heading', { name: /for this phone/ }).waitFor();
     expect(await page.getByText(/A notification says who wrote\. What they wrote stays in your house\./).count()).toBe(1);
     await tidy();
+  });
+
+  it('people who match: a want for help, a match from a neighbour\'s house, the owner says yes, and both are in (16 Nov)', async () => {
+    // A neighbour's house whose AI thinks its human can help; its own phone sends the match.
+    const [pp, hp] = [await freePort(), await freePort()];
+    await start(['packages/house/dist/main.js', '--name', 'helper', '--rules', 'personas/stan.yaml', '--data', join(dir, 'helper'), '--issuer-url', `${specialists}/issuer`, '--auditor-url', `${specialists}/auditor`,
+      '--pod-port', String(pp), '--port', String(hp), '--lake', nodeUrl, '--seed', '9', '--open-pairing'], /joined the Lake/);
+    const hb = `http://localhost:${hp}`, hPhone = await generateIdentity('helper-phone');
+    await fetch(`${hb}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: hPhone.publicJwk }) });
+    const hWebId = (await (await fetch(`${hb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.overview' }, hPhone, { iss: 'owner' })) })).json()).webId;
+    const asHelper = async (payload: Record<string, unknown>) => (await fetch(`${hb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, hPhone, { iss: hWebId })) })).json();
+    const hAi = await generateIdentity('helper-ai');
+    const { code } = await asHelper({ kind: 'panel.assistant.invite', label: 'Helper AI' });
+    await fetch(`${hb}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: hAi.publicJwk, code, label: 'Helper AI' }) });
+    const asHelperAi = async (payload: Record<string, unknown>) => (await fetch(`${hb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, hAi, { iss: 'assistant' })) })).json();
+    // This owner's AI lists a want for someone's help.
+    // This owner's own AI, paired for this test (an earlier test took the shared one's key back), and earlier wants closed
+    // (five open at most).
+    const jwk = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), ownerSeed!.seed]), format: 'der', type: 'pkcs8' }).export({ format: 'jwk' });
+    const me = await importIdentity({ kid: ownerSeed!.kid, privateJwk: { ...jwk, kid: ownerSeed!.kid }, publicJwk: { kty: 'OKP', crv: 'Ed25519', x: jwk.x, kid: ownerSeed!.kid } } as never);
+    const asMe = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, me, { iss: 'owner' })) })).json();
+    const myAi = await generateIdentity('my-matching-ai');
+    const invited = await asMe({ kind: 'panel.assistant.invite', label: 'Matching AI' });
+    expect((await fetch(`${house}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: myAi.publicJwk, code: invited.code, label: 'Matching AI' }) })).status).toBe(200);
+    const asMine = async (payload: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, myAi, { iss: 'assistant' })) })).json();
+    for (const w of ((await asMe({ kind: 'list' })).wants ?? []) as { want: { id: string }; closed?: string; bought?: string }[]) if (!w.closed && !w.bought) await asMe({ kind: 'panel.want.close', id: w.want.id });
+    const posted = await asMine({ kind: 'assistant.want', people: true, name: 'Help on Friday evening', description: 'Two hours, at home', properties: { When: 'Friday 6-11pm', Where: 'AU-QLD', 'First aid': 'yes' } });
+    expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+    const id = posted.want.id as string;
+    for (let i = 0; i < 40 && (await fetch(`${nodeUrl}/wants/${id}`)).status !== 200; i++) await page.waitForTimeout(500);
+    const drafted = await asHelperAi({ kind: 'assistant.want.match', house, want: id, matched: ['When', 'Where'] });
+    expect(drafted).toMatchObject({ ok: true, matched: ['When', 'Where'] });
+    expect(await asHelper({ kind: 'panel.want.match.send', id: drafted.id })).toMatchObject({ ok: true });
+    // On this phone: the row says someone matches; the card shows which points, no name, and that nothing is checked.
+    await tab('Today');
+    const row = page.locator('.chatrow.want-row', { hasText: 'Help on Friday evening' });
+    await row.locator('.chatlast', { hasText: '1 person matches' }).waitFor({ timeout: 20_000 });
+    await row.click();
+    const card = page.locator('ion-card.want-match');
+    await card.locator('.offer-shop', { hasText: 'Someone could help · fits 2 of 3' }).waitFor({ timeout: 10_000 });
+    await card.locator('.field-tag.match-yes', { hasText: 'When' }).waitFor();
+    await card.locator('.field-tag.match-no', { hasText: 'First aid: not said' }).waitFor();
+    await card.locator('.lake-pill', { hasText: 'Through their AI · not checked' }).waitFor();
+    expect(await card.getByText('helper', { exact: false }).count()).toBe(0);
+    // No shop offers to buy on a want for help.
+    expect(await page.locator('ion-card.offer').count()).toBe(0);
+    await tidy();
+    await card.getByRole('button', { name: 'Say yes' }).click();
+    await page.locator('ion-action-sheet').getByText(/Nobody has checked who they are/).waitFor();
+    await tidy();
+    await confirmSheet('Say yes');
+    await card.locator('.lake-pill', { hasText: 'Both in' }).waitFor({ timeout: 20_000 });
+    await card.getByText(/^Both said yes · the name their AI gave/).waitFor();
+    await card.getByRole('button', { name: 'Say hello' }).waitFor();
+    await tidy();
+    // The helper's house has a note from this one, and Say hello opens the chat with them here.
+    const helperSide = await asHelper({ kind: 'list' });
+    expect(helperSide.notes.some((n: { text: string }) => /You both said yes to "Help on Friday evening"/.test(n.text))).toBe(true);
+    // And the helper's own card says they're both in.
+    expect(helperSide.suggestions.find((x: { matchOut?: unknown }) => x.matchOut).matchOut).toMatchObject({ sent: expect.any(String), revealed: expect.any(String), revealedName: expect.any(String) });
+    await card.getByRole('button', { name: 'Say hello' }).click();
+    await page.getByText(/You both said yes to "Help on Friday evening"\. You're writing to /).waitFor({ timeout: 10_000 });
+    await tidy();
+    await goBack();
   });
 
   it('signs out on this device: back to the pairing screen', async () => {

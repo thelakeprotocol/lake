@@ -601,3 +601,7 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .duty-strip { display: flex; align-items: center; gap: 8px; width: calc(100% - 32px); margin: 4px 16px 0; padding: 10px 12px; border: 1px solid var(--lake-line); border-radius: 12px; background: var(--lake-surface); color: var(--lake-text); font: inherit; font-size: 14px; text-align: start; cursor: pointer; }
 .duty-strip ion-icon { color: var(--ion-color-tertiary, #7c5cff); flex: none; font-size: 18px; }
 .handled-acts { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* A match's points: which it meets, and which it doesn't. */
+.field-tag.match-yes { background: color-mix(in srgb, var(--ion-color-success, #2dd36f) 16%, transparent); }
+.field-tag.match-no { opacity: 0.6; }

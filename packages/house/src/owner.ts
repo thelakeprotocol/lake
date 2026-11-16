@@ -105,7 +105,13 @@ export interface PanelProvider {
   wantsList?(): WantRecord[];
   /** The name on the owner's door, if they set one: what a page at a shared link says they are. */
   doorName?(): string | undefined;
-  postWant?(input: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number }, limit?: { amount: number; currency: string }, by?: string): Promise<Want>;
+  /** Another house's want for a person's help, from the Lake's list: what the owner's AI says they match (SPEC §6.8). */
+  matchDraft?(house: string, want: string): Promise<{ want: Want; house: string } | { error: string }>;
+  /** Send a match the owner said yes to, signed by this house; the other house answers with its match id. */
+  matchSend?(house: string, want: string, matched: string[]): Promise<{ match: string; webId: string; dropped?: string[] } | { error: string }>;
+  /** The owner's yes or no to someone who matched one of their wants. */
+  matchAnswer?(want: string, match: string, yes: boolean): Promise<Record<string, unknown>>;
+  postWant?(input: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number; people?: boolean }, limit?: { amount: number; currency: string }, by?: string): Promise<Want>;
   closeWant?(id: string): Promise<boolean>;
   wantOffer?(wantId: string, offerId: string): WantOfferRecord | undefined;
   buyWant?(wantId: string, offerId: string, signed: { credential: string; owner: string }): Promise<Record<string, any>>;
@@ -229,6 +235,8 @@ export interface Suggestion {
   door?: { about: string };
   /** Something the assistant is waiting on (a reply, a cart): the house holds it while the assistant's chat is gone. */
   errand?: Errand;
+  /** Someone else's want the owner's AI says they match: Send is the owner's own yes (SPEC §6.8, people who match). */
+  matchOut?: { house: string; want: string; wantName: string; matched: string[]; points: string[]; sent?: string; /** Both said yes: the note from their house to answer, and the name they gave. */ revealed?: string; revealedName?: string };
   /** A time the AI on duty pencilled in: the house holds it, and Confirm or Decline here is the owner's own word on it. */
   booking?: { id: string; until: string; start: string; with: string; what?: string };
   at: string;
@@ -355,7 +363,7 @@ const webUrl = (u: unknown) => { try { const x = new URL(String(u ?? '')); retur
 
 /** An AI's name as a sentence says it: "Echo", from "Echo (AI on duty, via MCP)". */
 const shortLabel = (label: string) => label.replace(/ \(.*\)$/, '') || 'Your AI';
-const ASSISTANT_MAY = new Set(['assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close', 'assistant.tasks', 'assistant.task.done']);
+const ASSISTANT_MAY = new Set(['assistant.want.match', 'assistant.waiting', 'assistant.reply', 'assistant.answered', 'list', 'panel.overview', 'panel.rules', 'panel.activity', 'panel.agents', 'panel.money', 'panel.consents', 'panel.access', 'panel.data', 'panel.market', 'assistant.suggest', 'assistant.allowance', 'assistant.spent', 'assistant.badge', 'assistant.forward', 'assistant.agenda', 'panel.free', 'assistant.duty', 'assistant.duty.log', 'assistant.contact', 'assistant.known', 'assistant.freebusy', 'assistant.private_answer', 'panel.circles', 'assistant.want', 'assistant.want.close', 'assistant.tasks', 'assistant.task.done']);
 // What each look needs beyond the base: the owner turns these on per assistant; the house refuses the rest (SPEC §6.1).
 const NEEDS: Record<string, Reads> = { 'panel.rules': 'records', 'panel.activity': 'records', 'panel.agents': 'records', 'panel.consents': 'records', 'panel.access': 'records', 'panel.data': 'records', 'panel.money': 'money', 'panel.market': 'money' };
 /** Refused actions (limits aside) that take an AI off duty for the night. */
@@ -843,6 +851,7 @@ export class OwnerDesk {
     this.tasks = await loadJson(join(this.o.dataDir, 'tasks.json'), []);
     this.webNotes = new Map(await loadJson(join(this.o.dataDir, 'web-notes.json'), []));
     this.wantLinks = new Map(await loadJson(join(this.o.dataDir, 'want-links.json'), []));
+    this.matchesOut = await loadJson(join(this.o.dataDir, 'matches-out.json'), []);
     const kept = await loadJson(join(this.o.dataDir, 'notes.json'), {}) as { notes?: OwnerDesk['notes']; closed?: [string, { by: string; state: string }][] };
     this.notes = kept.notes ?? [];
     this.closedNotes = new Map(kept.closed ?? []);
@@ -1335,6 +1344,21 @@ export class OwnerDesk {
   private wantLinks = new Map<string, { want: string; left: number; until: string; made: string; closed?: string }>();
   private saveWantLinks = () => saveWhole(join(this.o.dataDir, 'want-links.json'), JSON.stringify([...this.wantLinks]));
   private wantReplies = new Map<string, number[]>();
+  /** Matches this house sent for its owner (SPEC §6.8): the other house's match id, where, and how it stands. */
+  private matchesOut: { id: string; to: string; toWebId?: string; want: string; wantName: string; at: string; state: 'sent' | 'revealed'; note?: string; suggestion?: string }[] = [];
+  private saveMatchesOut = () => saveWhole(join(this.o.dataDir, 'matches-out.json'), JSON.stringify(this.matchesOut));
+  private sameUrl = (a: string, b: string) => a.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === b.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+  /** A match this house sent, to the house whose verified WebID now answers about it. */
+  matchOut(id: string, fromWebId: string) { return this.matchesOut.find((m) => m.id === id && !!m.toWebId && m.toWebId === fromWebId); }
+  /** Both said yes: kept with the match, and shown on the owner's card for it ("You're both in"). */
+  async markMatchOut(id: string, toWebId: string, patch: { state: 'revealed'; note?: string }, name?: string) {
+    const m = this.matchesOut.find((x) => x.id === id && x.toWebId === toWebId);
+    if (!m) return;
+    Object.assign(m, patch);
+    const sug = this.suggestions.find((x) => x.id === m.suggestion && x.matchOut);
+    if (sug?.matchOut) { sug.matchOut.revealed = patch.note ?? 'yes'; if (name) sug.matchOut.revealedName = name; await this.saveSuggestions(); }
+    await this.saveMatchesOut();
+  }
   private liveWant(id: string) { return (this.o.panel?.wantsList?.() ?? []).find((r) => r.want.id === id && !r.closed && !r.bought); }
   private wantLink(id: string, token: string) {
     const l = this.wantLinks.get(createHash('sha256').update(String(token)).digest('base64url'));
@@ -1992,15 +2016,34 @@ export class OwnerDesk {
         // What its human is looking for (SPEC §6.8), from a photo or a few words: the house puts it on its card, and shops
         // offer. The most they'd pay stays in the house: offers over it are kept folded away, and no shop hears of it.
         if (p.kind === 'assistant.want') {
-          const q = p as unknown as { name?: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number; max_price?: number };
+          const q = p as unknown as { name?: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number; max_price?: number; people?: boolean };
           if (!this.o.panel?.postWant) return void res.status(501).json({ error: 'this house can\'t list wants' });
           const currency = isCurrency(q.currency) ? q.currency : undefined;
           try {
-            const w = await this.o.panel.postWant({ name: String(q.name ?? ''), description: q.description ? String(q.description) : undefined, properties: q.properties && typeof q.properties === 'object' ? q.properties : {}, quantity: Number.isInteger(q.quantity) ? q.quantity : undefined, area: q.area ? String(q.area) : undefined, currency, days: Number.isFinite(q.days) ? Number(q.days) : undefined },
+            const w = await this.o.panel.postWant({ ...(q.people === true ? { people: true } : {}), name: String(q.name ?? ''), description: q.description ? String(q.description) : undefined, properties: q.properties && typeof q.properties === 'object' ? q.properties : {}, quantity: Number.isInteger(q.quantity) ? q.quantity : undefined, area: q.area ? String(q.area) : undefined, currency, days: Number.isFinite(q.days) ? Number(q.days) : undefined },
               Number.isFinite(q.max_price) && q.max_price! > 0 && currency ? { amount: Number(q.max_price), currency } : undefined, assistant.kid);
             this.touch();
             return void res.json({ ok: true, want: w, note: `on your human's card now: shops' agents find it at the Lake's /wants and send offers to the house; your human sees them on their phone (Today) and buys with a tap. ${q.max_price && !currency ? 'max_price was not kept: give currency too. ' : ''}Nothing in it says what they'd pay. To ask people they know (who may have one, or know someone), your human taps Share on it in their panel and sends the link: replies come to their phone; you can't make the link.` });
           } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
+        }
+        // Someone else's want for a person's help that the owner's AI thinks its human matches (SPEC §6.8): a card for the
+        // owner, whose Send is their own yes. The AI never sends a match itself.
+        if (p.kind === 'assistant.want.match') {
+          const q = p as unknown as { house?: string; want?: string; matched?: unknown };
+          const d = await this.o.panel?.matchDraft?.(String(q.house ?? ''), String(q.want ?? ''));
+          if (!d) return void res.status(501).json({ error: 'this house can\'t send matches' });
+          if ('error' in d) return void res.status(400).json({ error: d.error });
+          const points = d.want.itemOffered.additionalProperty.map((x) => x.name), byName = new Map(points.map((n) => [n.toLowerCase(), n]));
+          const said = Array.isArray(q.matched) ? q.matched.slice(0, 12).map((m) => String(m).trim().slice(0, 40)) : [];
+          const matched = [...new Set(said.map((m) => byName.get(m.toLowerCase())).filter((m): m is string => !!m))];
+          if (!matched.length) return void res.status(400).json({ error: `matched: which of its points your human matches (${points.join(', ')})` });
+          if (this.suggestions.filter((x) => x.matchOut && !x.matchOut.sent).length >= 10) return void res.status(429).json({ error: 'ten matches wait for your human already' });
+          const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text: `Someone is looking for "${d.want.name}". You match ${matched.length} of ${points.length} points.`, matchOut: { house: d.house, want: d.want.id, wantName: d.want.name, matched, points }, at: new Date().toISOString() };
+          this.suggestions = [sug, ...this.suggestions];
+          this.trimSuggestions();
+          await this.saveSuggestions();
+          this.notifyOwner('suggestion', `${shortLabel(assistant.label)} found someone looking for "${d.want.name.slice(0, 50)}" you may match.`);
+          return void res.json({ ok: true, id: sug.id, matched, ...(said.length > matched.length ? { matched_dropped: said.filter((m) => !byName.has(m.toLowerCase())) } : {}), note: 'your human sees it on their phone: Send is their own yes. They see which points, not who it is; the other side sees the points, not your human\'s name, until both say yes' });
         }
         if (p.kind === 'assistant.want.close') {
           // Its own want only: another AI's, or one the owner posted, isn't its to close.
@@ -2995,6 +3038,21 @@ export class OwnerDesk {
             await this.saveWantLinks();
             return { ok: true, closed: n };
           },
+          // People who match (SPEC §6.8): the owner's own taps, never an assistant's (none of these is in ASSISTANT_MAY).
+          'panel.want.match.send': async () => {
+            const sug = this.suggestions.find((x) => x.id === String((q as { id?: string }).id ?? '') && x.matchOut);
+            if (!sug?.matchOut) return { error: 'no match waiting to be sent with that id' };
+            if (sug.matchOut.sent) return { error: 'sent already' };
+            const r = await panel.matchSend?.(sug.matchOut.house, sug.matchOut.want, sug.matchOut.matched);
+            if (!r || 'error' in r) return { error: r?.error ?? 'this house can\'t send matches' };
+            this.matchesOut = [...this.matchesOut.filter((m) => !(m.id === r.match && m.toWebId === r.webId)), { id: r.match, to: sug.matchOut.house, toWebId: r.webId, want: sug.matchOut.want, wantName: sug.matchOut.wantName, at: new Date().toISOString(), state: 'sent' as const, suggestion: sug.id }].slice(-100);
+            await this.saveMatchesOut();
+            sug.matchOut.sent = new Date().toISOString();
+            await this.saveSuggestions();
+            return { ok: true, match: r.match };
+          },
+          'panel.want.match.yes': async () => panel.matchAnswer?.(String((q as { want?: string }).want ?? ''), String((q as { match?: string }).match ?? ''), true) ?? { error: 'this house can\'t answer matches' },
+          'panel.want.match.no': async () => panel.matchAnswer?.(String((q as { want?: string }).want ?? ''), String((q as { match?: string }).match ?? ''), false) ?? { error: 'this house can\'t answer matches' },
           'panel.want.share': async () => {
             const id = String((q as { id?: string }).id ?? ''), r = this.liveWant(id);
             if (!r) return { error: 'no open want with that id' };
@@ -3227,7 +3285,7 @@ export class OwnerDesk {
       suggestions: forAssistant ? this.suggestions.map((x) => { const y = x.ask?.private && x.ask.answered ? { ...x, ask: { ...x.ask, answered: 'answered privately' } } : x; if (!y.count?.mine) return y; const { mine: _m, ...c } = y.count; return { ...y, count: c }; }) : this.suggestions,
       // Answered: a reply in its thread after it (not the sender's own follow-up).
       // What the owner is looking for, and what shops offered (the signed carts stay in the house).
-      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, replies: this.notes.filter((n) => n.want === r.want.id).length, repliesWaiting: this.notes.filter((n) => n.want === r.want.id && !this.settled(n)).length, shared: [...this.wantLinks.values()].some((l) => l.want === r.want.id && !l.closed && l.left > 0 && Date.parse(l.until) > Date.now()), offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
+      wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, matches: (r.matches ?? []).filter((m) => m.state !== 'no').map(({ matcher, ...m }) => (m.state === 'revealed' ? { ...m, matcher: { name: matcher.name } } : m)), replies: this.notes.filter((n) => n.want === r.want.id).length, repliesWaiting: this.notes.filter((n) => n.want === r.want.id && !this.settled(n)).length, shared: [...this.wantLinks.values()].some((l) => l.want === r.want.id && !l.closed && l.left > 0 && Date.parse(l.until) > Date.now()), offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
       seen: forAssistant ? undefined : this.chatSeen,
       notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && !n.from.via && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from), ...(!a && this.settled(n) ? { settled: true } : {}) }; }),
       agenda: this.agenda,

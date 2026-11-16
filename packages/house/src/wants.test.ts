@@ -87,3 +87,33 @@ describe('how a bought want ends at the payments agent', () => {
     expect(w.open()).toHaveLength(0);
   });
 });
+
+describe('people who match a want for someone\'s help (SPEC §6.8)', () => {
+  const service = (id: string): Want => ({ '@type': 'Demand', id, name: 'Help on Friday evening', availabilityEnds: new Date(Date.now() + 7 * 86_400_000).toISOString(), itemOffered: { '@type': 'Service', name: 'Help', additionalProperty: [{ '@type': 'PropertyValue', name: 'When', value: 'Friday 6-11pm' }, { '@type': 'PropertyValue', name: 'Where', value: 'AU-QLD' }, { '@type': 'PropertyValue', name: 'First aid', value: 'yes' }] } } as Want);
+  const house = (name: string) => ({ profile: { webId: `https://${name}.example/#house`, ownerDomain: `${name}.example` } as LakeProfile, card: { name: `${name}'s house`, supportedInterfaces: [{ url: `https://${name}.example/a2a` }] } as never });
+
+  it('keeps only the want\'s own points, one open match a house, and nothing for a want for a thing', async () => {
+    const { w, saved } = await open([{ want: service('w1'), offers: [], at: new Date().toISOString() }, { want: want('w2'), offers: [], at: new Date().toISOString() }]);
+    const jo = house('jo');
+    const r = await w.matchIn({ want: 'w1', matched: ['when', 'First aid', 'Loves dogs'] }, jo.profile, jo.card);
+    expect(r).toMatchObject({ ok: true, match: { matched: ['When', 'First aid'], state: 'open', matcher: { name: "jo's house" } }, dropped: ['Loves dogs'] });
+    // None of its points: refused, saying which there are.
+    expect(await w.matchIn({ want: 'w1', matched: ['Loves dogs'] }, jo.profile, jo.card)).toMatchObject({ ok: false, why: expect.stringContaining('When, Where, First aid') });
+    // The same house again replaces its open match.
+    const again = await w.matchIn({ want: 'w1', matched: ['When', 'Where', 'First aid'] }, jo.profile, jo.card);
+    expect(again).toMatchObject({ ok: true, replaced: (r as { match: { id: string } }).match.id });
+    expect(saved()[0]!.matches).toHaveLength(1);
+    // A want for a thing takes carts, not matches; a want for help takes no carts.
+    expect(await w.matchIn({ want: 'w2', matched: ['When'] }, jo.profile, jo.card)).toMatchObject({ ok: false, why: expect.stringContaining('a shop offers a cart') });
+    expect(await w.offerIn({ want: 'w1' }, jo.profile, jo.card, 'https://me.example/#house')).toMatchObject({ ok: false, why: expect.stringContaining('someone who matches') });
+    // The owner's answer is kept with it.
+    expect(await w.setMatch('w1', (again as { match: { id: string } }).match.id, { state: 'no' })).toMatchObject({ state: 'no' });
+    // Set aside stays set aside: the same house sending again changes nothing and isn't told why.
+    const third = await w.matchIn({ want: 'w1', matched: ['When'] }, jo.profile, jo.card);
+    expect(third).toMatchObject({ ok: true, quiet: true, match: { state: 'no' } });
+    expect(saved()[0]!.matches).toHaveLength(1);
+    // A closed want takes no more.
+    await w.close('w1');
+    expect(await w.matchIn({ want: 'w1', matched: ['When'] }, house('sam').profile, house('sam').card)).toMatchObject({ ok: false, why: expect.stringContaining('no longer open') });
+  });
+});

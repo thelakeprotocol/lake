@@ -89,6 +89,8 @@ export async function startShop(o: ShopOptions): Promise<Shop> {
     const wants = await fetch(`${o.node.split(',')[0]!.replace(/\/$/, '')}/wants`, { signal: AbortSignal.timeout(10_000) }).then((r) => r.json() as Promise<{ want: Want; house: { url: string; webId: string } }[]>).catch(() => []);
     let n = 0;
     for (const { want, house } of wants) {
+      // Someone's help, not a thing: people who match answer it, never a shop (SPEC §6.8).
+      if (want.itemOffered['@type'] === 'Service') continue;
       const key = `${house.webId}|${want.id}`;
       // Once per cart: when ours has nearly run out and the want is still open, we offer again (round 21: after a day every
       // offer on a want had run out, and no shop came back).

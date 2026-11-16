@@ -2092,9 +2092,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   server.registerTool(
     'lake_want',
     {
-      description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays; in the want\'s currency; one open offer per shop, a new one replaces it; it binds you to deliver within within_hours, 168 by default); status says where your offer stands; when they buy, lake_inbox brings { kind: "receipt", want, cart, hold, deliverTo } (deliverTo: the address to send it to, given to you alone, for this order); shipped files the delivery with the payments agent holding the money and tells the house you sent it (again with a new note, a tracking number say, and the latest counts). If the owner reports a problem, lake_inbox brings { kind: "want.problem", want, cart, hold, problem } (not_arrived, or not_right: damaged or not what you offered) and the money stays held, whatever the review time: send it again (shipped, with a new note) or give the money back (refund { hold }). Nobody rules on a parcel: it is between you and them.',
+      description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays; in the want\'s currency; one open offer per shop, a new one replaces it; it binds you to deliver within within_hours, 168 by default); status says where your offer stands; when they buy, lake_inbox brings { kind: "receipt", want, cart, hold, deliverTo } (deliverTo: the address to send it to, given to you alone, for this order); shipped files the delivery with the payments agent holding the money and tells the house you sent it (again with a new note, a tracking number say, and the latest counts). If the owner reports a problem, lake_inbox brings { kind: "want.problem", want, cart, hold, problem } (not_arrived, or not_right: damaged or not what you offered) and the money stays held, whatever the review time: send it again (shipped, with a new note) or give the money back (refund { hold }). Nobody rules on a parcel: it is between you and them. Someone\'s help, not a thing (a babysitter, a lift, a hand moving a sofa)? post with people: true: people\'s AIs answer it, not shops. Your human may match someone else\'s: find shows for_people wants; match { want, house, matched } puts it to your human, whose own tap sends it (they see the points, not each other\'s names, until both say yes).',
       inputSchema: {
-        action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'status', 'shipped', 'refund']),
+        action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'status', 'shipped', 'refund', 'match']),
+        people: z.boolean().optional().describe('post: true when your human wants someone\'s help, not a thing: people who match answer it, not shops'),
         name: z.string().max(80).optional().describe('post: what, in a few words ("Handheld shower head")'),
         description: z.string().max(280).optional().describe('post: one line more, if it helps ("to replace a worn one; the hose stays")'),
         properties: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe('post: what it must be, as name: value pairs (up to 12), as a shop would list them'),
@@ -2112,7 +2113,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         offer_currency: z.string().optional().describe('offer: the currency of your prices (default: the want\'s)'),
         within_hours: z.number().int().min(1).max(720).optional().describe('offer: the hours you promise to deliver within, as signed in your cart (default 168)'),
         delivery: z.string().max(200).optional().describe('offer: how soon, in words ("2 days, free"); shipped: your dispatch note (the carrier and tracking number)'),
-        matched: z.array(z.string()).max(12).optional().describe('offer: which of its properties your item has'),
+        matched: z.array(z.string()).max(12).optional().describe('offer: which of its properties your item has; match: which of its points your human meets (only ones you know from your human, never guessed)'),
         cart: z.string().optional().describe('shipped: the cart id the house paid'),
         hold: z.string().optional().describe('shipped, refund: the held payment\'s id, from the house\'s receipt message'),
       },
@@ -2121,7 +2122,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       try {
         if (a.action === 'post') {
           if (!a.name) throw new Error('post: name (what), and properties if you can tell them');
-          const r = await houseCall({ kind: 'assistant.want', name: a.name, description: a.description, properties: a.properties ?? {}, quantity: a.quantity, area: a.area, currency: a.currency?.toUpperCase(), days: a.days, max_price: a.max_price });
+          const r = await houseCall({ kind: 'assistant.want', ...(a.people ? { people: true } : {}), name: a.name, description: a.description, properties: a.properties ?? {}, quantity: a.quantity, area: a.area, currency: a.currency?.toUpperCase(), days: a.days, max_price: a.max_price });
           return json({ ...r, next: 'Tell your human, briefly: it\'s listed; offers will reach their phone (Today), and they buy with a tap. Not the id. Check back with mine if they ask how it\'s going.' });
         }
         if (a.action === 'mine') {
@@ -2129,9 +2130,17 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           return json({ wants: (v.wants ?? []).map((w) => ({ id: w.want.id, name: w.want.name, until: w.want.availabilityEnds, ...(w.closed ? { closed: w.closed } : {}), ...(w.bought ? { bought: true } : {}), offers: (w.offers ?? []).map((o) => ({ shop: o.seller.name, total: `${o.total.currency} ${o.total.value.toFixed(2)}`, delivery: o.delivery, matched: o.matched, state: o.state, ...(o.over ? { over_their_limit: true } : {}) })) })) });
         }
         if (a.action === 'close') return json(await houseCall({ kind: 'assistant.want.close', id: a.id }));
+        // Your human may be who someone else is looking for: a card on their phone, whose Send is their own yes (SPEC §6.8).
+        if (a.action === 'match') {
+          if (!a.want || !a.matched?.length) throw new Error('match: want (its id, from find), house (its address, from find) and matched (which of its points your human meets)');
+          const r = await houseCall({ kind: 'assistant.want.match', want: a.want, house: a.house ?? '', matched: a.matched });
+          return json({ ...r, next: 'Tell your human briefly: someone is looking for help they may give, and the card on their phone sends it if they want. Don\'t send anything yourself.' });
+        }
         const node = o.node.split(',')[0]!.trim().replace(/\/$/, '');
         if (a.action === 'find') {
-          const wants = (await (await fetch(`${node}/wants${a.q ? `?q=${encodeURIComponent(a.q)}` : ''}`)).json()) as unknown[];
+          const listed = (await (await fetch(`${node}/wants${a.q ? `?q=${encodeURIComponent(a.q)}` : ''}`)).json()) as { want: { itemOffered?: { '@type'?: string } } }[];
+          // A want for someone's help is answered with a match from the person, not a shop's cart.
+          const wants = listed.map((x) => (x.want.itemOffered?.['@type'] === 'Service' ? { ...x, for_people: true, answer: 'lake_want { action: "match", want, house, matched } if your human may be who they\'re looking for' } : x));
           // Empty is not the end (round 2): people's needs also stand as seeking: tags on their cards.
           return json({ wants, next: wants.length ? 'to offer: lake_want { action: "offer", want, house, house_webid, items, delivery, matched }' : `nobody here has a want${a.q ? ` about "${a.q}"` : ''} open now. People also leave needs as tags on their cards: lake_search { tag: "seeking:" }, and lake_ask_around shows what houses are into` });
         }

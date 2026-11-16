@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { cartHash, checkCart, deliverWithRetries, looksLikeInjection, makeWant, MAX_WANTS, signPaymentMandate, WANT_PROBLEMS, type AgentCard, type CartMandate, type Identity, type LakeProfile, type PostalAddress, type Want, type WantProblem } from '@thelakeprotocol/core';
+import { cartHash, checkCart, deliverWithRetries, forPeople, looksLikeInjection, makeWant, MAX_WANTS, signPaymentMandate, WANT_PROBLEMS, type AgentCard, type CartMandate, type Identity, type LakeProfile, type PostalAddress, type Want, type WantProblem } from '@thelakeprotocol/core';
 
 /** One shop's offer for a want, as the house keeps it: the signed cart, what it checked, and how it went. */
 export interface WantOfferRecord {
@@ -31,9 +31,22 @@ export interface WantOfferRecord {
   /** Bought with the owner's delivery address sent to this seller (the address itself stays in the pod). */
   addressSent?: boolean;
 }
-export interface WantRecord { want: Want; limit?: { amount: number; currency: string }; offers: WantOfferRecord[]; closed?: string; bought?: string; at: string; /** The assistant that posted it (its key): it follows its own want's offers. */ by?: string }
+/**
+ * Someone who says they match a want for a person's help (SPEC §6.8, people who match): only which of the want's own
+ * points, signed by their house; who they are stays out of the owner's list until both say yes.
+ */
+export interface WantMatch {
+  id: string; at: string;
+  matcher: { name: string; webId: string; url: string; domain: string };
+  matched: string[];
+  state: 'open' | 'yes' | 'no' | 'revealed';
+  /** After both said yes: who they are, as their house said, and the note filed for the owner to answer. */
+  revealed?: { name: string; handle?: string; url: string; at: string; note?: string };
+}
+export interface WantRecord { want: Want; limit?: { amount: number; currency: string }; offers: WantOfferRecord[]; closed?: string; bought?: string; at: string; /** The assistant that posted it (its key): it follows its own want's offers. */ by?: string; matches?: WantMatch[] }
 
 const MAX_OFFERS = 10;
+const MAX_MATCHES = 10;
 /** As many dispatch notes as a payments agent takes deliveries for one cart. */
 const MAX_NOTES = 6;
 const short = (s: unknown, n: number) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -73,6 +86,7 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       const r = find(String(p.want ?? ''));
       if (!r) return { ok: false, why: 'this house has no want with that id: check the house (lake_want find says which house each want is on)' };
       if (!live(r)) return { ok: false, why: 'that want is no longer open here (closed, bought or past its date)' };
+      if (forPeople(r.want)) return { ok: false, why: 'this want is for a person\'s help, not a thing: someone who matches says so with want.match' };
       let c;
       try { c = await checkCart(p.cart as CartMandate, profile.publicJwk); } catch (e) { return { ok: false, why: (e as Error).message }; }
       if (c.seller !== profile.webId) return { ok: false, why: 'the cart is signed for another seller' };
@@ -103,6 +117,46 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       if (before >= 0) r.offers[before] = offer; else r.offers.push(offer);
       await save();
       return { ok: true, offer, want: r.want, ...(replaced ? { replaced } : {}), ...(dropped?.length ? { dropped } : {}) };
+    },
+    /**
+     * Someone who matches a want for a person's help, as their house signed it: only names of the want's own points are
+     * kept (anything else is dropped and said), no words, no name shown until both say yes. One open match a house:
+     * a new one replaces it.
+     */
+    async matchIn(p: Record<string, unknown>, profile: LakeProfile, card: AgentCard): Promise<{ ok: true; match: WantMatch; want: Want; replaced?: string; dropped?: string[]; quiet?: true } | { ok: false; why: string }> {
+      const r = find(String(p.want ?? ''));
+      if (!r) return { ok: false, why: 'this house has no want with that id' };
+      if (!live(r)) return { ok: false, why: 'that want is no longer open here (closed, bought or past its date)' };
+      if (!forPeople(r.want)) return { ok: false, why: 'this want is for a thing: a shop offers a cart (want.offer)' };
+      const props = new Map(r.want.itemOffered.additionalProperty.map((x) => [x.name.toLowerCase(), x.name]));
+      const said = Array.isArray(p.matched) ? (p.matched as unknown[]).slice(0, 12).map((m) => short(m, 40)).filter(Boolean) : [];
+      const matched = [...new Set(said.map((m) => props.get(m.toLowerCase())).filter((m): m is string => !!m))];
+      const dropped = said.filter((m) => !props.has(m.toLowerCase()));
+      if (!matched.length) return { ok: false, why: `matched: name which of this want's points you match (${[...props.values()].join(', ')})` };
+      const matches = (r.matches ??= []);
+      // Set aside is set aside: the same house sending again changes nothing (round 62, Fable: a new card from someone the
+      // owner said no to), and is told only that it was received.
+      const no = matches.find((m) => m.matcher.webId === profile.webId && m.state === 'no');
+      if (no) return { ok: true, match: no, want: r.want, quiet: true };
+      const before = matches.findIndex((m) => m.matcher.webId === profile.webId && (m.state === 'open' || m.state === 'yes'));
+      if (before < 0 && matches.filter((m) => m.state === 'open' || m.state === 'yes').length >= MAX_MATCHES) return { ok: false, why: `${MAX_MATCHES} people have matched already: this want is full` };
+      const match: WantMatch = {
+        id: `m-${createHash('sha256').update(`${profile.webId}|${r.want.id}|${Date.now()}`).digest('hex').slice(0, 16)}`, at: new Date().toISOString(),
+        matcher: { name: short(card.name, 80), webId: profile.webId, url: String(card.supportedInterfaces?.[0]?.url ?? ''), domain: profile.ownerDomain },
+        matched, state: 'open',
+      };
+      const replaced = before >= 0 ? matches[before]!.id : undefined;
+      if (before >= 0) matches[before] = match; else matches.push(match);
+      await save();
+      return { ok: true, match, want: r.want, ...(replaced ? { replaced } : {}), ...(dropped.length ? { dropped } : {}) };
+    },
+    /** The owner's answer to a match, or how it ended: saved with the want. */
+    async setMatch(wantId: string, matchId: string, patch: Partial<Pick<WantMatch, 'state' | 'revealed'>>) {
+      const m = find(wantId)?.matches?.find((x) => x.id === matchId);
+      if (!m) return null;
+      Object.assign(m, patch);
+      await save();
+      return m;
     },
     /**
      * Where a shop's own offer for a want stands. Never whether it is over the owner's limit (that stays in the house), nor

@@ -139,11 +139,12 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
     const wantHtml = (v: NonNullable<ReturnType<OwnerDesk['wantLinkView']>>) => {
       if (!v.want || !v.open) return notePage('Closed', '<h1>This link is closed</h1><p class="lead">It doesn\'t take replies any more.</p>');
       const w = v.want;
-      return notePage(w.name, `<h1>${esc(v.name ? `${v.name} is looking for` : 'Someone is looking for')}: ${esc(w.name)}</h1>${w.description ? `<p class="lead">${esc(w.description)}</p>` : ''}`
+      const until = new Date(w.availabilityEnds).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return notePage(w.name, `<p class="small">${esc(v.name ? `${v.name} sent you this link.` : 'Someone sent you this link.')} Nothing to install: read it and reply below.</p><h1>${esc(v.name ? `${v.name} is looking for` : 'Someone is looking for')}: ${esc(w.name)}</h1>${w.description ? `<p class="lead">${esc(w.description)}</p>` : ''}`
         + `${w.itemOffered.additionalProperty.length ? `<ul class="small">${w.itemOffered.additionalProperty.map((x) => `<li>${esc(x.name)}: ${esc(x.value)}</li>`).join('')}</ul>` : ''}`
-        + `${w.areaServed ? `<p class="small">Where: ${esc(w.areaServed)}</p>` : ''}<p class="small">Open until ${esc(new Date(w.availabilityEnds).toUTCString())}.</p>`
+        + `${w.areaServed ? `<p class="small">Where: ${esc(w.areaServed)}</p>` : ''}<p class="small">Open until ${esc(until)}.</p>`
         + `<form method="post"><label class="small" for="t">Can you help? Say what you have, or who you know.</label><textarea class="say" id="t" name="text" rows="5" maxlength="1000" required></textarea>
-<input class="say" name="from" maxlength="80" placeholder="Your name" style="margin-top:8px"><input class="say" name="reply_to" maxlength="254" autocomplete="off" placeholder="Email or phone, if you'd like the answer there (optional)" style="margin-top:8px">
+<input class="say" name="from" maxlength="80" placeholder="Your name (as they know you)" style="margin-top:8px"><input class="say" name="reply_to" maxlength="254" autocomplete="off" placeholder="Email or phone, if you'd like the answer there (optional)" style="margin-top:8px">
 <p class="small" style="margin:6px 0 0">Only they see it. You'll never be asked to pay or sign in here. Nobody is checked here, on either side: before you meet, pay or say where you live, check who they are.</p><div class="row"><button class="btn primary" type="submit">Send</button></div></form>`);
     };
     app.get('/want/:id/:token', (req, res) => {
@@ -158,7 +159,7 @@ export function createHouseServer(card: AgentCard, id: Identity, keeper: Houseke
       const html = req.accepts(['json', 'html']) === 'html';
       if (r.body.kind === 'noted') {
         const at = `${(door ? door.a2a().replace(/\/a2a$/, '') : '')}/note/${r.body.note}/${r.body.key}`;
-        return void (html ? res.type('html').send(notePage('Reply sent', `<h1>Reply sent ✓</h1><p class="lead">They'll see it on their phone. Their answer will appear at this private link; keep it:</p><p style="overflow-wrap:anywhere"><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json({ kind: 'noted', note: r.body.note, answer_at: at }));
+        return void (html ? res.type('html').send(notePage('Reply sent', `<h1>Reply sent ✓</h1><p class="lead">They'll see it on their phone. Their answer will appear at this private link: bookmark it.</p><p style="overflow-wrap:anywhere"><a href="${esc(at)}">${esc(at)}</a></p>`)) : res.json({ kind: 'noted', note: r.body.note, answer_at: at }));
       }
       res.status(r.status);
       return void (html ? res.type('html').send(notePage('Not sent', `<h1>Not sent</h1><p class="lead">${esc(String(r.body.error))}</p>`)) : res.json(r.body));

@@ -160,14 +160,16 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
-  const kicker = x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const kicker = x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
   const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;
   const advice = x.advice ? h(Pill, { text: x.sender && x.advice === 'dont' ? 'Warning' : { do: 'Advises yes', dont: 'Advises no', your_call: 'Your call' }[x.advice], tone: x.advice === 'do' ? 'mint' : x.advice === 'dont' ? 'red' : 'muted' }) : null;
   const acts: Child[] = [];
   // A time your AI pencilled in: yours to confirm (the house tells them either way). Nothing else to do with it.
-  if (x.booking) acts.push(
+  // Someone looking for help your AI says you match: Send is your yes (they see the points, not your name, until they say yes).
+  if (x.matchOut && !x.matchOut.sent) acts.push(h(Btn, { key: 'mo', label: 'Offer to help', run: () => must({ kind: 'panel.want.match.send', id: x.id }), ask: { header: 'Offer to help?', sub: 'They see which of their points you fit, not your name. If they say yes too, you each see the other\'s name and can write to each other.', button: 'Offer to help', destructive: false }, done: 'Sent. If they say yes, their name appears here.' }));
+  else if (x.booking) acts.push(
     h(Btn, { key: 'bk', label: 'Confirm', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Confirm' }), done: `Confirmed. ${x.booking.with} was told.` }),
     h(Btn, { key: 'bd', label: 'Decline', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Decline' }), done: `Declined. ${x.booking.with} was told.` }));
   else if (x.ask && !answered) x.ask.choices.forEach((c, i) => acts.push(h(Btn, { key: `c${i}`, label: c, fill: x.ask!.recommend === i ? 'solid' : 'outline', run: async () => { await must({ kind: 'panel.assistant.answer', id: x.id, choice: c }); setAnsweredNow(c); }, done: `Sent to ${shortName(x.from)}: ${c}` })));
@@ -190,6 +192,9 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
       h('p', { class: 'muted-line', key: 'ht' }, `Your AI pencilled this in. ${x.booking.with} was told you'll confirm it yourself.`)]
       : h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
     !x.booking?.what && !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
+    x.matchOut ? h('div', { class: 'spec-chips' }, ...x.matchOut.points.map((pt) => h('span', { key: pt, class: `field-tag${x.matchOut!.matched.includes(pt) ? ' match-yes' : ' match-no'}` }, x.matchOut!.matched.includes(pt) ? pt : `${pt}: not said`))) : null,
+    x.matchOut?.revealed ? [h('p', { class: 'offer-note', key: 'mr' }, `You both said yes${x.matchOut.revealedName ? `: ${x.matchOut.revealedName}` : ''}.`), x.matchOut.revealed !== 'yes' ? h('ion-button', { key: 'mh', size: 'small', shape: 'round', onClick: () => push(`#note=${encodeURIComponent(x.matchOut!.revealed!)}`) }, 'Say hello') : null]
+      : x.matchOut?.sent ? h('p', { class: 'muted-line' }, 'Sent. If they say yes, their name appears here.') : null,
     x.door ? h('blockquote', {}, x.door.about) : null,
     x.pledge?.money ? h('p', { class: 'muted-line' }, `Puts in ${money$(x.pledge.money.amount, x.pledge.money.currency)}, held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}. Paid on only if ${x.pledge.money.threshold} sign (${x.pledge.money.count} so far); otherwise it comes back.`) : null,
     x.pledge?.circle ? h('p', { class: 'muted-line' }, `A promise circle: you promise ${x.pledge.circle.promise}, ${x.pledge.circle.times === 1 ? 'once' : `${x.pledge.circle.times} times`} a year. No money.`) : null,

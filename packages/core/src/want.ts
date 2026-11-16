@@ -16,7 +16,8 @@ export interface Want {
   /** One line more, if it helps: "To replace a worn one; the hose stays". */
   description?: string;
   /** schema.org itemOffered: the thing wanted and its properties, as name/value pairs ("Connection" = "1/2 inch BSP"). */
-  itemOffered: { '@type': 'Product'; name: string; additionalProperty: { '@type': 'PropertyValue'; name: string; value: string }[] };
+  /** A thing (Product: shops offer carts) or a person's help (Service: people who match say so, SPEC §6.8). */
+  itemOffered: { '@type': 'Product' | 'Service'; name: string; additionalProperty: { '@type': 'PropertyValue'; name: string; value: string }[] };
   /** How many. */
   eligibleQuantity?: { '@type': 'QuantitativeValue'; value: number };
   /** Where it should go, as coarse as the person likes: a country, a state ("AU-QLD"), a postcode area. */
@@ -26,6 +27,9 @@ export interface Want {
   /** When it closes: offers after that are turned away. */
   availabilityEnds: string;
 }
+
+/** A want for someone's help (a Service): people who match answer it, never a shop's cart. */
+export const forPeople = (w: Pick<Want, 'itemOffered'>) => w.itemOffered['@type'] === 'Service';
 
 export const MAX_WANTS = 5;
 export const MAX_WANT_DAYS = 14;
@@ -42,7 +46,7 @@ export function wantProblems(w: unknown, now = Date.now()): string[] {
   if (!text(x.name, 80)) out.push('name: what, in up to 80 characters');
   if (x.description !== undefined && !text(x.description, 280)) out.push('description: up to 280 characters');
   const props = x.itemOffered?.additionalProperty;
-  if (x.itemOffered?.['@type'] !== 'Product' || !text(x.itemOffered?.name, 80) || !Array.isArray(props)) out.push('itemOffered: { @type: "Product", name, additionalProperty: [...] }');
+  if ((x.itemOffered?.['@type'] !== 'Product' && x.itemOffered?.['@type'] !== 'Service') || !text(x.itemOffered?.name, 80) || !Array.isArray(props)) out.push('itemOffered: { @type: "Product" or "Service", name, additionalProperty: [...] }');
   else {
     if (props.length > MAX_PROPS) out.push(`at most ${MAX_PROPS} properties`);
     if (props.some((p) => p?.['@type'] !== 'PropertyValue' || !text(p.name, 40) || !text(p.value, 80))) out.push('each property: { @type: "PropertyValue", name (up to 40), value (up to 80) }');
@@ -59,14 +63,14 @@ export function wantProblems(w: unknown, now = Date.now()): string[] {
 }
 
 /** A want from plain words and properties (what an AI writes after looking at a photo): checked, ready for a card. */
-export function makeWant(o: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number }, now = Date.now()): Want {
+export function makeWant(o: { name: string; description?: string; properties?: Record<string, string | number>; quantity?: number; area?: string; currency?: string; days?: number; /** Someone's help, not a thing: people who match answer it, not shops. */ people?: boolean }, now = Date.now()): Want {
   const props = Object.entries(o.properties ?? {}).filter(([, v]) => String(v).trim()).map(([name, value]) => ({ '@type': 'PropertyValue' as const, name: name.slice(0, 40), value: String(value).slice(0, 80) }));
   const w: Want = {
     '@type': 'Demand',
     id: `w-${createHash('sha256').update(`${o.name}|${now}|${Math.random()}`).digest('hex').slice(0, 8)}`,
     name: o.name.trim(),
     ...(o.description?.trim() ? { description: o.description.trim() } : {}),
-    itemOffered: { '@type': 'Product', name: o.name.trim(), additionalProperty: props },
+    itemOffered: { '@type': o.people ? 'Service' : 'Product', name: o.name.trim(), additionalProperty: props },
     ...(o.quantity && o.quantity !== 1 ? { eligibleQuantity: { '@type': 'QuantitativeValue', value: o.quantity } } : {}),
     ...(o.area?.trim() ? { areaServed: o.area.trim() } : {}),
     ...(o.currency ? { priceCurrency: o.currency } : {}),

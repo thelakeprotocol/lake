@@ -1008,6 +1008,43 @@ describe('the owner', () => {
     expect((await ask(`${tally}/a2a`, opener, { kind: 'tally.sign', id: 'people-test' })).reply.kind).toBe('refused');
   });
 
+  it('people who match: a want for help on one house, a match from another, two yeses, and each has the other (16 Nov)', async () => {
+    // The same owner holds both houses here (paired above): strict looks for help, research's owner may give it.
+    const rWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(`${houses.research}/a2a`))).json())).webId;
+    const researchCall = async (payload: Record<string, unknown>) => (await fetch(`${houses.research}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: rWebId })) })).json();
+    const pairAi = async (house: string, call: (p: Record<string, unknown>) => Promise<any>, label: string) => {
+      const ai = await generateIdentity(label);
+      const { code } = await call({ kind: 'panel.assistant.invite', label });
+      expect((await fetch(`${house}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: ai.publicJwk, code, label }) })).status).toBe(200);
+      return async (p: Record<string, unknown>) => (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, ai, { iss: 'assistant' })) })).json();
+    };
+    const aiA = await pairAi(houses.strict!, ownerCall, 'Looking AI'), aiB = await pairAi(houses.research!, researchCall, 'Helper AI');
+    const posted = await aiA({ kind: 'assistant.want', people: true, name: 'Help on Friday evening', properties: { When: 'Friday 6-11pm', Where: 'AU-QLD', 'First aid': 'yes' } });
+    expect(posted).toMatchObject({ ok: true, want: { itemOffered: { '@type': 'Service' } } });
+    const id = posted.want.id as string;
+    for (let i = 0; i < 40 && (await fetch(`${node}/wants/${id}`)).status !== 200; i++) await new Promise((r) => setTimeout(r, 500));
+    // Research's AI thinks its human fits: a card for its owner, only the want's own points kept.
+    const drafted = await aiB({ kind: 'assistant.want.match', house: houses.strict, want: id, matched: ['When', 'first aid', 'Loves dogs'] });
+    expect(drafted).toMatchObject({ ok: true, matched: ['When', 'First aid'], matched_dropped: ['Loves dogs'] });
+    // Only the owner's tap sends it, and only the owner's tap says yes.
+    expect((await aiB({ kind: 'panel.want.match.send', id: drafted.id })).error).toBeTruthy();
+    const sent = await researchCall({ kind: 'panel.want.match.send', id: drafted.id });
+    expect(sent).toMatchObject({ ok: true, match: expect.stringMatching(/^m-/) });
+    const mine = (await ownerCall({ kind: 'list' })).wants.find((w: { want: { id: string } }) => w.want.id === id);
+    expect(mine.matches).toEqual([expect.objectContaining({ id: sent.match, matched: ['When', 'First aid'], state: 'open' })]);
+    expect(mine.matches[0].matcher).toBeUndefined();
+    expect((await aiA({ kind: 'panel.want.match.yes', want: id, match: sent.match })).error).toBeTruthy();
+    const yes = await ownerCall({ kind: 'panel.want.match.yes', want: id, match: sent.match });
+    expect(yes).toMatchObject({ ok: true, revealed: { name: expect.any(String), note: expect.any(String) } });
+    // Both in: each house has a note from the other, and the want's owner now sees who it is.
+    const after = await ownerCall({ kind: 'list' });
+    expect(after.wants.find((w: { want: { id: string } }) => w.want.id === id).matches[0]).toMatchObject({ state: 'revealed', matcher: { name: expect.any(String) } });
+    expect(after.notes.find((n: { id: string }) => n.id === yes.revealed.note)).toMatchObject({ text: expect.stringContaining('You both said yes to "Help on Friday evening"'), from: { webId: rWebId } });
+    expect((await researchCall({ kind: 'list' })).notes.some((n: { text: string }) => /You both said yes to "Help on Friday evening"/.test(n.text))).toBe(true);
+    // Closed by the AI that posted it.
+    expect(await aiA({ kind: 'assistant.want.close', id })).toMatchObject({ ok: true });
+  }, 120_000);
+
   it("counts what run 32's red team got away with: labels tried for the same data, an injection, a forged grant; its key is quarantined and its row says so", async () => {
     const v = await visitor('labels.example');
     const terms = (purpose: string, note?: string) => ({ purpose, fields: ['conditions', 'medications'], retention: 'none', priceUsd: 0, credentials: { ethicsApproved: false, sponsorVerified: true, auditCertified: false }, ...(note ? { note } : {}) });

@@ -68,11 +68,18 @@ const wantState = (w: WantV) => {
   return `${open.length} offer${open.length === 1 ? '' : 's'} · from ${money(open.map((o) => o.total).sort((a, b) => a.value - b.value)[0]!)}`;
 };
 /** Replies through a shared link come first in the row's line while it's open: a person answered. */
-const wantLine = (w: WantV) => (w.replies && !w.bought ? `${w.replies} repl${w.replies === 1 ? 'y' : 'ies'} · ${wantState(w)}` : wantState(w));
+const wantLine = (w: WantV) => {
+  if (w.bought) return wantState(w);
+  const people = (w.matches ?? []).filter((m) => m.state !== 'revealed').length;
+  const lead = [people ? `${people} ${people === 1 ? 'person matches' : 'people match'}` : '', w.replies ? `${w.replies} repl${w.replies === 1 ? 'y' : 'ies'}` : ''].filter(Boolean).join(' · ');
+  // A want for someone's help has no shop offers to speak of.
+  const forPeople = w.want.itemOffered['@type'] === 'Service';
+  return lead ? (forPeople ? lead : `${lead} · ${wantState(w)}`) : forPeople ? 'Waiting for someone who matches' : wantState(w);
+};
 /** A shop's cart is good for a day or so: after that it can't be bought, until the shop sends it again. */
 const ranOut = (o: WantOfferV) => Date.parse(o.expires) < Date.now();
 /** A want needs the owner while an offer waits for a yes, or what they bought is on its way (their "It arrived" pays the shop). */
-export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : !!w.repliesWaiting || w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
+export const wantNeedsYou = (w: WantV) => { const b = w.offers.find((o) => o.id === w.bought); return !w.closed && (b ? b.state === 'shipped' : !!w.repliesWaiting || (w.matches ?? []).some((m) => m.state === 'open') || w.offers.some((o) => o.state === 'open' && !o.over && !ranOut(o))); };
 
 export function WantRow({ w }: { w: WantV }) {
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow want-row${wantNeedsYou(w) ? ' unread' : ''}`, onClick: () => push(`#want=${encodeURIComponent(w.want.id)}`) },
@@ -270,6 +277,25 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
 export const blockAsk = (name?: string) => ({ header: `Block ${name || 'this sender'}?`, sub: 'Your house turns their messages away and tells them it doesn\'t take them. You can\'t undo this yet.', button: 'Block' });
 
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
+/** Someone who says they could help with a want for a person's help: which points, Say yes / Not this one, then who. */
+function MatchCard({ w, m }: { w: WantV; m: NonNullable<WantV['matches']>[number] }) {
+  const points = w.want.itemOffered.additionalProperty.map((p) => p.name);
+  const r = m.revealed;
+  return h('ion-card', { class: 'lake-card want-match' }, h('ion-card-content', {},
+    h('div', { class: 'offer-head' }, h('h3', { class: 'offer-shop' }, r ? r.name : `Someone could help · fits ${m.matched.length} of ${points.length}`), h('span', { class: 'row-time' }, when(m.at))),
+    r ? h('p', { class: 'muted-line' }, `Both said yes · the name their AI gave${r.handle ? ` · on the Lake they're ${r.handle}` : ''}`) : null,
+    h('div', { class: 'spec-chips' }, ...points.map((pt) => h('span', { key: pt, class: `field-tag${m.matched.includes(pt) ? ' match-yes' : ' match-no'}` }, m.matched.includes(pt) ? pt : `${pt}: not said`))),
+    h('div', { class: 'offer-tags' }, r ? h(Pill, { text: 'Both in', tone: 'mint' }) : h(Pill, { text: 'Through their AI · not checked', tone: 'amber' })),
+    r ? (r.note ? h('ion-button', { size: 'small', shape: 'round', onClick: () => push(`#note=${encodeURIComponent(r.note!)}`) }, 'Say hello') : null)
+      : m.state === 'yes' ? [h('p', { class: 'muted-line', key: 'wy' }, 'You said yes · waiting for their house.'),
+        h('div', { class: 'card-actions', key: 'wa' },
+          h(Btn, { label: 'Try again', size: 'small', fill: 'clear', run: () => must({ kind: 'panel.want.match.yes', want: w.want.id, match: m.id }), done: 'You both said yes.' }),
+          h(Btn, { label: 'Not this one', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.want.match.no', want: w.want.id, match: m.id }), done: 'Set aside' }))]
+      : h('div', { class: 'card-actions' },
+        h(Btn, { label: 'Say yes', size: 'small', run: () => must({ kind: 'panel.want.match.yes', want: w.want.id, match: m.id }), ask: { header: 'Say yes?', sub: 'They already said yes. If you do, you each see the other\'s name here and can write to each other. Nobody has checked who they are: check before you meet, pay or say where you live.', button: 'Say yes', destructive: false }, done: 'You both said yes.' }),
+        h(Btn, { label: 'Not this one', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.want.match.no', want: w.want.id, match: m.id }), done: 'Set aside' }))));
+}
+
 /** A link to send to people you know: they see what you're looking for and can reply, with nothing to install. */
 function ShareWant({ id, shared }: { id: string; shared: boolean }) {
   const [link, setLink] = useState<{ link: string; until: string } | null>(null);
@@ -288,6 +314,7 @@ export function WantPage({ arg }: { arg: string }) {
   if (!w) return h(Page, { title: 'Looking for', back: () => back('#inbox'), backLabel: 'Today' }, list.data ? h(Empty, { icon: 'search-outline', title: 'Not looking for this any more' }) : h(Failed, { error: list.error }));
   const bought = w.offers.find((o) => o.id === w.bought);
   const shop = bought ? shortShop(bought.seller.name) : '';
+  const people = w.want.itemOffered['@type'] === 'Service';
   // An offer whose cart has run out can't be bought (round 21: it was shown with a Buy button that failed on the tap).
   const open = w.offers.filter((o) => o.state === 'open' && !ranOut(o)).sort((a, b) => a.total.value - b.total.value);
   const gone = w.offers.filter((o) => o.state === 'open' && ranOut(o) && !o.over).length;
@@ -317,13 +344,19 @@ export function WantPage({ arg }: { arg: string }) {
       h('div', { class: 'spec-head' }, h(Avatar, { name: w.want.name, iconName: 'search', size: 40 }), h('div', {}, h('h2', {}, w.want.name), h('p', {}, bought ? 'What you asked for' : `Open until ${day(w.want.availabilityEnds)}`))),
       w.want.description ? h('p', { class: 'spec-desc' }, w.want.description) : null,
       h('div', { class: 'spec-chips' }, ...w.want.itemOffered.additionalProperty.map((p) => h('span', { key: p.name, class: 'field-tag' }, h('span', { class: 'tag-k' }, `${p.name} `), p.value))),
-      h('p', { class: 'spec-limit' }, [addr.data?.address ? `To ${addressLine(addr.data.address)}` : w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
+      h('p', { class: 'spec-limit' }, [people ? '' : addr.data?.address ? `To ${addressLine(addr.data.address)}` : w.want.areaServed ? `To ${w.want.areaServed}` : '', w.limit ? `Most you'd pay: ${money({ currency: w.limit.currency, value: w.limit.amount })} (only your house knows)` : ''].filter(Boolean).join(' · ')))),
     // Send it to people you know (SPEC §6.8): a link that shows what you're looking for, never what you'd pay; replies come
     // here. Ten replies, seven days.
-    bought ? null : h(ShareWant, { key: 'share', id: w.want.id, shared: !!w.shared }),
+    // People who could help (a want for someone's help): which points, never who until both say yes; nothing is checked.
+    // First under the want, with its empty state (round 62's design check).
+    ...(people && !bought ? [
+      h('h3', { class: 'section-h', key: 'ph' }, (w.matches ?? []).length ? `People (${w.matches!.length})` : 'People'),
+      ...(w.matches ?? []).length ? w.matches!.map((m) => h(MatchCard, { key: m.id, w, m }))
+        : [h(Empty, { key: 'none-p', icon: 'people-outline', title: 'Nobody yet', text: 'When someone who could help turns up, they appear here and you get a notification. Share the link below to ask people you know.' })],
+    ] : []),
     ...(list.data?.notes ?? []).filter((n) => n.want === w.want.id).length ? [
       h('h3', { class: 'section-h', key: 'rh' }, `Replies (${(list.data?.notes ?? []).filter((n) => n.want === w.want.id).length})`),
-      h('p', { class: 'muted-line pad', key: 'rw' }, 'Anyone with the link can say anything, and nobody here checks who they are. Before you meet, pay or say where you live, check them yourself.'),
+      h('p', { class: 'muted-line pad', key: 'rw' }, 'Nobody checks who replies. Check them yourself before you meet, pay or say where you live.'),
       ...(list.data?.notes ?? []).filter((n) => n.want === w.want.id).sort((a, b) => b.at.localeCompare(a.at)).map((n) => h('ion-card', { key: n.id, class: 'lake-card want-reply' }, h('ion-card-content', {},
         h('div', { class: 'offer-head' }, h('h3', { class: 'offer-shop' }, n.from.as ?? n.from.name), h('span', { class: 'row-time' }, when(n.at))),
         // Private isn't checked (round 60): anyone with the link can write any name and any claim.
@@ -333,6 +366,7 @@ export function WantPage({ arg }: { arg: string }) {
           h('ion-button', { size: 'small', shape: 'round', onClick: () => push(`#note=${encodeURIComponent(n.id)}`) }, 'Reply'),
           h(Btn, { label: 'Not this one', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.note.dismiss', id: n.id }), done: 'Set aside' }))))),
     ] : [],
+    bought ? null : h(ShareWant, { key: 'share', id: w.want.id, shared: !!w.shared }),
     bought ? [
       h('h3', { class: 'section-h', key: 'bh' }, bought.state === 'arrived' ? 'Arrived' : bought.problem ? 'Problem reported' : bought.state === 'shipped' ? 'On its way' : 'Bought'),
       card(bought, false),
@@ -346,8 +380,10 @@ export function WantPage({ arg }: { arg: string }) {
         bought.payBy ? h('p', { class: 'muted-line', key: 'by' }, `If you say nothing, ${shop} is paid on ${day(bought.payBy)}.`) : null) : null,
     ] : [
       refunded ? h('p', { class: 'muted-line pad', key: 'rf' }, `Your ${money(refunded.total)} came back from ${shortShop(refunded.seller.name)}${refunded.ended ? `: ${refunded.ended}` : ''}.`) : null,
-      h('h3', { class: 'section-h', key: 'oh' }, fits.length ? `Offers (${fits.length})` : 'Offers'),
-      fits.length ? fits.map((o) => card(o, true)) : over.length ? h('p', { class: 'muted-line pad', key: 'none' }, `None within the most you'd pay yet. Shops look every few minutes.`)
+      // A want for someone's help has no shop offers: people answer it (round 62's design check: it said "Shops look every
+      // few minutes" under a want no shop answers).
+      people ? null : h('h3', { class: 'section-h', key: 'oh' }, fits.length ? `Offers (${fits.length})` : 'Offers'),
+      people ? null : fits.length ? fits.map((o) => card(o, true)) : over.length ? h('p', { class: 'muted-line pad', key: 'none' }, `None within the most you'd pay yet. Shops look every few minutes.`)
         : gone ? null : h(Empty, { key: 'none', icon: 'hourglass-outline', title: 'No offers yet', text: 'Shops look every few minutes. You get a notification when one offers.' }),
       gone ? h('p', { class: 'muted-line pad offers-gone', key: 'gone' }, `${gone} offer${gone === 1 ? '' : 's'} ran out: a shop's price holds for about a day. It can send it again.`) : null,
       over.length ? h('ion-accordion-group', { key: 'over', class: 'lake-accordion' }, h('ion-accordion', { value: 'over' }, h('ion-item', { slot: 'header' }, h('ion-label', {}, `${over.length} over the most you'd pay`)), h('div', { slot: 'content' }, ...over.map((o) => card(o, true))))) : null,

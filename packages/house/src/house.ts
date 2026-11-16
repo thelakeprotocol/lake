@@ -6,7 +6,7 @@ import { houseRunner } from './duty-runner.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  allFields, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, cartReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
+  allFields, forPeople, type Want, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, cartReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type PostalAddress, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
 } from '@thelakeprotocol/core';
 import type express from 'express';
@@ -407,6 +407,36 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         return { kind: 'want.received', want: r.want.id, offer: r.offer.id, cart: r.offer.cart.contents.id, ...(r.replaced ? { replaced: r.replaced } : {}), ...(r.dropped ? { matched_dropped: r.dropped } : {}),
           note: `the owner sees it on their phone and decides; if they buy, a receipt comes with where to send it (keep the cart id for shipped).${r.replaced ? ' One open offer per shop: this replaces your earlier one.' : ''}${r.dropped ? ` Not shown as matched (not properties of this want): ${r.dropped.join(', ')}.` : ''}` };
       }
+      // Someone whose house says they match a want for a person's help: which points, no words, no name shown yet (SPEC §6.8).
+      if (p.kind === 'want.match') {
+        const r = await wants.matchIn(p, profile, from);
+        if (!r.ok) return { kind: 'refused', problems: [r.why] };
+        if (r.quiet) return { kind: 'want.match.received', want: r.want.id, match: r.match.id };
+        const of = r.want.itemOffered.additionalProperty.length;
+        note('want.match', `Someone matches ${r.match.matched.length} of ${of} points on "${r.want.name}"`);
+        desk.touch();
+        if (!r.replaced) desk.notifyOwner('want', `Someone matches ${r.match.matched.length} of ${of} points on "${r.want.name.slice(0, 50)}".`, `./#want=${r.want.id}`);
+        return { kind: 'want.match.received', want: r.want.id, match: r.match.id, ...(r.dropped ? { matched_dropped: r.dropped } : {}), note: `the owner sees which points you match, not who you are; if they say yes, each of you gets the other's handle as a note.${r.replaced ? ' One open match a house: this replaces your earlier one.' : ''}` };
+      }
+      // The owner of a want said yes to a match this house sent: its owner said yes when they sent it, so both are in. A note
+      // from them is filed here, and they get this owner's name and handle back (SPEC §6.8).
+      if (p.kind === 'want.match.yes') {
+        // Who said yes is the signer's verified WebID, never the address on its card (round 62, Fable: anyone holding the id
+        // could have posed as the want's house); the note's address is the one this house sent the match to.
+        const sent = desk.matchOut(String(p.match ?? ''), profile.webId);
+        if (!sent) return { kind: 'refused', problems: ['no match from this house with that id'] };
+        const url = sent.to;
+        const theirName = typeof p.name === 'string' ? p.name.replace(/\s+/g, ' ').trim().slice(0, 80) : '', theirHandle = typeof p.handle === 'string' ? p.handle.slice(0, 40) : '';
+        const door = (keeper as Housekeeper).rules.door as { name?: string; handle?: string } | undefined;
+        const shown: string = door?.name ?? o.name, handle: string | undefined = door?.handle;
+        if (sent.state !== 'revealed') {
+          const who = theirName || String(from.name ?? 'Their house').slice(0, 80);
+          const id2 = desk.addNote({ from: { name: who, domain: profile.ownerDomain, webId: profile.webId, url, checked: !o.sandbox, key: await keyThumbprint(profile.publicJwk) }, text: `You both said yes to "${sent.wantName}". You're writing to ${who}'s house: they or their AI answer.${theirHandle ? ` On the Lake they're ${theirHandle}.` : ''}` });
+          await desk.markMatchOut(sent.id, profile.webId, { state: 'revealed', note: id2 ?? undefined }, who);
+          desk.notifyOwner('want', `You're both in on "${sent.wantName.slice(0, 50)}".`, id2 ? `./#note=${id2}` : undefined);
+        }
+        return { kind: 'want.match.revealed', match: sent.id, name: shown, ...(handle ? { handle } : {}) };
+      }
       if (p.kind === 'want.status') return wants.statusFor(String(p.want ?? ''), profile.webId);
       const r = await wants.shippedIn(p, profile);
       if (!r.ok) return { kind: 'refused', problems: [r.why] };
@@ -543,6 +573,8 @@ const decode = (jws: string) => {
 /** Everything the owner's control panel shows and changes. Every call arrives signed by the owner's key. */
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
 
+const samePlace = (a: string, b: string) => a.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === b.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+
 function panelFor(x: {
   o: HouseOptions; owner: OwnerSession; filed: Filed; id: Identity; actor: string; activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[];
   note: (kind: string, text: string) => void;
@@ -561,7 +593,7 @@ function panelFor(x: {
     const reply = await sendLake(url.replace(/\/?$/, '').replace(/(\/a2a)?$/, '/a2a'), { lake: '0.1', card: x.card, envelope: envelope as LakeData['envelope'] }, { me: x.id, timeoutMs: 15_000 });
     const v = await verifyLakeData<Record<string, unknown>>(reply as LakeData<Record<string, unknown>>, { sandbox: x.o.sandbox });
     if (!v.ok) throw new Error(v.rejection.why);
-    return { payload: v.payload, card: (reply as LakeData).card };
+    return { payload: v.payload, card: (reply as LakeData).card, webId: v.profile.webId };
   };
   // The payments agent to pay a cart through: one of this Lake's that the shop named, or this Lake's own if it named none.
   const paymentsFor = async (cart: CartMandate) => {
@@ -1050,6 +1082,47 @@ function panelFor(x: {
     // What the owner is looking for (SPEC §6.8): post, close, and buy one offer with their signature for its cart.
     wantsList: () => x.wants.all(),
     doorName: () => x.keeper().rules.door?.name,
+    // People who match (SPEC §6.8). Another house's want, as this Lake lists it: the node's word for where it is.
+    async matchDraft(house, want) {
+      for (const n of x.nodes) {
+        const hit = await fetch(`${n}/wants/${encodeURIComponent(want)}`, { signal: AbortSignal.timeout(5000) }).then((r) => (r.ok ? r.json() as Promise<{ want: Want; house: { url: string } }> : null)).catch(() => null);
+        if (!hit) continue;
+        if (!forPeople(hit.want)) return { error: 'that want is for a thing: a shop offers it a cart, not a match' };
+        if (house && !samePlace(house, hit.house.url)) return { error: 'that want is on another house: the Lake lists it at ' + hit.house.url };
+        return { want: hit.want, house: hit.house.url };
+      }
+      return { error: 'no open want with that id on this Lake' };
+    },
+    async matchSend(house, want, matched) {
+      try {
+        const { payload, webId } = await send(house, { kind: 'want.match', want, matched });
+        if (payload.kind !== 'want.match.received') return { error: `their house didn't take it: ${((payload.problems as string[] | undefined) ?? [String(payload.kind)]).join('; ')}` };
+        return { match: String(payload.match), webId, ...(Array.isArray(payload.matched_dropped) ? { dropped: payload.matched_dropped.map(String) } : {}) };
+      } catch (e) { return { error: `their house didn't answer: ${(e as Error).message}` }; }
+    },
+    async matchAnswer(wantId, matchId, yes) {
+      const m = x.wants.find(wantId)?.matches?.find((y) => y.id === matchId);
+      if (!m) return { error: 'no such match' };
+      if (m.state === 'revealed') return { ok: true, revealed: m.revealed };
+      if (!yes) { await x.wants.setMatch(wantId, matchId, { state: 'no' }); return { ok: true, state: 'no' }; }
+      await x.wants.setMatch(wantId, matchId, { state: 'yes' });
+      try {
+        // The owner's tap is consent to say who they are, as their door says it.
+        const door = x.keeper().rules.door as { name?: string; handle?: string } | undefined;
+        const { payload, card } = await send(m.matcher.url, { kind: 'want.match.yes', want: wantId, match: matchId, ...(door?.name ? { name: door.name } : {}), ...(door?.handle ? { handle: door.handle } : {}) });
+        if (payload.kind !== 'want.match.revealed') {
+          // Their house no longer has it (it forgot, or it was never theirs): said plainly, and set aside, not stuck.
+          await x.wants.setMatch(wantId, matchId, { state: 'no' });
+          return { error: 'their house no longer has this match, so it was set aside' };
+        }
+        const name = String(payload.name ?? m.matcher.name).replace(/\s+/g, ' ').trim().slice(0, 80) || m.matcher.name, handle = typeof payload.handle === 'string' ? payload.handle.slice(0, 40) : undefined;
+        const jwk = (card?.capabilities?.extensions?.[0]?.params as { publicJwk?: JsonWebKey } | undefined)?.publicJwk;
+        const note = x.desk().addNote({ from: { name, domain: m.matcher.domain, webId: m.matcher.webId, url: m.matcher.url, checked: !x.o.sandbox, ...(jwk ? { key: await keyThumbprint(jwk as never) } : {}) }, text: `You both said yes to "${x.wants.find(wantId)?.want.name ?? 'your want'}". You're writing to ${name}'s house: they or their AI answer.${handle ? ` On the Lake they're ${handle}.` : ''}` });
+        const revealed = { name, ...(handle ? { handle } : {}), url: m.matcher.url, at: new Date().toISOString(), ...(note ? { note } : {}) };
+        await x.wants.setMatch(wantId, matchId, { state: 'revealed', revealed });
+        return { ok: true, revealed };
+      } catch (e) { return { error: `their house didn't answer (${(e as Error).message}): your yes is kept; try again in a minute` }; }
+    },
     async postWant(input, limit, by) { const w = await x.wants.post(input, limit, by); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
     async closeWant(id) { const ok = await x.wants.close(id); if (ok) await x.recard(x.keeper().rules); return ok; },
     wantOffer: (wantId, offerId) => x.wants.find(wantId)?.offers.find((o) => o.id === offerId),
