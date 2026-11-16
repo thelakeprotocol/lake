@@ -629,3 +629,7 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .chips-help { margin: 0 0 8px; }
 /* One tile, or the odd one at the end, takes the whole row. */
 .handled-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* "Reading …": the spinner beside its words. */
+.reading-line { display: flex; align-items: center; gap: 8px; }
+.reading-line ion-spinner { width: 20px; height: 20px; flex: none; }

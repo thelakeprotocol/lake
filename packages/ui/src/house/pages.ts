@@ -217,6 +217,9 @@ function PackOffers({ p, m }: { p: Market['packs'][number]; m: Market }) {
         o.result.eligible ? (done ? h(Pill, { text: o.status === 'paid' ? 'Paid' : 'Accepted', tone: 'mint' }) : h(Btn, { label: 'Accept', expand: 'block', run: async () => { const r = await call<{ error?: string }>({ kind: 'panel.offer.accept', offer: o.id, even_over_allowance: true }); if (r.error) throw new Error(r.error); }, ask: { header: `Accept ${o.quoter.name}?`, sub: 'What it needs goes to that one shop.', button: 'Accept', destructive: false } })) : null)); }));
 }
 
+/** Placeholder rows while something is read. */
+const Skeletons = ({ n }: { n: number }) => h('div', {}, ...Array.from({ length: n }, (_, i) => h('ion-item', { key: i, lines: 'full' }, h('ion-label', {}, h('ion-skeleton-text', { animated: true, style: 'width:45%;height:14px' }), h('ion-skeleton-text', { animated: true, style: 'width:75%;height:12px;margin-top:6px' })))));
+
 // ---- money ----
 export function MoneyPage({ backTo }: P) {
   const m = useHouse<{ total: number; held?: number; /** Receipts not read yet: the page shows what's read and updates itself. */ reading?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; toName?: string; items?: { label: string }[]; at: string; settlement?: string }[] }>({ kind: 'panel.money' });
@@ -279,8 +282,10 @@ export function DataPage({ backTo }: P) {
     // Still reading a big pod (17 Nov: the page sat on its skeleton for ever): said, and the page fills in by itself.
     d.data.reading ? h('p', { class: 'muted-line pad reading-line' }, h('ion-spinner', { name: 'dots' }), ' Reading your pod: this page updates by itself.') : null,
     h('p', { class: 'muted-line pad' }, 'A study is answered here, and the one who asked gets totals only. Accepting an offer sends that shop what the offer names. Both are listed under My data.'),
-    h(Section, { title: 'Where it came from' }, ...d.data.sources.map((s) => h(Row, { key: s.pack, icon: s.ok ? 'shield-checkmark-outline' : 'alert-circle-outline', tint: s.ok ? 'mint' : 'red', label: s.title, sub: `Signed by ${s.issuer ?? 'unknown'}${s.ok ? '' : ` · ${s.why ?? 'failed its check'}`}` }))),
-    h(Section, { title: 'What it says about you' }, ...[...by].map(([label, vs]) => h('ion-item', { key: label, lines: 'full' }, h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, vs.join(' · ')))))),
+    // While the pod is read, rows that say so, not empty boxes (17 Nov tour).
+    ...(d.data.reading && !d.data.sources.length ? [h(Section, { title: 'Where it came from', key: 'wsk' }, h(Skeletons, { n: 2 })), h(Section, { title: 'What it says about you', key: 'ssk' }, h(Skeletons, { n: 3 }))] : []),
+    d.data.reading && !d.data.sources.length ? null : h(Section, { title: 'Where it came from' }, ...d.data.sources.map((s) => h(Row, { key: s.pack, icon: s.ok ? 'shield-checkmark-outline' : 'alert-circle-outline', tint: s.ok ? 'mint' : 'red', label: s.title, sub: `Signed by ${s.issuer ?? 'unknown'}${s.ok ? '' : ` · ${s.why ?? 'failed its check'}`}` }))),
+    d.data.reading && !d.data.sources.length ? null : h(Section, { title: 'What it says about you' }, ...[...by].map(([label, vs]) => h('ion-item', { key: label, lines: 'full' }, h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, vs.join(' · ')))))),
     // The record isn't all a house keeps: said, so "what your house holds" is the whole of it.
     h(Section, { title: 'Also kept here', cls: 'also-kept' },
       h(Row, { icon: 'chatbubbles-outline', tint: 'mint', label: 'What people wrote to you', sub: 'Their notes and your answers, and the email address or phone number someone left for your answer', onClick: () => goTab('chats') }),
