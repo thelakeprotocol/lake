@@ -267,7 +267,8 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     expect(heard).not.toMatch(/as they asked|Sunday after ten/);
     await kim.close();
     // With no task left the house's runner is at rest again, and still off duty.
-    await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running: boolean }).running === false || undefined);
+    // Ninety seconds: the runner finishes its last look first, and the build server is slower (17 Nov: 30 s failed CI twice).
+    await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running: boolean }).running === false || undefined, 90_000);
     expect(((await owner({ kind: 'panel.duty.log' })).duties as { state: { on: boolean } }[]).every((d) => !d.state.on)).toBe(true);
-  });
+  }, 180_000);
 });
