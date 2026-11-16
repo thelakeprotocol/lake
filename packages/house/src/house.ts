@@ -681,12 +681,19 @@ function panelFor(x: {
   // seconds from its last result, or a placeholder that says it's being read; finished in the background, kept a minute,
   // and the phone told when a reading it was shown is done (17 Nov: "What your house holds" and "What left your house"
   // spun for ever on a house of 2,888 agreements).
-  const slowLooks = new Map<string, { value?: unknown; at: number; work?: Promise<void>; told?: boolean }>();
+  const slowLooks = new Map<string, { value?: unknown; at: number; work?: Promise<void>; told?: boolean; dirty?: boolean }>();
+  // Something new in the pod makes the last result old at once: kept a minute, a purchase left out of What left your house
+  // for that minute (17 Nov, the panel e2e).
+  x.filed.onChange((path) => {
+    for (const [key, folders] of [['left', ['audit/']], ['data', ['agreements/', 'receipts/', 'audit/']]] as const) if (folders.some((f) => path.startsWith(f))) { const s = slowLooks.get(key); if (s) { s.at = 0; s.dirty = true; } }
+  });
   const lookFast = async <T extends object>(key: string, compute: () => Promise<T>, placeholder: T, ttl = 60_000): Promise<T & { reading?: true }> => {
     const s = slowLooks.get(key) ?? { at: 0 };
     slowLooks.set(key, s);
     if (s.value !== undefined && Date.now() - s.at < ttl) return s.value as T;
-    s.work ??= compute().then((v) => { s.value = v; s.at = Date.now(); if (s.told) { s.told = false; x.desk().touch(); } }).catch(() => {}).finally(() => { s.work = undefined; });
+    // A change while it reads may be missed by this reading: its result is shown, and the next look reads again.
+    if (!s.work) s.dirty = false;
+    s.work ??= compute().then((v) => { s.value = v; s.at = s.dirty ? 0 : Date.now(); if (s.told) { s.told = false; x.desk().touch(); } }).catch(() => {}).finally(() => { s.work = undefined; });
     await Promise.race([s.work, new Promise((r) => setTimeout(r, 3000))]);
     if (s.value !== undefined && Date.now() - s.at < ttl) return s.value as T;
     s.told = true;

@@ -4,7 +4,7 @@ import { useRef, useState } from 'preact/hooks';
 import { call, key, must, state, useBump, useHouse, useRedraw } from './api';
 import { Btn, CopyBtn, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
 import { WantRow } from './chats';
-import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, plural, said, shortShop, signPledge, time, useLine, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
+import { addressLine, ago, date, dayTime, duration, forWhat, hoursLeft, money$, named, nice, pledgeOf, plural, said, shortName, shortShop, signPledge, time, useLine, who, WEEK, readWindow, writeWindow, ZONES, type AccessRow, type Address, type Consent, type Decision, type FreeState, type ListView, type Receipt, type Rule, type Rules, type Signed, type Win } from './logic';
 import { goTab, push } from './nav';
 import { signEnvelope } from '../owner-crypto';
 
@@ -147,6 +147,10 @@ function RuleEditor({ r, i, all, fields, purposes, redraw, close }: { r: Rule; i
 // ---- who has access ----
 export function AccessPage({ backTo }: P) {
   const a = useHouse<{ now: number; askedToday: number; blockedToday: number; agents: AccessRow[] }>({ kind: 'panel.access', tz_offset: new Date().getTimezoneOffset() });
+  // Your own AIs that may read records or money are access too (17 Nov, Fable as a privacy-minded owner: this page said
+  // "0 have a yes" while an AI read every record).
+  const v = useHouse<ListView>({ kind: 'list' });
+  const ais = (v.data?.assistants ?? []).filter((x) => (x.reads ?? []).length);
   const [filter, setFilter] = useState<'now' | 'asked' | 'all'>('now');
   const [openRow, setOpenRow] = useState<string | null>(null);
   if (!a.data) return page('Who has access', backTo, h(Failed, { error: a.error }));
@@ -160,6 +164,7 @@ export function AccessPage({ backTo }: P) {
       h('div', { class: 'stat mint' }, h('b', {}, String(now)), h('span', {}, 'have a yes now')),
       h('div', { class: 'stat' }, h('b', {}, String(askedToday)), h('span', {}, 'asked today')),
       h('div', { class: 'stat' }, h('b', {}, String(blockedToday)), h('span', {}, 'blocked today'))),
+    ais.length ? h(Section, { title: 'Your AIs', cls: 'access-ais' }, ...ais.map((x) => h(Row, { key: x.kid, icon: 'sparkles-outline', tint: 'violet', label: shortName(x.label), sub: `May read your ${(x.reads ?? []).join(' and ')} · tap to see what it looked at today`, onClick: () => push(`#aikey=${encodeURIComponent(x.kid)}`) }))) : null,
     h('div', { class: 'pad' }, h('ion-segment', { value: filter, onionChange: (e: CustomEvent) => setFilter(e.detail.value), 'aria-label': 'Show' },
       h('ion-segment-button', { value: 'now' }, h('ion-label', {}, 'Have a yes')), h('ion-segment-button', { value: 'asked' }, h('ion-label', {}, 'Asked lately')), h('ion-segment-button', { value: 'all' }, h('ion-label', {}, 'Everyone')))),
     shown.length ? h(Section, {}, ...shown.slice(0, 40).map((r) => {

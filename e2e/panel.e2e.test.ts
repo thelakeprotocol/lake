@@ -389,6 +389,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asAssistant({ kind: 'panel.data' })).toMatchObject({ needs: 'records' });
     await page.locator('.reads .reads-records ion-toggle').click();
     await page.getByText('Messages, records').first().waitFor({ timeout: 4000 });
+    // Who has access lists it too, beside the agents with a yes, and leads to this page.
+    await page.evaluate(() => { location.hash = '#access'; });
+    await page.locator('.access-ais ion-item', { hasText: 'Nova' }).getByText(/May read your records/).waitFor({ timeout: 5000 });
     await goBack();
   });
 
@@ -1179,7 +1182,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await confirmSheet('Remove');
     await onTab('My AI');
     await page.locator('ion-item.ai-row', { hasText: 'Nova' }).waitFor({ state: 'detached', timeout: 5000 });
-    expect((await asAssistant({ kind: 'list' })).error).toMatch(/no key/);
+    // Told plainly why, and how to come back.
+    expect((await asAssistant({ kind: 'list' })).error).toMatch(/your human took your key back.*new code in My AI/);
     await tidy();
   });
 

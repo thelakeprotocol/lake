@@ -1705,7 +1705,7 @@ export class OwnerDesk {
       this.assistants.set(kid, a);
       await this.o.saveAssistants?.([...this.assistants.values()]);
       const badge = await this.assistantBadge(a).catch(() => undefined);
-      res.json({ paired: true, role: 'assistant', webId: this.o.webId, ...(a.duty ? { duty: { kinds: a.duty.kinds, cap: a.duty.cap, until: a.duty.until, ...(a.duty.hours ? { hours: a.duty.hours } : {}), note: 'you are your human\'s AI on duty: only these kinds, no money, nothing to an agent they or their assistants never wrote to (leave them a note instead), and every action is logged for them' } } : {}), may: [...ASSISTANT_MAY].filter((k) => !NEEDS[k] || this.readsOf(a).has(NEEDS[k]!)), reads: [...this.readsOf(a)], ...(this.readsOf(a).size < READS.length ? { not_shared: READS.filter((r) => !this.readsOf(a).has(r)).map((r) => NEEDS_SAID[r]), not_shared_note: 'your human chose not to share these with you; if you need one, ask them (lake_house_suggest, saying why)' } : {}), may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
+      res.json({ paired: true, role: 'assistant', webId: this.o.webId, ...(a.duty ? { duty: { kinds: a.duty.kinds, cap: a.duty.cap, until: a.duty.until, ...(a.duty.hours ? { hours: a.duty.hours } : {}), note: 'you are your human\'s AI on duty: only these kinds, no money, nothing to an agent they or their assistants never wrote to (leave them a note instead), and every action is logged for them' } } : {}), may: [...ASSISTANT_MAY].filter((k) => !NEEDS[k] || this.readsOf(a).has(NEEDS[k]!)), reads: [...this.readsOf(a)], ...(this.readsOf(a).size < READS.length ? { not_shared: READS.filter((r) => !this.readsOf(a).has(r)).map((r) => NEEDS_SAID[r]), not_shared_note: 'your human chose not to share these with you; if you need one, ask them (lake_house_suggest, saying why)' } : {}), may_means: 'what you may do in your human\'s control panel (look and suggest); the badge below is what others see: the house\'s word that you answer and sell for it', looks: 'each look you make inside is written down for your human: which kind, when, and for their records which fields (never a value). They see it in My AI under your name, and can stop a kind there.', ...(badge ? { badge, badge_note: 'the house\'s word that you may sell for it: on your card, a cart you sign can name the house as payee, so what you earn is your human\'s' } : {}) });
     });
 
     // Public: is this house taken? (For the sandbox's list of houses to claim.)
@@ -1741,7 +1741,9 @@ export class OwnerDesk {
       try {
         p = await verifyMessage(req.body, async (kid) => { signer = kid; return kid === this.ownerJwk!.kid ? this.ownerJwk : this.assistants.get(kid)?.jwk ?? null; }, { replay: this.replay });
       } catch (e) {
-        return void res.status(403).json({ error: (e as Error).message });
+        // A key the owner took back is gone from the list: say so, not "no key" (17 Nov, an AI at the connector).
+        const back = !!signer && this.revokedIds.has(`assistant:${signer}`);
+        return void res.status(403).json({ error: back ? 'your human took your key back: this house no longer answers it. If they want you back, they make a new code in My AI (lake_house_connect)' : (e as Error).message });
       }
       // A call names the house it's for; one signed for another house on this host (a browser keeps one key per host, so
       // an owner of two houses here signs both with it) isn't this house's to act on.

@@ -74,7 +74,7 @@ function ConnectSheet({ houseUrl, ais }: { houseUrl: string; ais: Assistant[] })
   if (!invite) return h('div', { class: 'sheet-body' },
     h('p', {}, 'Your AI needs the Lake connector. You get a message with a one-time code to paste into it.'),
     h(ReadsToggles, { value: reads, onChange: setReads }),
-    h(Btn, { label: 'Make the code', expand: 'block', run: async () => { const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant', reads }); invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then look around inside and tell me what you see.`, until: Date.parse(r.until), made: Date.now() }; redraw(); } }));
+    h(Btn, { label: 'Make the code', expand: 'block', run: async () => { const r = await call<{ code: string; until: string }>({ kind: 'panel.assistant.invite', label: 'my assistant', reads }); invite = { msg: `Connect to my house as my assistant: use lake_house_connect with house_url ${houseUrl} and code ${r.code}. Then tell me what waits for me.`, until: Date.parse(r.until), made: Date.now() }; redraw(); } }));
   const mins = Math.max(1, Math.round((invite.until - Date.now()) / 60_000));
   return h('div', { class: 'sheet-body' },
     h('p', {}, `Paste this to your AI. It works once, for ${mins} minute${mins === 1 ? '' : 's'}.`),
