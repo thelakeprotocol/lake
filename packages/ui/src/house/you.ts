@@ -44,7 +44,7 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
   const access = useHouse<AccessView>({ kind: 'panel.access', tz_offset: tz() });
   const over = useHouse<Overview>({ kind: 'panel.overview', tz_offset: tz() });
   const list = useHouse<ListView>({ kind: 'list' });
-  const left = useHouse<{ total: number; left: Left[] }>({ kind: 'panel.left' });
+  const left = useHouse<{ total: number; left: Left[]; reading?: boolean }>({ kind: 'panel.left' });
   const [all, setAll] = useState(false);
   if (!access.data) return h(Page, { title: 'My data', back: backTo, backLabel: 'You' }, h(Failed, { error: access.error }));
   const holders = access.data.agents.filter((r) => r.canSee);
@@ -68,7 +68,7 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
       ...(out.length ? (all ? out : out.slice(0, 4)).map(({ x, n }, i) => h('ion-item', { key: i, lines: 'full', class: 'left-row' },
         h('div', { slot: 'start', class: `row-icon tint-${x.kind === 'study' ? 'mint' : 'amber'}` }, h('ion-icon', { name: x.kind === 'study' ? 'git-network-outline' : 'arrow-up-outline' })),
         h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, shortShop(x.to)), h('p', {}, leftLine(x)), h('p', {}, n > 1 ? `${n} times, last ${dayTime(x.at)}` : dayTime(x.at)))))
-        : [h('ion-item', { key: 'none', lines: 'none', class: 'left-none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, left.data ? 'Nothing has left your house yet. A study answered, or what an offer you accept sends, is listed here.' : 'Looking…')))]),
+        : [h('ion-item', { key: 'none', lines: 'none', class: 'left-none' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, left.data?.reading ? 'Reading what left your house: this updates by itself.' : left.data ? 'Nothing has left your house yet. A study answered, or what an offer you accept sends, is listed here.' : 'Looking…')))]),
       !all && out.length > 4 ? h(Row, { icon: 'chevron-down', tint: 'muted', label: `Show all ${out.length}`, detail: false, onClick: () => setAll(true) }) : null,
       left.data && left.data.total > left.data.left.length ? h('p', { class: 'muted-line pad' }, `The latest ${left.data.left.length} of ${left.data.total}. Download everything has them all.`) : null),
     h(Section, { title: 'Kept here' },

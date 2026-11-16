@@ -677,6 +677,21 @@ function panelFor(x: {
     return { ...out, ...(unread && moneyWork !== null ? { reading: unread } : {}) };
   };
   let moneyWork: Promise<void> | null = null;
+  // A look that may take long on a big pod (the whole record checked again, a folder of thousands): answered within a few
+  // seconds from its last result, or a placeholder that says it's being read; finished in the background, kept a minute,
+  // and the phone told when a reading it was shown is done (17 Nov: "What your house holds" and "What left your house"
+  // spun for ever on a house of 2,888 agreements).
+  const slowLooks = new Map<string, { value?: unknown; at: number; work?: Promise<void>; told?: boolean }>();
+  const lookFast = async <T extends object>(key: string, compute: () => Promise<T>, placeholder: T, ttl = 60_000): Promise<T & { reading?: true }> => {
+    const s = slowLooks.get(key) ?? { at: 0 };
+    slowLooks.set(key, s);
+    if (s.value !== undefined && Date.now() - s.at < ttl) return s.value as T;
+    s.work ??= compute().then((v) => { s.value = v; s.at = Date.now(); if (s.told) { s.told = false; x.desk().touch(); } }).catch(() => {}).finally(() => { s.work = undefined; });
+    await Promise.race([s.work, new Promise((r) => setTimeout(r, 3000))]);
+    if (s.value !== undefined && Date.now() - s.at < ttl) return s.value as T;
+    s.told = true;
+    return { ...((s.value ?? placeholder) as T), reading: true as const };
+  };
   // Money as far as it is read: receipts in, money out, and what each payment was for where that is known.
   const moneyFrom = (all: string[]) => {
     // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
@@ -1007,7 +1022,7 @@ function panelFor(x: {
       };
     },
     consents,
-    async data() {
+    async data() { return lookFast('data', async () => {
       const claims = await x.keeper().allClaims();
       const chain = await x.keeper().verifyOwnRecord();
       const json = (path: string) => owner.fetch(owner.podRoot + path).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Promise<{ card?: AgentCard } | null>;
@@ -1027,10 +1042,10 @@ function panelFor(x: {
         claims: claims.map((c) => ({ ...c, label: fieldSpec(c.field)?.label ?? c.field })), record: chain.ok ? { ok: true } : { ok: false, why: chain.why },
         sources, folders,
       };
-    },
+    }, { claims: [], record: { ok: true }, sources: [], folders: {} }); },
     // What left this house, newest first, from the pod's /audit/ log: each study answered (as shares), what an accepted
     // offer sent, an address that went with a payment. An entry never changes, so each is read once.
-    async left() {
+    async left() { return lookFast('left', async () => {
       const files = (await x.filed.list('audit/')).filter((f) => f.endsWith('.json'));
       const domains = new Map((await consents()).map((c) => [c.visitorWebId, c.visitor] as const));
       const recent = leftWindow(files);
@@ -1039,7 +1054,7 @@ function panelFor(x: {
         if (e) leftCache.set(f, leftRow(e, domains));
       });
       return { total: files.length, left: recent.map((f) => leftCache.get(f)).filter(Boolean) };
-    },
+    }, { total: 0, left: [] as never[] }); },
     async market() {
       const m = x.keeper().market;
       return {

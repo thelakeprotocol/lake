@@ -90,7 +90,7 @@ export function RulesPage({ backTo }: P) {
     h(Sheet, { open: open !== null && !!r.rules[open], onClose: () => setOpen(null), title: open !== null ? `Rule ${open + 1}` : undefined },
       open !== null && r.rules[open] ? h(RuleEditor, { key: open, r: r.rules[open]!, i: open, all: r.rules, fields, purposes, redraw, close: () => setOpen(null) }) : null),
     h(Section, { title: 'More' },
-      h('ion-item', {}, h('ion-label', {}, 'When no rule fits'), h(Seg, { value: r.default, onPick: (d: Decision) => { r.default = d; redraw(); } })),
+      h('ion-item', { class: 'stacked-seg' }, h('div', { class: 'then-row' }, h('p', { class: 'chips-label' }, 'When no rule fits'), h(Seg, { value: r.default, onPick: (d: Decision) => { r.default = d; redraw(); } }))),
       h('ion-item', {}, h('ion-toggle', { checked: !!r.negotiation?.join_collectives, onionChange: (e: CustomEvent) => { r.negotiation = { ...(r.negotiation ?? {}), join_collectives: e.detail.checked }; redraw(); } }, 'Bargain with neighbours')),
       h('ion-item', { lines: 'none' }, h('ion-toggle', { checked: r.privacy?.show_packs !== false, onionChange: (e: CustomEvent) => { if (e.detail.checked) delete r.privacy; else r.privacy = { show_packs: false }; redraw(); } }, 'Say what kinds of data I hold'))),
     h('ion-accordion-group', { class: 'lake-accordion' },
@@ -100,7 +100,7 @@ export function RulesPage({ backTo }: P) {
         ...(['ethics', 'auditors', 'issuers', 'payments'] as const).map((k) => h(Chips, { key: k, label: { ethics: 'Ethics bodies', auditors: 'Auditors', issuers: 'Record issuers', payments: 'Payments' }[k], values: trust[k] ?? [], onChange: (v: string[]) => { trust[k] = v; redraw(); } })),
         h('details', {}, h('summary', {}, 'As rules.yaml'), h('pre', { class: 'yaml' }, stringify(r)))))));
 }
-const Seg = ({ value, onPick }: { value: Decision; onPick: (d: Decision) => void }) => h('ion-segment', { value, slot: 'end', class: 'decision-seg', onionChange: (e: CustomEvent) => onPick(e.detail.value as Decision) },
+const Seg = ({ value, onPick }: { value: Decision; onPick: (d: Decision) => void }) => h('ion-segment', { value, class: 'decision-seg', onionChange: (e: CustomEvent) => onPick(e.detail.value as Decision) },
   ...(['join', 'ask', 'decline'] as Decision[]).map((d) => h('ion-segment-button', { key: d, value: d }, h('ion-label', {}, { join: 'Join', ask: 'Ask me', decline: 'Decline' }[d]))));
 function Chips({ label, values, onChange }: { label: string; values: string[]; onChange: (v: string[]) => void }) {
   const [v, setV] = useState('');
@@ -126,9 +126,13 @@ function RuleEditor({ r, i, all, fields, purposes, redraw, close }: { r: Rule; i
       h('ion-item', {}, h('ion-input', { label: 'When it pays less than ($)', type: 'number', value: r.match.price_below ?? '', placeholder: 'any', onionChange: (e: CustomEvent) => set('price_below', e.detail.value === '' ? undefined : Number(e.detail.value)) })),
       h('ion-item', {}, h('ion-toggle', { checked: !!r.match.ethics_approved, onionChange: (e: CustomEvent) => set('ethics_approved', e.detail.checked || undefined) }, 'Only if ethics-approved')),
       h('ion-item', {}, h('ion-toggle', { checked: !!r.match.audit_certified, onionChange: (e: CustomEvent) => set('audit_certified', e.detail.checked || undefined) }, 'Only if certified')),
-      h('ion-item', {}, h('ion-label', {}, 'Then'), h(Seg, { value: r.decision, onPick: (d: Decision) => { r.decision = d; redraw(); } }))),
+      ),
+    // Then: its own row, the three choices full width (17 Nov: "Ask ..." and "Decli..." cut off beside the label).
+    h('div', { class: 'then-row' }, h('p', { class: 'chips-label' }, 'Then'), h(Seg, { value: r.decision, onPick: (d: Decision) => { r.decision = d; redraw(); } })),
     r.decision === 'join' ? h('div', {},
-      h('p', { class: 'chips-label' }, 'Fields (tap: share, never)'), h('div', { class: 'chips' }, ...fields.map((f) => fieldChip(f.name))),
+      h('p', { class: 'chips-label' }, 'What it may read'), h('p', { class: 'muted-line chips-help' }, 'Tap once to share, again to never share, again to leave it to the request.'),
+      // Each field once, though two use cases name it (name, email and phone were listed twice).
+      h('div', { class: 'chips' }, ...[...new Set(fields.map((f) => f.name))].map((n) => fieldChip(n))),
       h('ion-list', { class: 'lake-list flat' },
         h('ion-item', {}, h('ion-input', { label: 'At least ($)', type: 'number', value: r.min_price_usd ?? '', placeholder: 'any', onionChange: (e: CustomEvent) => { if (e.detail.value === '') delete r.min_price_usd; else r.min_price_usd = Number(e.detail.value); redraw(); } })),
         h('ion-item', {}, h('ion-toggle', { checked: r.retention === 'none', onionChange: (e: CustomEvent) => { if (e.detail.checked) r.retention = 'none'; else delete r.retention; redraw(); } }, 'They keep nothing')),
@@ -266,12 +270,14 @@ export function MoneyPage({ backTo }: P) {
 // ---- what your house holds ----
 export function DataPage({ backTo }: P) {
   type Source = { pack: string; title: string; folder: string; issuer: string | null; converter: string; certifiedBy: string | null; ok: boolean; why?: string };
-  const d = useHouse<{ claims: { field: string; label?: string; value: string; observedAt?: string }[]; sources: Source[]; folders: Record<string, number> }>({ kind: 'panel.data' });
+  const d = useHouse<{ claims: { field: string; label?: string; value: string; observedAt?: string }[]; sources: Source[]; folders: Record<string, number>; reading?: boolean }>({ kind: 'panel.data' });
   const addr = useHouse<{ address: Address | null }>({ kind: 'panel.address' });
   if (!d.data) return page('What your house holds', backTo, h(Failed, { error: d.error }));
   const by = new Map<string, string[]>();
   for (const c of d.data.claims) by.set(c.label ?? nice(c.field), [...(by.get(c.label ?? nice(c.field)) ?? []), c.value]);
   return page('What your house holds', backTo,
+    // Still reading a big pod (17 Nov: the page sat on its skeleton for ever): said, and the page fills in by itself.
+    d.data.reading ? h('p', { class: 'muted-line pad reading-line' }, h('ion-spinner', { name: 'dots' }), ' Reading your pod: this page updates by itself.') : null,
     h('p', { class: 'muted-line pad' }, 'A study is answered here, and the one who asked gets totals only. Accepting an offer sends that shop what the offer names. Both are listed under My data.'),
     h(Section, { title: 'Where it came from' }, ...d.data.sources.map((s) => h(Row, { key: s.pack, icon: s.ok ? 'shield-checkmark-outline' : 'alert-circle-outline', tint: s.ok ? 'mint' : 'red', label: s.title, sub: `Signed by ${s.issuer ?? 'unknown'}${s.ok ? '' : ` · ${s.why ?? 'failed its check'}`}` }))),
     h(Section, { title: 'What it says about you' }, ...[...by].map(([label, vs]) => h('ion-item', { key: label, lines: 'full' }, h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, label), h('p', {}, vs.join(' · ')))))),

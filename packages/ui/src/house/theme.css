@@ -16,6 +16,7 @@
   --lake-surface: #ffffff;
   --lake-surface-2: #eef0ec;
   --lake-line: #e2e5e0;
+  --lake-toggle-off: #c9cfc6;
   --lake-text: #0d1512;
   --lake-muted: #5a6660;
   --lake-mint: #0a7f52;
@@ -94,6 +95,7 @@
     --lake-surface: #0f151e;
     --lake-surface-2: #17202b;
     --lake-line: #1f2a36;
+    --lake-toggle-off: #3a4656;
     --lake-text: #eef2f0;
     --lake-muted: #94a19b;
     --lake-mint: #3ddc97;
@@ -185,8 +187,10 @@ ion-title { font-weight: 650; letter-spacing: -0.01em; }
 
 /* ---- lists and rows ---- */
 .lake-list { border-radius: 16px; border: 1px solid var(--lake-line); box-shadow: var(--lake-shadow); margin: 14px 16px; background: var(--lake-surface); }
-.lake-list.flat { box-shadow: none; margin: 8px 0; background: transparent; }
-.lake-list.flat ion-item { --background: transparent; --padding-start: 0; --inner-padding-end: 0; }
+/* A list inside a sheet or card: still a card (its border kept), so its rows keep their padding too (17 Nov: labels and
+   toggles sat against the border). */
+.lake-list.flat { box-shadow: none; margin: 8px 0; overflow: hidden; }
+.lake-list.flat ion-item { --background: transparent; }
 .lake-list ion-list-header { --background: var(--lake-surface); font-size: 12px; font-weight: 700; color: var(--lake-muted); text-transform: uppercase; letter-spacing: 0.07em; min-height: 0; height: 34px; padding-top: 0; align-items: flex-end; margin: 0; }
 .lake-list ion-list-header ion-label { margin: 6px 0 2px !important; }
 .lake-list ion-item { --padding-start: 14px; --inner-padding-end: 14px; --min-height: 54px; font-size: 16px; }
@@ -257,7 +261,8 @@ ion-button.lake-btn .btn-spin { width: 18px; height: 18px; margin-right: 6px; }
 ion-segment { --background: var(--lake-surface-2); border-radius: 12px; }
 ion-segment-button { --indicator-color: var(--lake-surface); --color-checked: var(--lake-text); font-weight: 600; min-height: 34px; text-transform: none; letter-spacing: 0; }
 ion-chip { font-weight: 550; }
-ion-toggle { --track-background-checked: var(--lake-mint); }
+/* An off switch reads as a switch on a dark screen too: its track is visible. */
+ion-toggle { --track-background-checked: var(--lake-mint); --track-background: var(--lake-toggle-off, #c9cfc6); }
 
 /* ---- empty, info, pills, avatars ---- */
 .lake-empty { text-align: center; padding: 48px 32px 24px; }
@@ -285,7 +290,7 @@ ion-toggle { --track-background-checked: var(--lake-mint); }
 .sheet-inner { height: 100%; overflow-y: auto; padding-bottom: calc(24px + var(--ion-safe-area-bottom, 0px)); }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 12px 4px 20px; }
 .sheet-head h2 { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; margin: 0; }
-.sheet-body { padding: 0 20px; }
+.sheet-body { padding: 8px 20px 0; }
 .sheet-actions { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; }
 /* The toast is dark in both themes: its button (Undo) is the light mint in both. */
 ion-toast.lake-toast { --border-radius: 16px; --box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3); font-weight: 550; --button-color: #5fe3a8; }
@@ -462,7 +467,8 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .rule-n.d-decline { background: var(--lake-red-soft); color: var(--lake-red); }
 .rule h3 { font-size: 15px !important; font-weight: 550 !important; line-height: 1.35; }
 .rule-editor { border-color: color-mix(in srgb, var(--lake-mint) 35%, transparent); }
-.decision-seg { max-width: 220px; }
+.decision-seg { width: 100%; }
+.then-row { margin: 12px 0 4px; }
 .chips-field { margin: 12px 0; }
 .chips-label { font-size: 12.5px; font-weight: 700; color: var(--lake-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 10px 0 4px; }
 .chips { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; margin: 0 -4px; }
@@ -618,3 +624,6 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .handled-tile.tint-blue .tile-big, .handled-tile.tint-blue .tile-top ion-icon { color: var(--lake-blue); }
 .handled-tile.tint-amber .tile-big, .handled-tile.tint-amber .tile-top ion-icon { color: var(--lake-amber); }
 .handled-tile.tint-violet .tile-big, .handled-tile.tint-violet .tile-top ion-icon { color: var(--lake-violet); }
+
+.stacked-seg .then-row { width: 100%; margin: 10px 0; }
+.chips-help { margin: 0 0 8px; }
