@@ -192,7 +192,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   report('offer', { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' });
   await knockAll(houses, offer, true);
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));
-  if (Object.keys(declinedBecause).length) log('decide', `declined because: ${Object.entries(declinedBecause).map(([k, n]) => `${n} ${{ price: 'it pays too little', purpose: 'they take no research', default: 'no rule of theirs covers it', retention: 'they keep no data', identifying: 'it asks for something identifying' }[k] ?? k}`).join(' · ')}`);
+  if (Object.keys(declinedBecause).length) log('decide', `declined because: ${Object.entries(declinedBecause).map(([k, n]) => `${n} ${{ price: 'it pays too little', purpose: 'they take no research', default: 'no rule of theirs covers it', retention: 'they keep no data', identifying: 'it asks for something identifying', 'no-owner': 'nobody has claimed the house yet', unsaid: 'they gave no reason' }[k] ?? k}`).join(' · ')}`);
   await beat();
 
   // Houses that countered the same offer bargain as one bloc: the highest price, only fields all accept (SPEC §5.3).
@@ -238,6 +238,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
       });
       waiting = still;
     }
+    if (waiting.length) log('wait', `${waiting.length} owner(s) didn't tap in ${o.waitSeconds}s: left out of this run`);
   }
 
   // Countersign only what the budget can pay: a house beyond it never gets a signed promise, so no deal is left unpaid.

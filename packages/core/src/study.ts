@@ -256,7 +256,12 @@ export function summarizeTable(s: Study, cells: number[], n: number): TableSumma
   const small = n > 0 && cells.some((c) => c > 0 && c < 5);
   const pct = (x: number) => `${Math.round(x * 100)}%`;
   const summary = n === 0 ? 'No table.'
-    : comparison ? `${comparison.within.length ? `${comparison.within.join(', ')}: ` : ''}${comparison.outcome} ${pct(comparison.with.rate)} with ${comparison.exposure} (${comparison.with.yes} of ${comparison.with.of}) vs ${pct(comparison.without.rate)} without (${comparison.without.yes} of ${comparison.without.of}), from ${n} houses`
+    // An arm no house fell in has no rate (17 Nov, a researcher: "0% with … (0 of 0)").
+    : comparison ? `${comparison.within.length ? `${comparison.within.join(', ')}: ` : ''}${
+      comparison.with.of && comparison.without.of ? `${comparison.outcome} ${pct(comparison.with.rate)} with ${comparison.exposure} (${comparison.with.yes} of ${comparison.with.of}) vs ${pct(comparison.without.rate)} without (${comparison.without.yes} of ${comparison.without.of})`
+      : comparison.without.of ? `${comparison.outcome} ${pct(comparison.without.rate)} without ${comparison.exposure} (${comparison.without.yes} of ${comparison.without.of}); no house ${comparison.exposure}`
+      : comparison.with.of ? `${comparison.outcome} ${pct(comparison.with.rate)} with ${comparison.exposure} (${comparison.with.yes} of ${comparison.with.of}); no house without it`
+      : `no house in either group`}, from ${n} houses`
     : `${marginals[0]!.name}: ${marginals[0]!.yes} of ${n} (${pct(marginals[0]!.share)})`;
   return { n, marginals, ...(comparison ? { comparison } : {}), precision, small, summary: `${summary}${n === 0 ? '' : precision.exact ? '; exact counts' : `; each cell ±${precision.sdPerCell} (noise, ε ${eps})`}${small ? '; small numbers' : ''}` };
 }

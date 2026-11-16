@@ -205,6 +205,10 @@ describe('a table, summarised (any number of predicates)', () => {
     expect(t.small).toBe(true);
     expect(t.summary).toBe('over 60: readmitted 14% with on drug X (1 of 7) vs 33% without (2 of 6), from 24 houses; exact counts; small numbers');
   });
+  it('says an arm no house fell in has no house, not a rate of 0 of 0', () => {
+    const t = summarizeTable(study, [5, 4, 3, 0, 1, 2, 2, 0], 19);
+    expect(t.summary).toMatch(/^over 60: readmitted 33% without on drug X \(2 of 6\); no house on drug X, from 19 houses/);
+  });
   it('works for one, two and four predicates, never NaN', () => {
     const one = summarizeTable({ ...study, predicates: study.predicates.slice(0, 1) }, [7, 13], 20);
     expect(one.comparison).toBeUndefined();

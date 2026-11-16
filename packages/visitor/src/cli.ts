@@ -38,6 +38,22 @@ const HELP = `lake — talk to the Lake
   lake swarm [--traders 8] [--attackers 1] [--interval 2000] [--node http://lake-node:7000] [--only /t/sb-]`;
 
 const [cmd, ...rest] = process.argv.slice(2);
+// A failure is one line saying what to do, not a stack trace (17 Nov, a researcher: a missing flag printed undici's
+// internals). LAKE_DEBUG=1 prints the stack as well.
+type Failure = Error & { code?: string; port?: number; cause?: { code?: string; hostname?: string; address?: string; port?: number } };
+const plain = (err: Error): never => {
+  const e = err as Failure, c = e.cause;
+  const why = c?.code === 'EAI_AGAIN' || c?.code === 'ENOTFOUND' ? `can't find ${c.hostname}: on the sandbox, pass --node, --ethics, --auditor and --payments (lake.doneinfifty.com/docs/researchers)`
+    : c?.code === 'ECONNREFUSED' ? `nothing answers at ${c.address}${c.port ? `:${c.port}` : ''}: is that agent running, and is the address right?`
+    : e.code === 'EADDRINUSE' ? `port ${e.port ?? ''} is taken on this machine: pass --port with a free one`
+    : e.message;
+  console.error(`lake: ${why}`);
+  if (process.env.LAKE_DEBUG) console.error(e.stack);
+  process.exit(2);
+};
+process.on('uncaughtException', plain);
+process.on('unhandledRejection', (e) => plain(e instanceof Error ? e : new Error(String(e))));
+
 const { positionals, values: a } = parseArgs({
   args: rest,
   allowPositionals: true,

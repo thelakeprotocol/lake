@@ -15,10 +15,10 @@ lake_dispatch_study { fields: true }
 From a terminal:
 
 ```bash
-lake fields
+lake fields --packs health,shopping
 ```
 
-Both list every field of the packs loaded there: its name, its kind, how it can be compared, the codes its pack names, and whether a study may read it at all.
+Both list every field of the packs loaded there (the `lake` command loads only `health` unless `--packs` names more): its name, its kind, how it can be compared, the codes its pack names, and whether a study may read it at all.
 
 | Kind | Compare with | Example |
 |---|---|---|
@@ -66,6 +66,8 @@ Nothing is offered or paid. The ethics agent and the auditor look at it, and you
 - `tellers`: whether the Leader teller will count it (`will count it`, or why not: a `min` under its floor is refused here, before any house is asked);
 - `houses` and `minimum`: how many houses take part in that pack's studies (on the first Lake node that answers), and how many must answer for a table.
 
+The `lake` command has no free check: it checks the study's own form before anything runs (a field, a comparison, the length), then asks the ethics agent and the auditor as part of a run, before any house is knocked on or anything is paid. A run with `--unpaid` offers houses nothing.
+
 A study that can't be asked is refused before the Lake hears of it, with the reason: a field no pack declares, a comparison that field's kind doesn't take, an identifying field, a field a register keeps, a question longer than a sentence.
 
 ## What an owner sees
@@ -81,19 +83,21 @@ lake_dispatch_study { study: { question, predicates }, price_usd: 5, budget_usd:
 ```
 
 ```bash
-# against the sandbox (the defaults are a local Docker Lake's own addresses); --json prints cells, paid and pending too
-lake dispatch --study my-study.json --price 5 --budget 200 --json \
+# against the sandbox (the defaults are a local Docker Lake's own addresses); --wait gives owners a minute to tap
+lake dispatch --study my-study.json --price 5 --budget 200 --wait 60 \
   --node https://sandbox.lake.doneinfifty.com --ethics https://sandbox.lake.doneinfifty.com/s/ethics \
   --auditor https://sandbox.lake.doneinfifty.com/s/auditor --payments https://sandbox.lake.doneinfifty.com/s/payments
 ```
 
+It prints each step as it goes. Add `--json` for the result as JSON (cells, paid and pending too); it then prints nothing until the run is done. From a laptop its first line says the node can't reach the agent's card: the node can't list it on its map from behind your router, and the study runs anyway.
+
 It knocks on every house, bargains with those that counter together, signs agreements, has each joining house answer at home, pays each house that answered from your budget, and returns:
 
-- `participants`, and `decisions` (how many joined, declined, countered or asked their owner);
+- `participants`, and `decisions` (how many joined, declined, countered or asked their owner), with `declinedBecause` (a rule about the price, the purpose, what is kept or identifying; `no-owner`, a house nobody has claimed yet; `unsaid`, no reason given);
 - `cells`: the count in each combination of your parts;
 - `answer.summary`: one sentence, and `answer.table`: how many houses each part held for, the comparison with and without the exposure, whether the counts are exact or noised, and whether any cell other than an empty one is under 5;
 - `paid`: what was spent, to how many houses (houses that agreed after your budget ran out are left out, and listed in `excluded` with why);
-- `pending`: houses whose owners were asked and hadn't answered (`wait_seconds` waits for them).
+- `pending`: houses whose owners were asked and hadn't answered (`wait_seconds`, or `--wait` in seconds, waits for them; without it they are left out at once).
 
 `lake_dispatch_study { evidence_for: <study id> }` gives the signed bundle the result rests on (ethics approval, certificate, mandate, agreements as digests, both tellers' shares, receipts) to show someone else.
 

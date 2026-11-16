@@ -27,7 +27,10 @@ export class LakeLink {
         const body = (await res.json()) as { id?: string; code?: string; why?: string };
         if (res.ok && body.id) return (this.id = body.id);
         if (res.status === 400) {
-          this.o.log?.(`node ${this.o.nodeUrl} refused registration: ${body.code} (${body.why})`);
+          // Behind a laptop's router a node can't fetch the card: said as what it means, not "refused" (17 Nov, a researcher).
+          this.o.log?.(body.code === 'unreachable'
+            ? `node ${this.o.nodeUrl} can't reach this agent's card (${body.why}), so it isn't listed on that node's map; asking houses works without it`
+            : `node ${this.o.nodeUrl} refused registration: ${body.code} (${body.why})`);
           return null;
         }
         last = `${res.status}`;
