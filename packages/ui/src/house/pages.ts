@@ -215,7 +215,7 @@ function PackOffers({ p, m }: { p: Market['packs'][number]; m: Market }) {
 
 // ---- money ----
 export function MoneyPage({ backTo }: P) {
-  const m = useHouse<{ total: number; held?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; toName?: string; items?: { label: string }[]; at: string; settlement?: string }[] }>({ kind: 'panel.money' });
+  const m = useHouse<{ total: number; held?: number; /** Receipts not read yet: the page shows what's read and updates itself. */ reading?: number; receipts: Receipt[]; spent?: { amount: number; currency: string; agreement: string; to: string; toName?: string; items?: { label: string }[]; at: string; settlement?: string }[] }>({ kind: 'panel.money' });
   const [open, setOpen] = useState<string | null>(null);
   // What you're looking for, each a thread of shops' offers (the ones that need you are on Today too).
   const wants = (useHouse<ListView>({ kind: 'list' }).data?.wants ?? []).filter((w) => !w.closed);
@@ -235,6 +235,8 @@ export function MoneyPage({ backTo }: P) {
   const sums = (rs: { amount: number; currency: string }[]) => { const by = new Map<string, number>(); for (const r of rs) by.set(r.currency, (by.get(r.currency) ?? 0) + r.amount);
     return by.size ? [...by].map(([c, n]) => money$(Math.round(n * 100) / 100, c)).join(' + ') : money$(0, m.data!.receipts[0]?.currency ?? gone[0]?.currency ?? 'USD'); };
   return page('Money', backTo,
+    // Still reading new receipts (17 Nov: the page spun until the app gave up): what's read shows now, the rest comes in.
+    m.data.reading ? h('p', { class: 'muted-line pad reading-line' }, h('ion-spinner', { name: 'dots' }), ` Reading ${m.data.reading} new payment${m.data.reading === 1 ? '' : 's'}: this page updates by itself.`) : null,
     h('div', { class: 'stat-row' }, h('div', { class: 'stat mint' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement !== 'held'))), h('span', {}, 'Earned')),
       m.data.held ? h('div', { class: 'stat' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement === 'held'))), h('span', {}, 'Held')) : null,
       gone.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(gone.reduce((t, r) => t + r.amount, 0) * 100) / 100, gone[0]!.currency) : String(gone.length)), h('span', {}, 'Spent')) : null),

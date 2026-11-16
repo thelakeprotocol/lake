@@ -661,9 +661,24 @@ function panelFor(x: {
       for (const [f, c] of Object.entries(kept.receipts ?? {})) if (!receiptCache.has(f) && c?.vc) receiptCache.set(f, c);
       for (const [k, c] of Object.entries(kept.about ?? {})) if (!aboutCache.has(k) && c?.about) aboutCache.set(k, c);
     }
-    const before = receiptCache.size + aboutCache.size;
     const all = (await x.filed.list('receipts/')).filter((f) => f.endsWith('.receipt.jwt'));
-    await readReceipts(all);
+    // An answer within a few seconds from what is read already, the rest read in the background, and the phone told when
+    // it's done (17 Nov: the owner's Money spun until the app gave up while 83 new receipts and what each was for were
+    // read four at a time).
+    if (!moneyWork) {
+      const before = receiptCache.size + aboutCache.size;
+      moneyWork = (async () => { await readReceipts(all); await whatFor(moneyFrom(all).receipts as { agreement?: string }[]); })()
+        .catch(() => {})
+        .finally(() => { moneyWork = null; if (receiptCache.size + aboutCache.size !== before) { keepMoney(); moneyMemo = null; x.desk().touch(); } });
+    }
+    await Promise.race([moneyWork, new Promise((r) => setTimeout(r, 3000))]);
+    const out = moneyFrom(all);
+    const unread = all.filter((f) => !receiptCache.has(f)).length;
+    return { ...out, ...(unread && moneyWork !== null ? { reading: unread } : {}) };
+  };
+  let moneyWork: Promise<void> | null = null;
+  // Money as far as it is read: receipts in, money out, and what each payment was for where that is known.
+  const moneyFrom = (all: string[]) => {
     // What the owner's assistant paid under their allowance is filed as spent-…; everything else was paid to this house.
     const files = all.filter((f) => !/(^|\/)spent-/.test(f));
     const spentFiles = all.filter((f) => /(^|\/)spent-/.test(f));
@@ -686,9 +701,17 @@ function panelFor(x: {
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String((s.settlement === 'voided' ? s.seller : undefined) ?? s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.how ? { how: String(s.how) } : {}), ...(s.seller_name ? { toName: String(s.seller_name) } : {}), ...(Array.isArray(s.items) ? { items: s.items } : {}) } : null;
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
-    // What a payment for an agreement (a study, a key to some fields) was for: its consent record (who, which fields, what
-    // for) and, for a study, its question, filed beside it when it ran. The owner saw only "urn:lake:agreement:d4ed…".
-    // Four at a time: with nothing kept, five hundred receipts asked the pod for a thousand files at once.
+    for (const r of receipts as { agreement?: string; about?: unknown }[]) {
+      const offer = r.agreement?.startsWith('urn:lake:agreement:') ? r.agreement.split(':')[3] ?? '' : '';
+      const about = offer ? aboutCache.get(offer)?.about : undefined;
+      if (about) r.about = about;
+    }
+    // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
+    return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
+  };
+  // What each payment for an agreement (a study, a key to some fields) was for: its consent record and, for a study, its
+  // question, read once each, four at a time.
+  const whatFor = async (receipts: { agreement?: string }[]) => {
     await pool((receipts as { agreement?: string; about?: unknown }[]).filter((r) => r.agreement?.startsWith('urn:lake:agreement:')), 4, async (r) => {
       const offer = r.agreement!.split(':')[3] ?? '';
       if (!/^[\w-]+$/.test(offer)) return;
@@ -707,9 +730,6 @@ function panelFor(x: {
       const about = aboutCache.get(offer)?.about;
       if (about) r.about = about;
     });
-    if (receiptCache.size + aboutCache.size !== before) keepMoney();
-    // Money held until delivery isn't the owner's yet: its release receipt replaces it when it comes.
-    return { total: receipts.filter((r) => r.settlement !== 'held').reduce((n, r) => n + r.amount, 0), held: receipts.filter((r) => r.settlement === 'held').reduce((n, r) => n + r.amount, 0), receipts, spent };
   };
   // A person stamp for one context: its own person number, so counts can't link this owner's houses. The checker, shown
   // the stamp's hidden number, makes it; whoever counts is shown it, bound to this house's key.

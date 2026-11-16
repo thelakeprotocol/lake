@@ -707,21 +707,22 @@ export class OwnerDesk {
   async today(tzOffset: number) {
     const midnight = (() => { const d = new Date(Date.now() - tzOffset * 60_000); d.setUTCHours(0, 0, 0, 0); return d.getTime() + tzOffset * 60_000; })();
     const after = (iso?: string) => !!iso && Date.parse(iso) >= midnight;
-    type Line = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; /** Someone the AI on duty acts for alone: the owner may keep them ("Ask me first about …"). */ person?: { key: string; name: string } };
+    type Line = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; /** Someone the AI on duty acts for alone: the owner may keep them ("Ask me first about …"). */ person?: { key: string; name: string }; /** A count, shown as a tile: the number big, a few words, the names small (17 Nov: "a blob of text"). */ tile?: { big: string; label: string; detail?: string } };
     const lines: Line[] = [];
     const panel = this.o.panel;
     if (!panel) return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
     const events = (panel.activity(new Date(midnight).toISOString()) as unknown as { at: string; kind: string; subject?: string; data?: Record<string, unknown> }[]).filter((e) => after(e.at));
+    const who = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? `${n.slice(0, 2).join(', ')}${n.length > 2 ? ` +${n.length - 2}` : ''}` : undefined; };
     const names = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? ` (${n.slice(0, 2).join(', ')}${n.length > 2 ? ` and ${n.length - 2} more` : ''})` : ''; };
     const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
     for (const [d, word] of [['decline', 'no'], ['join', 'yes']] as const) {
       const es = events.filter((e) => e.kind === 'decision' && e.data?.decision === d);
-      if (es.length) lines.push({ by: 'rules', text: `Said ${word} to ${plural(es.length, 'request')}${names(es)}`, at: es[0]!.at, to: '#access' });
+      if (es.length) lines.push({ by: 'rules', text: `Said ${word} to ${plural(es.length, 'request')}${names(es)}`, at: es[0]!.at, to: '#access', tile: { big: String(es.length), label: d === 'decline' ? 'requests declined' : `request${es.length === 1 ? '' : 's'} allowed`, ...(who(es) ? { detail: who(es) } : {}) } });
     }
     const studies = events.filter((e) => e.kind === 'compute.done');
-    if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')}, as unreadable shares`, at: studies[0]!.at, to: '#money' });
+    if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')}, as unreadable shares`, at: studies[0]!.at, to: '#money', tile: { big: String(studies.length), label: studies.length === 1 ? 'study answered' : 'studies answered', detail: 'nothing readable left' } });
     const blocked = events.filter((e) => e.kind === 'attack.blocked');
-    if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that weren't what they claimed`, at: blocked[0]!.at, to: '#about' });
+    if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that weren't what they claimed`, at: blocked[0]!.at, to: '#about', tile: { big: String(blocked.length), label: 'fakes turned away', detail: 'not who they claimed' } });
     // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
     for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
       const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';
@@ -742,16 +743,16 @@ export class OwnerDesk {
       for (const r of inToday) by.set(r.currency, Math.round(((by.get(r.currency) ?? 0) + r.amount) * 100) / 100);
       const sums = [...by].map(([c, v]) => (c === 'USD' ? `$${v}` : c === 'AUD' ? `A$${v}` : `${c} ${v}`)).join(' and ');
       const held = inToday.filter((r) => r.settlement === 'held').length;
-      lines.push({ by: 'money', text: `${sums} came in (${plural(inToday.length, 'payment')}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money' });
+      lines.push({ by: 'money', text: `${sums} came in (${plural(inToday.length, 'payment')}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money', tile: { big: sums, label: 'came in', detail: `${plural(inToday.length, 'payment')}${held ? `, ${held} held` : ''}` } });
     }
     // Shops: offers for what the owner is looking for.
     for (const w of panel.wantsList?.() ?? []) {
       const fresh = w.offers.filter((x) => after(x.at));
-      if (fresh.length && !w.closed) lines.push({ by: 'shops', text: `${plural(fresh.length, 'shop')} offered on "${w.want.name}"`, at: fresh[fresh.length - 1]!.at, to: `#want=${encodeURIComponent(w.want.id)}` });
+      if (fresh.length && !w.closed) lines.push({ by: 'shops', text: `${plural(fresh.length, 'shop')} offered on "${w.want.name}"`, at: fresh[fresh.length - 1]!.at, to: `#want=${encodeURIComponent(w.want.id)}`, tile: { big: String(fresh.length), label: fresh.length === 1 ? 'shop offer' : 'shop offers', detail: w.want.name } });
     }
     // The door note: the house's own standing reply to new people.
     const noted = [...this.firstContacts.values()].filter((c) => after(c.noted));
-    if (noted.length) lines.push({ by: 'house', text: `Your door note went to ${plural(noted.length, 'new person', 'new people')}`, at: noted.map((c) => c.noted!).sort().at(-1)!, to: '#door' });
+    if (noted.length) lines.push({ by: 'house', text: `Your door note went to ${plural(noted.length, 'new person', 'new people')}`, at: noted.map((c) => c.noted!).sort().at(-1)!, to: '#door', tile: { big: String(noted.length), label: noted.length === 1 ? 'got your door note' : 'got your door note', detail: noted.length === 1 ? 'a new person' : 'new people' } });
     lines.sort((a, b) => b.at.localeCompare(a.at));
     return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople(), ...this.dutyLine() };
   }

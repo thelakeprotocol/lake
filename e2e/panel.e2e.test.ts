@@ -302,7 +302,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await visitor.getByText('I read these about once a week').waitFor();
     // Today counts it, and says someone waits for an answer instead of "all clear".
     await tab('Today');
-    await page.locator('.handled-row', { hasText: 'Your door note went to 1 new person' }).waitFor({ timeout: 8000 });
+    // A count on Today is a tile: the number, a few words, the names small; its full sentence is its label.
+    await page.getByRole('button', { name: 'Your door note went to 1 new person' }).locator('.tile-label', { hasText: 'got your door note' }).waitFor({ timeout: 8000 });
     await page.locator('.wait-new', { hasText: /new person wrote|new people wrote/ }).waitFor();
     await tab('People');
     const link = await visitor.locator('a').first().getAttribute('href');

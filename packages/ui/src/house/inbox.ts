@@ -13,7 +13,7 @@ import { TaskCard, TellButton } from './tasks';
 /** What the last sign-in answer did, kept past the refetch that takes the request away. */
 let connectedNote = '';
 
-type TodayLine = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; person?: { key: string; name: string } };
+type TodayLine = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; person?: { key: string; name: string }; tile?: { big: string; label: string; detail?: string } };
 const BY: Record<TodayLine['by'], { label: string; icon: string; tint: string }> = {
   rules: { label: 'Your rules', icon: 'list-outline', tint: 'mint' },
   ai: { label: 'Your AI', icon: 'sparkles-outline', tint: 'violet' },
@@ -63,12 +63,18 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       newN ? h(Row, { icon: 'people-outline', label: `${newN}${w.more ? '+' : ''} new ${newN === 1 ? 'person' : 'people'} wrote${!w.since ? '' : new Date(w.since).toDateString() === new Date().toDateString() ? ' today' : ` since ${new Date(w.since).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`}`, sub: newN === 1 ? 'No answer yet' : 'None has an answer yet', onClick: () => push('#chats'), cls: 'wait-new' }) : null) : null,
     !any ? h('div', { class: 'all-clear', key: 'clear' }, h('ion-icon', { name: 'checkmark-done-outline' }), h('div', {}, h('b', {}, 'You\'re all clear'), h('p', {}, 'Nothing needs your attention. Your house is keeping an eye on things.'))) : null,
     h(Section, { title: 'Handled for you', key: 'handled', cls: 'handled' },
-      ...(lines.length ? lines.map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => push(l.to), cls: 'handled-row',
+      // Counts as tiles (the number first, a few words, the names small), what an AI did as rows with Undo (17 Nov: the
+      // owner said the list looked "bland, like a blob of text").
+      lines.some((l) => l.tile) ? h('div', { class: 'handled-tiles', key: 'tiles' }, ...lines.filter((l) => l.tile).map((l, i) => h('button', { key: `t${i}`, type: 'button', class: `handled-tile tint-${BY[l.by].tint}`, onClick: () => push(l.to), 'aria-label': l.text },
+        h('div', { class: 'tile-top' }, h('ion-icon', { name: BY[l.by].icon }), h('span', { class: 'tile-time' }, time(l.at))),
+        h('b', { class: 'tile-big' }, l.tile!.big), h('span', { class: 'tile-label' }, l.tile!.label),
+        l.tile!.detail ? h('span', { class: 'tile-detail' }, l.tile!.detail) : null))) : null,
+      ...(lines.some((l) => !l.tile) ? lines.filter((l) => !l.tile).map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => push(l.to), cls: 'handled-row',
         below: l.undo || l.person ? h('div', { class: 'handled-acts' },
           l.undo ? h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: l.undo }), done: 'Undone' }) : null,
           // Keeps that person for the owner: their messages wait for them, and the AI on duty leaves them alone.
           l.person ? h(Btn, { label: `Always ask me first about ${l.person.name}`, size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.chat.mode', key: l.person!.key, mode: 'me' }), done: `Your AI leaves ${l.person.name} to you from now on.` }) : null) : undefined }))
-        : [h('ion-item', { key: 'none', lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, today.data ? h('p', {}, 'Nothing handled yet today.') : h('ion-skeleton-text', { animated: true, style: 'width:70%;height:14px' })))])),
+        : lines.length ? [] : [h('ion-item', { key: 'none', lines: 'none' }, h('ion-label', { class: 'ion-text-wrap' }, today.data ? h('p', {}, 'Nothing handled yet today.') : h('ion-skeleton-text', { animated: true, style: 'width:70%;height:14px' })))])),
     // Notes that need nothing from you: one short line each, the newest few; the whole note opens in a sheet (12 Nov: a
     // wall of long notes drowned the few that need you).
     notes.length ? h(Notes, { key: 'notes', notes }) : null,
