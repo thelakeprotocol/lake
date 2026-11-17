@@ -39,6 +39,9 @@ export function houseRunner(o: HouseRunnerOptions) {
   let stop: AbortController | null = null, loop: Promise<void> | null = null, since: string | undefined, lastError: string | undefined;
   // Off duty, it still runs for a task its owner gave it (SPEC §6.1): a loop for tasks only, which ends when none is left.
   let forTasks = false, look: (() => void) | null = null, starting: Promise<void> | null = null;
+  // Counts stops: a resume after a restart that was still on its way when the owner took it off duty must not start it
+  // again (17 Nov: on the build server the resume at 30 s met an off-duty tap, and the runner ran on for good).
+  let stops = 0;
   const owners = async (): Promise<ModelSpec | null> => loadJson<ModelSpec | null>(modelFile, null);
   const spec = async (): Promise<{ spec: ModelSpec; whose: 'yours' | 'house' } | null> => {
     const mine = await owners();
@@ -57,7 +60,7 @@ export function houseRunner(o: HouseRunnerOptions) {
     if (was) await Promise.race([was, new Promise((r) => setTimeout(r, 30_000))]);
   };
   /** Starts it, and answers once it has signed in and connected (or with why it couldn't). */
-  const start = async (code?: string, tasksOnly = false) => {
+  const start = async (code?: string, tasksOnly = false, unless?: number) => {
     const s = await spec();
     if (!s) throw new Error('no model connected: add your own, or this house offers none');
     await halt();
@@ -67,6 +70,8 @@ export function houseRunner(o: HouseRunnerOptions) {
     const saved = await loadJson<{ runs?: number[]; spent?: [number, number][] }>(onFile, {});
     if (!counters.runs.length && saved.runs) counters.runs.push(...saved.runs);
     if (!counters.spent.length && saved.spent) counters.spent.push(...saved.spent);
+    // The last await before it runs: a stop since the resume began means it stays stopped.
+    if (unless !== undefined && unless !== stops) return;
     const ctl = new AbortController();
     stop = ctl;
     forTasks = tasksOnly;
@@ -96,7 +101,7 @@ export function houseRunner(o: HouseRunnerOptions) {
       else if (stop) await halt();
     },
     start,
-    async stop() { await halt(); await rm(onFile, { force: true }); },
+    async stop() { stops++; await halt(); await rm(onFile, { force: true }); },
     /** A house handed back (a sandbox lease ending): the next owner gets none of this one's key, sign-in or counts. */
     async forget() { await halt(); await rm(modelFile, { force: true }); await rm(dir, { recursive: true, force: true }); counters.runs.length = 0; counters.spent.length = 0; },
     /**
@@ -112,7 +117,7 @@ export function houseRunner(o: HouseRunnerOptions) {
       await starting;
     },
     /** After a restart: back on duty if it was, with the sign-in it kept. */
-    async resume() { if (await readFile(onFile, 'utf8').then(() => true, () => false) && (await spec())) await start().catch((e: Error) => o.log(`AI on duty didn't resume: ${e.message}`)); },
+    async resume() { const at = stops; if (await readFile(onFile, 'utf8').then(() => true, () => false) && (await spec()) && at === stops) await start(undefined, false, at).catch((e: Error) => o.log(`AI on duty didn't resume: ${e.message}`)); },
   };
 }
 export type HouseRunner = ReturnType<typeof houseRunner>;
