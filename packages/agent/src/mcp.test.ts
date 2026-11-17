@@ -47,6 +47,15 @@ describe('tool sets (SPEC §6.1)', () => {
     expect(await names(await connect('duty'))).toEqual([...new Set([...TOOL_SETS.core!, ...DUTY_TOOLS])].sort());
   });
 
+  it('says what was wrong in words an AI can act on, not a schema path (round 79)', async () => {
+    const c = await connect();
+    const tags = JSON.stringify((await c.callTool({ name: 'lake_set_tags', arguments: { tags: ['Seeking Coffee'] } })).content);
+    expect(tags).toMatch(/no spaces, up to 40 characters, e\.g\. seeking:coffee/);
+    const ping = JSON.stringify((await c.callTool({ name: 'lake_ping', arguments: { handle: 'lake-demo', text: 'hi' } })).content);
+    expect(ping).toMatch(/who: their handle/);
+    expect(ping).toMatch(/about: what you want to say/);
+  });
+
   it('names only the tools a conversation lists, in what it is told first and in what it can do', async () => {
     for (const tools of ['', 'trade', 'together', 'research', 'duty', 'trade,together']) {
       const c = await connect(tools), listed = await names(c);

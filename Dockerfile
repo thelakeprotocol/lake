@@ -26,7 +26,9 @@ WORKDIR /app
 COPY --from=build /out/house .
 COPY personas /personas
 COPY personas/stan.yaml /rules.yaml
-ENV LAKE_DATA=/data LAKE_RULES=/rules.yaml NODE_ENV=production
+# Which build this is, for GET /health (CI passes the commit).
+ARG GIT_SHA=dev
+ENV LAKE_DATA=/data LAKE_RULES=/rules.yaml NODE_ENV=production LAKE_VERSION=$GIT_SHA
 VOLUME /data
 EXPOSE 4000 3000
 ENTRYPOINT ["node", "dist/main.js"]
@@ -37,7 +39,8 @@ LABEL org.opencontainers.image.source=https://github.com/thelakeprotocol/lake \
       org.opencontainers.image.licenses=Apache-2.0
 WORKDIR /app
 COPY --from=build /out/specialists .
-ENV NODE_ENV=production
+ARG GIT_SHA=dev
+ENV NODE_ENV=production LAKE_VERSION=$GIT_SHA
 VOLUME /data
 EXPOSE 4300
 ENTRYPOINT ["node", "dist/main.js"]

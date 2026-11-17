@@ -1627,9 +1627,9 @@ describe('the open door', () => {
     // Asked what's possible, the connector tells the assistant to ask the Lake; the Lake answers from who's actually here.
     expect(client.getInstructions()).toMatch(/lake_ask_around/);
     const around = await text('lake_ask_around');
-    expect(around.here.houses).toBeGreaterThan(0);
+    expect(around.listed_now.houses).toBeGreaterThan(0);
     // Live facts first: the node's counts and its latest lines, then what is for sale, pledges and rooms.
-    expect(Object.keys(around).slice(0, 4)).toEqual(['here', 'happening_now', 'for_sale', 'pledges_needing_signers']);
+    expect(Object.keys(around).slice(0, 4)).toEqual(['listed_now', 'happening_now', 'for_sale', 'pledges_needing_signers']);
     expect(around.happening_now).toMatchObject({ houses: expect.any(Number), cartsPaid: expect.any(Number), latest: expect.any(Array) });
     expect(around.who_offers_what.some((a: { name: string }) => a.name === 'Guide')).toBe(true);
     // Narrowed by a word, and capped (run 68: 55-60 KB a call): every list keeps only what mentions it.
