@@ -1,0 +1,25 @@
+{
+ "@context": [
+  "https://www.w3.org/ns/credentials/v2"
+ ],
+ "type": [
+  "VerifiableCredential",
+  "LakeReceipt"
+ ],
+ "issuer": "{{PAYMENTS}}",
+ "validFrom": "{{AT}}",
+ "validUntil": "2036-11-12T23:36:57.696Z",
+ "credentialSubject": {
+  "id": "{{OWNER}}",
+  "payer": "{{PAYER}}",
+  "amount": {
+   "currency": "USD",
+   "value": {{AMOUNT}}
+  },
+  "agreement": "urn:lake:agreement:{{OFFER}}:{{SUFFIX}}",
+  "payer_name": "{{PAYER_NAME}}",
+  "intentMandate": "sha256-OJDyRCjC/6awfbYcp4YPCl0YtFtszdRgr6TPuiXu0Vg=",
+  "settlement": "simulated",
+  "settlementId": "78cdf57a-2292-41a4-a50c-a6320a6ac686"
+ }
+}

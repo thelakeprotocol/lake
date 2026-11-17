@@ -327,9 +327,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         if (!listed && Date.now() - this.saidAt > 10 * 60_000) { this.saidAt = Date.now(); say('consent index: listing agreements/ failed; keeping what it has'); }
         // One that didn't read is tried again in ten minutes, not at every look (14 Nov).
         const missing = files.filter((f) => !consentCache.has(f) && Date.now() - (this.failedAt.get(f) ?? 0) > 10 * 60_000);
-        for (let i = 0; i < missing.length; i += 12) await Promise.all(missing.slice(i, i + 12).map(async (f) => {
-          const r = await owner.fetch(owner.podRoot + f).catch(() => null);
-          const rec = r?.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null;
+        // From disk for a pod this house runs (filed.read): thirty-two at a time costs little there.
+        for (let i = 0; i < missing.length; i += 32) await Promise.all(missing.slice(i, i + 32).map(async (f) => {
+          const t = await filed.read(f);
+          let rec: Record<string, unknown> | null = null;
+          try { rec = t ? JSON.parse(t) as Record<string, unknown> : null; } catch { rec = null; }
           if (rec) consentCache.set(f, rec); else this.failedAt.set(f, Date.now());
         }));
         if (missing.length) saveIndex();
@@ -664,9 +666,9 @@ function panelFor(x: {
     const now = Date.now();
     const todo = files.filter((f) => { const c = receiptCache.get(f); return !c || (!c.vc && now - c.at > 10 * 60_000); });
     if (!todo.length) return;
-    reading = pool(todo, 4, async (f) => {
-      const r = await owner.fetch(owner.podRoot + f).catch(() => null);
-      const vc = r?.ok ? decode(await r.text().catch(() => '')) : null;
+    reading = pool(todo, x.owner.disk ? 32 : 4, async (f) => {
+      const t = await x.filed.read(f);
+      const vc = t ? decode(t) : null;
       receiptCache.set(f, { vc: vc?.credentialSubject ? vc : null, at: now });
     }).finally(() => { reading = null; });
     await reading;
@@ -781,12 +783,12 @@ function panelFor(x: {
   // What each payment for an agreement (a study, a key to some fields) was for: its consent record and, for a study, its
   // question, read once each, four at a time.
   const whatFor = async (receipts: { agreement?: string }[]) => {
-    await pool((receipts as { agreement?: string; about?: unknown }[]).filter((r) => r.agreement?.startsWith('urn:lake:agreement:')), 4, async (r) => {
+    await pool((receipts as { agreement?: string; about?: unknown }[]).filter((r) => r.agreement?.startsWith('urn:lake:agreement:')), x.owner.disk ? 32 : 4, async (r) => {
       const offer = r.agreement!.split(':')[3] ?? '';
       if (!/^[\w-]+$/.test(offer)) return;
       const known = aboutCache.get(offer);
       if (!known || (!known.about?.question && Date.now() - known.at > 600_000)) {
-        const json = async (path: string) => { const res = await owner.fetch(owner.podRoot + path).catch(() => null); return res?.ok ? ((await res.json().catch(() => null)) as Record<string, any> | null) : null; };
+        const json = async (path: string) => { const t = await x.filed.read(path); try { return t ? JSON.parse(t) as Record<string, any> : null; } catch { return null; } };
         const [rec, study] = await Promise.all([json(`agreements/${offer}.consent.jsonld`), json(`agreements/${offer}.study.json`)]);
         const c = rec ? readConsentRecord(rec) : null;
         aboutCache.set(offer, { at: Date.now(), about: c ? {
@@ -1117,7 +1119,7 @@ function panelFor(x: {
       const domains = new Map((await consents()).map((c) => [c.visitorWebId, c.visitor] as const));
       const recent = leftWindow(files);
       await pool(recent.filter((f) => !leftCache.has(f)), 8, async (f) => {
-        const e = await owner.fetch(owner.podRoot + f).then((r) => (r.ok ? r.json() : null)).catch(() => null) as Record<string, unknown> | null;
+        const e = await x.filed.read(f).then((t) => (t ? JSON.parse(t) : null)).catch(() => null) as Record<string, unknown> | null;
         if (e) leftCache.set(f, leftRow(e, domains));
       });
       return { total: files.length, left: recent.map((f) => leftCache.get(f)).filter(Boolean) };

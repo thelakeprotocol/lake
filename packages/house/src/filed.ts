@@ -23,6 +23,7 @@ export async function filedIndex(pod: OwnerSession, file: string, folders: strin
   const saved = await readFile(file, 'utf8').then((t) => JSON.parse(t), () => ({})).catch(() => ({})) as Record<string, { listed?: boolean; names?: string[] }>;
   const known = new Map(folders.map((f) => [f, { listed: !!saved[f]?.listed, names: new Set(saved[f]?.names ?? []), listing: null as Promise<void> | null, failedAt: 0 }]));
   const changed: ((path: string) => void)[] = [];
+  const onDisk = new Map<string, { at: number; names: Map<string, string> }>();
   let saving: ReturnType<typeof setTimeout> | undefined;
   const write = async () => {
     // Written whole and renamed into place, so a crash mid-write never leaves half a file.
@@ -79,6 +80,27 @@ export async function filedIndex(pod: OwnerSession, file: string, folders: strin
         }).finally(() => { k.listing = null; }));
       }
       return [...k.names];
+    },
+    /**
+     * A file's text, read from disk for a pod this house runs itself, else from the pod (18 Nov: Who has access read three
+     * thousand consent records one request at a time, and for each the pod server listed a folder of nine thousand files
+     * to find it: on a big house the page loaded for ever). The server keeps a file as <name>, or <name>$.<ext> when it
+     * added a type; which one is learnt from the folder, listed again at most every five seconds when a name is missing.
+     */
+    async read(path: string): Promise<string | null> {
+      const folder = folderOf(path);
+      if (pod.disk && folder) {
+        const name = path.slice(folder.length);
+        let d = onDisk.get(folder);
+        if (!d?.names.has(name) && Date.now() - (d?.at ?? 0) > 5000) {
+          const files = await readdir(join(pod.disk, folder)).catch(() => null);
+          if (files) { d = { at: Date.now(), names: new Map(files.filter((f) => !/\.(meta|acl)$/.test(f)).map((f) => [f.split('$')[0]!, f])) }; onDisk.set(folder, d); }
+        }
+        const stored = d?.names.get(name);
+        if (stored) { const t = await readFile(join(pod.disk, folder, stored), 'utf8').catch(() => null); if (t !== null) return t; }
+      }
+      const res = await pod.fetch(pod.podRoot + path).catch(() => null);
+      return res?.ok ? res.text() : null;
     },
     /** Whether the folder has been listed from the pod (before that, `list` gives only what this house filed since). */
     listed: (folder: string) => !!known.get(folder)?.listed,

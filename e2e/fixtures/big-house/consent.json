@@ -1,0 +1,58 @@
+{
+ "@context": {
+  "dpv": "https://w3id.org/dpv#",
+  "dct": "http://purl.org/dc/terms/"
+ },
+ "@type": "dpv:ConsentRecord",
+ "dct:conformsTo": "https://w3id.org/dpv/schema/dpv-27560",
+ "dct:identifier": "{{OFFER}}",
+ "dpv:hasDataSubject": "{{OWNER}}",
+ "dpv:hasNotice": {
+  "@type": "dpv:ConsentNotice",
+  "dct:identifier": "urn:lake:agreement:{{OFFER}}:{{SUFFIX}}",
+  "dct:language": "en"
+ },
+ "dct:valid": "{{VALID}}",
+ "dpv:hasProcess": {
+  "dpv:hasPurpose": "dpv:ResearchAndDevelopment",
+  "dpv:hasPersonalData": [
+   {
+    "dct:identifier": "age_band"
+   },
+   {
+    "dct:identifier": "medications"
+   },
+   {
+    "dct:identifier": "readmissions"
+   }
+  ],
+  "dpv:hasProcessing": [
+   "dpv:Use"
+  ],
+  "dpv:hasStorageCondition": "not stored: computed in the house, records never leave",
+  "dpv:hasDataController": {
+   "@id": "https://{{DOMAIN}}/#agent",
+   "dct:title": "{{DOMAIN}}"
+  },
+  "dpv:hasRecipient": {
+   "@id": "https://{{DOMAIN}}/#agent",
+   "dct:title": "{{DOMAIN}}"
+  },
+  "dpv:hasLegalBasis": "dpv:Consent"
+ },
+ "dpv:hasConsentControl": {
+  "@type": "dpv:WithdrawConsent",
+  "dct:description": "the owner revokes the key in their control panel; its bit goes up on the house's public status list",
+  "dct:source": "{{HOUSE}}/status/revocation#{{N}}"
+ },
+ "dct:source": "urn:lake:agreement:{{OFFER}}:{{SUFFIX}}",
+ "dpv:hasConsentStatus": [
+  {
+   "@type": "dpv:ConsentGiven",
+   "dct:date": "2026-11-15T23:36:17.869Z",
+   "dpv:hasIndicationMethod": "urn:lake:consent:standing-rule",
+   "dpv:isIndicatedBy": "{{OWNER}}",
+   "dct:description": "the owner's standing rule 2 (rules sha256-spvDm6UEdFxkq5IwikU/HrZINCk43aZM7vYFPRU4d6A=) decided it"
+  }
+ ]
+}
