@@ -23,6 +23,7 @@ import { recordPaths } from './packs.js';
 import { convertRecord, fetchConverterCert, fetchRecord, type RecordPaths, type Trust } from './record.js';
 import { packFolders } from './typeindex.js';
 import { connectRelay } from './relay.js';
+import { callsHome } from './net.js';
 import { loadJson, saveWhole } from './state.js';
 import { createHouseServer } from './server.js';
 
@@ -145,7 +146,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   // memory, so a pod that stopped answering, a line to the Lake that dropped or a full disk all passed). The pod is asked at
   // most every half minute; each part says since when it has been wrong.
   const podSeen = { ok: true, at: 0, since: Date.now() };
-  const health = async () => {
+  const health = async (forOwner = false) => {
     if (Date.now() - podSeen.at > 30_000) {
       const ok = await owner.fetch(owner.podRoot, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).then((r) => r.status < 500, () => false);
       if (ok !== podSeen.ok) podSeen.since = Date.now();
@@ -162,7 +163,8 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       ok: podSeen.ok && lakeOk && diskOk,
       pod: { ok: podSeen.ok, ...(podSeen.ok ? {} : { since: new Date(podSeen.since).toISOString() }) },
       lake: { ok: lakeOk, ...lake, ...(lakeSince ? { since: new Date(lakeSince).toISOString() } : {}) },
-      disk: { ok: diskOk, ...(freeMb !== null ? { free_mb: freeMb } : {}) },
+      // On a hosted house the disk is the host's, the same for every tenant: how much is free is for its owner only (round 76).
+      disk: { ok: diskOk, ...(freeMb !== null && (forOwner || !o.host) ? { free_mb: freeMb } : {}) },
       ...(process.env.LAKE_VERSION ? { build: process.env.LAKE_VERSION } : {}),
     };
   };
@@ -426,6 +428,10 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     // A shop's offer for something the owner is looking for, or word that it sent what was bought (SPEC §6.8).
     wantIn: async (p, profile, from) => {
       if (p.kind === 'want.offer') {
+        // The house will write to the address on the seller's card (a receipt, word that the offer ended): never one on
+        // its own machine (round 76).
+        const home = callsHome(from.supportedInterfaces?.[0]?.url ?? '', { publicUrl: o.publicUrl, podRoot: owner.podRoot });
+        if (home) return { kind: 'refused', problems: [`your card's address can't be used: ${home}`] };
         const r = await wants.offerIn(p, profile, from, owner.webId);
         if (!r.ok) return { kind: 'refused', problems: [r.why] };
         note('want.offer', `${r.offer.seller.name} offered ${r.offer.total.currency} ${r.offer.total.value.toFixed(2)} for "${r.want.name}"`);
@@ -608,7 +614,7 @@ function panelFor(x: {
   note: (kind: string, text: string) => void;
   card: AgentCard; recard: (r: Rules) => Promise<void>; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
-  trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null; health: () => Promise<unknown>;
+  trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null; health: (forOwner?: boolean) => Promise<unknown>;
   consentCache: Map<string, Record<string, unknown>>;
   consentIndex: { listedAt: number; relist: () => Promise<void> };
   wants: Wants;
@@ -625,7 +631,7 @@ function panelFor(x: {
   };
   // Every shop whose offer ended unbought hears so once, sent until it lands (SPEC §6.8 `want.ended`): after a purchase or
   // a close at once, and a minute's sweep for offers and wants that ran out.
-  const tellEnded = () => { for (const m of x.wants.endedUntold()) deliverWithRetries(() => send(m.url, m.payload)); };
+  const tellEnded = () => { for (const m of x.wants.endedUntold()) if (!callsHome(m.url, { publicUrl: x.o.publicUrl, podRoot: owner.podRoot })) deliverWithRetries(() => send(m.url, m.payload)); };
   setInterval(tellEnded, 60_000).unref();
   // The payments agent to pay a cart through: one of this Lake's that the shop named, or this Lake's own if it named none.
   const paymentsFor = async (cart: CartMandate) => {
@@ -907,7 +913,7 @@ function panelFor(x: {
   let recordCheck: { at: number; claims: Awaited<ReturnType<ReturnType<typeof x.keeper>['allClaims']>>; chain: Awaited<ReturnType<ReturnType<typeof x.keeper>['verifyOwnRecord']>> } | null = null;
   return {
     forgetReceipt: (path: string) => void receiptCache.delete(path),
-    health: () => x.health(),
+    health: () => x.health(true),
     async overview(tzOffset?: number) {
       // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
       const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;

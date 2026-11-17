@@ -1187,7 +1187,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await onTab('My AI');
     await page.locator('ion-item.ai-row', { hasText: 'Nova' }).waitFor({ state: 'detached', timeout: 5000 });
     // Told plainly why, and how to come back.
-    expect((await asAssistant({ kind: 'list' })).error).toMatch(/your human took your key back.*new code in My AI/);
+    expect((await asAssistant({ kind: 'list' })).error).toMatch(/your human took it back.*new code in My AI/);
+    // The same words for a key that was never given: nobody learns which AIs an owner paired, or dropped (round 76).
+    const stranger = await generateIdentity();
+    const never = await (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, stranger, { iss: 'assistant' })) })).json();
+    const words = (e: string) => e.replace(/^no key \S+/, 'no key K');
+    expect(words(never.error)).toBe(words((await asAssistant({ kind: 'list' })).error));
     await tidy();
   });
 

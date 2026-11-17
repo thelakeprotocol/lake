@@ -1743,9 +1743,15 @@ export class OwnerDesk {
       try {
         p = await verifyMessage(req.body, async (kid) => { signer = kid; return kid === this.ownerJwk!.kid ? this.ownerJwk : this.assistants.get(kid)?.jwk ?? null; }, { replay: this.replay });
       } catch (e) {
-        // A key the owner took back is gone from the list: say so, not "no key" (17 Nov, an AI at the connector).
-        const back = !!signer && this.revokedIds.has(`assistant:${signer}`);
-        return void res.status(403).json({ error: back ? 'your human took your key back: this house no longer answers it. If they want you back, they make a new code in My AI (lake_house_connect)' : (e as Error).message });
+        // Not the owner's key: one answer whatever went wrong, so nobody can probe which AIs an owner paired, or dropped,
+        // by sending a key id with no signature (round 76, an attacker); it still says what an AI can do about it.
+        // It starts as an unknown key's answer does ("no key … for …"): a phone whose key the house no longer holds (moved
+        // or recovered elsewhere) goes back to pairing on that.
+        if (signer !== this.ownerJwk.kid) {
+          const iss = String((req.body as { payload?: { iss?: unknown } } | undefined)?.payload?.iss ?? '').slice(0, 80);
+          return void res.status(403).json({ error: `no key ${signer.slice(0, 100)} for ${iss}: this house doesn't answer this key (never given, or your human took it back), or the call was signed wrong or too late. If your human wants you in, they make a new code in My AI (lake_house_connect)` });
+        }
+        return void res.status(403).json({ error: (e as Error).message });
       }
       // A call names the house it's for; one signed for another house on this host (a browser keeps one key per host, so
       // an owner of two houses here signs both with it) isn't this house's to act on.
@@ -3291,6 +3297,9 @@ export class OwnerDesk {
    */
   private logRead(by: string, kind: string): ReadEntry {
     const e: ReadEntry = { at: new Date().toISOString(), by, what: READ_WHAT[kind]!, kind };
+    // Looks that need no switch (its messages, the summary) are kept 500 an AI: thousands of them can't push its looks at
+    // the records off its owner's page (round 76, an attacker).
+    if (!NEEDS[kind] && this.readLog.filter((x) => x.by === by && !NEEDS[x.kind]).length >= 500) this.readLog.splice(this.readLog.findIndex((x) => x.by === by && !NEEDS[x.kind]), 1);
     this.readLog.push(e);
     if (this.readLog.length > 6000) this.readLog = this.readLog.slice(-5000);
     this.readSave ??= setTimeout(() => { this.readSave = undefined; void saveWhole(join(this.o.dataDir, 'read-log.json'), JSON.stringify(this.readLog.slice(-5000))).catch(() => {}); }, 30_000);
