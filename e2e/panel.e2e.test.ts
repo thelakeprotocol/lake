@@ -1432,7 +1432,15 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(again).toMatchObject({ kind: 'want.received', replaced: expect.stringMatching(/^o-/) });
     expect(await want({ action: 'status', want: found!.want.id, house: found!.house.url })).toMatchObject({ kind: 'want.status', offer: again.offer, state: 'open' });
     expect((await one.call('lake_want', { action: 'mine' })).wants.find((w: { id: string }) => w.id === lamp.want.id)).toMatchObject({ offers: [{ total: 'USD 22.00', delivery: '3 days', state: 'open' }] });
+    // The shop's AI keeps its own offers: one open (the second replaced the first), USD 22.
+    const mine = await want({ action: 'mine' });
+    expect(mine.selling.offers).toMatchObject([{ want: lamp.want.id, state: 'open', total: { currency: 'USD', value: 22 } }]);
+    expect(mine.selling.totals.USD).toMatchObject({ open_offers: 1, held: 0 });
     expect(await one.call('lake_want', { action: 'close', id: lamp.want.id })).toMatchObject({ ok: true });
+    // The house tells the shop the want closed without buying: its own list says so, and nothing of why.
+    let ended = '';
+    for (let i = 0; i < 40 && ended !== 'closed'; i++) { ended = (await want({ action: 'mine' })).selling.offers[0]?.state; if (ended !== 'closed') await page.waitForTimeout(250); }
+    expect(ended).toBe('closed');
     await shopper.close(); await one.c.close();
     await tidy();
   });

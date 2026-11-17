@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { asAddress, blueprintList, foldFyi, inboxBatch, lakeMcpAgent, listedOnly, TOOL_SETS, toolSet } from './mcp.js';
+import { asAddress, blueprintList, foldFyi, inboxBatch, lakeMcpAgent, listedOnly, sellerView, TOOL_SETS, toolSet, type WantSale } from './mcp.js';
 import { DUTY_TOOLS, TASK_TOOLS, taskPrompt, taskUrl } from './duty.js';
 
 const agent = lakeMcpAgent({ name: 'Test assistant', domain: 'assistant.example', node: 'http://127.0.0.1:9' });
@@ -182,5 +182,27 @@ describe('a study of your own (SPEC §7)', () => {
     const words = await say(c, { question: 'Is this a real study?' });
     expect(words.isError).toBe(true);
     expect(words.text).toMatch(/isn't one of the ready questions.*write it as a study: lake_dispatch_study \{ fields: true \}/);
+  });
+});
+
+describe('a seller\'s offers on wants, for its morning line (round 80)', () => {
+  const sale = (cart: string, x: Partial<WantSale>): WantSale => ({ cart, want: `w-${cart}`, with: { name: 'h', url: `https://h-${cart}.example/a2a` }, status: 'carted', total: { currency: 'AUD', value: 34 }, items: [{ label: 'Shower head' }], expires: new Date(Date.now() + 3_600_000).toISOString(), ...x });
+  it('says where each stands and adds up held apart from released, per currency, from what was sent only', () => {
+    const v = sellerView([
+      sale('a', {}),
+      sale('b', { wantState: 'ended:not_bought' }),
+      sale('c', { expires: new Date(Date.now() - 60_000).toISOString() }),
+      sale('d', { status: 'paid', payment: 'held', deliverTo: { postalCode: '4000' } }),
+      sale('e', { status: 'delivered', payment: 'held', wantState: 'shipped' }),
+      sale('f', { status: 'paid', payment: 'released', wantState: 'arrived', total: { currency: 'USD', value: 20 } }),
+      sale('g', { status: 'refunded', payment: 'voided' }),
+      sale('h', { status: 'disputed', payment: 'held', wantState: 'problem' }),
+      { ...sale('i', {}), want: undefined },
+    ]);
+    expect(v.offers.map((o) => o.state)).toEqual(['open', 'not_bought', 'cart_ran_out', 'paid', 'shipped', 'arrived', 'refunded', 'problem']);
+    expect(v.totals).toEqual({ AUD: { held: 102, released: 0, refunded: 34, open_offers: 1 }, USD: { held: 0, released: 20, refunded: 0, open_offers: 0 } });
+    expect(v.ended_unbought).toEqual({ not_bought: 1, closed: 0, expired: 0, cart_ran_out: 1 });
+    expect(v.offers.find((o) => o.cart === 'd')).toMatchObject({ deliver_to: true, next: expect.stringContaining('lake_want { action: "shipped"') });
+    expect(JSON.stringify(v)).not.toContain('4000');
   });
 });
