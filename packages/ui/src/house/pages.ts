@@ -243,15 +243,18 @@ export function MoneyPage({ backTo }: P) {
   // Money that came back (a pledge that lapsed, a refund) is listed, and isn't counted as spent.
   const gone = spent.filter((r) => r.settlement !== 'voided');
   const spentIn = new Set(gone.map((r) => r.currency));
+  // Two currencies on one page ($935 earned beside A$19 spent): each tile names its own (round 77, a first-time owner).
+  const several = new Set([...m.data.receipts.map((r) => r.currency), ...spentIn]).size > 1;
+  const inCur = (word: string, rs: { currency: string }[]) => (several && new Set(rs.map((r) => r.currency)).size === 1 ? `${word} · ${rs[0]!.currency}` : word);
   // A total per currency, each with its own sign (an A$34 spend sat beside "$0 Earned"); nothing yet is said in the currency in use.
   const sums = (rs: { amount: number; currency: string }[]) => { const by = new Map<string, number>(); for (const r of rs) by.set(r.currency, (by.get(r.currency) ?? 0) + r.amount);
     return by.size ? [...by].map(([c, n]) => money$(Math.round(n * 100) / 100, c)).join(' + ') : money$(0, m.data!.receipts[0]?.currency ?? gone[0]?.currency ?? 'USD'); };
   return page('Money', backTo,
     // Still reading new receipts (17 Nov: the page spun until the app gave up): what's read shows now, the rest comes in.
     m.data.reading ? h('p', { class: 'muted-line pad reading-line' }, h('ion-spinner', { name: 'dots' }), ` Reading ${m.data.reading} new payment${m.data.reading === 1 ? '' : 's'}: this page updates by itself.`) : null,
-    h('div', { class: 'stat-row' }, h('div', { class: 'stat mint' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement !== 'held'))), h('span', {}, 'Earned')),
+    h('div', { class: 'stat-row' }, h('div', { class: 'stat mint' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement !== 'held'))), h('span', {}, inCur('Earned', m.data.receipts.filter((r) => r.settlement !== 'held')))),
       m.data.held ? h('div', { class: 'stat' }, h('b', {}, sums(m.data.receipts.filter((r) => r.settlement === 'held'))), h('span', {}, 'Held')) : null,
-      gone.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(gone.reduce((t, r) => t + r.amount, 0) * 100) / 100, gone[0]!.currency) : String(gone.length)), h('span', {}, 'Spent')) : null),
+      gone.length ? h('div', { class: 'stat' }, h('b', {}, spentIn.size === 1 ? money$(Math.round(gone.reduce((t, r) => t + r.amount, 0) * 100) / 100, gone[0]!.currency) : String(gone.length)), h('span', {}, inCur('Spent', gone))) : null),
     wants.length ? h(Section, { title: 'Looking for', cls: 'chat-list wants' }, ...wants.map((w) => h(WantRow, { key: w.want.id, w }))) : null,
     h(Section, { cls: 'money-rows' },
       market.data?.packs?.length ? h(Row, { icon: 'pricetags-outline', tint: 'amber', label: 'Offers for you', onClick: () => push('#offers') }) : null,

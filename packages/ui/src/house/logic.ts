@@ -183,12 +183,13 @@ export const phoneState = (p: { keyInDevice: boolean; recovery?: { at: string } 
 /** One thing that left the house (panel.left), in a sentence about the one who got it. */
 export type Left = { at: string; kind: 'study' | 'offer' | 'address'; to: string; fields?: string[]; question?: string; counts?: string[]; table?: { min: number; noise: boolean }; title?: string; released?: { facts?: string[]; files?: string[]; address?: boolean } };
 /** What two tellers hold a study's table to, as each said when it took the house's answer (or as the study asks). */
-export const tableLine = (t: { min: number; noise: boolean }) => `from ${t.min} or more answers, ${t.noise ? 'with noise added' : 'with no noise added'}`;
+// Plain words for a first-time owner (round 77: "shares, tellers, noise" in the line meant to reassure them).
+export const tableLine = (t: { min: number; noise: boolean }) => `and only once ${t.min} or more houses have answered${t.noise ? ', with a little noise added so no one answer shows' : ''}`;
 export const leftLine = (x: Left) => {
-  const totals = `it got totals only${x.table ? `, ${tableLine(x.table)}` : ''}.`;
+  const totals = `it got only how many said yes${x.table ? `, ${tableLine(x.table)}` : ''}.`;
   // What was counted, in the house's own words for each yes/no part, when the entry has them (13 Nov on).
-  if (x.kind === 'study' && x.counts?.length) return `Its study asked yes or no: ${x.counts.join('; ')}. Your answer left as two unreadable shares; ${totals}`;
-  if (x.kind === 'study') return `Its study used ${x.fields?.length ? x.fields.join(', ').toLowerCase() : 'your record'}. Your answer left as two unreadable shares; ${totals}`;
+  if (x.kind === 'study' && x.counts?.length) return `Its study asked yes or no: ${x.counts.join('; ')}. Your answer left split in two halves that nobody can read alone; ${totals}`;
+  if (x.kind === 'study') return `Its study used ${x.fields?.length ? x.fields.join(', ').toLowerCase() : 'your record'}. Your answer left split in two halves that nobody can read alone; ${totals}`;
   const got = [x.released?.facts?.length ? x.released.facts.join(', ').toLowerCase() : '', x.released?.files?.length ? `${plural(x.released.files.length, 'file')} from your record (${x.released.files.join(', ')})` : '', x.released?.address ? 'your delivery address' : ''].filter(Boolean).join(', and ');
   return `${x.kind === 'address' ? 'You bought from it' : 'You accepted its offer'}: it got ${got || 'nothing from your record'}.`;
 };
@@ -199,7 +200,7 @@ export function lastHere(at?: string): { text: string; now: boolean } {
   const ms = at ? Date.now() - Date.parse(at) : NaN;
   if (Number.isNaN(ms)) return { text: 'Not here yet', now: false };
   if (ms < 15 * 60_000) return { text: 'Here now', now: true };
-  return { text: `Here ${ago(at!)}`, now: false };
+  return { text: `Last here ${ago(at!)}`, now: false };
 }
 export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you know'], ['close', 'Mark notes that need no answer as done (thanks, confirmations, newsletters)'], ['book', 'Book times you\'re free'], ['deliver', 'Deliver what people buy from your AI']];
 /** Off for good (taken off, refused too often, ended): not the same as off for the night or outside its hours. */

@@ -193,7 +193,7 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
     // An instruction of yours is open here: said where you'd type (typing your own answer ends it).
     task ? h('p', { class: 'mode-note task-note' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(task.label)} is on it: “${task.text.length > 60 ? `${task.text.slice(0, 58)}…` : task.text}” `,
       h('button', { type: 'button', class: 'link-btn', onClick: async () => { try { await must({ kind: 'panel.task.stop', id: task.id }); void toast('Taken back'); } catch (e) { void toast((e as Error).message, { color: 'danger' }); } bump(); } }, 'Take it back'))
-      : c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} replies once it's on duty (My AI). Until then, messages here wait.`) : null,
+      : c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} isn't on duty, so it won't answer here yet: set that up in My AI, or type your own answer below.`) : null,
     // They wrote to your AI and don't know your house: an answer from here would tell them where it is, so there is
     // nothing to type into. What's said to them is said by that AI, on your word.
     c.toAi ? h('div', { class: 'composer-row via-row' },
@@ -239,7 +239,7 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
       mute));
   return h('div', { class: 'newstrip', role: 'note' },
     c.replyTo ? h('p', { class: 'reach' }, `Left ${c.replyTo.kind === 'email' ? 'an email address' : 'a phone number'} for your answer: `, h(ReachLinks, { r: c.replyTo })) : null,
-    h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : `New.${c.doorNote ? ` Got your door note ${when(c.doorNote)}.` : ''} The key is checked; the name is the one their AI gives.`),
+    h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : `New.${c.doorNote ? ` Got your door note ${when(c.doorNote)}.` : ''} Their message is signed; the name is what their AI calls them.`),
     mute ? h('div', { class: 'newstrip-acts' }, mute) : null);
 }
 

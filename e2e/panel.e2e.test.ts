@@ -694,7 +694,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // AI isn't on duty yet. The chat's details say who replies too, and lead to the same choice.
       await page.getByText(/^You've answered Alex, so .+ replies here while it's on duty\.$/).waitFor({ timeout: 6000 });
       await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor();
-      await page.locator('.mode-note', { hasText: 'once it\'s on duty' }).waitFor();
+      await page.locator('.mode-note', { hasText: 'or type your own answer below' }).waitFor();
       await tidy();
       await page.locator('.chatwho').click();
       await sheet().getByText('Its key is checked on every message').waitFor();
@@ -1533,7 +1533,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const req = page.locator('ion-card.req', { hasText: 'research.example' });
     await req.locator('.req-q').waitFor({ timeout: 10_000 });
     expect((await req.locator('.req-q').innerText()).replace(/\s+/g, ' ')).toBe('Their question Does a daily walk help?');
-    expect((await req.locator('.req-counts').innerText()).replace(/\s+/g, ' ')).toMatch(/^What your house would answer, yes or no, to each: .* Only the yes or no leaves, as two unreadable shares\. The two tellers publish totals only, from 3 or more answers, with no noise added\.$/);
+    expect((await req.locator('.req-counts').innerText()).replace(/\s+/g, ' ')).toMatch(/^What your house would answer, yes or no, to each: .* Only the yes or no leaves, split in two halves that nobody can read alone\. The one who asked sees only how many said yes, and only once 3 or more houses have answered\.$/);
     expect(await req.locator('.req-counts li').allInnerTexts()).toEqual(['medications: Drug Y', 'conditions: Hypertension', 'age band: 50 or more']);
     // Their names for the parts are nowhere on the card.
     expect(await req.innerText()).not.toMatch(/walks daily|feels better/);

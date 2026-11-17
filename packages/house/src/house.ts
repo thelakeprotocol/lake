@@ -761,6 +761,15 @@ function panelFor(x: {
       const s = vc?.credentialSubject;
       return s ? { file: f, amount: Number(s.amount?.value ?? 0), currency: s.amount?.currency ?? 'USD', agreement: String(s.agreement ?? ''), to: String((s.settlement === 'voided' ? s.seller : undefined) ?? s.id ?? ''), at: String(vc!.validFrom), settlement: String(s.settlement ?? ''), ...(s.how ? { how: String(s.how) } : {}), ...(s.seller_name ? { toName: String(s.seller_name) } : {}), ...(Array.isArray(s.items) ? { items: s.items } : {}) } : null;
     }).filter((x): x is NonNullable<typeof x> => !!x && (!since || Date.parse(x.at) >= since)).sort((a, b) => (a.at < b.at ? 1 : -1));
+    // A purchase held until it arrived keeps its receipt from the day it was paid: once the owner said it arrived (or the
+    // shop refunded it), the want knows, and Money says so (round 77: "Arrived" on the want, "held" on Money).
+    for (const r of spent) {
+      if (r.settlement !== 'held' || !r.agreement.startsWith('urn:ap2:cart:')) continue;
+      const cart = r.agreement.slice('urn:ap2:cart:'.length);
+      const o = x.wants.all().flatMap((w) => w.offers).find((y) => y.cart.contents.id === cart);
+      if (o?.state === 'arrived') r.settlement = 'captured';
+      else if (o?.state === 'refunded') r.settlement = 'voided';
+    }
     for (const r of receipts as { agreement?: string; about?: unknown }[]) {
       const offer = r.agreement?.startsWith('urn:lake:agreement:') ? r.agreement.split(':')[3] ?? '' : '';
       const about = offer ? aboutCache.get(offer)?.about : undefined;
