@@ -637,6 +637,21 @@ describe('what an attacker tried (round 16)', () => {
   const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, url: `https://${key}.example/a2a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
+  it('the overview an AI reads is bounded and gated: what waits always, yeses with records, money with money (round 86)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), overview: async () => ({ name: 'h', pending: 2, keys: 3, yeses: { now: 1, yeses: 3, by: [] }, earned: 9, money: { total: 9, today: { USD: 4 } } }) } });
+    h.desk.addNote({ from: from('dee'), text: 'Can you lend me a ladder?' });
+    const plain = await h.connect('Plain AI');
+    const o1 = await plain.call({ kind: 'panel.overview' });
+    expect(o1).toMatchObject({ name: 'h', waiting: { people: 1, newest: [{ from: "dee's AI" }] } });
+    expect(o1).not.toHaveProperty('yeses');
+    expect(o1).not.toHaveProperty('money');
+    expect(JSON.stringify(o1)).not.toContain('ladder');
+    expect(o1.waiting).not.toHaveProperty('requests');
+    const reader = await h.connect('Reading AI', ['records', 'money']);
+    expect(await reader.call({ kind: 'panel.overview' })).toMatchObject({ yeses: { now: 1 }, money: { today: { USD: 4 } }, waiting: { requests: 2 } });
+    h.close();
+  });
+
   it('takes back every live yes, those in the pod too, and Block takes back the blocked sender\'s (round 85)', async () => {
     // Two yeses live in the pod from before the house started (not in memory), one for dee, one for kim.
     const withdrawn: string[] = [];
@@ -885,7 +900,8 @@ describe('what an attacker tried (round 16)', () => {
     });
     const ai = await h.connect('Helper');
     const over = await ai.call({ kind: 'panel.overview' });
-    expect(over).toEqual({ name: 'h', handle: 'h', reads: [] });
+    // Beside the fields it may see, what waits for its human (round 86); a field added later stays the owner's alone.
+    expect(over).toEqual({ name: 'h', handle: 'h', waiting: expect.objectContaining({ people: 0, newest: [] }), reads: [] });
     // Which circles and what each is for, so a need finds the right one; members, favours and votes need records.
     expect(await ai.call({ kind: 'panel.circles' })).toEqual([{ url: 'https://lake.example/tally', id: 'meals', view: { text: 'Meals', promise: 'a meal when sick', open: true, kinds: ['a meal'] }, limited: true }]);
     expect((await (await h.connect('Reader', ['records'])).call({ kind: 'panel.circles' }))[0].view).toMatchObject({ members: 5, you: { you_owe: 2 } });

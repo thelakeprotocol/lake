@@ -3338,8 +3338,16 @@ export class OwnerDesk {
   /** The overview for an assistant: what it may read of it. */
   private overviewFor(o: Record<string, unknown>, reads: Set<Reads>) {
     // Named one by one: a field added to the overview later is the owner's alone until it's put on a list here.
-    const may = ['name', 'handle', 'shown', 'webId', 'reachedAt', 'relayed', ...(reads.has('records') ? ['podRoot', 'nodes', 'holds', 'claims', 'record', 'pending', 'keys', 'rulesOwner', 'knocksToday', 'blockedToday', 'person'] : []), ...(reads.has('money') ? ['earned'] : [])];
-    return { ...Object.fromEntries(may.filter((k) => k in o).map((k) => [k, o[k]])), reads: [...reads] };
+    const may = ['name', 'handle', 'shown', 'webId', 'reachedAt', 'relayed', ...(reads.has('records') ? ['podRoot', 'nodes', 'holds', 'claims', 'record', 'pending', 'keys', 'rulesOwner', 'knocksToday', 'blockedToday', 'person', 'yeses'] : []), ...(reads.has('money') ? ['earned', 'money'] : [])];
+    // What waits for its human, always (who wrote and when is in every assistant's base): people with no answer yet, and the
+    // newest few, without their words (round 86: it took the whole list to answer "what's waiting for me?").
+    // From the notes themselves (newest first), one entry a sender: nothing else of the house is read for it.
+    const open = this.notes.filter((n) => !this.settled(n) && !this.ownHouse(n.from.webId));
+    const senders = new Map<string, (typeof open)[number]>();
+    for (const n of open) { const who = n.from.key ? this.personOf(n.from.key) : n.from.webId; if (!senders.has(who)) senders.set(who, n); }
+    const newest = [...senders.values()];
+    const waiting = { people: newest.length, ...(newest.length ? { since: newest.map((n) => n.at).sort()[0] } : {}), ...(reads.has('records') ? { requests: o.pending } : {}), newest: newest.slice(0, 5).map((n) => ({ id: n.id, from: n.from.as ?? n.from.name, at: n.at })), more: 'lake_house { view: "requests" } for everything waiting' };
+    return { ...Object.fromEntries(may.filter((k) => k in o).map((k) => [k, o[k]])), waiting, reads: [...reads] };
   }
 
   private fullView(forAssistant: boolean) {

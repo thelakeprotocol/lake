@@ -942,6 +942,7 @@ function panelFor(x: {
       const busy = !chain.ok && 'transient' in chain && !!chain.transient;
       if (busy) recordCheck = null;
       const view = x.desk().view();
+      let live: Awaited<ReturnType<typeof consents>> = [], m: { total: number; held: number; receipts?: unknown[]; reading?: number } = { total: 0, held: 0 };
       return {
         name: x.o.name, ...(x.keeper().rules.door?.handle ? { handle: x.keeper().rules.door!.handle } : {}), ...(x.keeper().rules.door?.name ? { shown: x.keeper().rules.door!.name } : {}), webId: owner.webId, podRoot: owner.podRoot,
         reachedAt: x.card.supportedInterfaces.map((i) => i.url), relayed: !!x.relayed, nodes: x.nodes, ...(x.o.host ? { host: x.o.host } : {}),
@@ -951,8 +952,18 @@ function panelFor(x: {
         blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
         // Who can see something now, from the consent records in the pod (the same source as Who has access): the keys in
         // memory are gone after a restart, which showed "0 live keys" beside 101 open consents.
-        pending: view.requests.length, keys: (await consents()).filter((c) => c.status === 'active').length,
-        earned: (await money()).total,
+        pending: view.requests.length, keys: (live = (await consents()).filter((c) => c.status === 'active')).length,
+        earned: (m = await money()).total,
+        // Bounded answers for the owner's AI, which reads this first (round 86: on a big house its views ran to megabytes, and
+        // "who has my data", "what came in this week" took the whole list): who has a yes now, by agent; money today and this
+        // week, per currency, and the newest few. A look still reading says so.
+        // `now` counts agents, as Who has access does; `yeses` every live consent.
+        yeses: (() => { const g = [...live.reduce((g, c) => g.set(c.visitor, [...(g.get(c.visitor) ?? []), c]), new Map<string, typeof live>())]; return { now: g.length, yeses: live.length, by: g.map(([visitor, cs]) => ({ visitor, yeses: cs.length, until: cs.map((c) => c.until).sort().at(-1) })).sort((a, b) => b.yeses - a.yeses).slice(0, 10) }; })(),
+        money: (() => {
+          const rs = (m.receipts ?? []) as { amount: number; currency: string; at: string; settlement?: string; payerName?: string; payer?: string; about?: { question?: string } }[];
+          const sum = (since: number) => rs.filter((r) => Date.parse(r.at) >= since && r.settlement !== 'voided').reduce((t, r) => ({ ...t, [r.currency]: Math.round(((t[r.currency] ?? 0) + r.amount) * 100) / 100 }), {} as Record<string, number>);
+          return { total: m.total, held: m.held, today: sum(midnight), last_7_days: sum(midnight - 6 * 86_400_000), newest: rs.slice(0, 5).map((r) => ({ amount: r.amount, currency: r.currency, at: r.at, from: r.payerName ?? r.payer, ...(r.about?.question ? { for: r.about.question } : {}) })), ...(m.reading ? { reading: m.reading, note: `still reading ${m.reading} new payments: ask again in a few seconds` } : {}) };
+        })(),
         rulesOwner: x.keeper().rules.owner,
         person: await stamp().then((s) => (s ? { stamped: true, by: s.card?.name, person: s.person.slice(-8) } : { stamped: false, checker: !!x.o.personUrl })),
       };

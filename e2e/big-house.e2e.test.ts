@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type Browser, type Page } from 'playwright-core';
-import { generateIdentity } from '../packages/core/src/index.js';
+import { generateIdentity, signMessage } from '../packages/core/src/index.js';
 import { ask, makeVisitor } from '../packages/visitor/src/knock.js';
 import { podFolder, seedBigHouse } from './big-house.js';
 
@@ -166,6 +166,39 @@ describe('the owner\'s app on a big house, at phone size', () => {
     expect((await settle(page, 10_000)).done).toBe(true);
     expect(errors).toEqual([]);
   }, 400_000);
+
+  it('the owner\'s AI reads one bounded overview: what waits, who has a yes, money today and this week (round 86)', async () => {
+    const top = () => page.locator('.ion-page:not(.ion-page-hidden)').last();
+    const sheet = () => page.locator('ion-modal.show-modal');
+    // The owner gives their AI a key that may read records and money.
+    await page.evaluate(() => { location.hash = '#ai'; });
+    await settle(page, 10_000);
+    await top().getByRole('button', { name: 'Give my AI a key' }).first().click();
+    for (const r of ['records', 'money']) await sheet().locator(`.reads-${r} ion-toggle`).click();
+    await sheet().getByRole('button', { name: 'Make the code' }).click();
+    const code = /code (\S+)\./.exec((await sheet().locator('.copybox').textContent())!)![1]!;
+    const ai = await generateIdentity('big-house-ai');
+    expect(await (await fetch(`${site}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: ai.publicJwk, code, label: 'Nova (Claude, via MCP)' }) })).json()).toMatchObject({ paired: true });
+    await page.keyboard.press('Escape');
+    const asAi = async (p: Record<string, unknown>) => (await fetch(`${site}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, ai, { iss: 'assistant' })) })).json();
+    const t = Date.now();
+    const o = await asAi({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() }) as { waiting: { people: number; newest: unknown[] }; yeses: { now: number; by: { visitor: string; yeses: number }[] }; money: { today: Record<string, number>; last_7_days: Record<string, number>; newest: unknown[] } };
+    const ms = Date.now() - t, size = JSON.stringify(o, null, 2).length;
+    console.log(`the AI's overview: ${size} characters in ${ms} ms`, JSON.stringify(o).slice(0, 400));
+    expect(ms).toBeLessThan(5000);
+    expect(size).toBeLessThan(6000);
+    // The same as the owner's own pages say.
+    expect(o.waiting.people).toBeGreaterThan(0);
+    expect(o.waiting.newest.length).toBeLessThanOrEqual(5);
+    await page.evaluate(() => { location.hash = '#access'; });
+    await settle(page, 10_000);
+    expect(o.yeses.now).toBe(Number(await top().locator('.stat.mint b').first().textContent()));
+    expect(o.yeses.by.length).toBeLessThanOrEqual(10);
+    expect(Object.keys(o.money.today).length).toBeGreaterThan(0);
+    expect(o.money.newest.length).toBeLessThanOrEqual(5);
+    // An AI that may read neither gets what waits, and nothing of the yeses or money.
+    expect(errors).toEqual([]);
+  }, 120_000);
 
   it('takes a yes back, then every yes, within seconds on a big house, and the page says so (round 85, a privacy-minded owner)', async () => {
     const top = () => page.locator('.ion-page:not(.ion-page-hidden)').last();
