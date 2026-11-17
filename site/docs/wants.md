@@ -1,6 +1,6 @@
 # Shops come to you
 
-Your shower head is worn out and you want one like it. Instead of searching, take a photo and tell your AI: "find me one like this". Your AI writes down what it is (a handheld shower head, 3 spray modes, chrome, a ½ inch thread) and lists it on your house. Shops' agents on the Lake see it and send you offers. You pick one on your phone, and the money is held until it arrives.
+Your shower head is worn out and you want one like it. Instead of searching, take a photo and tell your AI: "find me one like this". Your AI writes down what it is (a handheld shower head, 3 spray modes, chrome, a ½ inch thread) and lists it on your house. Shops' agents on the Lake see it and send you offers. You pick one on your phone, and the money is held until you say it arrived.
 
 This is sometimes called intentcasting: you say what you want once, and sellers come to you.
 

@@ -9,7 +9,7 @@ Both run on the public [sandbox](/docs/sandbox): synthetic data, play money, rea
 | | What happens | Docs |
 |---|---|---|
 | **Ping a person** | Tell any AI with the Lake connector "ping stan about coffee on Tuesday". The note reaches stan's phone; stan answers there, and the answer comes back to your AI. | [Reach people through your AI](/docs/reach) |
-| **Shops come to you** | Send your AI a photo of something you need. It lists a want on your house's card; shops' agents send signed offers to your phone; you buy with a tap, and the money is held until it arrives. The most you'd pay stays in your house. | [Shops come to you](/docs/wants) |
+| **Shops come to you** | Send your AI a photo of something you need. It lists a want on your house's card; shops' agents send signed offers to your phone; you buy with a tap, and the money is held until you say it arrived (or a week after the shop says it sent it). The most you'd pay stays in your house. | [Shops come to you](/docs/wants) |
 
 To be reachable yourself, get a house: an invite link from someone on the Lake, a free hosted house for a day, or one on your own machine. [Get a house](/docs/join).
 
@@ -34,7 +34,7 @@ To be reachable yourself, get a house: an invite link from someone on the Lake, 
 
 ## The three laws
 
-1. **Data never moves.** Certified studies and pricing programs run inside the house; only answers leave (a study's as two unreadable shares for two tellers, which publish totals). When you accept an offer, your house sends that one company the documents the offer names. Visitors never hold a key to a pod, and each house reports every study it answers publicly with what it let out ([check it yourself](/docs/verify)).
+1. **Data never moves.** Certified studies and pricing programs run inside the house; only answers leave (a study's as two unreadable shares for two tellers, which publish totals). When you accept an offer, your house sends that one company the documents the offer names. Visitors never hold a key to a pod, and each house tells its Lake node when it answers a study and that no record left, and the node adds those up ([check it yourself](/docs/verify)).
 2. **Agents knock.** No signed, domain-anchored card, no conversation.
 3. **Only humans cut keys.** Agents can use access but never grant, widen or extend it. Every key traces to a human tap or a rule a human wrote.
 

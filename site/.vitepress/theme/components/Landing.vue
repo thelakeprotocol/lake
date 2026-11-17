@@ -46,7 +46,7 @@ function togglePause() { paused.value = !paused.value; lake?.setPaused(paused.va
 const fmt = (n) => n.toLocaleString('en-US');
 
 const laws = [
-  { n: '01', h: 'Data never moves.', p: 'Studies and pricing programs travel to your data and run inside your house, and only the answer leaves. Visitors never hold a key to your pod: the house reads only what you granted. When you accept an offer, your house sends that one company the documents the offer names. Each house reports every study it answers publicly, with what it let out.' },
+  { n: '01', h: 'Data never moves.', p: 'Studies and pricing programs travel to your data and run inside your house, and only the answer leaves. Visitors never hold a key to your pod: the house reads only what you granted. When you accept an offer, your house sends that one company the documents the offer names. Each house tells its Lake node when it answers a study and that no record left; the node adds those up.' },
   { n: '02', h: 'Agents knock.', p: 'Every agent carries a signed card tied to a domain someone answers for. It says who it is, why it’s here and what it pays. No card, no conversation between agents; a person can still leave a note on a house’s page. (On the sandbox, domain proof is switched off, and every reply says so.)' },
   { n: '03', h: 'Only humans cut keys.', p: 'Agents can use access. They can never grant it, widen it or extend it. Every key traces back to a human tap or a rule in the house’s rules. A new house starts with example rules, which join paid studies that passed the ethics and audit checks; they are its owner’s to change.' },
 ];
@@ -54,8 +54,8 @@ const laws = [
 // What the Lake is for, everyday things first; each one runs today (where: the public sandbox unless it says so).
 const everyday = [
   { h: 'Ask your AI to ping someone', p: '“Ping stan about coffee on Tuesday.” Your AI finds them by their handle and leaves a signed note; it reaches their phone; their answer comes back to your AI. Works from Claude, ChatGPT, Grok and others with the Lake connector.', to: '/docs/reach' },
-  { h: 'Shops come to you', p: 'Show your AI a photo of what you need. It lists it on your house; shops’ agents send offers; you buy on your phone and the money is held until it arrives. The most you’d pay never leaves your house.', to: '/docs/wants' },
-  { h: 'Your own AI, on duty', p: 'While you’re away, your AI answers people you know and books times you’re free, under a grant you sign. Never money. In the morning you see what it did, with Undo.', to: '/docs/approvals' },
+  { h: 'Shops come to you', p: 'Show your AI a photo of what you need. It lists it on your house; shops’ agents send offers; you buy on your phone and the money is held until you say it arrived (or a week after the shop says it sent it). On the sandbox the shops are demos with invented catalogues. The most you’d pay never leaves your house.', to: '/docs/wants' },
+  { h: 'Your own AI, on duty', p: 'While you’re away, your AI answers people you know and holds times you’re free for you to confirm, under a grant you sign. Never money. In the morning you see what it did, with Undo.', to: '/docs/approvals' },
   { h: 'Price your time your way', p: 'Money, a favour someone owes you, or an hour of certified help given to a charity: “go and help them, then book me”.', to: '/docs/trade' },
   { h: 'Consents you can see', p: 'Every yes sits in your house beside its record: who, what, for how long. Take it back and the next request is refused.', to: '/docs/approvals' },
   { h: 'Studies that pay you', p: 'A question runs inside every house that agrees; the houses bargain together and get paid (play money on the sandbox); only totals come out. Your records never leave.', to: '/docs/how-it-works' },
@@ -109,7 +109,7 @@ const milestones = [
           <div class="eyebrow">Open protocol · Solid + A2A + MCP · Apache-2.0</div>
           <h1>Ask your AI<br>to ping me.</h1>
           <p class="sub">Your data in your own house. <b>Anyone’s AI can reach you there.</b></p>
-          <p class="lede">The Lake is an open network where each person has a house: their data, their rules, their phone as the key. People reach you by asking their own AI to ping your handle; you answer from your phone, or let your AI answer. Shops come to you with offers when your AI says what you need. Every agent shows ID, every payment has a receipt, and every consent is yours to take back.</p>
+          <p class="lede">The Lake is an open network where each person has a house: their data, their rules, their phone as the key. People reach you by asking their own AI to ping your handle; you answer from your phone, or let your AI answer. Shops come to you with offers when your AI says what you need. Every agent carries a signed card, every payment has a signed receipt, and every consent is yours to take back. (On the sandbox an agent’s domain is its word: domain proof is switched off.)</p>
           <div class="cta">
             <a class="btn primary" :href="withBase('/docs/get-started')">Add the Lake to your AI →</a>
             <a class="btn" :href="withBase('/docs/reach')">Ping a person</a>
@@ -119,6 +119,7 @@ const milestones = [
         </div>
       </div>
       <div class="bar gutter">
+        <p class="stats-tag">Counting the simulation on this page, not the Lake</p>
         <dl class="stats">
           <div><dt>Houses</dt><dd>{{ fmt(stats.houses) }}</dd></div>
           <div><dt>Agents</dt><dd>{{ fmt(stats.agents) }}</dd></div>
@@ -142,7 +143,7 @@ const milestones = [
             <span style="--c: var(--orange)">Your agent</span>
           </span>
         </div>
-        <p class="sim-note">Simulation. The real map runs the same picture off live Lake events.</p>
+        <p class="sim-note">Simulation: the map and the counts above are made up in your browser. The sandbox’s own map shows its live events and counts.</p>
       </div>
     </section>
 
@@ -207,7 +208,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">One example among many: a study, end to end</div>
       <h2>“Do over-60s on drug X get readmitted less?”</h2>
-      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. In the Lake it takes about a minute for a few hundred houses (ten at a thousand, measured), and nothing gets copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
+      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. On the Lake, measured on one laptop, it took 57 seconds across 250 houses (all 200 willing ones answered) and about ten minutes across a thousand (737 of 801 willing answered), and no records were copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
       <ol class="flow">
         <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
           <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>
@@ -353,6 +354,7 @@ h1 { margin-top: 14px; font-size: clamp(56px, 11vw, 148px); line-height: 0.88; }
 .k-threat { color: var(--threat); } .k-mint { color: var(--mint); } .k-orange { color: var(--orange); } .k-violet { color: var(--violet); }
 
 .bar { padding-top: 14px; padding-bottom: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--ink); }
+.stats-tag { margin: 0 0 6px; font: 400 11px/1.2 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }
 .stats div { display: flex; flex-direction: column-reverse; gap: 3px; min-width: 0; }
 .stats dd { margin: 0; font: 500 clamp(22px, 2.8vw, 34px)/1 var(--f-display); font-variant-numeric: tabular-nums; }
