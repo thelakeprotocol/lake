@@ -20,7 +20,7 @@ import { ReplyCache } from './replies.js';
  * once (SPEC §3). The copy must be the same signed envelope from the same card; anything else goes to `handle`, whose
  * guard refuses a reused nonce.
  */
-export function lakeAgentApp(card: AgentCard, handle: (data: LakeData | null) => Promise<LakeData>, me: Identity, opts: { replay?: ReplayGuard; replies?: ReplyCache<LakeData> } = {}): express.Express {
+export function lakeAgentApp(card: AgentCard, handle: (data: LakeData | null) => Promise<LakeData>, me: Identity, opts: { replay?: ReplayGuard; replies?: ReplyCache<LakeData>; /** Is it well beyond answering: 503 when not. */ health?: () => Promise<{ ok: boolean }> } = {}): express.Express {
   const guard = opts.replay;
   const replies = guard ? (opts.replies ?? new ReplyCache<LakeData>()) : null;
   const answer = (data: LakeData | null): Promise<LakeData> => {
@@ -44,7 +44,11 @@ export function lakeAgentApp(card: AgentCard, handle: (data: LakeData | null) =>
   };
   const handler = new DefaultRequestHandler(card, new InMemoryTaskStore(), executor);
   const app = express();
-  app.get('/health', (_req, res) => void res.json({ ok: true }));
+  app.get('/health', async (_req, res) => {
+    if (!opts.health) return void res.json({ ok: true });
+    const h = await opts.health().catch(() => ({ ok: false }));
+    res.status(h.ok ? 200 : 503).json(h);
+  });
   app.use('/.well-known/agent-card.json', agentCardHandler({ agentCardProvider: async () => card }));
   app.use('/a2a', express.json({ limit: '512kb' }), jsonRpcHandler({ requestHandler: handler, userBuilder: UserBuilder.noAuthentication }));
   return app;

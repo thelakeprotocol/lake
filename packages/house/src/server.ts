@@ -57,8 +57,8 @@ function notePage(title: string, body: string): string {
 }
 
 /** Serves the house: A2A at /a2a, its signed card at the well-known path, the owner's approvals app at /owner/, its door page at /. */
-export function createHouseServer(card: AgentCard, id: Identity, keeper: Housekeeper, desk?: OwnerDesk, appDir?: string, door?: DoorPage): express.Express {
-  const app = lakeAgentApp(card, (data) => keeper.handle(data), id, { replay: keeper.replay });
+export function createHouseServer(card: AgentCard, id: Identity, keeper: Housekeeper, desk?: OwnerDesk, appDir?: string, door?: DoorPage, health?: () => Promise<{ ok: boolean }>): express.Express {
+  const app = lakeAgentApp(card, (data) => keeper.handle(data), id, { replay: keeper.replay, health });
   // A person who opens the A2A address itself (run 44: "Cannot GET") is shown the door page too.
   if (door) app.get('/a2a', (req, res) => void (req.accepts(['html', 'json']) === 'html' ? res.type('html').send(doorPage(door)) : res.status(405).json({ error: 'A2A: POST a JSON-RPC message here (the Lake connector does it for you)', page: door.a2a().replace(/\/a2a$/, '') })));
   // Notes over plain web, for an AI that can only open links (SPEC §9.0): GET with a query, or POST JSON. The answer is

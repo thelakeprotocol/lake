@@ -368,9 +368,22 @@ export function MovePage({ backTo }: P) {
 }
 
 // ---- about this house ----
+/** What GET /health says (SPEC §6.1). */
+interface Health { ok: boolean; pod: { ok: boolean; since?: string }; lake: { ok: boolean; nodes: number; registered: number; relay?: number; since?: string }; disk: { ok: boolean; free_mb?: number }; build?: string }
+
+/** Is it well: its pod, its line to the Lake, disk left; a part that's wrong says since when (round 74, someone running their own house). */
+function HealthRows({ h: x }: { h: Health }) {
+  const since = (t?: string) => (t ? ` since ${dayTime(t)}` : '');
+  return h(Section, { title: 'How it is running', cls: 'health' },
+    h(Row, { icon: x.pod.ok ? 'checkmark-circle-outline' : 'alert-circle-outline', tint: x.pod.ok ? 'mint' : 'red', label: x.pod.ok ? 'Its pod answers' : `Its pod isn't answering${since(x.pod.since)}`, sub: x.pod.ok ? 'Where your records and agreements are kept' : 'Nothing can be read or written until it does. Restarting the house restarts it' }),
+    x.lake.nodes ? h(Row, { icon: x.lake.ok ? 'checkmark-circle-outline' : 'alert-circle-outline', tint: x.lake.ok ? 'mint' : 'red', label: x.lake.ok ? 'Connected to the Lake' : `Not connected to the Lake${since(x.lake.since)}`, sub: x.lake.ok ? `${x.lake.registered} of ${x.lake.nodes} node${x.lake.nodes === 1 ? '' : 's'}` : 'Nobody can reach you until it is: it keeps trying by itself' }) : null,
+    x.disk.free_mb !== undefined ? h(Row, { icon: x.disk.ok ? 'checkmark-circle-outline' : 'alert-circle-outline', tint: x.disk.ok ? 'mint' : 'red', label: x.disk.ok ? 'Room on its disk' : 'Its disk is nearly full', sub: `${x.disk.free_mb >= 1024 ? `${(x.disk.free_mb / 1024).toFixed(1)} GB` : `${x.disk.free_mb} MB`} free${x.build ? ` · build ${x.build.slice(0, 7)}` : ''}` }) : null);
+}
+
 export function AboutPage({ backTo }: P) {
   const o = useHouse<{ record: { ok: boolean; why?: string }; claims: number; holds: string[]; relayed: boolean; host?: { by: string; tells?: boolean }; person?: { stamped: boolean; by?: string; person?: string; checker?: boolean } }>({ kind: 'panel.overview', tz_offset: new Date().getTimezoneOffset() });
   const feed = useHouse<{ at: string; kind: string; text: string }[]>({ kind: 'panel.activity' });
+  const well = useHouse<Health>({ kind: 'panel.health' });
   const [tally, setTally] = useState(''), [pid, setPid] = useState('');
   const [all, setAll] = useState(false);
   if (!o.data) return page('About this house', backTo, h(Failed, { error: o.error }));
@@ -385,6 +398,7 @@ export function AboutPage({ backTo }: P) {
       o.data.host ? h(Row, { icon: 'server-outline', tint: 'amber', label: 'Runs on a server someone else runs', sub: o.data.host.by, cls: 'host-row', below: h('p', { class: 'muted-line' }, `Whoever runs it could read what your house keeps${o.data.host.tells ? ', and hears when someone claims a house, pairs a phone or uses an invite, and when an AI app signs in (only that it happened)' : ''}. For data only you can read, run your own house.`) })
         : h(Row, { icon: 'server-outline', label: 'Runs where you started it', cls: 'host-row', below: h('p', { class: 'muted-line' }, 'What it keeps stays on that machine, readable by whoever can open it.') }),
       p ? h(Row, { icon: 'finger-print-outline', tint: p.stamped ? 'mint' : 'muted', label: p.stamped ? 'One person, one house: stamped' : 'One person, one house', sub: p.stamped ? `By ${p.by ?? 'a person checker'}` : p.checker ? 'A stamp counts you once in pledges' : 'No person checker set', below: !p.stamped && p.checker ? h(Btn, { label: 'Get a person stamp', size: 'small', run: async () => must({ kind: 'panel.person.request', consent: await signEnvelope({ kind: 'personhood.consent', house: state.webId }, key, state.webId || 'owner') }) }) : undefined }) : null),
+    well.data && !('error' in well.data) ? h(HealthRows, { h: well.data }) : null,
     state.leaseUntil ? h(Section, { title: 'Sandbox lease' }, h(Row, { icon: 'hourglass-outline', tint: 'amber', label: `Yours until ${new Date(state.leaseUntil).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` }),
       h('div', { class: 'pad' }, h(Btn, { label: 'Hand it back now', fill: 'outline', color: 'danger', expand: 'block', run: async () => { await call({ kind: 'release' }); location.reload(); }, ask: { header: 'Hand this house back?', sub: 'Every key is revoked and the rules reset.', button: 'Hand it back' } }))) : null,
     h('h3', { class: 'section-h' }, 'Recent at your door'),

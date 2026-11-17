@@ -1795,6 +1795,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('About this house');
     // A house its owner runs says so, and who could read what it keeps (round 39).
     await page.locator('ion-item.host-row', { hasText: 'Runs where you started it' }).getByText('readable by whoever can open it').waitFor({ timeout: 10_000 });
+    // How it is running: the same as GET /health, which a container's healthcheck reads (round 74).
+    const well = await (await fetch(`${house}/health`)).json() as { ok: boolean; lake: { ok: boolean } };
+    expect(well).toMatchObject({ pod: { ok: true }, lake: { ok: true }, disk: { ok: true, free_mb: expect.any(Number) } });
+    await page.locator('.health ion-item', { hasText: 'Its pod answers' }).waitFor({ timeout: 10_000 });
+    await page.locator('.health ion-item', { hasText: 'Connected to the Lake' }).waitFor({ timeout: 10_000 });
     await page.locator('ion-accordion', { hasText: 'Sign a pledge from your house' }).locator('ion-item[slot="header"]').click();
     await page.getByPlaceholder(/tally address/).fill(`${specialists}/tally`);
     await page.getByPlaceholder('pledge id').fill('street-circle');

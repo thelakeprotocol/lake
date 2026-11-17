@@ -27,4 +27,19 @@ describe('a house behind a relay (a connection that died silently left it unreac
     expect(live.hellos()).toBe(1);
     a.close(); b.close(); dead.stop(); live.stop();
   });
+
+  it('says whether its line is up, and since when (the health of the house)', async () => {
+    const id = await generateIdentity();
+    const live = await node(true);
+    const r = connectRelay({ nodeUrl: live.url, card: {} as ReturnType<typeof buildCard>, id, webId: 'https://house.example/profile#me', localPort: 1, beat: 60 });
+    expect(r.state().up).toBe(false);
+    await r.connected;
+    const up = r.state();
+    expect(up.up).toBe(true);
+    live.stop();
+    await until(() => !r.state().up);
+    expect(r.state().up).toBe(false);
+    expect(r.state().since).toBeGreaterThanOrEqual(up.since);
+    r.close();
+  });
 });

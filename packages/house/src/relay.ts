@@ -14,6 +14,8 @@ export function connectRelay(o: { nodeUrl: string; card: AgentCard; id: Identity
   let ready: () => void;
   const connected = new Promise<void>((ok) => (ready = ok));
   const url = `${o.nodeUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/relay`;
+  // Up from the node's "ready" to the line closing: what the house's health says (round 74, someone running their own house).
+  let up = false, since = Date.now();
 
   const open = () => {
     const sock = (ws = new WebSocket(url));
@@ -35,6 +37,7 @@ export function connectRelay(o: { nodeUrl: string; card: AgentCard; id: Identity
     ws.on('message', async (raw) => {
       const m = JSON.parse(String(raw)) as { type: string; id?: string; method?: string; path?: string; headers?: Record<string, string>; body?: string };
       if (m.type === 'ready') {
+        if (!up) { up = true; since = Date.now(); }
         o.log?.(`reachable through the relay at ${o.nodeUrl}`);
         ready();
         return;
@@ -49,10 +52,10 @@ export function connectRelay(o: { nodeUrl: string; card: AgentCard; id: Identity
         ws!.send(JSON.stringify({ type: 'res', id: m.id, status: 502, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ error: (e as Error).message }) }));
       }
     });
-    sock.on('close', () => clearInterval(mine));
+    sock.on('close', () => { clearInterval(mine); if (up) { up = false; since = Date.now(); } });
     ws.on('close', () => setTimeout(open, (delay = Math.min(delay * 2, 15_000))));
     ws.on('error', () => {});
   };
   open();
-  return { connected, close: () => { clearInterval(pulse); ws?.removeAllListeners('close'); ws?.close(); } };
+  return { connected, state: () => ({ up, since }), close: () => { clearInterval(pulse); ws?.removeAllListeners('close'); ws?.close(); } };
 }

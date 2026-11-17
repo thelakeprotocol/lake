@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat, statfs, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { houseRunner } from './duty-runner.js';
@@ -140,6 +140,32 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     };
   };
   let link: LakeLinks | null = null;
+  let relays: ReturnType<typeof connectRelay>[] = [];
+  // Is it well, beyond answering at all (round 74, someone running their own house: the healthcheck fetched the card from
+  // memory, so a pod that stopped answering, a line to the Lake that dropped or a full disk all passed). The pod is asked at
+  // most every half minute; each part says since when it has been wrong.
+  const podSeen = { ok: true, at: 0, since: Date.now() };
+  const health = async () => {
+    if (Date.now() - podSeen.at > 30_000) {
+      const ok = await owner.fetch(owner.podRoot, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).then((r) => r.status < 500, () => false);
+      if (ok !== podSeen.ok) podSeen.since = Date.now();
+      podSeen.ok = ok; podSeen.at = Date.now();
+    }
+    const fs = await statfs(o.dataDir).catch(() => null);
+    const freeMb = fs ? Math.floor((fs.bavail * fs.bsize) / 1_048_576) : null;
+    const lines = relays.map((r) => r.state());
+    const lake = { nodes: nodes.length, registered: link ? link.links.filter((l) => l.id).length : 0, ...(relays.length ? { relay: lines.filter((s) => s.up).length } : {}) };
+    const lakeOk = !o.lakeUrl || !nodes.length || (lake.registered > 0 && (!relays.length || lake.relay! > 0));
+    const lakeSince = relays.length && !lake.relay ? Math.max(...lines.map((s) => s.since)) : undefined;
+    const diskOk = freeMb === null || freeMb >= 200;
+    return {
+      ok: podSeen.ok && lakeOk && diskOk,
+      pod: { ok: podSeen.ok, ...(podSeen.ok ? {} : { since: new Date(podSeen.since).toISOString() }) },
+      lake: { ok: lakeOk, ...lake, ...(lakeSince ? { since: new Date(lakeSince).toISOString() } : {}) },
+      disk: { ok: diskOk, ...(freeMb !== null ? { free_mb: freeMb } : {}) },
+      ...(process.env.LAKE_VERSION ? { build: process.env.LAKE_VERSION } : {}),
+    };
+  };
   // What happened at this door, for the owner's control panel. Kept in memory; the pod keeps the agreements and audit log.
   // Each entry numbered, so an assistant polling for news asks only for what came after the last one it saw.
   const activity: { seq: number; at: string; kind: string; text: string; subject?: string; data?: LakeEvent['data'] }[] = [];
@@ -311,7 +337,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
   // A record written again (withdrawn, or by a study that ran) is read again at the next look.
   filed.onChange((path) => { if (path.endsWith('.consent.jsonld')) consentCache.delete(path); });
-  const panel = panelFor({ o, owner, filed, id, actor, activity, note, card, recard, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
+  const panel = panelFor({ o, owner, filed, id, actor, activity, note, card, recard, health, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
   // Looked at a little after start, so the first look at Who has access has a fresh index.
   setTimeout(() => void consentIndex.relist().catch(() => {}), 20_000).unref();
   // The owner's AI on duty, run here when they choose (duty-runner.ts): as awake as the house.
@@ -470,14 +496,15 @@ export async function startHouse(o: HouseOptions): Promise<House> {
 
   // Its door page: the Lake's connector is at the Lake's own address (a hosted house is one of its tenants), or as configured.
   const connector = o.connectorUrl ?? (o.publicUrl.includes('/t/') ? `${o.publicUrl.split('/t/')[0]}/mcp` : undefined);
-  const app = createHouseServer(card, id, keeper, desk, approvalsApp(), { door: () => keeper.rules.door, a2a: () => card.supportedInterfaces?.[0]?.url ?? `${o.publicUrl}/a2a`, connector, joinUrl: o.joinUrl ?? 'https://lake.doneinfifty.com/docs/join' });
+  // GET /health, for whoever runs it (a container's healthcheck, a monitor): booleans, counts and times only.
+  const app = createHouseServer(card, id, keeper, desk, approvalsApp(), { door: () => keeper.rules.door, a2a: () => card.supportedInterfaces?.[0]?.url ?? `${o.publicUrl}/a2a`, connector, joinUrl: o.joinUrl ?? 'https://lake.doneinfifty.com/docs/join' }, health);
   return {
     name: o.name, card, keeper, desk, app,
     get link() { return link; },
     join: async () => {
       if (relayed && o.relay) {
         // Open the way in first: the node checks our card through it when we register.
-        const relays = nodes.map((n) => connectRelay({ nodeUrl: n, card, id, webId: owner.webId, localPort: o.relay!.localPort, log: say }));
+        relays = nodes.map((n) => connectRelay({ nodeUrl: n, card, id, webId: owner.webId, localPort: o.relay!.localPort, log: say }));
         await Promise.race([Promise.all(relays.map((r) => r.connected)), new Promise((ok) => setTimeout(ok, 15_000))]);
       }
       if (o.lakeUrl) {
@@ -581,7 +608,7 @@ function panelFor(x: {
   note: (kind: string, text: string) => void;
   card: AgentCard; recard: (r: Rules) => Promise<void>; desk: () => OwnerDesk; keeper: () => Housekeeper; signals: () => { reputation: Record<string, number> };
   records: { pack: LakePack; paths: RecordPaths }[];
-  trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null;
+  trustFrom: (r: Rules) => Trust; nodes: string[]; relayed: string[] | null; health: () => Promise<unknown>;
   consentCache: Map<string, Record<string, unknown>>;
   consentIndex: { listedAt: number; relist: () => Promise<void> };
   wants: Wants;
@@ -880,6 +907,7 @@ function panelFor(x: {
   let recordCheck: { at: number; claims: Awaited<ReturnType<ReturnType<typeof x.keeper>['allClaims']>>; chain: Awaited<ReturnType<ReturnType<typeof x.keeper>['verifyOwnRecord']>> } | null = null;
   return {
     forgetReceipt: (path: string) => void receiptCache.delete(path),
+    health: () => x.health(),
     async overview(tzOffset?: number) {
       // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
       const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;
