@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type Browser, type Page } from 'playwright-core';
+import { generateIdentity } from '../packages/core/src/index.js';
+import { ask, makeVisitor } from '../packages/visitor/src/knock.js';
 import { podFolder, seedBigHouse } from './big-house.js';
 
 // Every page of the owner's app on a house as big as a real one, at phone size, light and dark: each shows real content
@@ -49,7 +51,16 @@ beforeAll(async () => {
   console.log(`seeded ${n} files in ${Date.now() - t} ms`);
   for (const f of ['pod-index.json', 'money-cache.json', 'consent-index.json']) await rm(join(dir, 'house', 'big', f), { force: true }).catch(() => {});
   house = await start(houseArgs, /joined the Lake/);
+  // People who wrote: sixty notes from thirty senders, through the door as real notes (the People list, Today's counts).
+  const senders = await Promise.all(Array.from({ length: 30 }, async (_, i) => makeVisitor(await generateIdentity(), `writer-${i}.example`)));
+  for (let r = 0; r < 2; r++) await Promise.all(senders.map((v, i) => ask(`${site}/a2a`, v, { kind: 'note', text: `Hello from writer ${i}, note ${r + 1}: could we talk about the garden this weekend?` }).catch(() => {})));
   browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/usr/bin/google-chrome' });
+  // One phone, paired once, for every test here.
+  page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 })).newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${site}/owner/`);
+  await page.getByRole('button', { name: 'Use this phone' }).click();
+  await page.locator('ion-tab-button').first().waitFor({ timeout: 30_000 });
 }, 600_000);
 
 afterAll(async () => {
@@ -76,17 +87,13 @@ const PAGES: [string, string][] = [['#inbox', 'Today'], ['#chats', 'People'], ['
 describe('the owner\'s app on a big house, at phone size', () => {
   for (const scheme of ['dark', 'light'] as const) {
     it(`every page shows real content within a few seconds (${scheme}), and opens at once the second time`, async () => {
-      // One phone, paired once; the second run switches it to light.
-      if (!page) { const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 }); page = await ctx.newPage(); }
       await page.emulateMedia({ colorScheme: scheme });
-      if (scheme === 'dark') page.on('pageerror', (e) => errors.push(e.message));
       // Which looks are still on their way when a page doesn't settle, and how long each took.
       const waiting = new Map<unknown, { kind: string; at: number }>(), took: string[] = [];
       page.on('request', (r) => { if (r.url().endsWith('/owner/api')) { try { waiting.set(r, { kind: JSON.parse(r.postData() ?? '{}').payload?.kind ?? '?', at: Date.now() }); } catch { /* not ours */ } } });
       page.on('requestfinished', (r) => { const w = waiting.get(r); if (w) { took.push(`${w.kind} ${Date.now() - w.at}ms`); waiting.delete(r); } });
       const still = () => [...waiting.values()].map((w) => `${w.kind} ${Date.now() - w.at}ms`).join(', ');
       await page.goto(`${site}/owner/`);
-      if (scheme === 'dark') await page.getByRole('button', { name: 'Use this phone' }).click();
       await page.locator('ion-tab-button').first().waitFor({ timeout: 30_000 });
       const first: Record<string, number> = {}, again: Record<string, number> = {};
       for (const [hash, name] of PAGES) {
@@ -107,4 +114,56 @@ describe('the owner\'s app on a big house, at phone size', () => {
       expect(errors).toEqual([]);
     }, 400_000);
   }
+
+  it('taps every tile on Today and every row under You: each opens its own page, settled, and Money says what Today says', async () => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    const top = () => page.locator('.ion-page:not(.ion-page-hidden)').last();
+    const go = async (h: string) => { await page.evaluate((x) => { location.hash = x; }, h); await page.waitForTimeout(500); await settle(page, 10_000); };
+    // Today's tiles, each to the page about it.
+    await go('#inbox');
+    const tiles = await top().locator('.handled-tile').allTextContents();
+    expect(tiles.length).toBeGreaterThan(0);
+    const SUBJECT: [RegExp, string][] = [[/came in/, '#money'], [/stud/, '#mydata'], [/request/, '#access'], [/fake|turned away/, '#about'], [/door note/, '#chats']];
+    let moneyTile = '';
+    for (const t of tiles) {
+      await go('#inbox');
+      await top().locator('.handled-tile', { hasText: t.slice(0, 20) }).first().click();
+      await page.waitForTimeout(500);
+      const s = await settle(page, 10_000);
+      expect(s.done, `the tile "${t}" opened a page still loading`).toBe(true);
+      const want = SUBJECT.find(([re]) => re.test(t));
+      if (want) expect(page.url(), `the tile "${t}"`).toContain(want[1]);
+      if (/came in today/.test(t)) moneyTile = /\$[\d,.]+|A\$[\d,.]+/.exec(t)?.[0] ?? '';
+    }
+    // The same money on Money as on Today (18 Nov: "$420 came in" on Today, "$4129 Earned" on Money, neither saying which).
+    // Twenty of the seeded payments are from today: the tile is there, and Money says the same.
+    expect(moneyTile, `no "came in today" tile among: ${tiles.join(' | ')}`).not.toBe('');
+    {
+      await go('#money');
+      expect(await top().locator('.stat-today').textContent()).toContain(moneyTile);
+    }
+    // Every row under You and the pages under it opens somewhere, settled, and isn't wider than the phone.
+    for (const hub of ['#you', '#mydata', '#money', '#phone', '#door']) {
+      await go(hub);
+      const rows = (await top().locator('ion-item.lake-row, ion-item.you-row, .you-row').evaluateAll((es) => es.filter((e) => (e as HTMLElement & { button?: boolean }).button || e.classList.contains('you-row')).map((e) => (e.querySelector('h3') ?? e).textContent!.trim()))).filter(Boolean);
+      for (const r of rows) {
+        await go(hub);
+        const before = page.url(), len = () => top().evaluate((e) => (e as HTMLElement).innerText.length), was = await len();
+        await top().locator('ion-item, .you-row', { hasText: r }).first().click();
+        await page.waitForTimeout(600);
+        const s = await settle(page, 10_000);
+        // A page, a sheet, or something opened in place ("Show all", a row's details).
+        expect(page.url() !== before || await page.locator('ion-modal.show-modal').count() > 0 || (await len()) !== was, `${hub} → "${r}" opened nothing`).toBe(true);
+        expect(s.done, `${hub} → "${r}" still loading after 10 s`).toBe(true);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${hub} → "${r}" wider than the phone`).toBe(true);
+        if (await page.locator('ion-modal.show-modal').count()) await page.keyboard.press('Escape');
+      }
+    }
+    // People: the list, and a chat from it.
+    await go('#chats');
+    await top().locator('ion-item').filter({ hasText: /writer|Hello/ }).first().click();
+    await page.waitForTimeout(600);
+    expect((await settle(page, 10_000)).done).toBe(true);
+    expect(errors).toEqual([]);
+  }, 400_000);
 });
