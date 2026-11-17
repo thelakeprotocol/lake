@@ -166,4 +166,35 @@ describe('the owner\'s app on a big house, at phone size', () => {
     expect((await settle(page, 10_000)).done).toBe(true);
     expect(errors).toEqual([]);
   }, 400_000);
+
+  it('takes a yes back, then every yes, within seconds on a big house, and the page says so (round 85, a privacy-minded owner)', async () => {
+    const top = () => page.locator('.ion-page:not(.ion-page-hidden)').last();
+    const confirm = async (name: string) => { await page.locator('ion-action-sheet').getByRole('button', { name, exact: true }).click(); };
+    const nowCount = async () => Number(await top().locator('.stat.mint b').first().textContent());
+    await page.evaluate(() => { location.hash = '#access'; });
+    await settle(page, 10_000);
+    const before = await nowCount();
+    expect(before, 'the seeded house has yeses from today').toBeGreaterThan(1);
+    // One agent's yeses.
+    const row = top().locator('ion-item.access-row', { hasText: 'Take it back' }).first();
+    const who = (await row.locator('h3').textContent())!.trim();
+    let t = Date.now();
+    await row.locator('ion-button', { hasText: 'Take it back' }).first().click();
+    await confirm('Take back');
+    await page.locator('ion-toast', { hasText: 'Taken back' }).waitFor({ timeout: 8000 });
+    const one = Date.now() - t;
+    await expect.poll(nowCount, { timeout: 8000 }).toBe(before - 1);
+    expect(await top().locator('ion-item.access-row', { hasText: who }).filter({ hasText: 'Take it back' }).count(), `${who} still shows Take it back`).toBe(0);
+    // Every yes.
+    t = Date.now();
+    await page.locator('ion-button', { hasText: 'Take everything back' }).last().click();
+    await confirm('Take everything back');
+    await page.locator('ion-toast', { hasText: 'Taken back' }).last().waitFor({ timeout: 15_000 });
+    const all = Date.now() - t;
+    await expect.poll(nowCount, { timeout: 10_000 }).toBe(0);
+    console.log(`took back one agent's yeses in ${one} ms, every yes in ${all} ms`);
+    expect(one).toBeLessThan(6000);
+    expect(all).toBeLessThan(10_000);
+    expect(errors).toEqual([]);
+  }, 120_000);
 });

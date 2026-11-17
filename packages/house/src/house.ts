@@ -356,9 +356,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     writeGrant: (gid, jws) => put(owner, `agreements/${gid}.grant.jwt`, jws, 'text/plain'),
     writeConsent: async (gid, record) => { await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json'); consentCache.set(`agreements/${gid}.consent.jsonld`, record as Record<string, unknown>); saveIndex(); },
     withdrawConsent: async (gid, at) => {
-      const r = await owner.fetch(`${owner.podRoot}agreements/${gid}.consent.jsonld`).catch(() => null);
-      if (!r?.ok) return;
-      const record = withdrawConsent(await r.json(), at);
+      // Read from disk for a pod this house runs (filed.read), like every other read of the agreements folder.
+      const t = await filed.read(`agreements/${gid}.consent.jsonld`);
+      let rec: Record<string, unknown> | null = null;
+      try { rec = t ? JSON.parse(t) as Record<string, unknown> : null; } catch { rec = null; }
+      if (!rec) return;
+      const record = withdrawConsent(rec as Parameters<typeof withdrawConsent>[0], at);
       await put(owner, `agreements/${gid}.consent.jsonld`, JSON.stringify(record, null, 1), 'application/ld+json');
       consentCache.set(`agreements/${gid}.consent.jsonld`, record);
       saveIndex();
@@ -925,6 +928,7 @@ function panelFor(x: {
   return {
     forgetReceipt: (path: string) => void receiptCache.delete(path),
     health: () => x.health(true),
+    activeConsents: async () => (await consents()).filter((c) => c.status === 'active').map((c) => ({ id: c.id, visitorWebId: c.visitorWebId })),
     async overview(tzOffset?: number) {
       // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
       const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;

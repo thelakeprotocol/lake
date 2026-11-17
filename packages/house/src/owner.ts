@@ -58,6 +58,8 @@ export interface PanelProvider {
   health?(): Promise<unknown>;
   /** What anyone can read about this house without a key: its card and its page. */
   seen?(): unknown;
+  /** Every yes still live, from the consent records in the pod (not only those given since the house started). */
+  activeConsents?(): Promise<{ id: string; visitorWebId: string }[]>;
   /** Standing yeses: added after the owner's own declines, listed, removed (each a change to the owner's rules). */
   addStanding?(s: { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor: { amount: number; currency: string } }): Promise<{ ok: true } | { ok: false; error: string }>;
   removeStanding?(jkt: string, purpose?: string): Promise<{ ok: true; removed: number } | { ok: false; error: string }>;
@@ -1116,6 +1118,12 @@ export class OwnerDesk {
   async mute(key: string) {
     if (!key) return;
     this.muted.add(key);
+    // Blocked is cut off: its live yeses are taken back too (round 85: a blocked agent kept reading with a key it held).
+    const who = new Set(this.notes.filter((x) => x.from.key === key).map((x) => x.from.webId));
+    if (who.size) {
+      const theirs = [...[...this.grants.values()].filter((g) => !g.revoked && who.has(g.visitor)).map((g) => g.id), ...(await this.o.panel?.activeConsents?.().catch(() => []) ?? []).filter((c) => who.has(c.visitorWebId)).map((c) => c.id)];
+      if (theirs.length) await this.revoke([...new Set(theirs)]);
+    }
     this.endTasksWith(key, 'You blocked them.');
     this.endTasksWith(`via:${key}`, 'You blocked them.');
     // Its notes leave the owner's list, and say so to their sender ("no such note" made a sender think it never arrived).
@@ -1602,26 +1610,24 @@ export class OwnerDesk {
     await this.o.saveRevoked([...this.revokedIds]);
   }
 
-  async revoke(which: 'all' | string): Promise<number> {
-    const ids = which === 'all' ? [...this.grants.values()].filter((g) => !g.revoked).map((g) => g.id) : [which];
+  async revoke(which: 'all' | string | string[]): Promise<number> {
+    // Every yes still live, from the records in the pod too: the keys in memory are only those given since the house
+    // started (round 85: after a restart "Take everything back" said "Taken back" and every older yes stayed live).
+    const live = which === 'all' ? (await this.o.panel?.activeConsents?.().catch(() => []) ?? []).map((c) => c.id) : [];
+    const asked = which === 'all' ? [...new Set([...[...this.grants.values()].filter((g) => !g.revoked).map((g) => g.id), ...live])] : Array.isArray(which) ? which : [which];
     // "Take everything back" takes the AI on duty off too.
     if (which === 'all') await this.o.dutyRunner?.stop();
-    let n = 0;
-    const at = new Date().toISOString();
-    const withdrawn: Promise<void>[] = [];
-    for (const id of ids) {
-      const g = this.grants.get(id);
-      // The consent record says it was taken back, and when. A key cut before a restart isn't in memory any more, but
-      // its record is still in the pod, and still the owner's to withdraw (the panel's Consents list offers it).
-      if (g ? !g.revoked : !this.revokedIds.has(id)) withdrawn.push(this.o.withdrawConsent?.(id, at).catch(() => {}) ?? Promise.resolve());
-      if (g && !g.revoked) { g.revoked = true; n++; }
-      this.revokedIds.add(id);
-    }
-    // Awaited, so the panel that asked sees the record withdrawn when it looks again.
-    await Promise.all(withdrawn);
+    const ids = asked.filter((id) => { const g = this.grants.get(id); return g ? !g.revoked : !this.revokedIds.has(id); });
+    for (const id of ids) { const g = this.grants.get(id); if (g) g.revoked = true; this.revokedIds.add(id); }
+    // Refused at the door from this moment: the list is saved before the records are rewritten.
     await this.o.saveRevoked([...this.revokedIds]);
-    if (n) this.o.emit(makeEvent('grant.revoked', this.o.actor, undefined, { count: n }));
-    return n;
+    // Each consent record says it was taken back, and when, 32 at a time: a few are awaited, so the page that asked sees
+    // them withdrawn; thousands finish in the background (the door refuses them already).
+    const at = new Date().toISOString();
+    const write = async () => { for (let i = 0; i < ids.length; i += 32) await Promise.all(ids.slice(i, i + 32).map((id) => this.o.withdrawConsent?.(id, at).catch(() => {}) ?? Promise.resolve())); };
+    if (ids.length <= 32) await write(); else void write();
+    if (ids.length) this.o.emit(makeEvent('grant.revoked', this.o.actor, undefined, { count: ids.length }));
+    return ids.length;
   }
 
   /**
@@ -2854,7 +2860,7 @@ export class OwnerDesk {
       }
       if (p.kind === 'list') return void res.json(this.view(signer !== this.ownerJwk?.kid ? signer : false, !!assistant?.duty && !this.isRevoked(assistant.duty.statusId)));
       if (p.kind === 'answer') return void res.json(await this.answer(p.request ?? '', p.answer ?? '', p.grant));
-      if (p.kind === 'revoke') return void res.json({ revoked: await this.revoke(p.revoke ?? 'all') });
+      if (p.kind === 'revoke') { const r = (p as { revoke?: unknown }).revoke; return void res.json({ revoked: await this.revoke(Array.isArray(r) ? r.map(String).slice(0, 5000) : typeof r === 'string' ? r : 'all') }); }
       if (p.kind === 'release' && this.o.leaseHours) {
         await this.release();
         return void res.json({ released: true });

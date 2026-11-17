@@ -637,6 +637,25 @@ describe('what an attacker tried (round 16)', () => {
   const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, url: `https://${key}.example/a2a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
+  it('takes back every live yes, those in the pod too, and Block takes back the blocked sender\'s (round 85)', async () => {
+    // Two yeses live in the pod from before the house started (not in memory), one for dee, one for kim.
+    const withdrawn: string[] = [];
+    const live = [{ id: 'c-dee', visitorWebId: 'https://dee.example/#a' }, { id: 'c-kim', visitorWebId: 'https://kim.example/#a' }];
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), activeConsents: async () => live.filter((c) => !withdrawn.includes(c.id)) }, withdrawConsent: async (id: string) => { withdrawn.push(id); } });
+    // Block dee: dee's yes goes, kim's stays.
+    h.desk.addNote({ from: from('dee'), text: 'Can you lend me a ladder?' });
+    await h.desk.mute(from('dee').key);
+    expect(h.desk.isRevoked('c-dee')).toBe(true);
+    expect(h.desk.isRevoked('c-kim')).toBe(false);
+    // Take everything back: kim's too, though the house only read it from the pod.
+    expect(await h.owner({ kind: 'revoke', revoke: 'all' })).toEqual({ revoked: 1 });
+    expect(h.desk.isRevoked('c-kim')).toBe(true);
+    expect(withdrawn.sort()).toEqual(['c-dee', 'c-kim']);
+    // One agent's several yeses in one call.
+    expect(await h.owner({ kind: 'revoke', revoke: ['c-x', 'c-y'] })).toEqual({ revoked: 2 });
+    h.close();
+  });
+
   it('a want shared by link: only the owner makes it, it shows no limit, replies land on the want and stay from the AI (16 Nov)', async () => {
     const want = { '@type': 'Demand', id: 'w-0123abcd', name: 'Babysitter, Friday evening', description: 'Two kids, 6 and 9', itemOffered: { '@type': 'Product', name: 'Babysitter', additionalProperty: [{ '@type': 'PropertyValue', name: 'When', value: 'Friday 6-11pm' }] }, areaServed: 'AU-QLD', availabilityEnds: new Date(Date.now() + 10 * 86_400_000).toISOString() };
     const rec = { want, limit: { amount: 80, currency: 'AUD' }, offers: [] as unknown[], at: new Date().toISOString() } as Record<string, unknown>;
