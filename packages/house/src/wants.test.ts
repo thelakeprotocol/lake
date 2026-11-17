@@ -95,7 +95,9 @@ describe('a shop hears when its offer ended unbought (SPEC §6.8 want.ended)', (
     w.find('w1')!.bought = 'o1'; w.find('w1')!.offers[0]!.state = 'paid';
     const told = w.endedUntold();
     expect(told).toEqual([{ url: 'https://tapworks.example/a2a', payload: { kind: 'want.ended', want: 'w1', offer: 'o2', cart: 'cart-o2', state: 'not_bought', want_open: false, at: expect.any(String) } }]);
-    expect(JSON.stringify(told)).not.toMatch(/washer|o1|34/);
+    // Nothing of the one bought (its shop, its offer, its price); the time is left out, as 10:34 holds a 34.
+    const { at: _at, ...said } = told[0]!.payload;
+    expect(JSON.stringify(said)).not.toMatch(/washer|"o1"|34/);
     expect(w.endedUntold()).toEqual([]);
     await w.close('w2');
     expect(w.endedUntold()).toMatchObject([{ payload: { offer: 'o3', state: 'closed' } }]);
