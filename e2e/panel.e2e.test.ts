@@ -248,11 +248,14 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await page.locator('ion-tab-button ion-label').allTextContents()).toEqual(TABS);
     await onTab('Today');
     await page.getByRole('heading', { name: 'Welcome to your house' }).waitFor();
+    // On the sandbox it says so first, and each promise says its limit (round 84).
+    await page.getByText('This is the sandbox: made-up data and play money, real signatures.').waitFor();
+    await page.getByText('A yes can be taken back; what already left is listed under My data').waitFor();
     await tidy();
   });
 
   it('opens the door by picking a handle on Today, says it saved, and the door page says how to knock', async () => {
-    await page.getByRole('button', { name: 'Pick your handle' }).click();
+    await page.getByRole('button', { name: 'Choose your name here' }).click();
     await page.getByLabel('Your handle').fill('Panel Owner');
     expect(await page.getByLabel('Your handle').inputValue()).toBe('panelowner');
     await page.getByRole('button', { name: /^Save/ }).click();

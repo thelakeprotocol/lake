@@ -972,7 +972,8 @@ function panelFor(x: {
     },
     door() {
       const d = x.keeper().rules.door;
-      return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), ...(d?.handle ? { handle: d.handle } : {}), ...(d?.note ? { note: d.note } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
+      // On a sandbox the first screen says so: made-up data and play money (round 84: a first-time owner couldn't tell).
+      return { open: !!d, ...(x.o.sandbox ? { sandbox: true } : {}), ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), ...(d?.handle ? { handle: d.handle } : {}), ...(d?.note ? { note: d.note } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };
     },
     // Written into the owner's rules (comments and all kept): the door is one of their settings, saved in their pod.
     // When the owner is free to meet, in their rules like the door (null takes it out).

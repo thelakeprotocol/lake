@@ -55,6 +55,8 @@ function ChatRow({ c }: { c: Chat }) {
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
       c.trust === 'lookalike' ? h('div', { class: 'row-via careful' }, `Says they're ${shortName(c.twin?.name ?? c.name)}, with a different key`) : null,
       c.toAi ? h('div', { class: 'row-via to-ai' }, h('ion-icon', { name: 'sparkles-outline' }), c.via) : null,
+      // What a new sender is, before it's opened (round 84: "Visitor from early.example: a person, a bot, spam?").
+      !c.toAi && c.trust === 'new' ? h('div', { class: 'row-via' }, c.via) : null,
       h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : ai ? `${ai}: ` : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));
 }
 
@@ -239,7 +241,7 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
       mute));
   return h('div', { class: 'newstrip', role: 'note' },
     c.replyTo ? h('p', { class: 'reach' }, `Left ${c.replyTo.kind === 'email' ? 'an email address' : 'a phone number'} for your answer: `, h(ReachLinks, { r: c.replyTo })) : null,
-    h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : `New.${c.doorNote ? ` Got your door note ${when(c.doorNote)}.` : ''} Their message is signed; the name is what their AI calls them.`),
+    h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : `New: their AI wrote this for them.${c.doorNote ? ` They got your door note ${when(c.doorNote)}.` : ''} The message is signed, so it's the same sender each time; the name is only what their AI says, and nobody has checked it. They see nothing in your house. Type below and your answer goes to their AI, which passes it on; or Block.`),
     mute ? h('div', { class: 'newstrip-acts' }, mute) : null);
 }
 
@@ -403,10 +405,12 @@ export function WelcomeCard({ door }: { door?: DoorState }) {
   return h('ion-card', { class: 'lake-card hero-card welcome-card' }, h('ion-card-content', {},
     h('h2', {}, 'Welcome to your house'),
     h('p', {}, 'Your own place online. People\'s AIs reach you here, and companies ask before they use anything of yours.'),
+    door.sandbox ? h('p', { class: 'muted-line sandbox-line' }, 'This is the sandbox: made-up data and play money, real signatures.') : null,
+    // Each promise with its limit (round 84: "You can take anything back" read as more than it is).
     h('ul', { class: 'welcome-points' },
-      h('li', {}, h('ion-icon', { name: 'hand-left-outline' }), 'You decide what\'s shared'),
-      h('li', {}, h('ion-icon', { name: 'eye-off-outline' }), 'You can take anything back'),
-      h('li', {}, h('ion-icon', { name: 'shield-checkmark-outline' }), 'No AI can overrule your rules')),
-    h('ion-button', { expand: 'block', onClick: () => push('#door') }, 'Pick your handle'),
-    h('p', { class: 'muted-line' }, 'Then anyone can ask their AI to ping you.')));
+      h('li', {}, h('ion-icon', { name: 'hand-left-outline' }), 'Nothing of yours goes out unless your rules or you say yes'),
+      h('li', {}, h('ion-icon', { name: 'eye-off-outline' }), 'A yes can be taken back; what already left is listed under My data'),
+      h('li', {}, h('ion-icon', { name: 'shield-checkmark-outline' }), 'Your rules answer at the door; an AI only does what you hand it')),
+    h('ion-button', { expand: 'block', onClick: () => push('#door') }, 'Choose your name here'),
+    h('p', { class: 'muted-line' }, 'Say it\'s alex, and anyone can tell their AI "ping alex". It isn\'t a login: it\'s how AIs find your door.')));
 }
