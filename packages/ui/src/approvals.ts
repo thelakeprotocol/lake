@@ -6,7 +6,7 @@ import '@ionic/core/css/palettes/dark.system.css';
 import './house/theme.css';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { CACHE, Version, api, cached, call, houseBase, key, reachWatchers, reachable, remember, shared, state } from './house/api';
+import { CACHE, Version, api, cached, call, houseBase, key, reachWatchers, reachable, remember, shared, state, warmPrivate } from './house/api';
 import { h, toast } from './house/ion';
 import { knownWaiting, type ListView } from './house/logic';
 import { back, goTab, parse, UNDER, type Tab } from './house/nav';
@@ -38,6 +38,8 @@ function App() {
   const [ok, setOk] = useState(reachable);
   const [live, setLive] = useState<boolean | 'reconnecting'>(true);
   useEffect(() => { reachWatchers.add(setOk); return () => { reachWatchers.delete(setOk); }; }, []);
+  // Four seconds after it opens (Today first), the slow private pages are fetched quietly, so opening them is quick.
+  useEffect(() => { const t = setTimeout(() => { if (state.webId) warmPrivate(0); }, 4000); return () => clearTimeout(t); }, []);
   useEffect(() => { const f = () => setRoute(parse()); addEventListener('hashchange', f); addEventListener('popstate', f); return () => { removeEventListener('hashchange', f); removeEventListener('popstate', f); }; }, []);
   // Opened from a notification (?n=<text>#<screen>): it opens on that screen, and says what it was about, once.
   useEffect(() => {

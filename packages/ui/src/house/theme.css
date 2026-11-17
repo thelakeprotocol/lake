@@ -443,6 +443,8 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 
 /* ---- My AI ---- */
 .stat-row { display: flex; gap: 10px; margin: 14px 16px; }
+/* Money: what came in today, under the total (the same as Today's tile). */
+.stat .stat-today { display: block; margin-top: 2px; color: var(--lake-text); font-weight: 700; }
 .stat { flex: 1; background: var(--lake-surface); border-radius: 18px; padding: 14px 12px; box-shadow: var(--lake-shadow); border: 1px solid var(--lake-line); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .stat b { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
 .stat span { font-size: 12.5px; color: var(--lake-muted); font-weight: 600; }

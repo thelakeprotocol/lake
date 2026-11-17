@@ -68,6 +68,20 @@ export const useRedraw = () => { const [, set] = useState(0); return () => set((
 
 /** Kept off the phone's quick-start cache: what the house holds about its owner, their money, an export (round 10). */
 const PRIVATE = new Set(['panel.data', 'panel.money', 'panel.export', 'panel.address', 'panel.consents', 'panel.left']);
+/**
+ * Those are kept in this page's memory only, never written to the phone, so opening one again shows what it last said at
+ * once while it fetches (18 Nov, the owner: "the loading states are very long": Money and My data started from a skeleton
+ * on every visit). Gone when the app is closed or signed out.
+ */
+const inMemory = new Map<string, unknown>();
+const lastSaid = <T>(k: string): T | undefined => cached<T>(k) ?? (inMemory.get(k) as T | undefined);
+/** The slow private looks, fetched once in the background after the app opens, so the first tap on them is quick too. */
+export function warmPrivate(version: number) {
+  for (const payload of [{ kind: 'panel.money' }, { kind: 'panel.left' }, { kind: 'panel.data' }]) {
+    const k = JSON.stringify(payload);
+    if (!inMemory.has(k)) shared(payload, version).then((d) => { if (!forgetting && !inMemory.has(k)) inMemory.set(k, d); }, () => {});
+  }
+}
 
 /** The same look asked again for the same change, while it is still on its way, waits for that one: every screen asking at
  *  once made a slow house slower (14 Nov). Never across a change (an answer from before it would be stale), and only for
@@ -89,7 +103,7 @@ export function shared<T>(payload: Record<string, unknown>, version: number): Pr
 export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error?: string } {
   const { version } = useContext(Version);
   const k = JSON.stringify(payload);
-  const [s, set] = useState<{ data?: T; error?: string }>(() => ({ data: cached<T>(k) }));
+  const [s, set] = useState<{ data?: T; error?: string }>(() => ({ data: lastSaid<T>(k) }));
   // Each fetch numbered as it starts; an answer is shown unless a newer one already was. Two on their way at most: a
   // change while two are out waits for one of them, then fetches once more.
   const me = useRef({ k, payload, version, started: 0, shown: 0, flying: 0, again: false, mounted: true });
@@ -102,7 +116,7 @@ export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error
       const key = m.k, body = m.payload, n = ++m.started;
       m.flying++;
       shared<T>(body, m.version).then((data) => {
-        if (!PRIVATE.has(String(body.kind))) remember(key, data);
+        if (!PRIVATE.has(String(body.kind))) remember(key, data); else if (!forgetting) inMemory.set(key, data);
         if (m.mounted && m.k === key && n > m.shown) { m.shown = n; set({ data }); }
       }, (e: Error) => { if (m.mounted && m.k === key && n > m.shown) set((x) => ({ ...x, error: e.message })); })
         .finally(() => { m.flying--; if (m.again && m.mounted) { m.again = false; run(); } });
@@ -115,6 +129,7 @@ export function useHouse<T>(payload: Record<string, unknown>): { data?: T; error
 /** Your key lives only on this device: signing out forgets it here, and what the screens last showed. */
 export async function signOut() {
   forgetting = true;
+  inMemory.clear();
   await forgetKey();
   try {
     localStorage.setItem('lake-houses', JSON.stringify((JSON.parse(localStorage.getItem('lake-houses') ?? '[]') as string[]).filter((x) => x !== houseBase())));

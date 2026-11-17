@@ -735,7 +735,7 @@ export class OwnerDesk {
       if (es.length) lines.push({ by: 'rules', text: `Said ${word} to ${plural(es.length, 'request')}${names(es)}`, at: es[0]!.at, to: '#access', tile: { big: String(es.length), label: d === 'decline' ? 'requests declined' : `request${es.length === 1 ? '' : 's'} allowed`, ...(who(es) ? { detail: who(es) } : {}) } });
     }
     const studies = events.filter((e) => e.kind === 'compute.done');
-    if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')}, as unreadable shares`, at: studies[0]!.at, to: '#money', tile: { big: String(studies.length), label: studies.length === 1 ? 'study answered' : 'studies answered', detail: 'nothing readable left' } });
+    if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')} today, as unreadable shares`, at: studies[0]!.at, to: '#mydata', tile: { big: String(studies.length), label: studies.length === 1 ? 'study answered' : 'studies answered', detail: 'today · nothing readable left' } });
     const blocked = events.filter((e) => e.kind === 'attack.blocked');
     if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that weren't what they claimed`, at: blocked[0]!.at, to: '#about', tile: { big: String(blocked.length), label: 'fakes turned away', detail: 'not who they claimed' } });
     // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
@@ -758,7 +758,7 @@ export class OwnerDesk {
       for (const r of inToday) by.set(r.currency, Math.round(((by.get(r.currency) ?? 0) + r.amount) * 100) / 100);
       const sums = [...by].map(([c, v]) => (c === 'USD' ? `$${v}` : c === 'AUD' ? `A$${v}` : `${c} ${v}`)).join(' and ');
       const held = inToday.filter((r) => r.settlement === 'held').length;
-      lines.push({ by: 'money', text: `${sums} came in (${plural(inToday.length, 'payment')}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money', tile: { big: sums, label: 'came in', detail: `${plural(inToday.length, 'payment')}${held ? `, ${held} held` : ''}` } });
+      lines.push({ by: 'money', text: `${sums} came in today (${plural(inToday.length, 'payment')}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money', tile: { big: sums, label: 'came in today', detail: `${plural(inToday.length, 'payment')}${held ? `, ${held} held` : ''}` } });
     }
     // Shops: offers for what the owner is looking for.
     for (const w of panel.wantsList?.() ?? []) {
