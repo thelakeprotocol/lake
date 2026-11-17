@@ -956,6 +956,18 @@ function panelFor(x: {
       const fields = [...allFields().map((f) => ({ name: f, label: fieldSpec(f)!.label, pack: fieldSpec(f)!.pack.id })), ...identifyingFields().map((f) => ({ name: f, label: f.replace(/_/g, ' '), pack: 'identifying' }))];
       return { text: x.keeper().rulesText, rules: x.keeper().rules, fields, purposes: Object.entries(PURPOSES).map(([name, p]) => ({ name, label: p.label, within: p.within })) };
     },
+    // What anyone can read about this house without a key: its card as it is sent, its page (round 78, a privacy-minded owner:
+    // tags, kinds of data and every open want were public, and no page said so).
+    seen() {
+      const p = lakeProfile(x.card), r = x.keeper().rules;
+      return {
+        name: x.card.name, ...(p?.handle ? { handle: p.handle } : {}), tags: p?.tags ?? [],
+        packs: (p?.packs ?? []).map((id) => ({ id, title: x.o.packs.find((k) => packId(k) === id)?.title ?? id })), showPacks: r.privacy?.show_packs !== false,
+        wants: (p?.wants ?? []).map((w) => ({ id: w.id, name: w.name, ...(w.areaServed ? { area: w.areaServed } : {}), ends: w.availabilityEnds })),
+        door: { open: !!r.door, ...(r.door?.name ? { name: r.door.name } : {}), ...(r.door?.about ? { about: r.door.about } : {}) },
+        card: `${x.o.publicUrl}/.well-known/agent-card.json`, page: x.o.publicUrl,
+      };
+    },
     door() {
       const d = x.keeper().rules.door;
       return { open: !!d, ...(d?.about ? { about: d.about } : {}), ...(d?.name ? { name: d.name } : {}), ...(d?.handle ? { handle: d.handle } : {}), ...(d?.note ? { note: d.note } : {}), address: x.o.publicUrl, a2a: x.card.supportedInterfaces?.[0]?.url ?? `${x.o.publicUrl}/a2a` };

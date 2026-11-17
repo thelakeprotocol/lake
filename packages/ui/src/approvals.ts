@@ -13,7 +13,7 @@ import { back, goTab, parse, UNDER, type Tab } from './house/nav';
 import { ChatPage, ChatsTab, WantPage } from './house/chats';
 import { InboxTab, decisions } from './house/inbox';
 import { AiKeyPage, AiTab } from './house/ai';
-import { DoorPage, MyDataPage, NotifyPage, PhonePage, YouTab } from './house/you';
+import { DoorPage, MyDataPage, NotifyPage, PhonePage, SeenPage, YouTab } from './house/you';
 import { AboutPage, AccessPage, AddressPage, CirclesPage, DataPage, FreePage, KeyPage, MoneyPage, MovePage, OffersPage, RulesPage } from './house/pages';
 import { ConnectAI, NoKey, Pair, connecting } from './house/pair';
 
@@ -28,7 +28,7 @@ const TABS: { tab: Tab; label: string; icon: string }[] = [
   { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];
-const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, address: AddressPage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage, mydata: MyDataPage, phone: PhonePage };
+const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, address: AddressPage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage, mydata: MyDataPage, phone: PhonePage, seen: SeenPage };
 
 function App() {
   const [route, setRoute] = useState(parse());

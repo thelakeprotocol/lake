@@ -56,6 +56,8 @@ export interface PanelProvider {
   overview(tzOffset?: number): Promise<unknown>;
   /** Is it well: its pod answering, its line to the Lake, disk left (the same as GET /health). */
   health?(): Promise<unknown>;
+  /** What anyone can read about this house without a key: its card and its page. */
+  seen?(): unknown;
   /** Standing yeses: added after the owner's own declines, listed, removed (each a change to the owner's rules). */
   addStanding?(s: { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor: { amount: number; currency: string } }): Promise<{ ok: true } | { ok: false; error: string }>;
   removeStanding?(jkt: string, purpose?: string): Promise<{ ok: true; removed: number } | { ok: false; error: string }>;
@@ -2864,6 +2866,7 @@ export class OwnerDesk {
         const answer = await ({
           'panel.overview': () => panel.overview(Number((q as { tz_offset?: number }).tz_offset)),
           'panel.health': async () => panel.health?.() ?? { error: 'this house can\'t say' },
+          'panel.seen': async () => panel.seen?.() ?? { error: 'this house can\'t say' },
           'panel.rules': () => panel.rules(),
           'panel.door': async () => { const d = panel.door?.(); return d ? { ...d, note_sent: this.doorNoteStats() } : { error: 'this house has no door' }; },
           // The owner's free slots, around what is already in their agenda: what their assistant may offer (runs 49-50).

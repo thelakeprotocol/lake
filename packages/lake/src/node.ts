@@ -169,8 +169,9 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     const out = batch;
     batch = [];
     for (let i = out.length - 1; i > 0; i--) { const j = randomInt(0, i + 1); [out[i], out[j]] = [out[j]!, out[i]!]; }
-    const at = new Date().toISOString();
-    for (const [e, p] of out) publishNow({ ...e, at }, p);
+    const at = new Date().toISOString(), base = Date.now().toString(36);
+    // New ids too: an id is its moment and order (`<ms>-<seq>`), which put the knock and the answer back together (round 78).
+    for (const [i, [e, p]] of out.entries()) publishNow({ ...e, at, id: `${base}-b${i.toString(36)}` }, p);
     setTimeout(flush, batchMs * (0.6 + Math.random() * 0.8)).unref();
   };
   if (batchMs > 0) setTimeout(flush, batchMs).unref();

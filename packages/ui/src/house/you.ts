@@ -63,7 +63,8 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
         return h(Row, { key: r.id, icon: 'eye-outline', tint: 'blue', label: r.domain ?? 'An agent with no proven name', sub: `${useLine(open)} · ${hoursLeft(latest.until)} left`, cls: 'holder', onClick: () => push('#access') });
       }),
       ...ais.map((a) => h(Row, { key: a.kid, icon: 'sparkles-outline', tint: stale(a) ? 'amber' : 'violet', label: shortName(a.label), sub: stale(a) ? `Not here for ${Math.round((Date.now() - Date.parse(a.seenAt!)) / 86_400_000)} days. May still read your records.` : `Your AI · may read your records · ${lastHere(a.seenAt).text.toLowerCase()}`, cls: 'reader', onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`) })),
-      h(Row, { icon: 'people-outline', tint: 'muted', label: 'Who has access', sub: 'Everyone who asked, and every yes you gave', onClick: () => push('#access') })),
+      h(Row, { icon: 'people-outline', tint: 'muted', label: 'Who has access', sub: 'Everyone who asked, and every yes you gave', onClick: () => push('#access') }),
+      h(Row, { icon: 'globe-outline', tint: 'muted', label: 'Seen from outside', sub: 'What anyone can read about your house without a key', onClick: () => push('#seen') })),
     left.error && !left.data ? null : h(Section, { title: 'What left your house', cls: 'data-left' },
       ...(out.length ? (all ? out : out.slice(0, 4)).map(({ x, n }, i) => h('ion-item', { key: i, lines: 'full', class: 'left-row' },
         h('div', { slot: 'start', class: `row-icon tint-${x.kind === 'study' ? 'mint' : 'amber'}` }, h('ion-icon', { name: x.kind === 'study' ? 'git-network-outline' : 'arrow-up-outline' })),
@@ -168,3 +169,25 @@ export function NotifyPage({ backTo }: { backTo: () => void }) {
       perm === 'granted' ? h(Btn, { label: 'Turn off', expand: 'block', fill: 'clear', color: 'danger', run: async () => { void toast(await turnOffNotifications()); re(); } }) : null) : null);
 }
 
+
+/** What anyone can read about your house without a key (SPEC §6.1): its card, its page, and what the Lake's map shows. */
+type Seen = { name: string; handle?: string; tags: string[]; packs: { id: string; title: string }[]; showPacks: boolean; wants: { id: string; name: string; area?: string; ends: string }[]; door: { open: boolean; name?: string; about?: string }; card: string; page: string };
+
+export function SeenPage({ backTo }: { backTo: () => void }) {
+  const s = useHouse<Seen>({ kind: 'panel.seen' });
+  if (!s.data || 'error' in s.data) return h(Page, { title: 'Seen from outside', back: backTo, backLabel: 'My data' }, h(Failed, { error: s.error }));
+  const d = s.data;
+  return h(Page, { title: 'Seen from outside', back: backTo, backLabel: 'My data' },
+    h('p', { class: 'muted-line pad top-line' }, 'Anyone on the Lake, with no key, can read this about your house. Your records, your chats and what you said yes to are not here.'),
+    h(Section, { title: 'On your card', cls: 'seen-card' },
+      h(Row, { icon: 'home-outline', label: d.name, sub: d.handle ? `Handle: ${d.handle} · change it in Your door` : 'No handle · Your door adds one', onClick: () => push('#door') }),
+      h(Row, { icon: 'pricetags-outline', label: d.tags.length ? `Interests: ${d.tags.join(', ')}` : 'No interests listed', sub: 'Agents search by these · Rules, then Advanced', onClick: () => push('#rules'), cls: 'seen-tags' }),
+      h(Row, { icon: 'folder-open-outline', label: d.packs.length ? `Kinds of data: ${d.packs.map((p) => p.title).join(', ')}` : 'Kinds of data: not said', sub: d.showPacks ? 'Agents looking for these find you · turn off in Rules, then More' : 'Agents searching by kind of data won\'t find you', onClick: () => push('#rules'), cls: 'seen-packs' }),
+      ...(d.wants.length ? d.wants.map((w) => h(Row, { key: w.id, icon: 'search-outline', label: `Looking for: ${w.name}`, sub: `${w.area ? `${w.area} · ` : ''}until ${date(w.ends)} · the most you'd pay stays in your house`, onClick: () => push(`#want=${encodeURIComponent(w.id)}`) }))
+        : [h(Row, { key: 'nowant', icon: 'search-outline', tint: 'muted', label: 'Nothing you\'re looking for' })])),
+    h(Section, { title: 'On your page' },
+      h(Row, { icon: 'globe-outline', label: d.door.open ? (d.door.name ? `Open, as ${d.door.name}` : 'Open') : 'Closed: it says nothing about who lives here', sub: d.door.about ?? (d.door.open ? 'People can leave you a note there' : 'Open it in Your door'), onClick: () => push('#door') })),
+    h(Section, { title: 'On the Lake\'s map' },
+      h(Row, { icon: 'git-network-outline', tint: 'muted', label: 'What happens at your door, never what was said', sub: 'Each knock, whether your house said yes, no or ask, a key it gave and for how long, a study it answered (with no records out), an offer worked out or accepted. It names your house, in batches so the moment is blurred.', detail: false })),
+    h('div', { class: 'pad' }, h('a', { href: d.card, target: '_blank', rel: 'noopener', class: 'plain-link' }, 'Open your card as agents see it'), h('span', {}, ' · '), h('a', { href: d.page, target: '_blank', rel: 'noopener', class: 'plain-link' }, 'Open your page')));
+}

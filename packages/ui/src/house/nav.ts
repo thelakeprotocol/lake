@@ -6,9 +6,9 @@
 
 export type Tab = 'chats' | 'inbox' | 'ai' | 'you';
 export type Route = { tab: Tab; page?: string; arg?: string };
-export const YOU_PAGES = ['door', 'notify', 'free', 'address', 'rules', 'access', 'offers', 'money', 'data', 'circles', 'key', 'move', 'about', 'mydata', 'phone'] as const;
+export const YOU_PAGES = ['door', 'notify', 'free', 'address', 'rules', 'access', 'offers', 'money', 'data', 'circles', 'key', 'move', 'about', 'mydata', 'phone', 'seen'] as const;
 /** The pages that open from another page under You: their Back goes to that page. */
-export const UNDER: Record<string, string> = { free: 'door', access: 'mydata', data: 'mydata', move: 'mydata', offers: 'money', address: 'money', circles: 'money', notify: 'phone', key: 'phone', about: 'phone' };
+export const UNDER: Record<string, string> = { free: 'door', access: 'mydata', data: 'mydata', move: 'mydata', seen: 'mydata', offers: 'money', address: 'money', circles: 'money', notify: 'phone', key: 'phone', about: 'phone' };
 const OLD: Record<string, string> = { people: 'chats', today: 'inbox', home: 'inbox', needs: 'inbox', requests: 'inbox', myagent: 'ai', ais: 'ai', me: 'you', settings: 'you', keys: 'access', agents: 'access' };
 
 export function parse(hash = location.hash): Route {

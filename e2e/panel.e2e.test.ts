@@ -55,7 +55,7 @@ async function tidy() {
 // Four tabs, Today first (it opens there). You has five rows that each say how they stand, and every other page sits
 // one tap under one of them (12 Nov: the redesign, then Fable's design; 13 Nov: fourteen rows became five).
 const TABS = ['Today', 'People', 'My AI', 'You'];
-const UNDER: Record<string, string> = { 'When you can meet': 'Your door', 'Who has access': 'My data', 'What your house holds': 'My data', 'Download everything': 'My data', 'Offers for you': 'Money', 'Delivery address': 'Money', 'Your promise circles': 'Money', Notifications: 'This phone', 'New or lost phone': 'This phone', 'About this house': 'This phone' };
+const UNDER: Record<string, string> = { 'When you can meet': 'Your door', 'Who has access': 'My data', 'What your house holds': 'My data', 'Download everything': 'My data', 'Seen from outside': 'My data', 'Offers for you': 'Money', 'Delivery address': 'Money', 'Your promise circles': 'Money', Notifications: 'This phone', 'New or lost phone': 'This phone', 'About this house': 'This phone' };
 const tab = async (name: string, p: Page = page) => {
   if (TABS.includes(name)) {
     // On a page opened from a tab (a chat, a setting), the tab bar isn't there: Back first.
@@ -1139,7 +1139,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(await page.getByRole('button', { name: `Back to ${backTo}`, exact: true }).count()).toBe(1);
       await tidy();
     };
-    const under: Record<string, string[]> = { 'Your door': ['When you can meet'], Rules: [], 'My data': ['Who has access', 'What your house holds', 'Download everything'], Money: ['Delivery address'], 'This phone': ['Notifications', 'New or lost phone', 'About this house'] };
+    const under: Record<string, string[]> = { 'Your door': ['When you can meet'], Rules: [], 'My data': ['Who has access', 'Seen from outside', 'What your house holds', 'Download everything'], Money: ['Delivery address'], 'This phone': ['Notifications', 'New or lost phone', 'About this house'] };
     for (const [hub, pages] of Object.entries(under)) {
       await tab(hub);
       await fine('You');
@@ -1929,6 +1929,18 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await card.getByRole('button', { name: 'Say hello' }).click();
     await page.getByText(/You both said yes to "Help on Friday evening"\. You're writing to /).waitFor({ timeout: 10_000 });
     await tidy();
+    await goBack();
+  });
+
+  it('Seen from outside shows what the card anyone can fetch says: interests, kinds of data, what you\'re looking for (round 78)', async () => {
+    const card = await (await fetch(`${house}/.well-known/agent-card.json`)).json() as { name: string; capabilities: { extensions: { params: { tags: string[]; packs: string[] } }[] } };
+    const prof = card.capabilities.extensions[0]!.params;
+    await page.evaluate(() => { location.hash = '#seen'; });
+    await page.getByText('Anyone on the Lake, with no key, can read this about your house.').waitFor({ timeout: 10_000 });
+    await page.locator('.seen-card ion-item', { hasText: card.name }).waitFor();
+    expect(await page.locator('.seen-tags').textContent()).toContain(prof.tags.length ? prof.tags.join(', ') : 'No interests listed');
+    expect(await page.locator('.seen-packs').textContent()).toContain(prof.packs.length ? 'Kinds of data: ' : 'not said');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await goBack();
   });
 

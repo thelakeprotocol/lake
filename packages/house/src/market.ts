@@ -329,7 +329,8 @@ export class Market {
     this.programs.set(offer.id, p);
     this.heard.get(p.pack)?.away.delete(url);
     await this.c.write(`offers/${offer.id}.json`, JSON.stringify(offer));
-    this.c.emit(makeEvent('quote.made', this.c.actor, `agent:${profile.ownerDomain}`, { pack: p.pack }));
+    // No pack named: the public feed would say which kind of data a house holds, even with show_packs off (round 78).
+    this.c.emit(makeEvent('quote.made', this.c.actor, `agent:${profile.ownerDomain}`));
     // The same answer whatever the result: the agent learns nothing until the owner accepts.
     return { kind: 'quoted', ref: offer.id };
   }
@@ -366,7 +367,7 @@ export class Market {
     const released = (rec.pack.release ?? []).length;
     // What went, and to whom (the owner's "What left your house" reads these). No recordsOut: that counts studies (SPEC §7).
     await this.c.write(`audit/${Date.now()}-accept.json`, JSON.stringify({ at: new Date().toISOString(), offer: offer.id, title: offer.title, to: offer.quoter.webId, toName: offer.quoter.name, toDomain: offer.quoter.domain, released: (rec.pack.release ?? []).map((f) => (f === 'claims' ? `claims: ${(rec.pack.releaseFields ?? []).join(', ')}` : rec.paths[f])), consent: 'owner, live' }));
-    this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { pack: offer.pack, released }));
+    this.c.emit(makeEvent('offer.accepted', this.c.actor, `agent:${offer.quoter.domain}`, { released }));
     // Found what they were looking for: stop asking (run 28's grocers quoted the same household again within minutes),
     // but still count in the group for a day, so a neighbour who decides later gets the street's price too.
     const i = this.intents.get(offer.pack);
