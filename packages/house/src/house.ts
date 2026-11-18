@@ -1113,10 +1113,14 @@ function panelFor(x: {
         now: all.filter((r) => r.canSee).length,
         askedToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
         blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
-        agents: all,
+        // What the page shows: every live yes (Take it back needs them all), the newest 15 of the rest, the newest 8 asks
+        // (18 Nov: the whole history ran to 950 KB a look, and over a poor connection the page sat loading for a minute).
+        agents: all.map((r) => ({ ...r, yeses: ((others) => r.yeses.filter((c) => c.status === 'active' || others.n++ < 15))({ n: 0 }), yesCount: r.yeses.length, asks: (r.asks ?? []).slice(0, 8) })),
       };
     },
-    consents,
+    // Every live consent and the newest 50 of the rest (the full list ran to megabytes on a busy house); the house's own
+    // counts read them all.
+    consents: async () => { let others = 0; return (await consents()).filter((c) => c.status === 'active' || others++ < 50); },
     async data() { return lookFast('data', async () => {
       const claims = await x.keeper().allClaims();
       const chain = await x.keeper().verifyOwnRecord();

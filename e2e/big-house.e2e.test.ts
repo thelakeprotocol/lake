@@ -196,6 +196,8 @@ describe('the owner\'s app on a big house, at phone size', () => {
     expect(o.yeses.by.length).toBeLessThanOrEqual(10);
     expect(Object.keys(o.money.today).length).toBeGreaterThan(0);
     expect(o.money.newest.length).toBeLessThanOrEqual(5);
+    // Who has access and the consent list stay small on a big house (18 Nov: 950 KB a look sat loading for a minute on a poor line).
+    for (const kind of ['panel.access', 'panel.consents']) expect(JSON.stringify(await asAi({ kind })).length, kind).toBeLessThan(200_000);
     // An AI that may read neither gets what waits, and nothing of the yeses or money.
     expect(errors).toEqual([]);
   }, 120_000);
