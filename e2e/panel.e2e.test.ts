@@ -570,7 +570,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await page.getByText('A second one, for the other bathroom').waitFor({ timeout: 10_000 });
       await page.locator('ion-card.offer').first().getByRole('button', { name: 'Buy for A$34.00' }).click({ timeout: 20_000 });
       await confirmSheet('Pay A$34.00');
-      await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 20_000 });
+      // Forty seconds: the payment goes through the payments agent and the shop, and the build server is slower (18 Nov: 20 s failed CI once).
+      await page.getByRole('heading', { name: 'On its way' }).waitFor({ timeout: 40_000 });
       // An assistant key can't report one: it is the owner's word.
       expect((await asAssistant({ kind: 'panel.want.problem', want: secondId, problem: 'not_arrived' })).error).toMatch(/only your human's key/);
       await page.getByRole('button', { name: 'Report a problem' }).click();
