@@ -1233,7 +1233,8 @@ export class OwnerDesk {
       if (this.dutyPushed.has(key)) continue;
       this.dutyPushed.add(key);
       const s = this.dutySummary(a, at - 20 * 3_600_000);
-      if (s.handled + s.waiting + s.blocked) this.notifyOwner('duty', `While you slept: ${s.handled} handled, ${s.waiting} waiting for you, ${s.blocked} blocked.`);
+      // "While you were away": Messages ends in the evening, Away in the morning (round 90).
+      if (s.handled + s.waiting + s.blocked) this.notifyOwner('duty', `While you were away: ${s.handled} handled, ${s.waiting} waiting for you, ${s.blocked} blocked.`);
     }
   }
   dutySummary(a: AssistantKey, since: number) {

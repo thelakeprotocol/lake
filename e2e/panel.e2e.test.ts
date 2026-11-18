@@ -1611,12 +1611,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('puts the owner\'s AI on duty: a signed grant and a code, the morning page with Undo, and off duty in two taps (5 Nov)', async () => {
     await tab('My AI');
-    // Off until set up: a row on My AI, and its form in a sheet.
-    await page.locator('ion-item.lake-row', { hasText: 'Set up AI on duty' }).click();
+    // Roles on My AI (round 90): Away is hired from its row, its preset in a sheet.
+    await page.locator('.roles ion-item.role-away', { hasText: 'Hire' }).click();
     const card = sheet();
     // This house offers a model, so it can run the AI itself: one tap. This test runs it elsewhere, to pair its own stand-in.
     await card.locator('ion-segment-button', { hasText: 'In my house' }).waitFor({ timeout: 10_000 });
-    await card.getByRole('button', { name: 'Sign and turn on' }).waitFor();
+    await card.getByRole('button', { name: 'Sign and hire' }).waitFor();
     await card.locator('ion-segment-button', { hasText: 'On my computer' }).click();
     await card.getByText('Never money; anything new waits for you.').waitFor({ timeout: 10_000 });
     // Hours around now, so what it does below counts as on duty.
@@ -1763,20 +1763,22 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tidy();
       await tab('My AI');
     } finally { await sam.close(); }
-    // On duty, with tonight's count; its own page says what it may do; off duty after a sheet that asks.
-    const on = page.locator('ion-item.duty-row', { hasText: 'Night AI' });
-    await on.locator('.lake-pill', { hasText: 'On duty' }).waitFor({ timeout: 10_000 });
-    expect(await on.textContent()).toMatch(new RegExp(`${from}–${to} · 2 of 10 tonight`));
+    // Away, held by the Night AI, with today's count; the AI's row says its role; its page says what it may do; stopped after a sheet that asks.
+    const on = page.locator('ion-item.role-away', { hasText: 'Night AI' });
+    await on.locator('.lake-pill', { hasText: 'On now' }).waitFor({ timeout: 10_000 });
+    expect(await on.textContent()).toMatch(new RegExp(`Night AI · ${from}–${to} · 2 of 10 today`));
+    expect(await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).textContent()).toContain('Away');
     await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).click();
     await page.getByText('Replies, notes set aside and bookings only, never money').waitFor();
     await tidy();
     await goBack();
-    await on.getByRole('button', { name: 'Turn off' }).click();
-    await confirmSheet('Turn off');
-    // Off duty: back to Set up.
-    await page.locator('ion-item.lake-row', { hasText: 'Set up AI on duty' }).waitFor({ timeout: 10_000 });
-    await page.locator('ion-item.lake-row', { hasText: 'Set up AI on duty' }).click();
-    await sheet().getByRole('button', { name: 'Sign and turn on' }).waitFor({ timeout: 10_000 });
+    await on.getByRole('button', { name: 'Stop' }).click();
+    await confirmSheet('Stop');
+    // Stopped: Away is free to hire again, and Messages has the day preset.
+    await page.locator('.roles ion-item.role-away', { hasText: 'Hire' }).waitFor({ timeout: 10_000 });
+    await page.locator('.roles ion-item.role-messages', { hasText: 'Hire' }).click();
+    await sheet().getByRole('button', { name: 'Sign and hire' }).waitFor({ timeout: 10_000 });
+    expect(await sheet().getByLabel('On duty from').inputValue().catch(async () => sheet().getByLabel('On duty from').evaluate((e) => (e as HTMLInputElement & { value: string }).value))).toBe('08:00');
     await closeSheet();
     expect(await asNight({ kind: 'assistant.duty' })).toMatchObject({ on: false });
     await tidy();

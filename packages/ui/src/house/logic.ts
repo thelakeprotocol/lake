@@ -204,6 +204,22 @@ export function lastHere(at?: string): { text: string; now: boolean } {
 }
 export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you know'], ['close', 'Mark notes that need no answer as done (thanks, confirmations, newsletters)'], ['book', 'Book times you\'re free'], ['deliver', 'Deliver what people buy from your AI']];
 /** Off for good (taken off, refused too often, ended): not the same as off for the night or outside its hours. */
+/**
+ * Roles an AI holds, read off what it already has (the day-1 plan, round 90): nothing stored, so a role can never say
+ * more than the grant or allowance it stands for. A live duty grant that may hold times is Away, one that may not is
+ * Messages; a live spending allowance is Shopping.
+ */
+export type Role = 'messages' | 'shopping' | 'away';
+export const ROLES: Record<Role, { name: string; line: string }> = {
+  // "Replies", not "Messages": each AI's row already says "Messages only" for what it may read.
+  messages: { name: 'Replies', line: 'Answers people you know while you\'re out, sets aside what needs no answer. Never money.' },
+  shopping: { name: 'Shopping', line: 'Posts what you\'re looking for and pays for what you accept, up to what you sign.' },
+  away: { name: 'Away', line: 'At night: replies, sets aside, holds times you\'re free for you to confirm. Never money.' },
+};
+export const rolesOf = (a: { kid: string; allowance?: { until: string } }, duties: DutyInfo[]): Role[] => {
+  const d = duties.find((x) => x.kid === a.kid && dutyLive(x));
+  return [...(d ? [d.kinds.includes('book') ? 'away' as const : 'messages' as const] : []), ...(a.allowance && Date.parse(a.allowance.until) > Date.now() ? ['shopping' as const] : [])];
+};
 export const dutyLive = (d: DutyInfo) => !(d.off && !d.off.night) && Date.parse(d.until) > Date.now() && !(!d.state.on && /took you off duty|has ended/.test(d.state.why));
 export const watching = (r: NonNullable<DutyInfo['runner']>) => {
   const late = Date.now() - Date.parse(r.last) > 3 * r.every * 1000;

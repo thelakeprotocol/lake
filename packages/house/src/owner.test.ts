@@ -461,7 +461,7 @@ describe('the morning after a night on duty', () => {
     expect(pushed).toEqual([]); // not yet
     next(7, 2);
     next(7, 10); // once a morning
-    expect(pushed).toEqual(['While you slept: 1 handled, 0 waiting for you, 1 blocked.']);
+    expect(pushed).toEqual(['While you were away: 1 handled, 0 waiting for you, 1 blocked.']);
   });
 });
 
