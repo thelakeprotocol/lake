@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -3270,7 +3271,13 @@ describe('invites: a hosted Lake gives someone a house of their own, from an own
     const bCard = await (await fetch(`${node}/cards?q=${b.house.split('/t/')[1]}&idle=1`)).json() as unknown[];
     expect(bCard).toEqual([]);
     expect((await fetch(`${a.house}/owner/status`)).status).toBe(200);
-  }, 120_000);
+    // Its folders are gone from disk too.
+    expect(existsSync(join(dir, 'hosted-invites', 'hosted', 'houses', b.house.split('/t/')[1]!))).toBe(false);
+    // Five at once make three at most (round 89: the cap was checked before the slow part and counted after it).
+    const many = await Promise.all([1, 2, 3, 4, 5].map(() => make()));
+    expect(many.filter((m) => m.house).length).toBeLessThanOrEqual(3);
+    expect(many.some((m) => /waiting to be claimed/.test(m.error ?? ''))).toBe(true);
+  }, 180_000);
 });
 
 describe('relay: a house behind a home router', () => {

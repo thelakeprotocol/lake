@@ -655,17 +655,19 @@ describe('what an attacker tried (round 16)', () => {
   it('takes back every live yes, those in the pod too, and Block takes back the blocked sender\'s (round 85)', async () => {
     // Two yeses live in the pod from before the house started (not in memory), one for dee, one for kim.
     const withdrawn: string[] = [];
-    const live = [{ id: 'c-dee', visitorWebId: 'https://dee.example/#a' }, { id: 'c-kim', visitorWebId: 'https://kim.example/#a' }];
+    // A third yes names dee's WebID with another domain: dee's own word for a WebID can't take back someone else's yes.
+    const live = [{ id: 'c-dee', visitorWebId: 'https://dee.example/#a', visitorDomain: 'dee.example' }, { id: 'c-kim', visitorWebId: 'https://kim.example/#a', visitorDomain: 'kim.example' }, { id: 'c-other', visitorWebId: 'https://dee.example/#a', visitorDomain: 'other.example' }];
     const h = await house({ panel: { activity: () => [], money: async () => ({}), activeConsents: async () => live.filter((c) => !withdrawn.includes(c.id)) }, withdrawConsent: async (id: string) => { withdrawn.push(id); } });
     // Block dee: dee's yes goes, kim's stays.
     h.desk.addNote({ from: from('dee'), text: 'Can you lend me a ladder?' });
     await h.desk.mute(from('dee').key);
     expect(h.desk.isRevoked('c-dee')).toBe(true);
     expect(h.desk.isRevoked('c-kim')).toBe(false);
+    expect(h.desk.isRevoked('c-other')).toBe(false);
     // Take everything back: kim's too, though the house only read it from the pod.
-    expect(await h.owner({ kind: 'revoke', revoke: 'all' })).toEqual({ revoked: 1 });
+    expect(await h.owner({ kind: 'revoke', revoke: 'all' })).toEqual({ revoked: 2 });
     expect(h.desk.isRevoked('c-kim')).toBe(true);
-    expect(withdrawn.sort()).toEqual(['c-dee', 'c-kim']);
+    expect(withdrawn.sort()).toEqual(['c-dee', 'c-kim', 'c-other']);
     // One agent's several yeses in one call.
     expect(await h.owner({ kind: 'revoke', revoke: ['c-x', 'c-y'] })).toEqual({ revoked: 2 });
     h.close();

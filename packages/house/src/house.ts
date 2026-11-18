@@ -94,6 +94,8 @@ export interface House {
   /** Register with the node (if any), follow its signals, and announce the house. */
   join: () => Promise<void>;
   leave: () => Promise<void>;
+  /** Stops it on this host: no more checking in or listening to its nodes, off the Lake (a house nobody claimed). */
+  stop: () => Promise<void>;
 }
 
 // Whose signatures count. A sandbox house with no trust section trusts the demo specialists and its packs' demo issuers, and says so.
@@ -142,6 +144,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
   let link: LakeLinks | null = null;
   let relays: ReturnType<typeof connectRelay>[] = [];
+  let signalTimer: ReturnType<typeof setInterval> | undefined;
   // Is it well, beyond answering at all (round 74, someone running their own house: the healthcheck fetched the card from
   // memory, so a pod that stopped answering, a line to the Lake that dropped or a full disk all passed). The pod is asked at
   // most every half minute; each part says since when it has been wrong.
@@ -523,10 +526,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
         const ids = await link.register();
         ids.forEach((nodeId, i) => { if (nodeId) say(`registered with the Lake node at ${nodes[i]} as ${nodeId}`); });
         link.keepAlive(5_000 + Math.floor(Math.random() * 10_000));
-        setInterval(async () => {
+        signalTimer = setInterval(async () => {
           const s = await link?.signals();
           if (s) { signals.blocklist = new Set(s.blocklist); signals.reputation = s.reputation; }
-        }, 2000).unref();
+        }, 2000);
+        signalTimer.unref();
       }
       // "Joined" only when some node was told (round 6: a house with no --lake said it had joined).
       if (nodes.length) emit(makeEvent('house.joined', actor, undefined, { tags: (rules.tags ?? []).join(',') }));
@@ -539,6 +543,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     leave: async () => {
       emit(makeEvent('house.left', actor));
       await link?.flush();
+    },
+    stop: async () => {
+      clearInterval(signalTimer);
+      for (const l of link?.links ?? []) l.stop();
+      for (const r of relays) r.close();
+      await link?.leave();
     },
   };
 }
@@ -928,7 +938,7 @@ function panelFor(x: {
   return {
     forgetReceipt: (path: string) => void receiptCache.delete(path),
     health: () => x.health(true),
-    activeConsents: async () => (await consents()).filter((c) => c.status === 'active').map((c) => ({ id: c.id, visitorWebId: c.visitorWebId })),
+    activeConsents: async () => (await consents()).filter((c) => c.status === 'active').map((c) => ({ id: c.id, visitorWebId: c.visitorWebId, visitorDomain: c.visitor })),
     async overview(tzOffset?: number) {
       // "Today" is the owner's day: the panel says how far its clock is from UTC (minutes, as the browser counts them).
       const offset = Number.isFinite(tzOffset) ? Number(tzOffset) : 0;

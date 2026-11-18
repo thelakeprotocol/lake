@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { loadJson, saveWhole } from './state.js';
 import { hostname, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
@@ -263,22 +263,29 @@ async function hosted(n: number) {
   // one-use link in the answer pairs it, so a link left unopened in a chat can't be taken by a stranger. Paired, it stays
   // like an invited house; not paired in time, it is gone. A few at most wait at once, within the Lake's own cap.
   const fresh = new Map<string, number>(), gone = new Set<string>();
+  let madeThisHour: number[] = [];
   const keepFresh = async (name: string) => {
     fresh.delete(name);
     invited.push({ name, by: 'chat', at: new Date().toISOString() });
     await saveWhole(invitedFile, JSON.stringify(invited));
     log(`${name}, made from a chat, was claimed by a phone`);
   };
-  app.post('/t/new', express.json(), async (_req, res) => {
+  app.post('/t/new', express.json(), async (req, res) => {
     if (!a['make-houses']) return void res.status(404).json({ error: 'this Lake doesn\'t make houses from a chat' });
-    if (fresh.size >= (Number(a['max-unclaimed']) || 3)) return void res.status(429).json({ error: 'a few new houses are waiting to be claimed already: try again in a while' });
+    // Only its own connector asks, when the operator sets a token for it (round 89, an attacker: the endpoint was open).
+    if (process.env.LAKE_MAKE_HOUSES_TOKEN && req.get('x-lake-maker') !== process.env.LAKE_MAKE_HOUSES_TOKEN) return void res.status(403).json({ error: 'only this Lake\'s connector makes houses here' });
+    madeThisHour = madeThisHour.filter((t) => Date.now() - t < 3_600_000);
+    if (fresh.size >= (Number(a['max-unclaimed']) || 3) || madeThisHour.length >= (Number(process.env.LAKE_MAKES_PER_HOUR) || 12)) return void res.status(429).json({ error: 'a few new houses are waiting to be claimed already: try again in a while' });
     if (houses.length + invites.filter((x) => !x.used).length >= (Number(a['max-houses']) || 0)) return void res.status(503).json({ error: 'this Lake is full for now: they can run a house of their own (lake.doneinfifty.com/docs/join)' });
-    const name = `h-${randomBytes(4).toString('hex')}`;
+    let name = `h-${randomBytes(4).toString('hex')}`;
+    while (sessions.has(name)) name = `h-${randomBytes(4).toString('hex')}`;
+    // Counted before anything slow: fifty requests at once all passed the cap while the first pods started.
+    fresh.set(name, Date.now());
+    madeThisHour.push(Date.now());
     try {
       await tenantSessions({ dataDir, baseUrl: podUrl, names: [name] }).then((m) => sessions.set(name, m.get(name)!));
       await closePodRoot(sessions.get(name)!).catch(() => false);
       kept.add(name);
-      fresh.set(name, Date.now());
       const house = await startOne(name);
       await house.join();
       const token = (await readFile(join(dataDir, 'houses', name, 'pairing-token'), 'utf8')).trim();
@@ -288,7 +295,11 @@ async function hosted(n: number) {
         fresh.delete(name); kept.delete(name); gone.add(name);
         const i = houses.findIndex((h) => h.name === name);
         // Off the Lake too: it stops checking in and says it's gone, so nobody finds a house that no longer answers.
-        if (i >= 0) { const h = houses[i]!; for (const l of h.link?.links ?? []) l.stop(); void h.link?.leave(); houses.splice(i, 1); }
+        // Stopped, off the Lake, and its folders removed: nothing of it keeps running or filling the disk.
+        if (i >= 0) { const h = houses[i]!; void h.stop(); houses.splice(i, 1); }
+        sessions.delete(name);
+        void rm(join(dataDir, 'houses', name), { recursive: true, force: true }).catch(() => {});
+        void rm(join(dataDir, 'pod', name), { recursive: true, force: true }).catch(() => {});
         log(`${name}, made from a chat, wasn't claimed in time: gone`);
       }, ms).unref();
       log(`made ${name} from a chat`);

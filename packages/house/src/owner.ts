@@ -59,7 +59,7 @@ export interface PanelProvider {
   /** What anyone can read about this house without a key: its card and its page. */
   seen?(): unknown;
   /** Every yes still live, from the consent records in the pod (not only those given since the house started). */
-  activeConsents?(): Promise<{ id: string; visitorWebId: string }[]>;
+  activeConsents?(): Promise<{ id: string; visitorWebId: string; visitorDomain?: string }[]>;
   /** Standing yeses: added after the owner's own declines, listed, removed (each a change to the owner's rules). */
   addStanding?(s: { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor: { amount: number; currency: string } }): Promise<{ ok: true } | { ok: false; error: string }>;
   removeStanding?(jkt: string, purpose?: string): Promise<{ ok: true; removed: number } | { ok: false; error: string }>;
@@ -1119,9 +1119,12 @@ export class OwnerDesk {
     if (!key) return;
     this.muted.add(key);
     // Blocked is cut off: its live yeses are taken back too (round 85: a blocked agent kept reading with a key it held).
-    const who = new Set(this.notes.filter((x) => x.from.key === key).map((x) => x.from.webId));
+    // Matched on the sender's WebID and domain together: a card's WebID is the sender's own word, so a name alone could
+    // make the owner take back someone else's yeses (round 89, an attacker).
+    const who = new Set(this.notes.filter((x) => x.from.key === key).map((x) => `${x.from.webId}|${x.from.domain}`));
     if (who.size) {
-      const theirs = [...[...this.grants.values()].filter((g) => !g.revoked && who.has(g.visitor)).map((g) => g.id), ...(await this.o.panel?.activeConsents?.().catch(() => []) ?? []).filter((c) => who.has(c.visitorWebId)).map((c) => c.id)];
+      const domains = new Set([...who].map((w) => w.split('|')[1]));
+      const theirs = [...[...this.grants.values()].filter((g) => !g.revoked && domains.has(g.visitor)).map((g) => g.id), ...(await this.o.panel?.activeConsents?.().catch(() => []) ?? []).filter((c) => who.has(`${c.visitorWebId}|${c.visitorDomain ?? ''}`)).map((c) => c.id)];
       if (theirs.length) await this.revoke([...new Set(theirs)]);
     }
     this.endTasksWith(key, 'You blocked them.');

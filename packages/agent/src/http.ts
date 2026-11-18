@@ -260,7 +260,7 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
       const ask = String(req.body?.ask ?? ''), asked = auth.asked(ask);
       if (!asked) return page(res, 400, 'Start again', 'This sign-in page has expired: start again from your AI app.');
       if (!makeHousesAt) return page(res, 404, 'Not here', 'This Lake doesn\'t make houses from the sign-in page.');
-      const made = await fetch(`${makeHousesAt}/t/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(90_000) }).then((r) => r.json() as Promise<{ house?: string; panel?: string; error?: string }>).catch((): { house?: string; panel?: string; error?: string } => ({ error: 'it didn\'t answer' }));
+      const made = await fetch(`${makeHousesAt}/t/new`, { method: 'POST', headers: { 'content-type': 'application/json', ...(process.env.LAKE_MAKE_HOUSES_TOKEN ? { 'x-lake-maker': process.env.LAKE_MAKE_HOUSES_TOKEN } : {}) }, body: '{}', signal: AbortSignal.timeout(90_000) }).then((r) => r.json() as Promise<{ house?: string; panel?: string; error?: string }>).catch((): { house?: string; panel?: string; error?: string } => ({ error: 'it didn\'t answer' }));
       if (!made.house || !made.panel) return page(res, 503, 'No house just now', `The Lake said: ${made.error ?? 'no house'}.`);
       sweepPending();
       pending.set(ask, { house: made.house, number: '', state: 'waiting', at: Date.now(), fresh: true });
@@ -276,7 +276,7 @@ h1{font-size:26px;line-height:1.2;margin:0 0 10px}p{color:#93A3B6}a.go{display:b
 <a class="go" href="${safe}">Open my house here</a>
 <p>Or send this link to your phone:</p><div class="link">${safe}</div>
 <p id="state">Waiting for your phone…</p>
-<p class="small">The link works once and lasts an hour. Sandbox: made-up data and play money.</p>
+<p class="small">The link works once. Open it within 15 minutes for ${app2} to connect; the house waits an hour for a phone. Sandbox: made-up data and play money.</p>
 </main><script nonce="${nonce}">
 (function(){var u=${JSON.stringify(`${resource}/oauth/house/status?ask=${encodeURIComponent(ask)}`)},s=document.getElementById('state');
 function look(){fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).then(function(x){
@@ -322,6 +322,8 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
       // From the house: its panel made a one-time assistant code with the owner's key; this agent takes it now.
       const house = typeof req.body?.house === 'string' ? req.body.house : '', code = typeof req.body?.code === 'string' ? req.body.code : '';
       const w = pending.get(String(req.body?.ask ?? ''));
+      // A sign-in waiting on a house goes to that house only (round 89: whoever held the link could name another).
+      if (w && house && house.replace(/\/$/, '') !== w.house) return page(res, 403, 'Not connected', 'This sign-in asked another house. Start again from your AI app.');
       if (house && code) {
         try {
           const l = await agentFor(r.principal);
