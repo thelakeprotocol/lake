@@ -1020,6 +1020,36 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  // Round 95 (a first-time owner, the babysitter): "Mia confirmed Friday 6 to 10" was words on a card and went into no agenda.
+  it('a task done with a time agreed: the house holds it, tells them in its own words, and only the owner\'s tap confirms it', async () => {
+    const h = await withReplies();
+    const a = await h.connect('Helper');
+    const kid = a.id.publicJwk.kid!;
+    const id = h.desk.addNote({ from: from('mia'), text: 'I can babysit Friday evening' })!;
+    await settle();
+    const set = await h.owner({ kind: 'panel.task.set', note: id, by: kid, text: 'Ask if 6 to 10 works, $25 an hour' });
+    const friday = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    // Not before it's done, not too soon for the owner to answer, and not without a start.
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'back', text: 'x', agenda: { what: 'Babysitting', start: friday } })).toMatchObject({ error: expect.stringContaining('outcome "done"') });
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x', agenda: { what: 'Babysitting', start: new Date(Date.now() + 3_600_000).toISOString() } })).toMatchObject({ error: expect.stringContaining('three hours') });
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x', agenda: { what: 'Babysitting' } })).toMatchObject({ error: expect.stringContaining('start') });
+    h.sent.length = 0;
+    const done = await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Mia can do Friday 6 to 10 at $25 an hour.', agenda: { what: 'Babysitting', start: friday, minutes: 240 } });
+    expect(done).toMatchObject({ ok: true, held: { id: expect.any(String), status: expect.stringContaining('never say it is booked') } });
+    // The house told Mia's agent itself that it is only held.
+    expect(h.sent.at(-1)).toMatchObject({ url: 'https://mia.example/a2a', m: { kind: 'note.reply', booking: { status: 'held', what: 'Babysitting', minutes: 240 } } });
+    expect(String(h.sent.at(-1)!.m.text)).toContain("hasn't confirmed it yet");
+    const list = await h.owner({ kind: 'list' });
+    expect(list.tasks[0]).toMatchObject({ state: 'done' });
+    const card = list.suggestions.find((x: { booking?: { id: string } }) => x.booking?.id === done.held.id);
+    expect(card).toMatchObject({ booking: { what: 'Babysitting', with: "mia's AI" } });
+    // The owner's tap confirms it: in the agenda, and Mia is told.
+    expect(await h.owner({ kind: 'panel.assistant.answer', id: card.id, choice: 'Confirm' })).not.toHaveProperty('error');
+    expect((await h.owner({ kind: 'list' })).agenda.find((x: { id: string }) => x.id === done.held.id)).toMatchObject({ confirmed: expect.any(String), start: friday });
+    expect(h.sent.at(-1)).toMatchObject({ m: { booking: { status: 'confirmed' } } });
+    h.close();
+  });
+
   it('a task ends when the owner answers, takes it back or gives another; when its time runs out; and with its AI', async () => {
     const h = await withReplies();
     // No AI: said so, with what's needed.

@@ -2217,15 +2217,33 @@ export class OwnerDesk {
           });
         }
         if (p.kind === 'assistant.task.done') {
-          const q = p as unknown as { id?: string; outcome?: string; text?: string };
+          const q = p as unknown as { id?: string; outcome?: string; text?: string; agenda?: { what?: string; start?: string; minutes?: number; where?: string } };
           const t = this.tasks.find((x) => x.id === String(q.id ?? '') && x.by === assistant.kid);
           if (!t) return void res.status(404).json({ error: 'no task of yours with that id' });
           if (t.state !== 'open') return void res.status(409).json({ error: `that task is over already${t.ended?.why ? ` (${t.ended.why})` : ''}` });
           const outcome = (['done', 'back', 'cant'] as const).find((o) => o === q.outcome);
           if (!outcome) return void res.status(400).json({ error: 'outcome: "done", "back" (it needs your human) or "cant"' });
+          // Done with a time agreed in that conversation (round 95: "Mia confirmed Friday 6 to 10" stayed words on a card, and
+          // went into no agenda): the house holds it as it holds an AI on duty's time, tells them so in its own words, and only
+          // the owner's tap confirms it.
+          let held: AgendaItem | undefined;
+          if (q.agenda !== undefined) {
+            if (outcome !== 'done') return void res.status(400).json({ error: 'agenda goes with outcome "done": a time agreed in that conversation' });
+            const what = String(q.agenda?.what ?? '').trim().slice(0, 200), start = new Date(String(q.agenda?.start ?? ''));
+            if (!what || Number.isNaN(start.getTime())) return void res.status(400).json({ error: 'agenda: { what, start } (what was agreed, and when it starts: ISO 8601 with its offset)' });
+            if (start.getTime() < Date.now() + HELD_AHEAD) return void res.status(409).json({ error: 'a time your human confirms starts at least three hours from now, so they have time to say yes or no: tell them about it in text instead (outcome "back")' });
+            const about = this.notes.filter((n) => OwnerDesk.conv(n.from) === t.to.key).sort((x, y) => y.at.localeCompare(x.at))[0];
+            if (!about) return void res.status(409).json({ error: 'nothing in that conversation to hold a time for' });
+            if (this.agenda.some((x) => x.held?.note === about.id)) return void res.status(409).json({ error: 'a time is already held in that conversation: your human confirms or declines it first' });
+            const minutes = Number.isInteger(q.agenda?.minutes) && q.agenda!.minutes! >= 5 && q.agenda!.minutes! <= 720 ? q.agenda!.minutes! : this.o.panel?.availability?.()?.meetings ?? 60;
+            held = { id: randomBytes(6).toString('hex'), what, when: this.whenWords(start.toISOString()), start: start.toISOString(), minutes, ...(q.agenda?.where ? { where: String(q.agenda.where).trim().slice(0, 120) } : {}), with: t.to.name, by: assistant.label, at: new Date().toISOString() };
+            const r = await this.holdBooking(assistant, held, about);
+            if ('error' in r) return void res.status(502).json(r);
+          }
           this.endTask(t, outcome, { text: String(q.text ?? '').trim().slice(0, 500) }, false);
-          this.notifyOwner('task', outcome === 'done' ? `${shortLabel(assistant.label)} did what you asked.` : `${shortLabel(assistant.label)} needs you on what you asked it to do.`);
-          return void res.json({ ok: true, note: 'your human sees it on the card' });
+          // A held time tells the owner itself (Confirm or Decline): one buzz, not two.
+          if (!held) this.notifyOwner('task', outcome === 'done' ? `${shortLabel(assistant.label)} did what you asked.` : `${shortLabel(assistant.label)} needs you on what you asked it to do.`);
+          return void res.json({ ok: true, note: 'your human sees it on the card', ...(held ? { held: { id: held.id, until: held.held!.until, status: 'held: your human confirms it with a tap, and the house tells them how it ends; never say it is booked' } } : {}) });
         }
         if (p.kind === 'assistant.forward') {
           // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked

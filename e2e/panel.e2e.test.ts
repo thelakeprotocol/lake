@@ -991,6 +991,40 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     } finally { await sam.close().catch(() => {}); }
   });
 
+  it('a task that ends with a time agreed: the card holds it for the owner\'s OK, their tap puts it in the agenda, and the other side is told (round 95)', async () => {
+    const got: Record<string, any>[] = [];
+    const mia = await joinLake({ name: 'Mia (Claude)', domain: 'mia.example', node: nodeUrl, port: await freePort(), onMessage: async (m) => { got.push(m.payload as Record<string, any>); return { kind: 'received' }; } });
+    try {
+      const left = await mia.ask(`${house}/a2a`, { kind: 'note', text: 'Mia here: I can babysit on Friday evening.' }) as { kind: string; note: string };
+      expect(await asAssistant({ kind: 'assistant.suggest', text: 'Mia offers to babysit on Friday evening.', note: left.note, advice: 'your_call' })).toMatchObject({ ok: true });
+      await tab('Today');
+      const sug = page.locator('ion-card.sug', { hasText: 'Mia offers to babysit' });
+      await sug.getByRole('button', { name: 'Tell Nova what to do' }).click();
+      await sheet().getByRole('textbox', { name: 'Your instruction' }).fill('Ask if 6 to 10 works');
+      await sheet().locator('ion-button.tell-send').click();
+      await page.getByText('Sent to Nova').waitFor({ timeout: 6000 });
+      const mine = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string; with: string }[] };
+      const task = mine.tasks.find((t) => /Mia/.test(t.with))!;
+      const start = new Date(Date.now() + 3 * 86_400_000); start.setUTCHours(8, 0, 0, 0);
+      got.length = 0;
+      expect(await asAssistant({ kind: 'assistant.task.done', id: task.id, outcome: 'done', text: 'Mia can do Friday 6 to 10.', agenda: { what: 'Babysitting', start: start.toISOString(), minutes: 240 } })).toMatchObject({ ok: true, held: { id: expect.any(String) } });
+      // Mia hears from the house that it is only held.
+      await expect.poll(() => got.find((m) => m.booking?.status === 'held')?.text, { timeout: 6000 }).toMatch(/hasn't confirmed it yet/);
+      // The owner's card: what, when, Confirm.
+      const held = page.locator('ion-card.sug', { hasText: 'Held for your OK' }).filter({ hasText: 'Babysitting' });
+      await held.waitFor({ timeout: 6000 });
+      await tidy();
+      await held.getByRole('button', { name: 'Confirm' }).click();
+      await held.waitFor({ state: 'detached', timeout: 6000 });
+      await expect.poll(() => got.find((m) => m.booking?.status === 'confirmed')?.text, { timeout: 6000 }).toMatch(/^Confirmed by/);
+      // The task's own card says what the AI did; OK clears it.
+      const card = page.locator('ion-card.task-card', { hasText: 'Mia can do Friday 6 to 10' });
+      await card.getByRole('button', { name: 'OK', exact: true }).click();
+      await card.waitFor({ state: 'detached', timeout: 6000 });
+      await tidy();
+    } finally { await mia.close().catch(() => {}); }
+  });
+
   it('someone who wrote to the owner\'s AI, never to the house: a chat of its own with nothing to type, and the AI answers from its own address on the owner\'s word (13 Nov)', async () => {
     // Kim's AI wrote to Nova's own address. Nova files the message with the house as Kim's AI signed it, and its note about it.
     const kim = await makeVisitor(await generateIdentity(), 'kim.example', 'Kim (Claude)', 'http://localhost:9/a2a');
