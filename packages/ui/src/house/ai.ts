@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, houseBase, must, useHouse, useRedraw } from './api';
 import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { CURRENCIES, DUTY_KINDS, ROLES, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, rolesOf, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads, type Role } from './logic';
+import { CURRENCIES, DUTY_CLI, DUTY_KINDS, ROLES, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, rolesOf, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads, type Role } from './logic';
 import { back, push } from './nav';
 
 // My AI: your own AI with a key to your house. Your AIs first, then AI on duty, then what it did while you were away.
@@ -117,9 +117,9 @@ function DutySetup({ houseUrl, log, done, start, preset = 'away' }: { houseUrl: 
   return h('div', { class: 'sheet-body' },
     runner.data?.can ? h('ion-segment', { value: where, class: 'where-seg', 'aria-label': 'Where it runs', onionChange: (e: CustomEvent) => setWhere(e.detail.value) },
       h('ion-segment-button', { value: 'house' }, h('ion-label', {}, 'In my house')), h('ion-segment-button', { value: 'computer' }, h('ion-label', {}, 'On my computer'))) : null,
-    h('p', { class: 'muted-line' }, inHouse ? `Your house runs it, awake whenever your house is, with ${runner.data!.model!.whose === 'yours' ? 'your own Claude API key' : 'the AI your house offers'}. Never money; anything new waits for you.` : 'It runs on your computer in Claude Code, on your own Claude subscription, and answers within seconds while the computer is on. Never money; anything new waits for you.'),
+    h('p', { class: 'muted-line' }, inHouse ? `Your house runs it, awake whenever your house is, with ${runner.data!.model!.whose === 'yours' ? 'your own Claude API key' : 'the AI your house offers'}. Never money; anything new waits for you.` : `It runs on your computer in Claude Code, on your own Claude subscription, and answers within ${DUTY_CLI.live ? 'seconds' : 'a minute'} while the computer is on. Never money; anything new waits for you.`),
     h('ion-list', { inset: true, class: 'lake-list' },
-      ...DUTY_KINDS.map(([k, label]) => h('ion-item', { key: k }, h('ion-checkbox', { checked: kinds.includes(k), onionChange: (e: CustomEvent) => setKinds(e.detail.checked ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k)), labelPlacement: 'end', justify: 'start' }, label))),
+      ...DUTY_KINDS.map(([k, label]) => h('ion-item', { key: k }, h('ion-checkbox', { checked: kinds.includes(k) && !(k === 'deliver' && !inHouse && !DUTY_CLI.menu), disabled: k === 'deliver' && !inHouse && !DUTY_CLI.menu, onionChange: (e: CustomEvent) => setKinds(e.detail.checked ? [...new Set([...kinds, k])] : kinds.filter((x) => x !== k)), labelPlacement: 'end', justify: 'start' }, label))),
       h('ion-item', {}, h('ion-input', { type: 'time', label: 'From', value: from, 'aria-label': 'On duty from', onionInput: (e: CustomEvent) => setFrom(String(e.detail.value)) })),
       h('ion-item', {}, h('ion-input', { type: 'time', label: 'To', value: to, 'aria-label': 'On duty until', onionInput: (e: CustomEvent) => setTo(String(e.detail.value)) })),
       h('ion-item', {}, h('ion-input', { type: 'number', label: preset === 'messages' ? 'Things a day, at most' : 'Things a night, at most', value: cap, min: 1, max: 50, 'aria-label': 'Most things a night', onionInput: (e: CustomEvent) => setCap(Number(e.detail.value)) })),
@@ -127,14 +127,16 @@ function DutySetup({ houseUrl, log, done, start, preset = 'away' }: { houseUrl: 
     h('p', { class: 'muted-line' }, `Your time zone: ${tz.replace(/_/g, ' ')}`),
     h('div', { class: 'sheet-actions' },
       h(Btn, { label: inHouse ? 'Sign and hire' : 'Sign and get the command', expand: 'block', run: async () => {
-        if (!kinds.length) throw new Error('Pick at least one thing it may do.');
+        // On a computer, only what the runner people get can do (DUTY_CLI): no menu to deliver from yet.
+        const may = !inHouse && !DUTY_CLI.menu ? kinds.filter((k) => k !== 'deliver') : kinds;
+        if (!may.length) throw new Error('Pick at least one thing it may do.');
         if (!(cap >= 1 && cap <= 50)) throw new Error('From 1 to 50 things a night.');
         if (!(Number.isInteger(days) && days >= 1 && days <= 31)) throw new Error('From 1 to 31 days.');
         if (from === to) throw new Error('The hours need to start and end at different times.');
-        const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds, cap, days, hours: { from, to, tz } });
+        const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds: may, cap, days, hours: { from, to, tz } });
         if (inHouse) { await must({ kind: 'panel.duty.set', id: d.id, label: `${ROLES[preset].name} AI`, credential: await signDraft(d.draft), runner: 'house' }); void toast('Your house runs your AI on duty now'); done(); return; }
         const r = await must<{ code: string; until: string }>({ kind: 'panel.duty.set', id: d.id, label: `${ROLES[preset].name} AI`, credential: await signDraft(d.draft) });
-        dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code} --live${kinds.includes('deliver') ? ' --menu menu.json' : ''}` };
+        dutyCode = { code: r.code, until: Date.parse(r.until), made: Date.now(), cmd: `npx -y @thelakeprotocol/agent@${DUTY_CLI.version} duty --lake ${location.origin}/mcp --house ${houseUrl} --code ${r.code} ${DUTY_CLI.live ? '--live' : '--every 20'}${may.includes('deliver') && DUTY_CLI.menu ? ' --menu menu.json' : ''}` };
         redraw();
       } }),
       h('ion-button', { fill: 'clear', color: 'medium', expand: 'block', onClick: done }, 'Not now')));

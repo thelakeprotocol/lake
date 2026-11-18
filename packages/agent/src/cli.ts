@@ -30,17 +30,22 @@ if (process.argv[2] === 'mcp' && process.argv.includes('--http')) {
 } else if (process.argv[2] === 'duty') {
   // `lake duty --lake <connector>/mcp --house <house> --code <code>`: the owner's own AI on duty while they're away.
   const { parseArgs } = await import('node:util');
-  const { values: a } = parseArgs({ args: process.argv.slice(3), options: {
+  // A wrong option or a menu file that isn't there is one line saying what to do, not a stack trace (18 Nov).
+  const fail = (why: string): never => { console.error(`lake duty: ${why}`); process.exit(2); };
+  let parsed;
+  try { parsed = parseArgs({ args: process.argv.slice(3), options: {
     lake: { type: 'string', default: 'https://sandbox.lake.doneinfifty.com/mcp' }, house: { type: 'string' }, code: { type: 'string' },
     agent: { type: 'string', default: 'claude -p' }, every: { type: 'string', default: '600' }, 'max-runs': { type: 'string', default: '30' },
     'max-tools': { type: 'string', default: '40' }, state: { type: 'string' }, menu: { type: 'string' }, live: { type: 'boolean', default: false }, 'keep-logs': { type: 'string', default: '7' },
-  } });
+  } }); } catch (e) { fail(`${(e as Error).message.split('.')[0]}: if the command came from your house's panel, run it with npx -y @thelakeprotocol/agent@latest`); }
+  const a = parsed!.values;
   if (!a.house) { console.error('usage: lake duty --house <your house> --code <the code from your panel> [--lake <connector>/mcp] [--agent "claude -p"] [--live | --every 600] [--max-runs 30] [--max-tools 40] [--menu menu.json] [--keep-logs 7]'); process.exit(2); }
   const { runDuty } = await import('./duty.js');
   const { readFileSync } = await import('node:fs');
   // The menu its agent sells from while on duty (with "deliver" in the grant), set at first sign-in: a JSON list of items,
   // or { items, about, tags } to say on its card what it sells.
-  const file = a.menu ? JSON.parse(readFileSync(a.menu, 'utf8')) as unknown[] | { items: unknown[]; about?: string; tags?: string[] } : undefined;
+  let file: unknown[] | { items: unknown[]; about?: string; tags?: string[] } | undefined;
+  try { file = a.menu ? JSON.parse(readFileSync(a.menu, 'utf8')) : undefined; } catch (e) { fail(`can't read ${a.menu}: ${(e as NodeJS.ErrnoException).code === 'ENOENT' ? 'save your menu there first (a JSON list of items, or { items, about, tags })' : (e as Error).message}`); }
   const menu = Array.isArray(file) ? { menu: file } : file ? { menu: file.items, ...(file.about ? { about: file.about } : {}), ...(file.tags ? { tags: file.tags } : {}) } : {};
   const stop = new AbortController();
   process.once('SIGINT', () => stop.abort());

@@ -209,6 +209,12 @@ export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you kn
  * more than the grant or allowance it stands for. A live duty grant that may hold times is Away, one that may not is
  * Messages; a live spending allowance is Shopping.
  */
+/**
+ * The runner people get from npm today, and what it can do: the command the panel hands out uses only that (18 Nov: it
+ * said --live and --menu, which the published 0.3.1 doesn't know, and failed with "Unknown option '--live'"). A release
+ * bumps this with the tag.
+ */
+export const DUTY_CLI = { version: '0.3.1', live: false, menu: false };
 export type Role = 'messages' | 'shopping' | 'away';
 export const ROLES: Record<Role, { name: string; line: string }> = {
   // "Replies", not "Messages": each AI's row already says "Messages only" for what it may read.
