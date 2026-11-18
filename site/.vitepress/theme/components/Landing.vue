@@ -109,7 +109,7 @@ const milestones = [
           <div class="eyebrow">Open protocol · Solid + A2A + MCP · Apache-2.0</div>
           <h1>Ask your AI<br>to ping me.</h1>
           <p class="sub">Your data in your own house. <b>Anyone’s AI can reach you there.</b></p>
-          <p class="lede">The Lake is an open network where each person has a house: their data, their rules, their phone as the key. People reach you by asking their own AI to ping your handle; you answer from your phone, or let your AI answer. Shops come to you with offers when your AI says what you need. Every agent carries a signed card, every payment has a signed receipt, and every consent is yours to take back. (On the sandbox an agent’s domain is its word: domain proof is switched off.)</p>
+          <p class="lede">The Lake is an open network where each person has a house: their data, their rules, their phone as the key. People reach you by asking their own AI to ping your handle; you answer from your phone, or let your AI answer. Shops come to you with offers when your AI says what you need. Every agent carries a signed card, every payment has a signed receipt, and every consent is yours to take back: from then on the next request is refused, though what already left (a study’s answer, the documents of an offer you accepted) stays sent. (On the sandbox an agent’s domain is its word: domain proof is switched off.)</p>
           <div class="cta">
             <a class="btn primary" :href="withBase('/docs/get-started')">Add the Lake to your AI →</a>
             <a class="btn" :href="withBase('/docs/reach')">Ping a person</a>
@@ -164,7 +164,7 @@ const milestones = [
     <section class="block gutter real">
       <div class="eyebrow">Not a simulation</div>
       <h2>The map above is a simulation.<br><span class="mint">This one is real.</span></h2>
-      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 houses get paid (play money), an attacker is quarantined, an owner revokes every key. Records moved, as the houses report it: 0. <a href="/docs/verify">Check it yourself</a>: what the live sandbox shows, and what it can't prove yet.</p>
+      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 houses get paid (play money), an attacker is quarantined, an owner revokes every key. Records moved, as each house reports it: 0 (the houses’ own count; nothing outside checks it yet). <a href="/docs/verify">Check it yourself</a>: what the live sandbox shows, and what it can't prove yet.</p>
       <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
         <source src="/demo.mp4" type="video/mp4">
       </video>
@@ -208,7 +208,7 @@ const milestones = [
     <section class="block gutter">
       <div class="eyebrow">One example among many: a study, end to end</div>
       <h2>“Do over-60s on drug X get readmitted less?”</h2>
-      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. On the Lake, measured on one laptop, it took 57 seconds across 250 houses (all 200 willing ones answered) and about ten minutes across a thousand (737 of 801 willing answered), and no records were copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
+      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. On the Lake it took 57 seconds across 250 houses (all 200 willing ones answered) and about ten minutes across a thousand (737 of 801 willing answered), measured by hand on one busy laptop (<a href="/docs/architecture#scale-measured">how, and on what</a>). No records were copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
       <ol class="flow">
         <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
           <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>
@@ -267,7 +267,7 @@ await me.study(question)</code></pre>
         </article>
         <article>
           <h3>Run the water</h3>
-          <p>Run a Lake node. Pick your peers and your blocklists. With two or more nodes, stopping one in the middle of a study doesn’t stop the study (tested). The public Lake has one node today.</p>
+          <p>Run a Lake node. Pick your peers and your blocklists. With two or more nodes, stopping one in the middle of a study doesn’t stop the study (<a href="https://github.com/thelakeprotocol/lake/blob/main/e2e/lake.e2e.test.ts">tested</a>: the end-to-end suite stops a node mid-study). The public Lake has one node today.</p>
           <pre><code>docker run \
   ghcr.io/thelakeprotocol/lake-node \
   --follow https://lake.example</code></pre>
@@ -280,7 +280,7 @@ await me.study(question)</code></pre>
     <section class="block gutter">
       <div class="eyebrow">Wild west</div>
       <h2>Weeks old. Built in the open.</h2>
-      <p class="kicker">Every milestone runs, and all but the 1,000-house run are in the end-to-end tests. It is also weeks old, with no outside security review and no real users yet: rough edges, open questions, a public sandbox on a 2 GB box. That’s the invitation: the first people in shape what it becomes.</p>
+      <p class="kicker">Every milestone runs; the end-to-end tests cover all but the 250- and 1,000-house runs, which were measured by hand. What it isn’t yet: independently audited; run by more than one operator (the public Lake has one node, and the same operator runs both tellers, the payments agent and the log); paying real money (it’s simulated, with real signed receipts); sure who an agent is (domain proof is off on the sandbox). Records are synthetic throughout. It is weeks old with no real users, on a public sandbox on a 2 GB box. <a href="/docs/verify">What you can check from outside</a>. That’s the invitation: the first people in shape what it becomes.</p>
       <ol class="ms">
         <li v-for="([m, s]) in milestones" :key="m" :class="s"><span>{{ m }}</span></li>
       </ol>
