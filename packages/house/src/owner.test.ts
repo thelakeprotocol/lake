@@ -686,7 +686,9 @@ describe('what an attacker tried (round 16)', () => {
     // The page: the want's public points, never the most they'd pay.
     const view = h.desk.wantLinkView(want.id, token)!;
     expect(view).toMatchObject({ open: true, want: { name: 'Babysitter, Friday evening', areaServed: 'AU-QLD' } });
-    expect(JSON.stringify(view)).not.toContain('80');
+    // No limit anywhere in it (checked by key and value: a date in it may hold the digits 80).
+    expect(JSON.stringify(view)).not.toMatch(/"limit"|"amount":80\b|"value":80\b/);
+    expect(view).not.toHaveProperty('limit');
     expect(h.desk.wantLinkView(want.id, 'wrong-token')).toBeNull();
     // A reply: a web note on the want, counted in the list, its words kept from the AI.
     expect(h.desk.replyByWantLink(want.id, token, { text: 'I babysit on Fridays, happy to help', from: 'Sam' }, '10.0.0.1')).toMatchObject({ status: 200, body: { kind: 'noted' } });
