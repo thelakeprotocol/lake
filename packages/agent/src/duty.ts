@@ -277,6 +277,8 @@ export async function runDuty(o: DutyOptions): Promise<void> {
       await giveUp((p.tasks ?? []).filter((t) => tried.get(t) === 2), 'I tried twice and couldn\'t get this done. Tell me again, or answer them yourself.');
       const due = (p.tasks ?? []).filter((t) => (tried.get(t) ?? 0) < 2);
       if (o.tasksOnly && !due.length && !(p.duty?.on)) break;
+      // Back within its hours: said once, so its log doesn't read as off all night (19 Nov: on duty from 22:00, it said nothing).
+      if (p.duty?.on && offSaid) { log('on duty again: looking for messages'); offSaid = false; }
       if (due.length) {
         if (tried.size > 200) for (const k of [...tried.keys()].slice(0, 100)) tried.delete(k);
         if (capped) { log(`a task from its human waits, but ${capped}: not running`); await giveUp(due, 'I\'ve used up my runs for today, so I can\'t do this now. Answer them yourself, or tell me again tomorrow.'); }

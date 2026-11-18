@@ -1479,9 +1479,34 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     let ended = '';
     for (let i = 0; i < 40 && ended !== 'closed'; i++) { ended = (await want({ action: 'mine' })).selling.offers[0]?.state; if (ended !== 'closed') await page.waitForTimeout(250); }
     expect(ended).toBe('closed');
+    // Someone's help, through the connector (round 97): the AI is told how people answer, not shops, and its mine shows the
+    // replies that came through the owner's link (who and how many, never the words).
+    const sitter = await one.call('lake_want', { action: 'post', people: true, name: 'Babysitter, Friday 6 to 10', properties: { When: 'Friday 6-10pm', Where: 'AU-QLD' } });
+    expect(sitter).toMatchObject({ ok: true, next: expect.stringContaining('Share with people you know') });
+    expect(sitter.next).toContain('lake_house { view: "tasks" }');
+    expect(sitter.next).not.toMatch(/buy with a tap/);
+    expect(sitter.note).not.toMatch(/shops/);
+    // Nothing needs the owner yet, so it isn't on Today: its page, as the owner opens it from the want.
+    await page.evaluate((id) => { location.hash = `#want=${encodeURIComponent(id)}`; }, sitter.want.id as string);
+    await page.getByRole('button', { name: 'Share with people you know' }).click();
+    const link = (await page.locator('.share-want .copybox code').textContent({ timeout: 10_000 }))!.trim();
+    const friend = await page.context().newPage();
+    await friend.goto(link);
+    await friend.locator('textarea[name="text"]').fill('Friday works for me, I have first aid');
+    await friend.locator('input[name="from"]').fill('Neighbour Mia');
+    await friend.getByRole('button', { name: 'Send' }).click();
+    await friend.getByRole('heading', { name: 'Reply sent ✓' }).waitFor({ timeout: 10_000 });
+    await friend.close();
+    const sitterRow = async () => (await one.call('lake_want', { action: 'mine' })).wants.find((w: { id: string }) => w.id === sitter.want.id);
+    await expect.poll(async () => (await sitterRow())?.replies_waiting, { timeout: 10_000 }).toBe(1);
+    const seen = await sitterRow();
+    expect(seen).toMatchObject({ for_people: true, shared: true, replies: 1, matches: [], next: expect.stringContaining('task') });
+    expect(JSON.stringify(seen)).not.toContain('first aid');
+    expect(await one.call('lake_want', { action: 'close', id: sitter.want.id })).toMatchObject({ ok: true });
+    await tab('Today');
     await shopper.close(); await one.c.close();
     await tidy();
-  });
+  }, 150_000);
 
   it('recovers the house on a new device with a recovery code, and the old device knows it lost the key', async () => {
     await tab('New or lost phone');
