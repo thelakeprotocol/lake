@@ -76,6 +76,11 @@ const { values: a } = parseCli({
     // Invites (a hosted Lake): each owner may bring this many people in, each with a house of their own, up to a total.
     'invites-each': { type: 'string', default: process.env.LAKE_INVITES_EACH ?? '5' },
     'max-houses': { type: 'string', default: process.env.LAKE_MAX_HOUSES ?? '20' },
+    // A house made for someone from their AI's chat (POST /t/new): off unless set. Closed until its one-use link pairs a
+    // phone, dropped if none does in time; at most a few waiting at once.
+    'make-houses': { type: 'boolean', default: process.env.LAKE_MAKE_HOUSES === '1' },
+    'unclaimed-seconds': { type: 'string', default: process.env.LAKE_UNCLAIMED_SECONDS ?? '3600' },
+    'max-unclaimed': { type: 'string', default: process.env.LAKE_MAX_UNCLAIMED ?? '3' },
   },
 });
 // Its data folder first: outside Docker the default /data usually isn't writable, and the error was a stack trace.
@@ -236,7 +241,7 @@ async function hosted(n: number) {
       leaseHours: a['open-pairing'] && !kept.has(name) ? Number(a['lease-hours'] ?? 24) || undefined : undefined,
       emit: () => {}, say: (msg) => { if (/WARNING|BROKEN/.test(msg)) { warnings++; log(`${name}: ${msg}`); } }, quiet: true, invite: () => inviteFor(name)(),
       host: { by: new URL(baseUrl).host, tells: !!a.operator && name !== a.operator },
-      onPaired: ({ claimed }) => { if (!claimed || name === a.operator) return; tellOperator(isInvited(name) ? `Someone paired a phone with ${name}, the house they were invited into: a person is using it.` : `Someone claimed the sandbox house ${name} and paired a phone with it.`); },
+      onPaired: ({ claimed }) => { if (fresh.has(name)) void keepFresh(name); if (!claimed || name === a.operator) return; tellOperator(isInvited(name) ? `Someone paired a phone with ${name}, the house they were invited into: a person is using it.` : `Someone claimed the sandbox house ${name} and paired a phone with it.`); },
     });
     app.use(`/t/${name}`, house.app);
     houses.push(house);
@@ -254,12 +259,53 @@ async function hosted(n: number) {
     await saveWhole(invitesFile, JSON.stringify(invites));
     return { link: `${baseUrl}/t/join/${code}`, left: each - mine - 1 };
   };
+  // A house made from someone's AI chat (round 87, the day-1 plan): a new name, kept (no lease) and closed: only the
+  // one-use link in the answer pairs it, so a link left unopened in a chat can't be taken by a stranger. Paired, it stays
+  // like an invited house; not paired in time, it is gone. A few at most wait at once, within the Lake's own cap.
+  const fresh = new Map<string, number>(), gone = new Set<string>();
+  const keepFresh = async (name: string) => {
+    fresh.delete(name);
+    invited.push({ name, by: 'chat', at: new Date().toISOString() });
+    await saveWhole(invitedFile, JSON.stringify(invited));
+    log(`${name}, made from a chat, was claimed by a phone`);
+  };
+  app.post('/t/new', express.json(), async (_req, res) => {
+    if (!a['make-houses']) return void res.status(404).json({ error: 'this Lake doesn\'t make houses from a chat' });
+    if (fresh.size >= (Number(a['max-unclaimed']) || 3)) return void res.status(429).json({ error: 'a few new houses are waiting to be claimed already: try again in a while' });
+    if (houses.length + invites.filter((x) => !x.used).length >= (Number(a['max-houses']) || 0)) return void res.status(503).json({ error: 'this Lake is full for now: they can run a house of their own (lake.doneinfifty.com/docs/join)' });
+    const name = `h-${randomBytes(4).toString('hex')}`;
+    try {
+      await tenantSessions({ dataDir, baseUrl: podUrl, names: [name] }).then((m) => sessions.set(name, m.get(name)!));
+      await closePodRoot(sessions.get(name)!).catch(() => false);
+      kept.add(name);
+      fresh.set(name, Date.now());
+      const house = await startOne(name);
+      await house.join();
+      const token = (await readFile(join(dataDir, 'houses', name, 'pairing-token'), 'utf8')).trim();
+      const ms = (Number(a['unclaimed-seconds']) || 3600) * 1000;
+      setTimeout(() => {
+        if (!fresh.has(name)) return;
+        fresh.delete(name); kept.delete(name); gone.add(name);
+        const i = houses.findIndex((h) => h.name === name);
+        // Off the Lake too: it stops checking in and says it's gone, so nobody finds a house that no longer answers.
+        if (i >= 0) { const h = houses[i]!; for (const l of h.link?.links ?? []) l.stop(); void h.link?.leave(); houses.splice(i, 1); }
+        log(`${name}, made from a chat, wasn't claimed in time: gone`);
+      }, ms).unref();
+      log(`made ${name} from a chat`);
+      res.json({ house: `${baseUrl}/t/${name}`, panel: `${baseUrl}/t/${name}/owner/#pair=${token}`, until: new Date(Date.now() + ms).toISOString() });
+    } catch (e) {
+      fresh.delete(name);
+      log(`making a house: ${(e as Error).message}`);
+      res.status(500).json({ error: 'the house could not start just now; try again in a minute' });
+    }
+  });
   // The door opens before the houses do: each answers as soon as it's up, and one still starting says so (503 with
   // Retry-After) where a proxy in front would say "bad gateway" (12 Nov: fifteen houses took 340 s on the sandbox's one
   // core, and nobody's house answered until the last was up).
   const starting = new Set(names), failed = new Set<string>();
   app.use('/t/:name', (req, res, next) => {
     const name = String(req.params.name);
+    if (gone.has(name)) return void res.status(410).json({ error: 'this house was made from a chat and nobody claimed it in time: ask your AI for a new one' });
     if (failed.has(name)) return void res.status(503).json({ error: 'this house could not start; whoever runs this server can see why in its log' });
     if (starting.has(name)) return void res.status(503).set('Retry-After', '20').json({ error: 'this house is starting; try again in a moment' });
     next();

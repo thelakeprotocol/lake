@@ -424,6 +424,8 @@ A door MAY carry a **door note** (`door: { note }`: up to 500 characters, with a
 
 A hosted Lake (one process holding many houses) MAY let owners bring people in: an owner's panel makes a one-time invite link (`panel.invite`; a few per owner, up to a total for the Lake; only from a house that stays its owner's, never one claimed for a day), and whoever opens it picks a handle and gets a house of their own: kept (no lease), its door open under that handle, open to pair only until its first device pairs. Used links are refused; invited houses come back after a restart. The owner answers a note from an agent from their phone: the house sends the agent `note.reply { note, text }`, signed by the house, and the agent's connector keeps it for its AI (`lake_inbox`), even across conversations. A handle is the owner's choice and the only name a search for it returns; nobody is listed by real name. A house started with `--handle <h>` opens its door under it, unless its rules already open one.
 
+A hosted Lake MAY also make a house for someone from their AI's chat: `POST /t/new` answers `{ house, panel, until }`, where `panel` carries the house's one-use pairing token (`/owner/#pair=<token>`). Such a house MUST start closed (only that token pairs it, so a link left unopened in a chat can't be taken by a stranger), is kept once a phone pairs it, and is gone (410) if none does by `until`. A Lake SHOULD cap how many wait unclaimed at once (three in the reference, an hour each) and count them against its total.
+
 ### 9.1 Relay
 
 A participant that cannot accept incoming connections (a house behind a home router) MAY be reached through a node:

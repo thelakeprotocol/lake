@@ -3210,7 +3210,7 @@ describe('invites: a hosted Lake gives someone a house of their own, from an own
   it('an owner makes a one-time link; the friend picks a handle and gets a house, pairs their phone, and anyone\'s AI can ping them', async () => {
     const [pp, hp] = [await freePort(), await freePort()];
     const base = `http://localhost:${hp}`;
-    await start(['packages/house/dist/main.js', '--tenants', '1', '--tenant-prefix', 'inv-', '--kept', 'teacher', '--open-pairing', '--invites-each', '2', '--max-houses', '10',
+    await start(['packages/house/dist/main.js', '--tenants', '1', '--tenant-prefix', 'inv-', '--kept', 'teacher', '--open-pairing', '--invites-each', '2', '--max-houses', '10', '--make-houses', '--unclaimed-seconds', '20',
       '--public-url', base, '--pod-port', String(pp), '--pod-url', `http://localhost:${pp}/`, '--port', String(hp), '--data', join(dir, 'hosted-invites'), '--lake', node,
       '--issuer-url', issuerUrl, '--auditor-url', auditor, '--person-url', `${specialistsUrl}/person`, '--personas-dir', 'personas', '--seed', '42'], /houses joined in/);
     hosted = procs[procs.length - 1];
@@ -3251,6 +3251,26 @@ describe('invites: a hosted Lake gives someone a house of their own, from an own
     const day = await (await fetch(`${base}/t/inv-0/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'panel.invite' }, dayPhone, { iss: 'owner' })) })).json();
     expect(day).toMatchObject({ error: expect.stringMatching(/only a house that stays yours can invite/) });
   }, 240_000);
+  it('makes a house from someone\'s AI chat: closed until its one-use link pairs a phone, kept once paired, gone if nobody does (round 87)', async () => {
+    const base = (hosted!.spawnargs[hosted!.spawnargs.indexOf('--public-url') + 1])!;
+    const make = async () => (await fetch(`${base}/t/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as Promise<{ house: string; panel: string; until: string; error?: string }>;
+    const a = await make();
+    expect(a).toMatchObject({ house: expect.stringMatching(new RegExp(`^${base}/t/h-[0-9a-f]{8}$`)), panel: expect.stringMatching(/\/owner\/#pair=[\w-]+$/) });
+    const token = a.panel.split('#pair=')[1]!;
+    // A stranger's phone can't take it without the link; the link's phone can, once.
+    const pair = (jwk: unknown, t?: string) => fetch(`${a.house}/owner/pair`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: jwk, ...(t ? { token: t } : {}) }) });
+    expect((await pair((await generateIdentity('chat-stranger')).publicJwk)).status).not.toBe(200);
+    expect((await pair((await generateIdentity('chat-owner')).publicJwk, token)).status).toBe(200);
+    // One nobody claims is gone after its time; the claimed one stays.
+    const b = await make();
+    expect(b.house).not.toBe(a.house);
+    await new Promise((ok) => setTimeout(ok, 22_000));
+    expect((await fetch(`${b.house}/owner/status`)).status).toBe(410);
+    // And off the Lake: the node no longer lists it.
+    const bCard = await (await fetch(`${node}/cards?q=${b.house.split('/t/')[1]}&idle=1`)).json() as unknown[];
+    expect(bCard).toEqual([]);
+    expect((await fetch(`${a.house}/owner/status`)).status).toBe(200);
+  }, 120_000);
 });
 
 describe('relay: a house behind a home router', () => {
