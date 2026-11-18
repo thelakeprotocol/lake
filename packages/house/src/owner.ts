@@ -214,6 +214,12 @@ const READS: readonly Reads[] = ['records', 'money'];
 const asReads = (v: unknown): Reads[] => (Array.isArray(v) ? READS.filter((r) => v.includes(r)) : []);
 export interface AssistantKey { /** On duty: the grant it acts under while the owner is away. */ duty?: Duty; /** What else it may read (none: notes, its errands, the agenda and free hours only). */ reads?: Reads[]; /** Its `money` came with a spending allowance, not the owner's switch: it lasts as long as the allowance. */ moneyWithAllowance?: true; kid: string; jwk: JWK; label: string; addedAt: string; /** When it last used its key (kept at most every 10 minutes). */ seenAt?: string; /** Its Lake WebID, for an allowance to name. */ webId?: string; /** Its A2A endpoint: where the house tells it what its human decided. */ url?: string }
 /** What the owner lets one assistant spend for them (SPEC §6.2): their signed AP2 Intent Mandate, with its bit on the status list. */
+/**
+ * An AI the owner removed, kept for them (round 99, a privacy-minded owner: a removed AI vanished, with what it had read
+ * and any try it made after): its name, what it might read, and the calls its own key made since, refused. Counted only
+ * when its signature checks, so nobody can fill this with its key id; never the payload.
+ */
+export interface RemovedAi { kid: string; jwk: JWK; label: string; addedAt: string; seenAt?: string; removedAt: string; reads?: Reads[]; tried?: { n: number; last: string; kinds: string[] } }
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
@@ -526,6 +532,8 @@ export class OwnerDesk {
   /** What the AI on duty did and was refused, newest last (the morning page). */
   dutyLog: DutyEntry[] = [];
   readLog: ReadEntry[] = [];
+  removed = new Map<string, RemovedAi>();
+  private removedSave?: ReturnType<typeof setTimeout>;
   private readSave?: NodeJS.Timeout;
   private dutyPushed = new Set<string>();
   /** Keys the owner's assistants have sent signed messages to: who counts as known for the duty's novelty rule. */
@@ -578,6 +586,10 @@ export class OwnerDesk {
   private answeredFixed(about: OwnerDesk['notes'][number], text: string, by: string, at: string, own = false) {
     const before = about.answered ? [...(about.answered.before ?? []), { text: about.answered.text, by: about.answered.by, at: about.answered.at, ...(about.answered.task ? { task: about.answered.task } : {}) }].slice(-8) : undefined;
     about.answered = { text, by, fixed: true, at, ...(own ? { own: true as const } : {}), ...(before ? { before } : {}) };
+  }
+  private saveRemoved() {
+    this.removedSave ??= setTimeout(() => { this.removedSave = undefined; void saveWhole(join(this.o.dataDir, 'removed-ais.json'), JSON.stringify([...this.removed.values()])).catch(() => {}); }, 1000);
+    this.removedSave.unref?.();
   }
   /** A task as its owner's panel and its AI see it. */
   private taskView(t: Task) {
@@ -888,6 +900,7 @@ export class OwnerDesk {
     setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); }, 60_000).unref();
     this.dutyLog = await loadJson(join(this.o.dataDir, 'duty-log.json'), []);
     this.readLog = await loadJson(join(this.o.dataDir, 'read-log.json'), []);
+    for (const r of await loadJson<RemovedAi[]>(join(this.o.dataDir, 'removed-ais.json'), [])) this.removed.set(r.kid, r);
     this.contacts = new Map(await loadJson(join(this.o.dataDir, 'contacts.json'), []));
     this.firstContacts = new Map(await loadJson(join(this.o.dataDir, 'first-contacts.json'), []));
     setInterval(() => this.morningPush(), 60_000).unref();
@@ -1767,6 +1780,13 @@ export class OwnerDesk {
         // It starts as an unknown key's answer does ("no key … for …"): a phone whose key the house no longer holds (moved
         // or recovered elsewhere) goes back to pairing on that.
         if (signer !== this.ownerJwk.kid) {
+          // A removed AI's own key, still calling: counted for the owner (the answer stays the same as anyone's).
+          const gone = this.removed.get(signer);
+          if (gone && await verifyMessage(req.body, async () => gone.jwk).then(() => true, () => false)) {
+            const kind = String((req.body as { payload?: { kind?: unknown } } | undefined)?.payload?.kind ?? '').slice(0, 40);
+            gone.tried = { n: (gone.tried?.n ?? 0) + 1, last: new Date().toISOString(), kinds: [...new Set([...(gone.tried?.kinds ?? []), ...(kind ? [kind] : [])])].slice(0, 5) };
+            this.saveRemoved();
+          }
           const iss = String((req.body as { payload?: { iss?: unknown } } | undefined)?.payload?.iss ?? '').slice(0, 80);
           return void res.status(403).json({ error: `no key ${signer.slice(0, 100)} for ${iss}: this house doesn't answer this key (never given, or your human took it back), or the call was signed wrong or too late. If your human wants you in, they make a new code in My AI (lake_house_connect)` });
         }
@@ -2435,7 +2455,7 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.reads') {
         const q = p as unknown as { kid?: string; since?: number };
-        if (!this.assistants.has(String(q.kid ?? ''))) return void res.status(404).json({ error: 'no such assistant' });
+        if (!this.assistants.has(String(q.kid ?? '')) && !this.removed.has(String(q.kid ?? ''))) return void res.status(404).json({ error: 'no such assistant' });
         return void res.json({ lines: this.readsFor(String(q.kid), Number(q.since) || Date.now() - 24 * 3_600_000) });
       }
       if (p.kind === 'panel.assistant.reads') {
@@ -2453,6 +2473,11 @@ export class OwnerDesk {
         // Its badge goes with its key: the bit on the status list is set, so no payments agent pays the house through it.
         for (const k of kid === 'all' ? [...this.assistants.keys()] : [kid]) if (this.assistants.has(k)) this.revokedIds.add(`assistant:${k}`);
         await this.o.saveRevoked([...this.revokedIds]);
+        // Kept for the owner: who it was, what it might read, and whether its key keeps calling (round 99).
+        const at = new Date().toISOString();
+        for (const a of kid === 'all' ? [...this.assistants.values()] : [this.assistants.get(kid)].filter((x): x is AssistantKey => !!x)) this.removed.set(a.kid, { kid: a.kid, jwk: a.jwk, label: a.label, addedAt: a.addedAt, ...(a.seenAt ? { seenAt: a.seenAt } : {}), removedAt: at, ...(a.reads ? { reads: a.reads } : {}) });
+        while (this.removed.size > 20) this.removed.delete([...this.removed.values()].sort((x, y) => x.removedAt.localeCompare(y.removedAt))[0]!.kid);
+        this.saveRemoved();
         const gone = kid === 'all' ? this.assistants.size : Number(this.assistants.delete(kid));
         if (kid === 'all') this.assistants.clear();
         this.sweepTasks();
@@ -3395,6 +3420,7 @@ export class OwnerDesk {
       requests: [...this.pending.values()].filter((x) => x.status === 'pending'),
       connects: [...this.connects].filter(([, c]) => Date.now() - c.at < 15 * 60_000).map(([id, c]) => ({ id, app: c.app, from: c.from, number: c.number, at: new Date(c.at).toISOString() })),
       // Awake: something runs it and looked lately (the house's own runner, or one on a computer), so a task starts soon.
+      removed: forAssistant ? undefined : [...this.removed.values()].filter((r) => !this.assistants.has(r.kid)).sort((x, y) => y.removedAt.localeCompare(x.removedAt)).map(({ jwk: _, ...r }) => r),
       assistants: [...this.assistants.values()].map(({ kid, label, addedAt, seenAt, webId, reads, duty }) => { const a = this.allowanceFor(kid), w = this.waitingFor.get(kid), r = duty?.runner; return { kid, label, addedAt, seenAt, ...(r ? { runs: r.host === 'house' ? 'house' : 'computer', awake: Date.now() - Date.parse(r.last) < Math.max(3 * r.every, 180) * 1000 } : {}), ...((chosen) => (this.holdsDuty(this.assistants.get(kid)) ? { reads: [], readsChosen: chosen, dutyHeld: duty!.until } : { reads: chosen }))((reads ?? []).filter((r) => !(r === 'money' && this.assistants.get(kid)?.moneyWithAllowance && !a))), ...(w ? { waiting: w } : {}), canHaveAllowance: !!webId, ...(a ? { allowance: { amount: a.amount, currency: a.currency, until: a.until } } : {}) }; }),
       // What the owner told an AI to do: the open ones, and those that ended in the last two days.
       tasks: forAssistant ? [] : this.tasks.filter((t) => t.state === 'open' || Date.parse(t.ended?.at ?? t.at) > Date.now() - 48 * 3_600_000).map((t) => this.taskView(t)),

@@ -1108,6 +1108,28 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  // Round 99, a privacy-minded owner: a removed AI stays on the owner's list, with the calls its key made since.
+  it('keeps a removed AI for its owner and counts its key\'s refused calls, signed ones only and never for an AI', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const a = await h.connect('Helper'), b = await h.connect('Other');
+    const kid = a.id.publicJwk.kid!;
+    expect(await h.owner({ kind: 'panel.assistant.revoke', kid })).toEqual({ revoked: 1 });
+    for (const kind of ['list', 'panel.data', 'list']) expect(await a.call({ kind })).toHaveProperty('error');
+    // A call with its key id whose signature doesn't check is no try of its own.
+    const forged = await signMessage({ kind: 'list' }, a.id, { iss: 'assistant' }) as { payload: Record<string, unknown> };
+    forged.payload = { ...forged.payload, kind: 'panel.money' };
+    expect(await h.post('/api', forged)).toHaveProperty('error');
+    await settle();
+    const gone = (await h.owner({ kind: 'list' })).removed;
+    expect(gone).toHaveLength(1);
+    expect(gone[0]).toMatchObject({ kid, label: 'Helper', removedAt: expect.any(String), tried: { n: 3, last: expect.any(String), kinds: ['list', 'panel.data'] } });
+    expect(gone[0]).not.toHaveProperty('jwk');
+    // Its read log stays for the owner; another AI sees nothing of it.
+    expect(await h.owner({ kind: 'panel.reads', kid })).toHaveProperty('lines');
+    expect((await b.call({ kind: 'list' })).removed).toBeUndefined();
+    h.close();
+  });
+
   // Fable's review of the task feature, 13 Nov: what it does under strain.
     const slow = async () => {
       const sent: string[] = [];

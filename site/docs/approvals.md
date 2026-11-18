@@ -66,7 +66,7 @@ After you answer, a short message at the bottom offers next time in one tap: **A
 
 ## Your own AI
 
-Under **My AI**, tap **Give my AI a key** and paste the message it shows to your AI (it needs the Lake connector; the code works once, for a few minutes). Or connect from the AI app itself: sign in with **Continue in my house** and approve it in Today. Its key can look at everything and suggest, never Allow, change rules, accept or revoke. Each AI shows when it last used its key ("Here now", "Here 3 hours ago"), and **Remove this AI** takes its key back.
+Under **My AI**, tap **Give my AI a key** and paste the message it shows to your AI (it needs the Lake connector; the code works once, for a few minutes). Or connect from the AI app itself: sign in with **Continue in my house** and approve it in Today. Its key can look at everything and suggest, never Allow, change rules, accept or revoke. Each AI shows when it last used its key ("Here now", "Here 3 hours ago"), and **Remove this AI** takes its key back. A removed AI stays under **Removed** on My AI, with what your house gave it that day and whether its old key tried again since ("Tried 2 times since, last 10:42: refused"). What an AI reads goes into that AI's chat with its company, under their terms: your house can't call it back, and removing the AI stops the next read.
 
 **Spending money.** Tap your AI under **My AI**: it starts with no spending money (it asks you before paying for anything). Tap that line to set an amount (up to 1,000, in one currency: nothing converts) for 1 to 31 days; **Sign and give** signs it on this device, and the AI spends under it with `lake_pay`. Payments refuse anything over it, after its date, or once you **Stop** it. An AI on duty never spends.
 

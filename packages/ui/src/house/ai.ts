@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, houseBase, must, useHouse, useRedraw } from './api';
 import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { CURRENCIES, DUTY_CLI, DUTY_KINDS, ROLES, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, rolesOf, shortName, signDraft, time, waitingLine, watching, type Assistant, type DutyLog, type ListView, type Reads, type Role } from './logic';
+import { CURRENCIES, DUTY_CLI, DUTY_KINDS, ROLES, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, rolesOf, triedLine, PROVIDER_LINE, shortName, signDraft, time, waitingLine, watching, type Assistant, type RemovedAi, type DutyLog, type ListView, type Reads, type Role } from './logic';
 import { back, push } from './nav';
 
 // My AI: your own AI with a key to your house. Your AIs first, then AI on duty, then what it did while you were away.
@@ -35,6 +35,9 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
         h('h2', {}, 'Bring your own AI'),
         h('p', {}, 'Give Claude, ChatGPT or another AI a key to your house. It sees who writes to you and suggests what to do; it reads a chat\'s words only when you hand it that chat. You choose whether it also sees your records or money. Only you decide.'),
         h('ion-button', { shape: 'round', onClick: () => setConnect(true) }, 'Give my AI a key'))),
+    // Removed, and whether their key kept calling (round 99): a removed AI doesn't vanish with what it had read.
+    v.data.removed?.length ? h(Section, { title: 'Removed', cls: 'removed-ais' },
+      ...v.data.removed.slice(0, 5).map((r) => h(Row, { key: r.kid, cls: 'removed-ai', icon: 'remove-circle-outline', tint: 'muted', label: shortName(r.label), sub: `Removed ${dayTime(r.removedAt)} · ${triedLine(r)}`, onClick: () => push(`#aikey=${encodeURIComponent(r.kid)}`) }))) : null,
     // Roles you hire an AI into (the day-1 plan, round 90): Messages and Away run on their own (in your house or on your
     // computer); Shopping is an AI you chat with, spending up to what you sign. Each row says who holds it, or Hire.
     h(Section, { title: 'Roles', cls: 'roles' },
@@ -172,6 +175,8 @@ export function AiKeyPage({ arg }: { arg: string }) {
   const duty = useHouse<DutyLog>({ kind: 'panel.duty.log' });
   const gave = useHouse<{ lines: ReadLine[] }>({ kind: 'panel.reads', kid: arg, since: new Date().setHours(0, 0, 0, 0) });
   const a = v.data?.assistants.find((x) => x.kid === arg);
+  const gone = v.data?.removed?.find((x) => x.kid === arg);
+  if (!a && gone) return h(RemovedPage, { r: gone, lines: gave.data?.lines });
   if (!a) return h(Page, { title: 'Your AI', back: () => back('#ai'), backLabel: 'My AI' }, v.data ? h(Empty, { icon: 'sparkles-outline', title: 'This AI isn\'t connected any more' }) : h(Failed, { error: v.error }));
   const mine = (duty.data?.duties ?? []).find((d) => d.kid === a.kid && dutyLive(d)), onDuty = !!mine;
   return h(Page, { title: shortName(a.label), back: () => back('#ai'), backLabel: 'My AI' },
@@ -196,6 +201,15 @@ export function AiKeyPage({ arg }: { arg: string }) {
  * What the house gave this AI today, a line per kind of look, from the house's own record (17 Nov, a privacy-minded owner:
  * "Last here" said when, not what). Stop turns off the switch that lets it make that look.
  */
+/** A removed AI (round 99): when, what its house gave it today before that, and whether its key kept calling. */
+function RemovedPage({ r, lines }: { r: RemovedAi; lines?: ReadLine[] }) {
+  return h(Page, { title: shortName(r.label), back: () => back('#ai'), backLabel: 'My AI' },
+    h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(r.label), size: 72 }), h('h2', {}, shortName(r.label)), h(Pill, { text: 'Removed', tone: 'muted' })),
+    h(Section, { title: 'Its key', cls: 'removed-key' },
+      h(Row, { icon: 'remove-circle-outline', tint: 'muted', label: `Removed ${dayTime(r.removedAt)}`, sub: 'Its key stopped working then. What it read before then it already has.' }),
+      h(Row, { icon: r.tried?.n ? 'shield-checkmark-outline' : 'checkmark-circle-outline', tint: r.tried?.n ? 'amber' : 'muted', label: triedLine(r), sub: r.tried?.n ? `Each call was signed with its old key, and your house said no. What it tried: ${r.tried.kinds.join(', ') || 'not said'}.` : 'Its old key hasn\'t called your house since you removed it.' })),
+    h(GaveToday, { a: { kid: r.kid, label: r.label, addedAt: r.addedAt, reads: r.reads } as Assistant, lines }));
+}
 function GaveToday({ a, lines }: { a: Assistant; lines?: ReadLine[] }) {
   const reads = a.readsChosen ?? a.reads ?? [];
   const more = (fs: string[]) => fs.length > 4 ? `${fs.slice(0, 4).join(', ')} +${fs.length - 4} more` : fs.join(', ');
@@ -248,5 +262,5 @@ const READS_SAID: [Reads, string, string][] = [
 /** Besides the messages at your door, what an AI may read: off unless you switch it on. */
 export function ReadsToggles({ value, onChange, bare, disabled }: { value: Reads[]; onChange: (r: Reads[]) => void; bare?: boolean; disabled?: boolean }) {
   const items = READS_SAID.map(([r, label, sub]) => h('ion-item', { key: r, lines: 'full', class: `reads-${r}` }, h('ion-toggle', { checked: value.includes(r), disabled: !!disabled, justify: 'space-between', onionChange: (e: CustomEvent) => onChange(e.detail.checked ? [...new Set([...value, r])] : value.filter((x) => x !== r)) }, h('span', { class: 'toggle-title' }, label), h('span', { class: 'toggle-sub' }, sub))));
-  return bare ? items : h('ion-list', { inset: true, class: 'lake-list reads-list' }, h('ion-list-header', {}, h('ion-label', {}, 'It also sees')), ...items);
+  return bare ? items : h('ion-list', { inset: true, class: 'lake-list reads-list' }, h('ion-list-header', {}, h('ion-label', {}, 'It also sees')), ...items, h('p', { class: 'muted-line provider-line' }, PROVIDER_LINE));
 }

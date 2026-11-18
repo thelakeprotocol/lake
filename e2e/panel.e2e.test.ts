@@ -1231,7 +1231,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const never = await (await fetch(`${house}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage({ kind: 'list' }, stranger, { iss: 'assistant' })) })).json();
     const words = (e: string) => e.replace(/^no key \S+/, 'no key K');
     expect(words(never.error)).toBe(words((await asAssistant({ kind: 'list' })).error));
+    // Kept under Removed (round 99): its old key's two calls counted, refused; the stranger's not at all.
+    const removed = page.locator('ion-item.removed-ai', { hasText: 'Nova' });
+    await expect.poll(async () => { await page.reload(); await onTab('My AI'); return removed.textContent({ timeout: 10_000 }); }, { timeout: 20_000 }).toMatch(/Tried 2 times since, last .*: refused/);
     await tidy();
+    await removed.click();
+    await page.locator('.removed-key').getByText('Tried 2 times since').waitFor();
+    await page.getByText('Its key stopped working then. What it read before then it already has.').waitFor();
+    await page.locator('.gave').waitFor();
+    await tidy();
+    await tab('My AI');
   });
 
   it('signs an AI app in through the house: no code to copy, the same agent in every chat', async () => {
