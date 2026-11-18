@@ -4,6 +4,8 @@ import { DECLINE_WORDS, type StudyRun } from './dispatch.js';
 
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const digest = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 16);
+// Why a house that agreed was left out, in fixed words: a house's own reason or an error can carry its address (round 98).
+const leftOut = (why: string) => /^over budget/.test(why) ? 'the budget ran out' : /^too few houses/.test(why) ? 'too few houses joined for a table' : 'its answer didn\'t arrive or didn\'t check';
 
 /**
  * A study's result as one page a researcher can show a colleague (round 82, a researcher: the result lived in a terminal
@@ -29,7 +31,7 @@ export function renderStudyReport(run: StudyRun, study: Study, at = new Date()):
 ${t ? `<p class="small">${t.precision.exact ? 'Exact counts.' : `Noise added by the tellers: standard deviation ${esc(t.precision.sdPerCell)} per cell (ε ${esc(t.precision.epsilon)}); a cell noise took below zero shows as 0.`}${t.small ? ' Some cells are under 5: small numbers, read with care.' : ''}</p>` : ''}
 <p class="small">No table is published from fewer than ${esc(study.privacy.min)} houses${t ? `; this one comes from ${esc(t.n)}` : ''}.</p>
 <h2>Who was asked</h2><p>${run.houses} houses asked · ${run.participants} answered${run.paid ? ` · ${esc(run.paid.houses)} paid, $${esc(run.paid.total)} in all` : ''}.</p>
-${declined ? `<p class="small">Why the others said no:</p><ul>${declined}</ul>` : ''}${run.pending.length ? `<p class="small">${run.pending.length} owners were asked and hadn't answered.</p>` : ''}${run.excluded.length ? `<p class="small">${run.excluded.length} agreed but were left out: ${esc([...new Set(run.excluded.map((x) => x.why).filter(Boolean))].join('; ') || 'no reason given')}.</p>` : ''}
+${declined ? `<p class="small">Why the others said no:</p><ul>${declined}</ul>` : ''}${run.pending.length ? `<p class="small">${run.pending.length} owners were asked and hadn't answered.</p>` : ''}${run.excluded.length ? `<p class="small">${run.excluded.length} agreed but were left out: ${esc([...new Set(run.excluded.map((x) => leftOut(x.why)))].join('; '))}.</p>` : ''}
 <h2>What it rests on</h2><ul>${credential('Ethics approval', run.evidence.ethics)}${credential('Audit certificate', run.evidence.audit)}${credential('Spending mandate', run.evidence.mandate)}
 <li>Agreements: ${run.evidence.agreements.length} countersigned by the houses that answered</li>
 <li>Tellers: ${esc(tellers.leader?.card?.name ?? 'leader')} and ${esc(tellers.helper?.card?.name ?? 'helper')}, each signing its share of the sum</li>

@@ -2245,7 +2245,10 @@ describe('a study run', () => {
     const root = join(dir, 'houses', 'research', 'pod', 'research', 'health');
     const file = join(root, (await readdir(root)).find((f) => f.startsWith('claims.ttl'))!);
     const original = await readFile(file, 'utf8');
-    await writeFile(file, original.replace(/"(\d)0-(\d)9"/, '"90+"'));
+    // Always a change: a synthetic person may already be 90 or over (CI failed once when "90+" became "90+").
+    const tampered = original.replace(/"(\d0-\d9|90\+)"/, (m) => m === '"90+"' ? '"10-19"' : '"90+"');
+    expect(tampered).not.toBe(original);
+    await writeFile(file, tampered);
     const r = await run();
     expect(r.decisions).toEqual({ join: 2, decline: 1, ask: 1 });
     // Why it said no comes back coarsely, counted, never by house.

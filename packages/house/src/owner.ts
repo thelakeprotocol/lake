@@ -574,6 +574,11 @@ export class OwnerDesk {
     const before = about.answered ? [...(about.answered.before ?? []), { text: about.answered.text, by: about.answered.by, at: about.answered.at, ...(about.answered.task ? { task: about.answered.task } : {}) }].slice(-8) : undefined;
     about.answered = { text, by, at, task, ...(before ? { before } : {}) };
   }
+  /** The house's own fixed words about a held time, as the note's latest: what was answered before stays in the chat. */
+  private answeredFixed(about: OwnerDesk['notes'][number], text: string, by: string, at: string, own = false) {
+    const before = about.answered ? [...(about.answered.before ?? []), { text: about.answered.text, by: about.answered.by, at: about.answered.at, ...(about.answered.task ? { task: about.answered.task } : {}) }].slice(-8) : undefined;
+    about.answered = { text, by, fixed: true, at, ...(own ? { own: true as const } : {}), ...(before ? { before } : {}) };
+  }
   /** A task as its owner's panel and its AI see it. */
   private taskView(t: Task) {
     return { ...t, label: this.assistants.get(t.by)?.label ?? 'your AI' };
@@ -1304,7 +1309,7 @@ export class OwnerDesk {
     const text = `${owner}'s AI has pencilled in ${time} for "${item.what.slice(0, 120)}". ${owner} hasn't confirmed it yet: you'll hear here when they do, by ${this.whenWords(until)} at the latest.`;
     if (!(await this.tellBooking(item, text, 'held', a.label))) return { error: 'the one who asked couldn\'t be told the time is only held, so nothing was held: leave your human a note about it instead' };
     this.agenda = [...this.agenda, item].slice(-100);
-    about.answered = { text, by: a.label, fixed: true, at: new Date(now).toISOString() };
+    this.answeredFixed(about, text, a.label, new Date(now).toISOString());
     const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: a.label, by: a.kid, text: `Pencilled in ${time} with ${who}: ${item.what}. ${who} was told you'll confirm it yourself.${item.note ? ` ${item.note}` : ''}`.slice(0, 1500), note: about.id, booking: { id: item.id, until, start: item.start!, with: who, what: item.what }, ask: { choices: ['Confirm', 'Decline'] }, at: new Date(now).toISOString() };
     this.suggestions = [sug, ...this.suggestions];
     this.trimSuggestions();
@@ -1314,6 +1319,8 @@ export class OwnerDesk {
     return { ok: true };
   }
   private settling = new Set<string>();
+  /** Tasks whose AI is holding a time right now. */
+  private holdingFor = new Set<string>();
   /** How a held time ends: the owner's Confirm or Decline, its date, or the AI taking it back. The house tells the one who asked. */
   private async settleBooking(id: string, how: Exclude<Booked, 'held'>): Promise<{ ok: true } | { error: string }> {
     const item = this.agenda.find((x) => x.id === id && x.held);
@@ -1331,7 +1338,7 @@ export class OwnerDesk {
       const at = new Date().toISOString(), own = how === 'confirmed' || how === 'declined';
       if (how === 'confirmed') { delete item.held; item.confirmed = at; } else this.agenda = this.agenda.filter((x) => x.id !== id);
       const about = this.notes.find((x) => x.id === h.note);
-      if (about) about.answered = { text, by: own ? 'you' : item.by, ...(own ? { own: true as const } : {}), fixed: true, at };
+      if (about) this.answeredFixed(about, text, own ? 'you' : item.by, at, own);
       if (how === 'confirmed' && h.to.key && !this.contacts.has(h.to.key)) this.contacts.set(h.to.key, { name: who, webId: String(about?.from.webId ?? '').slice(0, 300), at });
       this.suggestions = this.suggestions.filter((x) => x.booking?.id !== id);
       const e = this.dutyLog.find((x) => x.undo?.kind === 'agenda' && x.undo.ref === id);
@@ -2234,11 +2241,20 @@ export class OwnerDesk {
             if (start.getTime() < Date.now() + HELD_AHEAD) return void res.status(409).json({ error: 'a time your human confirms starts at least three hours from now, so they have time to say yes or no: tell them about it in text instead (outcome "back")' });
             const about = this.notes.filter((n) => OwnerDesk.conv(n.from) === t.to.key).sort((x, y) => y.at.localeCompare(x.at))[0];
             if (!about) return void res.status(409).json({ error: 'nothing in that conversation to hold a time for' });
-            if (this.agenda.some((x) => x.held?.note === about.id)) return void res.status(409).json({ error: 'a time is already held in that conversation: your human confirms or declines it first' });
+            if (this.agenda.some((x) => x.held?.note === about.id) || this.holdingFor.has(t.id)) return void res.status(409).json({ error: 'a time is already held in that conversation: your human confirms or declines it first' });
             const minutes = Number.isInteger(q.agenda?.minutes) && q.agenda!.minutes! >= 5 && q.agenda!.minutes! <= 720 ? q.agenda!.minutes! : this.o.panel?.availability?.()?.meetings ?? 60;
+            // Not on top of what's already there (round 98: a held time over a confirmed one, and the owner's Confirm double-booked).
+            const from = start.getTime(), to = from + minutes * 60_000;
+            const clash = this.agenda.find((x) => x.start && Date.parse(x.start) < to && Date.parse(x.start) + (x.minutes ?? 60) * 60_000 > from);
+            if (clash) return void res.status(409).json({ error: `that overlaps "${clash.what.slice(0, 80)}" (${this.whenWords(clash.start!)}), already in your human's agenda: agree another time, or tell them (outcome "back")` });
             held = { id: randomBytes(6).toString('hex'), what, when: this.whenWords(start.toISOString()), start: start.toISOString(), minutes, ...(q.agenda?.where ? { where: String(q.agenda.where).trim().slice(0, 120) } : {}), with: t.to.name, by: assistant.label, at: new Date().toISOString() };
-            const r = await this.holdBooking(assistant, held, about);
-            if ('error' in r) return void res.status(502).json(r);
+            // Two reports sent at once: one holds, the other is told a time is held (round 98).
+            this.holdingFor.add(t.id);
+            try {
+              const r = await this.holdBooking(assistant, held, about);
+              if ('error' in r) return void res.status(502).json(r);
+            } finally { this.holdingFor.delete(t.id); }
+            if (t.state !== 'open') return void res.status(409).json({ error: `that task is over already${t.ended?.why ? ` (${t.ended.why})` : ''}` });
           }
           this.endTask(t, outcome, { text: String(q.text ?? '').trim().slice(0, 500) }, false);
           // A held time tells the owner itself (Confirm or Decline): one buzz, not two.

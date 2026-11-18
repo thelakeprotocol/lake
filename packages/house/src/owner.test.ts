@@ -1033,8 +1033,20 @@ describe('what an attacker tried (round 16)', () => {
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'back', text: 'x', agenda: { what: 'Babysitting', start: friday } })).toMatchObject({ error: expect.stringContaining('outcome "done"') });
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x', agenda: { what: 'Babysitting', start: new Date(Date.now() + 3_600_000).toISOString() } })).toMatchObject({ error: expect.stringContaining('three hours') });
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x', agenda: { what: 'Babysitting' } })).toMatchObject({ error: expect.stringContaining('start') });
+    // Not on top of what's already in the agenda (round 98).
+    expect(await a.call({ kind: 'assistant.agenda', what: 'Dentist', when: 'Friday', start: new Date(Date.parse(friday) + 3_600_000).toISOString(), minutes: 30 })).toMatchObject({ ok: true });
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x', agenda: { what: 'Babysitting', start: friday, minutes: 240 } })).toMatchObject({ error: expect.stringContaining('overlaps "Dentist"') });
+    // The AI's own reply stays in the chat when the house's words about the time come after it.
+    expect(await a.call({ kind: 'assistant.reply', note: id, text: 'Does 6 to 10 work for you?' })).toMatchObject({ ok: true });
     h.sent.length = 0;
-    const done = await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Mia can do Friday 6 to 10 at $25 an hour.', agenda: { what: 'Babysitting', start: friday, minutes: 240 } });
+    // Two reports at once: one holds, the other is refused.
+    const two = await Promise.all([1, 2].map(() => a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Mia can do Friday 6 to 10 at $25 an hour.', agenda: { what: 'Babysitting', start: new Date(Date.parse(friday) + 86_400_000).toISOString(), minutes: 240 } })));
+    expect(two.filter((r) => r.ok)).toHaveLength(1);
+    expect(two.filter((r) => r.error)).toHaveLength(1);
+    expect(h.sent.filter((x) => x.m.booking?.status === 'held')).toHaveLength(1);
+    const done = two.find((r) => r.ok)!;
+    const answers = (await h.owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === id);
+    expect(JSON.stringify(answers)).toContain('Does 6 to 10 work for you?');
     expect(done).toMatchObject({ ok: true, held: { id: expect.any(String), status: expect.stringContaining('never say it is booked') } });
     // The house told Mia's agent itself that it is only held.
     expect(h.sent.at(-1)).toMatchObject({ url: 'https://mia.example/a2a', m: { kind: 'note.reply', booking: { status: 'held', what: 'Babysitting', minutes: 240 } } });
@@ -1045,7 +1057,7 @@ describe('what an attacker tried (round 16)', () => {
     expect(card).toMatchObject({ booking: { what: 'Babysitting', with: "mia's AI" } });
     // The owner's tap confirms it: in the agenda, and Mia is told.
     expect(await h.owner({ kind: 'panel.assistant.answer', id: card.id, choice: 'Confirm' })).not.toHaveProperty('error');
-    expect((await h.owner({ kind: 'list' })).agenda.find((x: { id: string }) => x.id === done.held.id)).toMatchObject({ confirmed: expect.any(String), start: friday });
+    expect((await h.owner({ kind: 'list' })).agenda.find((x: { id: string }) => x.id === done.held.id)).toMatchObject({ confirmed: expect.any(String), start: new Date(Date.parse(friday) + 86_400_000).toISOString() });
     expect(h.sent.at(-1)).toMatchObject({ m: { booking: { status: 'confirmed' } } });
     h.close();
   });
