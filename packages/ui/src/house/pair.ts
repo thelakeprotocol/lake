@@ -62,7 +62,9 @@ export const connecting = (() => {
   const q = new URLSearchParams(location.hash.slice(1));
   const ask = q.get('connect'), back = q.get('back');
   if (!ask || !back) return null;
-  history.replaceState(null, '', location.pathname);
+  // A link from a house made on the sign-in page carries its pairing token too: kept for the pairing (round 88).
+  const pair = q.get('pair');
+  history.replaceState(null, '', location.pathname + (pair ? `#${new URLSearchParams({ pair })}` : ''));
   return { ask, back, app: (q.get('app') ?? 'An AI app').slice(0, 60), from: (q.get('from') ?? '').slice(0, 100) };
 })();
 

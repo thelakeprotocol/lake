@@ -34,8 +34,9 @@ const LAKE_IS = `Each person's data stays in their own house, and their own rule
 export const TOOL_SETS: Record<string, readonly string[]> = {
   // Finding something and leaving a need standing are everyday errands too ("find someone who can lend me a ladder"):
   // with only the nine before, an AI had nothing to try and told its human to add the connector again (13 Nov).
-  core: ['lake_overview', 'lake_ping', 'lake_inbox', 'lake_ask', 'lake_search', 'lake_set_tags', 'lake_house_connect', 'lake_house', 'lake_house_suggest', 'lake_house_reply', 'lake_verify'],
-  trade: ['lake_sell', 'lake_buy', 'lake_pay', 'lake_want', 'lake_deed', 'lake_block'],
+  // The want tool is everyday (round 88, the day-1 plan): "find us a babysitter" is the first thing a newcomer asks.
+  core: ['lake_overview', 'lake_ping', 'lake_inbox', 'lake_ask', 'lake_search', 'lake_set_tags', 'lake_house_connect', 'lake_house', 'lake_house_suggest', 'lake_house_reply', 'lake_verify', 'lake_want'],
+  trade: ['lake_sell', 'lake_buy', 'lake_pay', 'lake_deed', 'lake_block'],
   together: ['lake_ask_around', 'lake_room', 'lake_pledge', 'lake_circle', 'lake_count', 'lake_draw', 'lake_commit', 'lake_blueprints', 'lake_publish_blueprint'],
   research: ['lake_knock', 'lake_dispatch_study'],
   duty: DUTY_TOOLS,
@@ -52,7 +53,7 @@ export function toolSet(spec?: string): Set<string> | null {
   return new Set([...TOOL_SETS.core!, ...names.flatMap((n) => (n !== 'core' && Object.hasOwn(TOOL_SETS, n) ? TOOL_SETS[n]! : []))]);
 }
 /** The groups a set leaves out, said for the model (lake_overview's more_tools in place of what_you_can_do). */
-const MORE: Record<string, string> = { trade: 'buy, sell, pay, wants', together: 'rooms, pledges, promise circles, votes, fair draws, sealed bids, blueprints', research: 'knock with a purpose, run a study' };
+const MORE: Record<string, string> = { trade: 'buy, sell, pay', together: 'rooms, pledges, promise circles, votes, fair draws, sealed bids, blueprints', research: 'knock with a purpose, run a study' };
 const moreTools = (only: Set<string>) => ({
   ...Object.fromEntries(Object.entries(MORE).filter(([g]) => !TOOL_SETS[g]!.every((t) => only.has(t)))),
   how: 'Your human adds this connector again with ?tools=all at the end of its address (or one group: ?tools=trade). With the lake command: lake mcp --tools all.',

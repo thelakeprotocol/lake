@@ -165,7 +165,9 @@ ul{list-style:none;padding:0;margin:0}li{background:var(--card);border:1px solid
   });
 
   // ---- Sign-in (OAuth 2.1 for MCP): only with a data folder ----
-  const auth = o.data ? new LakeOAuth({ dir: join(o.data, 'auth'), base: resource, resource, title: 'the Lake sandbox' }) : undefined;
+  // Where this Lake makes a house for a newcomer (its hosted houses' POST /t/new), if it does (the day-1 plan, round 88).
+  const makeHousesAt = process.env.LAKE_MAKE_HOUSES_URL?.replace(/\/$/, '');
+  const auth = o.data ? new LakeOAuth({ dir: join(o.data, 'auth'), base: resource, resource, title: 'the Lake sandbox', makeHouses: !!makeHousesAt }) : undefined;
   // An AI app signing in as itself (Claude, ChatGPT…), not a script's anonymous token or a sign-in check: its person is
   // likely someone new, and whoever runs this Lake asked to hear it (LAKE_OPERATOR_HOUSE).
   const tellOperator = operatorNotes({ house: process.env.LAKE_OPERATOR_HOUSE, dataDir: o.data, publicUrl: resource, log: o.log });
@@ -215,7 +217,7 @@ ul{list-style:none;padding:0;margin:0}li{background:var(--card);border:1px solid
     // Through the person's house. The sign-in may be in an AI app's own browser, which doesn't hold the owner's key, so the
     // house is asked and its panel, wherever the key is, shows the request with a number to match (as other services
     // approve a sign-in on a device that's already signed in). A browser that holds the key can open the panel here too.
-    const pending = new Map<string, { house: string; number: string; state: 'waiting' | 'done' | 'refused' | 'failed'; redirect?: string; error?: string; at: number }>();
+    const pending = new Map<string, { house: string; number: string; state: 'waiting' | 'done' | 'refused' | 'failed'; redirect?: string; error?: string; at: number; /** A house made here: its phone approves, and this page goes on. */ fresh?: boolean }>();
     const sweepPending = () => { for (const [k, x] of pending) if (Date.now() - x.at > 20 * 60_000) pending.delete(k); };
     app.post(`${path}/oauth/house`, form, async (req, res) => {
       const ask = String(req.body?.ask ?? ''), asked = auth.asked(ask);
@@ -247,6 +249,38 @@ a{color:#3DDC97}.small{font-size:13px;color:#5C6B7E}#state{color:#E8EEF4}</style
 function look(){fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).then(function(x){
 if(x.redirect){s.textContent='Approved. Back to your app…';location.href=x.redirect;return}
 if(x.state==='refused'){s.textContent='Your house said no. You can close this.';return}
+if(x.state==='failed'){s.textContent='It didn\u2019t work: '+(x.error||'try again from your app');return}
+if(x.state==='gone'){s.textContent='This sign-in has expired: start again from your app.';return}
+setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
+</script></body></html>`);
+    });
+    // A newcomer's house, made here (round 88, the day-1 plan): the Lake starts a closed house, this page shows its one-use
+    // link (open it on your phone, or here), the phone pairs and taps Connect, and this page carries on to the AI app.
+    app.post(`${path}/oauth/house/new`, form, async (req, res) => {
+      const ask = String(req.body?.ask ?? ''), asked = auth.asked(ask);
+      if (!asked) return page(res, 400, 'Start again', 'This sign-in page has expired: start again from your AI app.');
+      if (!makeHousesAt) return page(res, 404, 'Not here', 'This Lake doesn\'t make houses from the sign-in page.');
+      const made = await fetch(`${makeHousesAt}/t/new`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(90_000) }).then((r) => r.json() as Promise<{ house?: string; panel?: string; error?: string }>).catch((): { house?: string; panel?: string; error?: string } => ({ error: 'it didn\'t answer' }));
+      if (!made.house || !made.panel) return page(res, 503, 'No house just now', `The Lake said: ${made.error ?? 'no house'}.`);
+      sweepPending();
+      pending.set(ask, { house: made.house, number: '', state: 'waiting', at: Date.now(), fresh: true });
+      const link = `${made.panel}&${new URLSearchParams({ connect: ask, app: asked.app, from: asked.back, back: `${resource}/oauth/approve` })}`;
+      const nonce = randomBytes(12).toString('base64url'), safe = link.replace(/&/g, '&amp;').replace(/"/g, '&quot;'), app2 = asked.app.replace(/[&<>"']/g, '');
+      res.set({ 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'` });
+      res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your house is ready</title><style>
+body{margin:0;background:#070B12;color:#E8EEF4;font:16px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}main{max-width:440px;margin:0 auto;padding:36px 20px}
+h1{font-size:26px;line-height:1.2;margin:0 0 10px}p{color:#93A3B6}a.go{display:block;text-align:center;padding:13px;border-radius:12px;font:600 16px system-ui;background:#3DDC97;color:#04170F;text-decoration:none;margin:18px 0}
+.link{overflow-wrap:anywhere;font:13px ui-monospace,Menlo,monospace;color:#E8EEF4;background:#0E1622;border:1px solid #1E2A3B;border-radius:10px;padding:10px}.small{font-size:13px;color:#5C6B7E}#state{color:#E8EEF4}</style></head><body><main>
+<h1>Your house is ready</h1>
+<p>Open it on the phone you'll use: that phone becomes its key. Then tap <b>Connect</b> to let ${app2} in.</p>
+<a class="go" href="${safe}">Open my house here</a>
+<p>Or send this link to your phone:</p><div class="link">${safe}</div>
+<p id="state">Waiting for your phone…</p>
+<p class="small">The link works once and lasts an hour. Sandbox: made-up data and play money.</p>
+</main><script nonce="${nonce}">
+(function(){var u=${JSON.stringify(`${resource}/oauth/house/status?ask=${encodeURIComponent(ask)}`)},s=document.getElementById('state');
+function look(){fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).then(function(x){
+if(x.redirect){s.textContent='Connected. Back to your app…';location.href=x.redirect;return}
 if(x.state==='failed'){s.textContent='It didn\u2019t work: '+(x.error||'try again from your app');return}
 if(x.state==='gone'){s.textContent='This sign-in has expired: start again from your app.';return}
 setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
@@ -287,10 +321,18 @@ setTimeout(look,2000)}).catch(function(){setTimeout(look,4000)})}look()})();
       realSignIn(r.app);
       // From the house: its panel made a one-time assistant code with the owner's key; this agent takes it now.
       const house = typeof req.body?.house === 'string' ? req.body.house : '', code = typeof req.body?.code === 'string' ? req.body.code : '';
+      const w = pending.get(String(req.body?.ask ?? ''));
       if (house && code) {
         try {
           const l = await agentFor(r.principal);
           await l.agent.connectHouse(house, code, r.app);
+          // A house made on the sign-in page: the phone that approved isn't where the AI app waits, so the sign-in page
+          // there goes on by itself; this one says it's done (and can finish here if the app is on this device).
+          if (w?.fresh) {
+            w.state = 'done'; w.redirect = r.redirect;
+            const e = (x: string) => x.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+            return void res.status(200).set('cache-control', 'no-store').type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connected</title><style>body{margin:0;background:#070B12;color:#E8EEF4;font:16px/1.5 system-ui,-apple-system,sans-serif}main{max-width:440px;margin:0 auto;padding:36px 20px}p{color:#93A3B6}a{color:#3DDC97}</style></head><body><main><h1>Connected</h1><p>Your house is yours, and ${e(r.app)} is connected to it. Go back to ${e(r.app)}: it carries on by itself.</p><p>Is ${e(r.app)} on this device? <a href="${e(r.redirect)}">Finish here</a>.</p></main></body></html>`);
+          }
         } catch (e) {
           const l = live.get(r.principal);
           if (l) await sleep(l, true);

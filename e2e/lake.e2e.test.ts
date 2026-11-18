@@ -1197,7 +1197,7 @@ describe('the open door', () => {
     const client = new Client({ name: 'e2e-assistant', version: '0' });
     await client.connect(transport);
     // The everyday tools are listed (SPEC §6.1, tool sets); a study's tool isn't, and answers all the same when called.
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_overview', 'lake_ping', 'lake_search', 'lake_set_tags', 'lake_verify']);
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(['lake_ask', 'lake_house', 'lake_house_connect', 'lake_house_reply', 'lake_house_suggest', 'lake_inbox', 'lake_overview', 'lake_ping', 'lake_search', 'lake_set_tags', 'lake_verify', 'lake_want']);
     const overview = JSON.parse(((await client.callTool({ name: 'lake_overview', arguments: {} })).content as { text: string }[])[0]!.text);
     // What it can do names only tools on its list: reaching a person and its human's house stay, selling and studies go to more_tools.
     expect(Object.keys(overview.what_you_can_do)).toEqual(['reach_someone', 'your_humans_house', 'talk', 'in_the_world', 'invent', 'test']);
@@ -1299,7 +1299,7 @@ describe('the open door', () => {
     };
     // Two chats at once (the phone and the web): the same agent, both working.
     const one = await chat(tokens.access_token), two = await chat(tokens.access_token);
-    expect((await one.c.listTools()).tools).toHaveLength(11);
+    expect((await one.c.listTools()).tools).toHaveLength(12);
     const wide = new Client({ name: 'claude-ai', version: '0' });
     await wide.connect(new StreamableHTTPClientTransport(new URL(`${url}?tools=all`), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } }));
     expect((await wide.listTools()).tools).toHaveLength(28);

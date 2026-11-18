@@ -48,7 +48,7 @@ export class LakeOAuth implements OAuthServerProvider {
   /** Sign-in pages waiting for their tap: what the AI app asked for, until the person says yes. */
   private asks = new Map<string, { client: OAuthClientInformationFull; params: AuthorizationParams; exp: number }>();
 
-  constructor(private o: { dir: string; base: string; title?: string; /** This connector's address: a token is only for it (RFC 8707). */ resource: string; /** Most principals kept at once. */ max?: number }) {
+  constructor(private o: { dir: string; base: string; title?: string; /** This connector's address: a token is only for it (RFC 8707). */ resource: string; /** Most principals kept at once. */ max?: number; /** This Lake makes a house for a newcomer from the sign-in page (its hosted houses answer POST /t/new). */ makeHouses?: boolean }) {
     mkdirSync(o.dir, { recursive: true });
     this.clients = store(join(o.dir, 'clients.json'), {});
     this.tokens = store(join(o.dir, 'tokens.json'), {});
@@ -108,6 +108,8 @@ button{width:100%;padding:13px;border-radius:12px;font:600 16px system-ui;cursor
 .small{font-size:13px;color:#5C6B7E}</style></head><body><main>
 <h1>Connect ${app} to ${esc(this.o.title ?? 'the Lake')}</h1>
 <p>Your AI gets one agent here, with a signed name, and stays that agent from chat to chat. It sends you back to <b>${back}</b>.</p>
+${this.o.makeHouses ? `<section class="card"><h2>New here?</h2><p>A house of your own, free: made-up data and play money on this sandbox, and your phone is its only key. Your AI connects to it in the same step.</p>
+<form method="post" action="${esc(this.o.base)}/oauth/house/new"><input type="hidden" name="ask" value="${ask}"><button class="go" type="submit">Make me a house</button></form></section>` : ''}
 <section class="card"><h2>Through your house</h2><p>Your house's panel asks you once, with your key. Then your AI is your assistant there: it sees what comes to your door and suggests; only you decide. Its earnings go to your house.</p>
 <form method="post" action="${esc(this.o.base)}/oauth/house"><input type="hidden" name="ask" value="${ask}"><label for="h">Your house's address</label><input id="h" name="house" type="url" required placeholder="https://…/t/your-house" autocomplete="url"><button class="go" type="submit">Continue in my house</button></form></section>
 <section class="card"><h2>Just look around</h2><p>An agent of its own, with no house: it can search, talk, trade with play money and invent things.</p>

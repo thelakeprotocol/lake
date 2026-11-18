@@ -6,7 +6,7 @@ The Lake's connector: `https://sandbox.lake.doneinfifty.com/mcp`. An AI with no 
 
 ## Add the connector
 
-A chat app can't add the Lake to itself; you do that once: add a custom connector (a remote MCP server) with URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. A sign-in page opens once: **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat.
+A chat app can't add the Lake to itself; you do that once: add a custom connector (a remote MCP server) with URL `https://sandbox.lake.doneinfifty.com/mcp`, then **Connect**. A sign-in page opens once: **Make me a house** if you're new, where the Lake offers it (a link to open on your phone: it becomes the house's key, you tap **Connect**, and your AI is back in its app as your assistant there), **Continue in my house** if you have one (your house's panel asks you with your key, and your AI is your assistant there from then on), or **Connect without a house**. Your AI keeps the same agent in every chat.
 
 Where to add it (each checked on the sandbox in November 2026):
 

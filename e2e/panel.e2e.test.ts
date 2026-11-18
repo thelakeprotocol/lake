@@ -1955,6 +1955,68 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await goBack();
   });
 
+  it('a newcomer gets a house from the sign-in page: one link, the phone pairs and taps Connect, and the AI is back in the app, connected (round 88)', async () => {
+    // A hosted Lake that makes houses, and its connector, on one address as on the sandbox.
+    const [hp2, pp2, mp2, xp2] = [await freePort(), await freePort(), await freePort(), await freePort()];
+    const site2 = `http://localhost:${xp2}`;
+    const proxy2 = httpServer((req, res) => {
+      const to = /^\/(mcp|\.well-known\/oauth-)/.test(req.url ?? '') ? mp2 : hp2;
+      const fwd = request({ host: 'localhost', port: to, path: req.url, method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
+      fwd.on('error', () => { res.writeHead(502); res.end(); });
+      req.pipe(fwd);
+    }).listen(xp2);
+    try {
+      await start(['packages/house/dist/main.js', '--tenants', '1', '--tenant-prefix', 'mk-', '--make-houses', '--max-houses', '5', '--public-url', site2, '--pod-port', String(pp2), '--pod-url', `http://localhost:${pp2}/`,
+        '--port', String(hp2), '--data', join(dir, 'made'), '--lake', nodeUrl, '--issuer-url', `${specialists}/issuer`, '--auditor-url', `${specialists}/auditor`, '--personas-dir', 'personas', '--seed', '42'], /houses joined in/);
+      await start(['packages/agent/dist/cli.js', 'mcp', '--http', String(mp2), '--public-url', site2], /Lake MCP over HTTP/, { LAKE_NODE_URL: nodeUrl, LAKE_MCP_DATA: join(dir, 'mcp2'), LAKE_MAKE_HOUSES_URL: site2 });
+      const cb = 'https://app.example/callback';
+      let goTo: URL | undefined, verifier = '', info: unknown, tokens: unknown;
+      const provider: OAuthClientProvider = {
+        redirectUrl: cb,
+        clientMetadata: { client_name: 'ChatGPT', redirect_uris: [cb], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' },
+        clientInformation: () => info as never, saveClientInformation: (i) => { info = i; },
+        tokens: () => tokens as never, saveTokens: (t) => { tokens = t; },
+        redirectToAuthorization: (u) => { goTo = u; },
+        saveCodeVerifier: (v) => { verifier = v; }, codeVerifier: () => verifier,
+      };
+      const mcp = new URL(`${site2}/mcp`);
+      const first = new StreamableHTTPClientTransport(mcp, { authProvider: provider });
+      await expect(new Client({ name: 'ChatGPT', version: '0' }).connect(first)).rejects.toThrow(UnauthorizedError);
+      // The AI app's browser: the sign-in page offers a house first.
+      const appCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      const app = await appCtx.newPage();
+      app.on('pageerror', (e) => errors.push(e.message));
+      await app.goto(goTo!.href);
+      await app.getByRole('button', { name: 'Make me a house' }).click();
+      await app.getByRole('heading', { name: 'Your house is ready' }).waitFor({ timeout: 90_000 });
+      const link = (await app.locator('a.go').getAttribute('href'))!;
+      expect(link).toMatch(/\/t\/h-[0-9a-f]{8}\/owner\/#pair=[\w-]+&connect=/);
+      expect(await app.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      // The phone: the link pairs it and asks to connect ChatGPT; one tap.
+      const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      const phone = await phoneCtx.newPage();
+      phone.on('pageerror', (e) => errors.push(e.message));
+      await phone.goto(link);
+      await phone.getByRole('heading', { name: 'Connect ChatGPT?' }).waitFor({ timeout: 20_000 });
+      await app.route(`${cb}**`, (r) => r.fulfill({ body: 'back in the app' }));
+      await phone.getByRole('button', { name: 'Connect' }).first().click();
+      await phone.getByRole('heading', { name: 'Connected' }).waitFor({ timeout: 20_000 });
+      expect(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      // The sign-in page in the app goes on by itself, and the AI is its human's assistant in the new house.
+      await app.waitForURL(/app\.example\/callback/, { timeout: 20_000 });
+      await first.finishAuth(new URL(app.url()).searchParams.get('code')!);
+      const c = new Client({ name: 'ChatGPT', version: '0' });
+      await c.connect(new StreamableHTTPClientTransport(mcp, { authProvider: provider }));
+      const r = await c.callTool({ name: 'lake_house', arguments: { view: 'overview' } });
+      expect(r.isError, JSON.stringify(r.content)).toBeFalsy();
+      expect(JSON.parse((r.content as { text: string }[])[0]!.text)).toMatchObject({ name: expect.stringMatching(/^h-[0-9a-f]{8}$/), waiting: { people: 0 } });
+      // And the want tool is in its everyday list.
+      expect((await c.listTools()).tools.map((t) => t.name)).toContain('lake_want');
+      await c.close(); await appCtx.close(); await phoneCtx.close();
+    } finally { proxy2.close(); }
+    expect(errors).toEqual([]);
+  }, 300_000);
+
   it('a slow look still shows on a busy house: a change while it loads never throws it away (17 Nov: pages loaded for ever)', async () => {
     // Every look takes 2.5 s, and notes arrive every 400 ms, each a change the phone hears: before, each change threw away
     // the look in flight, so the page never filled.
