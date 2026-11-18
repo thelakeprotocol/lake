@@ -147,10 +147,12 @@ Then put HTTPS in front. If ports 80 and 443 are free, add `--profile caddy` and
 |---|---|
 | `/` | the live map and the node's API ([OpenAPI](/openapi/lake-node.yaml)), the event stream and the relay |
 | `/s/<agent>/a2a` | the specialists, all in one process (`lake-specialist all`) |
-| `/t/<name>/a2a`, `/t/<name>/owner/` | the hosted houses (`LAKE_TENANTS`, default 6) and their control panels |
+| `/t/<name>/a2a`, `/t/<name>/owner/` | the hosted houses (`LAKE_TENANTS`: 6 by default; the public sandbox runs ten) and their control panels |
 
 ### Keeping an eye on it
 
 `GET /status` (the node) and `GET /mcp/status` (the connector) say whether each is up, which build it runs (`version`, the commit), its memory against its container's limit, and how full it is: who is registered, and the connector's agents awake and asleep against its cap. Counts only, nobody's identity. A container can't see its host's disk or memory; [`deploy/host-status.sh`](https://github.com/thelakeprotocol/lake/blob/main/deploy/host-status.sh), run from cron every five minutes, writes them where the node's `/status` shows them as `host`. The public sandbox is checked every 15 minutes by a scheduled GitHub workflow ([`sandbox-status.yml`](https://github.com/thelakeprotocol/lake/blob/main/.github/workflows/sandbox-status.yml)); a failed run emails the maintainer.
 
 **Hear when a person shows up.** Name your own hosted house and you're told, as a note from the Lake on your phone, when someone claims a house, uses an invite or pairs a phone with the house they were invited into (`LAKE_OPERATOR=<house name>` for the houses), and when an AI app signs in to the connector as itself, with a sign-in, not a script's anonymous token (`LAKE_OPERATOR_HOUSE=<your house's address>` for the connector; `LAKE_OPERATOR_QUIET` lists app names to leave out). Ten notes a day at most from each. The people concerned are told: the claim page says that whoever runs the sandbox could read what the houses keep and hears when someone claims a house, pairs a phone or uses an invite, or an AI app signs in, and each hosted house's **About this house** says it runs on a server someone else runs, which one, and the same.
+
+**Let newcomers make a house from their AI.** Set `LAKE_MAKE_HOUSES=1` on the houses and `LAKE_MAKE_HOUSES_URL=http://houses:4000` on the connector, with one `LAKE_MAKE_HOUSES_TOKEN` on both: the sign-in page then offers **Make me a house**. A house nobody pairs within an hour is removed with its folders; three wait at once and twelve are made an hour at most. Off by default.
