@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { parseArgs } from 'node:util';
 import { cardUrlFor, didWebDocument, lakeAgentApp, LakeLinks, loadOrCreateIdentity, signMessage, verifyLakeCard, type LakeData } from '@thelakeprotocol/core';
@@ -9,6 +9,7 @@ import { attack, houseUrls, swarm } from './attack.js';
 import { ask, knock, makeVisitor, presets, type Tamper } from './knock.js';
 import { startQuoter } from './quoter.js';
 import { startShop } from './shop.js';
+import { renderStudyReport } from './report.js';
 
 const HELP = `lake — talk to the Lake
 
@@ -18,6 +19,7 @@ const HELP = `lake — talk to the Lake
 
   lake dispatch [--goal "Do over-60s on drug X get readmitted less?"] [--price 2] [--budget 5000] [--as uni.example]
                 [--study my-study.json]   your own: { "question", "predicates": [{ "name", "field", "op", "value" }], "min"?, "noise_epsilon"? }
+                [--report result.html]   the result as one page to show someone
                 [--extra-fields postcode] [--node http://lake-node:7000]
                 [--ethics http://ethics:4500] [--auditor http://auditor:4400] [--payments http://payments:4600]
                 [--wait 30] [--unpaid] [--concurrency 32] [--port 4800] [--json]
@@ -69,6 +71,8 @@ const { positionals, values: a } = parseArgs({
     goal: { type: 'string' },
     study: { type: 'string' },
     'extra-fields': { type: 'string' },
+    // A study's result as one page to show someone: what each house counted, the table, who said no and why, and the signed evidence.
+    report: { type: 'string' },
     node: { type: 'string', default: process.env.LAKE_NODE_URL ?? 'http://lake-node:7000' },
     ethics: { type: 'string', default: process.env.LAKE_ETHICS_URL ?? 'http://ethics:4500' },
     auditor: { type: 'string', default: process.env.LAKE_AUDITOR_URL ?? 'http://auditor:4400' },
@@ -289,6 +293,7 @@ async function dispatchCmd(chosen?: Study) {
         payments: a.payments!,
       },
     });
+    if (a.report) { writeFileSync(a.report, renderStudyReport(r, study)); if (!a.json) console.log(`REPORT    ${a.report}: the result as a page to show someone (no house is named)`); }
     if (a.json) console.log(JSON.stringify({ ...r, grants: r.grants.map((g) => g.house) }, null, 2));
     else {
       for (const x of r.excluded) console.log(`EXCLUDED  ${x.house}: ${x.why}`);

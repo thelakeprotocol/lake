@@ -89,7 +89,7 @@ lake dispatch --study my-study.json --price 5 --budget 200 --wait 60 \
   --auditor https://sandbox.lake.doneinfifty.com/s/auditor --payments https://sandbox.lake.doneinfifty.com/s/payments
 ```
 
-It prints each step as it goes. Add `--json` for the result as JSON (cells, paid and pending too); it then prints nothing until the run is done. From a laptop its first line says the node can't reach the agent's card: the node can't list it on its map from behind your router, and the study runs anyway.
+It prints each step as it goes. Add `--json` for the result as JSON (cells, paid and pending too); it then prints nothing until the run is done. Add `--report result.html` for the result as one page to show a colleague or an ethics board: the question, what each house counted in its own words, the table (cells under 5 said plainly), who said no and why, and the signed evidence (the ethics approval, the audit, the tellers, the receipts). It names no house. From a laptop its first line says the node can't reach the agent's card: the node can't list it on its map from behind your router, and the study runs anyway.
 
 It knocks on every house, bargains with those that counter together, signs agreements, has each joining house answer at home, pays each house that answered from your budget, and returns:
 

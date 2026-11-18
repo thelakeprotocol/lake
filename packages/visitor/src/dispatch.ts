@@ -48,6 +48,10 @@ export interface DispatchOptions {
 interface House { id: string; name: string; url: string }
 interface Joined { house: House; grant: string; agreement?: SignedAgreement; priceUsd: number }
 
+/** Why houses declined, in words (the coarse codes houses give visitors, SPEC §5). */
+export const DECLINE_WORDS: Record<string, string> = { price: 'it pays too little', purpose: 'they take no research', default: 'no rule of theirs covers it', retention: 'they keep no data', identifying: 'it asks for something identifying', 'no-owner': 'nobody has claimed the house yet', unsaid: 'they gave no reason',
+  rule: 'a rule of theirs says no', repeat: 'they turned this purpose down in the last day', relabel: 'the same data was asked for under another purpose within the hour', 'too-many': 'too many requests already wait for their owner', 'owner-said-no': 'their owner said no to you before', unauthorised: 'those fields need an authority you didn\'t show', quarantined: 'your key is quarantined' };
+
 export interface StudyRun {
   study: string;
   question: string;
@@ -192,7 +196,7 @@ export async function dispatch(o: DispatchOptions): Promise<StudyRun> {
   report('offer', { price: o.priceUsd, fields: fields.join(', '), purpose: 'research' });
   await knockAll(houses, offer, true);
   log('decide', Object.entries(decisions).map(([k, n]) => `${n} ${k}`).join(' · '));
-  if (Object.keys(declinedBecause).length) log('decide', `declined because: ${Object.entries(declinedBecause).map(([k, n]) => `${n} ${{ price: 'it pays too little', purpose: 'they take no research', default: 'no rule of theirs covers it', retention: 'they keep no data', identifying: 'it asks for something identifying', 'no-owner': 'nobody has claimed the house yet', unsaid: 'they gave no reason' }[k] ?? k}`).join(' · ')}`);
+  if (Object.keys(declinedBecause).length) log('decide', `declined because: ${Object.entries(declinedBecause).map(([k, n]) => `${n} ${DECLINE_WORDS[k] ?? k}`).join(' · ')}`);
   await beat();
 
   // Houses that countered the same offer bargain as one bloc: the highest price, only fields all accept (SPEC §5.3).
