@@ -29,7 +29,7 @@ export interface WantOfferRecord {
    * The owner said something is wrong with what was sent, and the shop was told. `held`: the payments agent took it as a
    * dispute, so the money stays where it is until the shop sends again or refunds, or the owner says it arrived after all.
    */
-  problem?: { code: WantProblem; at: string; held: boolean };
+  problem?: { code: WantProblem; at: string; held: boolean; /** With neither a new delivery nor a refund by then, the money comes back (round 103). */ until?: string };
   /** Bought with the owner's delivery address sent to this seller (the address itself stays in the pod). */
   addressSent?: boolean;
 }
@@ -192,7 +192,7 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       const open = live(r);
       if (!mine) return { kind: 'want.status', want: wantId, offer: null, want_open: open, says: open ? 'no offer of yours is open on it' : 'no offer of yours, and it is no longer open' };
       const state = mine.id === r.bought && mine.state === 'shipped' && mine.problem ? 'problem' : mine.id === r.bought || mine.state === 'refunded' ? mine.state : !open ? 'not_bought' : Date.parse(mine.expires) < Date.now() ? 'expired' : 'open';
-      const says = { open: 'open: the owner sees it on their phone; you hear if they buy', expired: 'your cart has run out: send a new offer to stay in', not_bought: 'the want closed without buying yours', paid: `bought, held until they say it arrived: send it to the address in the receipt, then lake_want shipped`, shipped: 'sent: paid when they say it arrived, or after the cart\'s review time', arrived: 'arrived: the payment is released to you', problem: `the buyer says ${mine.problem?.code === 'not_arrived' ? 'it hasn\'t arrived' : 'it came damaged or isn\'t what you offered'}: ${mine.problem?.held ? 'the money stays held until' : 'answer it:'} you send it again (lake_want shipped, with a new note) or refund it (lake_want refund)`, refunded: `the money went back to the buyer${mine.ended ? ` (${mine.ended})` : ''}: nothing is owed either way` }[state as string] ?? state;
+      const says = { open: 'open: the owner sees it on their phone; you hear if they buy', expired: 'your cart has run out: send a new offer to stay in', not_bought: 'the want closed without buying yours', paid: `bought, held until they say it arrived: send it to the address in the receipt, then lake_want shipped`, shipped: 'sent: paid when they say it arrived, or after the cart\'s review time', arrived: 'arrived: the payment is released to you', problem: `the buyer says ${mine.problem?.code === 'not_arrived' ? 'it hasn\'t arrived' : 'it came damaged or isn\'t what you offered'}: ${mine.problem?.held ? 'the money stays held until' : 'answer it:'} you send it again (lake_want shipped, with a new note) or refund it (lake_want refund)${mine.problem?.until ? `, by ${mine.problem.until}: with neither, the money goes back to the buyer` : ''}`, refunded: `the money went back to the buyer${mine.ended ? ` (${mine.ended})` : ''}: nothing is owed either way` }[state as string] ?? state;
       return { kind: 'want.status', want: wantId, offer: mine.id, cart: mine.cart.contents.id, state, ...(state === 'problem' ? { problem: mine.problem!.code } : {}), total: mine.total, expires: mine.expires, says };
     },
     /** The shop says it sent it: from the shop that was paid, about that cart. */
@@ -269,14 +269,15 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       if (offer.state === 'arrived') return { error: `${offer.seller.name} is paid already for this one` };
       if (offer.state !== 'shipped') return { error: `${offer.seller.name} hasn't said it sent it yet: if it never does, your money comes back by itself` };
       if (offer.problem) return { error: `you told ${offer.seller.name} already: your money stays held until it answers` };
-      let held = false;
+      let held = false, until: string | undefined;
       if (offer.shipped?.sha256) {
         const { payload } = await x.send(x.payments, { kind: 'dispute', hold: offer.hold, sha256: offer.shipped.sha256, code: 'not_as_described' });
         held = payload.kind === 'disputed';
+        if (held && typeof payload.until === 'string' && Number.isFinite(Date.parse(payload.until))) until = payload.until;
       }
-      offer.problem = { code: code as WantProblem, at: new Date().toISOString(), held };
+      offer.problem = { code: code as WantProblem, at: new Date().toISOString(), held, ...(until ? { until } : {}) };
       await save();
-      const told = { kind: 'want.problem', want: r.want.id, cart: offer.cart.contents.id, hold: offer.hold, problem: code, held, at: offer.problem.at };
+      const told = { kind: 'want.problem', want: r.want.id, cart: offer.cart.contents.id, hold: offer.hold, problem: code, held, at: offer.problem.at, ...(until ? { until } : {}) };
       deliverWithRetries(() => x.send(offer.seller.url, told));
       return { ok: true, offer, want: r.want };
     },

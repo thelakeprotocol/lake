@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import express from 'express';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildCard, cartHash, EMPTY_SHA256, generateIdentity, issueCredential, sendLake, signCard, signCart, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData, type AgentCard, type CartMandate, type DeliveryTerms, type Identity, type LakeData } from '@thelakeprotocol/core';
 import { createPayments } from './review.js';
 
@@ -42,7 +42,7 @@ beforeAll(async () => {
   const app = express();
   server = await new Promise<Server>((ok) => { const s = app.listen(0, () => ok(s)); });
   const base = `http://localhost:${(server.address() as { port: number }).port}`;
-  const payments = await createPayments({ id: await generateIdentity(), url: base, domain: 'payments.lake.local', sandbox: true });
+  const payments = await createPayments({ id: await generateIdentity(), url: base, domain: 'payments.lake.local', sandbox: true, sweepMs: 100 });
   app.use(payments.app);
   url = `${base}/a2a`;
 });
@@ -85,6 +85,28 @@ describe('a held payment follows the delivery (SPEC §6.5)', () => {
     // The release receipt tells the story: how it ended, the delivery, and the dispute and how that ended.
     const sub = JSON.parse(Buffer.from(done.credential.split('.')[1], 'base64url').toString()).credentialSubject;
     expect(sub).toMatchObject({ amount: { value: 1.5 }, how: 'accepted', delivered: sha('owl?'), deliveries: 1, disputes: [{ code: 'not_as_described', ended: 'accepted' }] });
+  });
+
+  // Round 103: after a dispute nothing had a deadline, and a seller that never answered froze the money.
+  it('gives the seller a week to answer a dispute: silence sends the money back to the buyer, never to the seller', async () => {
+    const { hold } = await payHeld();
+    await ask(seller, { kind: 'delivered', hold, sha256: sha('parcel') });
+    const disputed = await ask(buyer, { kind: 'dispute', hold, sha256: sha('parcel'), code: 'not_as_described' });
+    expect(disputed).toMatchObject({ kind: 'disputed', until: expect.any(String), note: expect.stringContaining('it goes back to you') });
+    expect(Math.abs(Date.parse(disputed.until) - Date.now() - 7 * 86_400_000)).toBeLessThan(60_000);
+    // A revision inside the week answers it: the buyer's time to answer runs again.
+    const { hold: answered } = await payHeld();
+    await ask(seller, { kind: 'delivered', hold: answered, sha256: sha('v1') });
+    await ask(buyer, { kind: 'dispute', hold: answered, sha256: sha('v1'), code: 'not_as_described' });
+    await ask(seller, { kind: 'delivered', hold: answered, sha256: sha('v2') });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 8 * 86_400_000);
+      await new Promise((r) => setTimeout(r, 400));
+      // The unanswered one went back to the buyer; the answered one was released after its review time, as before.
+      expect(await ask(seller, { kind: 'delivered', hold, sha256: sha('too late') })).toMatchObject({ kind: 'refused', problems: ['it was voided already'] });
+      expect(await ask(buyer, { kind: 'capture', hold: answered, sha256: sha('v2') })).toMatchObject({ kind: 'refused', problems: ['it was captured already'] });
+    } finally { vi.useRealTimers(); }
   });
 
   it('follows the cart\'s signed terms: its clocks, its revisions, and a ruling that a delivery misses its counts (run 36)', async () => {

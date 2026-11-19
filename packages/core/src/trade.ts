@@ -208,7 +208,7 @@ export const DISPUTE_CODES = ['not_received', 'not_as_described', 'changes_reque
 export type DisputeCode = (typeof DISPUTE_CODES)[number];
 
 /** How a held payment ended, as its receipt says: what a seller's record is counted from. */
-export const SETTLED_HOW = ['accepted', 'review_expired', 'ruling', 'seller_void', 'undelivered_expired',
+export const SETTLED_HOW = ['accepted', 'review_expired', 'ruling', 'seller_void', 'undelivered_expired', 'unanswered_expired',
   // Money held for a pledge (SPEC §11.4a): it filled, it lapsed, its signer took it back, or its tally never settled it.
   'pledge_filled', 'pledge_lapsed', 'pledge_withdrawn', 'pledge_expired'] as const;
 export type SettledHow = (typeof SETTLED_HOW)[number];

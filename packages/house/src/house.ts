@@ -1299,7 +1299,7 @@ function panelFor(x: {
       if (!payments) return { error: 'no payments agent on this Lake' };
       const out = await x.wants.problem(wantId, code, { payments, send });
       if ('error' in out) return out;
-      x.note('want.problem', `You told ${offer.seller.name} that "${r!.want.name}" ${code === 'not_arrived' ? 'hasn\'t arrived' : 'came damaged or wrong'}${out.offer.problem?.held ? ': your money stays held until it sends it again or refunds you' : ''}`);
+      x.note('want.problem', `You told ${offer.seller.name} that "${r!.want.name}" ${code === 'not_arrived' ? 'hasn\'t arrived' : 'came damaged or wrong'}${out.offer.problem?.held ? `: your money stays held until it sends it again or refunds you${out.offer.problem.until ? `, and comes back to you if it does neither by ${new Date(out.offer.problem.until).toUTCString().slice(0, 16)}` : ''}` : ''}`);
       return { ok: true, want: r!.want.id, held: !!out.offer.problem?.held };
     },
     async passFavour() {

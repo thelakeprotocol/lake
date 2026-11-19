@@ -578,12 +578,12 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect((await asAssistant({ kind: 'panel.want.problem', want: secondId, problem: 'not_arrived' })).error).toMatch(/only your human's key/);
       await page.getByRole('button', { name: 'Report a problem' }).click();
       await page.locator('ion-action-sheet').getByText('What went wrong?').waitFor();
-      await page.locator('ion-action-sheet').getByText(/Washer & Wrench is told, and your A\$34\.00 stays held until it sends it again or refunds you\./).waitFor();
+      await page.locator('ion-action-sheet').getByText(/Washer & Wrench is told, and your A\$34\.00 stays held until it sends it again or refunds you, a week at most\./).waitFor();
       await tidy();
       await confirmSheet('It hasn\'t arrived');
       // Said back at once, with what holds the money now; the owner can still say it came. The demo shop answers a few seconds on.
       await page.getByRole('heading', { name: 'Problem reported' }).waitFor({ timeout: 10_000 });
-      await page.getByText(/^On \w{3}, .*\d you told Washer & Wrench it hasn't arrived\. Your A\$34\.00 stays held until Washer & Wrench sends it again or refunds you\.$/).waitFor();
+      await page.getByText(/^On \w{3}, .*\d you told Washer & Wrench it hasn't arrived\. Your A\$34\.00 stays held until Washer & Wrench sends it again or refunds you\. If it does neither by \w{3}, .*\d+, it comes back to you\.$/).waitFor();
       await page.getByRole('button', { name: 'It arrived after all' }).waitFor();
       expect(await page.getByRole('button', { name: 'Report a problem' }).count()).toBe(0);
       expect(await page.getByText(/^If you say nothing/).count()).toBe(0);

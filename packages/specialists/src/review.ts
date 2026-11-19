@@ -220,6 +220,12 @@ export const newId = () => randomUUID();
 export const HOLD_HOURS = { min: 1, max: 168, default: 24 } as const;
 /** How long a seller has to deliver before a held payment goes back to the buyer. */
 export const DELIVER_HOURS = 24;
+/**
+ * How long a seller has to answer a dispute, by a new delivery or a refund, before the money goes back to the buyer (round
+ * 103: after a dispute nothing had a deadline, and a seller that never answered froze the money). Marketplaces do the
+ * same: silence after a claim never pays the seller.
+ */
+export const ANSWER_HOURS = 168;
 /** Deliveries one held payment takes: the first and five revisions. */
 const MAX_DELIVERIES = 6;
 
@@ -252,6 +258,8 @@ interface Hold {
   disputes?: { code: DisputeCode; sha256: string; at: number; ended?: string }[];
   /** Before deliveries were filed: the buyer disputed it. */
   disputed?: boolean;
+  /** When an open dispute goes back to the buyer if the seller hasn't sent again or refunded (ms). */
+  answerBy?: number;
 }
 
 const openDispute = (h: Hold) => h.disputes?.find((d) => !d.ended);
@@ -268,6 +276,8 @@ const PLEDGE_HOLD_DAYS = 32;
 export async function createPayments(o: SpecialistOptions & {
   /** Each settlement, for the node's counters: whether it paid a cart, and whether its money is held or a hold being released. */
   onSettled?: (amount: number, count: number, how?: { cart?: boolean; held?: boolean; released?: boolean; currency?: string }) => void; log?: (entry: string, kind: string) => Promise<{ index: number; origin: string }>;
+  /** How often deadlines are checked, ms (60 s; tests check sooner). */
+  sweepMs?: number;
   /** Where held payments, paid carts and budgets spent are kept across restarts. Without it, in memory only. */
   dataDir?: string;
   /** The domains of arbiters whose rulings move a held payment. Default: arbiter.lake.local. */
@@ -493,7 +503,7 @@ export async function createPayments(o: SpecialistOptions & {
     h.settledAt = Date.now();
     // A ruling's end says which way it went: a lost "nothing arrived" claim isn't a mark against the seller (run 37).
     const open = openDispute(h);
-    if (open) open.ended = how === 'seller_void' ? 'refund' : how === 'ruling' ? (to === 'captured' ? 'ruling_for_seller' : 'ruling_for_buyer') : how;
+    if (open) open.ended = how === 'seller_void' ? 'refund' : how === 'ruling' ? (to === 'captured' ? 'ruling_for_seller' : 'ruling_for_buyer') : how === 'unanswered_expired' ? 'unanswered' : how;
     if (to === 'voided') spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - h.amount));
     await save();
     const story = { how, ...(h.delivered ? { delivered: h.delivered.sha256, deliveries: h.delivered.revision } : {}), ...(h.disputes?.length ? { disputes: h.disputes.map((d) => ({ code: d.code, ended: d.ended })) } : {}) };
@@ -518,7 +528,10 @@ export async function createPayments(o: SpecialistOptions & {
   // Checked at start too, for holds whose time passed while this agent was down.
   const sweep = () => {
     for (const h of holds.values()) {
-      if (h.status !== 'held' || h.until > Date.now() || h.disputed || openDispute(h)) continue;
+      if (h.status !== 'held') continue;
+      // Disputed: the seller's week to send again or refund; with neither, back to the buyer. Silence never pays a seller.
+      if (h.disputed || openDispute(h)) { if (h.answerBy && h.answerBy <= Date.now()) void finish(h, 'voided', 'unanswered_expired', 'the seller didn\'t answer the dispute in time'); continue; }
+      if (h.until > Date.now()) continue;
       // Money for a pledge its tally never settled goes back: nobody's word released it.
       if (h.pledge) { void finish(h, 'voided', 'pledge_expired', 'the pledge was never settled by its tally'); continue; }
       if (h.reviewMs !== undefined && !h.delivered) void finish(h, 'voided', 'undelivered_expired', 'nothing was delivered in time');
@@ -526,7 +539,7 @@ export async function createPayments(o: SpecialistOptions & {
     }
   };
   setTimeout(sweep, 1_000).unref();
-  setInterval(sweep, 60_000).unref();
+  setInterval(sweep, o.sweepMs ?? 60_000).unref();
   const settleHold = async (p: Record<string, unknown>, from: string): Promise<Reply> => {
     const h = holds.get(String(p.hold ?? ''));
     if (!h) return { kind: 'refused', problems: ['no held payment with that id (the receipt\'s settlementId)'] };
@@ -580,8 +593,9 @@ export async function createPayments(o: SpecialistOptions & {
       if (from !== h.payer) return { kind: 'refused', problems: ['only the buyer disputes it'] };
       if (!filed) {
         h.disputed = true;
+        h.answerBy = Date.now() + ANSWER_HOURS * 3_600_000;
         await save();
-        return { kind: 'disputed', hold: h.id, note: 'held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules' } as never;
+        return { kind: 'disputed', hold: h.id, until: new Date(h.answerBy).toISOString(), note: `held until you accept (a revised delivery, say), the seller refunds, or an arbiter rules; with none of these by ${new Date(h.answerBy).toISOString()}, it goes back to you` } as never;
       }
       const code = (p.code ?? 'not_as_described') as DisputeCode;
       if (!DISPUTE_CODES.includes(code)) return { kind: 'refused', problems: [`code: one of ${DISPUTE_CODES.join(', ')}`] };
@@ -591,10 +605,12 @@ export async function createPayments(o: SpecialistOptions & {
       if (wrong) return { kind: 'refused', problems: [wrong] };
       if (openDispute(h)) return { kind: 'refused', problems: ['that delivery is disputed already: it stays held until a revision, your accept, or a refund'] };
       (h.disputes ??= []).push({ code, sha256: sha || h.delivered!.sha256, at: Date.now() });
+      h.answerBy = Date.now() + ANSWER_HOURS * 3_600_000;
       await save();
-      return { kind: 'disputed', hold: h.id, code, note: code === 'changes_requested' ? 'held while the seller revises it: a revision restarts your time to answer'
-        : code === 'not_received' ? 'held: the seller can show it reached you (the Arbiter rules on that), revise, or refund'
-        : 'held until the seller revises it and you accept, or the seller refunds: whether it is what you ordered is not something signatures settle, so no ruling moves it' } as never;
+      const by = new Date(h.answerBy).toISOString(), back = ` If the seller does neither by ${by}, it goes back to you.`;
+      return { kind: 'disputed', hold: h.id, code, until: by, note: (code === 'changes_requested' ? 'held while the seller revises it: a revision restarts your time to answer.'
+        : code === 'not_received' ? 'held: the seller can show it reached you (the Arbiter rules on that), revise, or refund.'
+        : 'held until the seller revises it and you accept, or the seller refunds: whether it is what you ordered is not something signatures settle, so no ruling moves it.') + back } as never;
     }
     // A ruling, from an arbiter this payments agent trusts or one the seller named in the cart the buyer paid (that very
     // key), about this very cart, that found it paid. It settles only what signatures can: whether the delivery in dispute

@@ -136,7 +136,7 @@ describe('the transparency log', () => {
     expect(onA).toMatchObject({ origin, sales: 1, sold: { USD: 7 } });
     // Each fact is on one log, so they add up; the same log reached twice (through two Lakes' search) counts once.
     // The same buyer on both Lakes is one counterparty (a passport shows how many different agents it dealt with).
-    expect(sumRecords([onB, onA, onA] as never)).toEqual({ buyers: [BUYER], sellers: [], sales: 2, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 10 }, released: { accepted: 0, review_expired: 0, ruling: 1 }, disputes: { against: 1, ended: { revision: 0, refund: 0, ruling_for_seller: 1, ruling_for_buyer: 0, accepted: 0 }, changes_requested: 0 }, disputes_raised: 0, logs: ['log.b.example/log', origin] });
+    expect(sumRecords([onB, onA, onA] as never)).toEqual({ buyers: [BUYER], sellers: [], sales: 2, purchases: 0, refunds_given: 0, held_now: 0, sold: { USD: 10 }, released: { accepted: 0, review_expired: 0, ruling: 1 }, disputes: { against: 1, ended: { revision: 0, refund: 0, ruling_for_seller: 1, ruling_for_buyer: 0, accepted: 0, unanswered: 0 }, changes_requested: 0 }, disputes_raised: 0, logs: ['log.b.example/log', origin] });
     await rm(bdir, { recursive: true, force: true });
   });
 });
