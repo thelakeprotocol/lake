@@ -745,6 +745,8 @@ export class OwnerDesk {
     const lines: Line[] = [];
     const panel = this.o.panel;
     if (!panel) return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
+    // A reset on the house's machine, said for a week: if it wasn't the owner, they learn who has their house.
+    if (this.ownerReset && Date.now() - Date.parse(this.ownerReset) < 7 * 86_400_000) lines.push({ by: 'house', text: `This house's owner key was reset on its machine, ${this.whenWords(this.ownerReset)}. The old phone and any recovery code can't open it. If that wasn't you, whoever has that machine has your house.`, at: this.ownerReset, to: '#you' });
     const events = (panel.activity(new Date(midnight).toISOString()) as unknown as { at: string; kind: string; subject?: string; data?: Record<string, unknown> }[]).filter((e) => after(e.at));
     const who = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? `${n.slice(0, 2).join(', ')}${n.length > 2 ? ` +${n.length - 2}` : ''}` : undefined; };
     const names = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? ` (${n.slice(0, 2).join(', ')}${n.length > 2 ? ` and ${n.length - 2} more` : ''})` : ''; };
@@ -872,6 +874,32 @@ export class OwnerDesk {
     await this.o.onRelease?.();
   }
 
+  /**
+   * The owner's key forgotten on the house's own machine (round 101, a self-hoster: a house moved to a new address with no
+   * recovery code answered every phone "this house already has an owner", with no way back). For a house its owner runs:
+   * whoever holds its disk holds it anyway. The phone, the recovery code and the house's pushes to it go; so do the duty
+   * grants and allowances the old key signed. The AIs keep their look-and-suggest keys, and the notes, agenda, rules and
+   * people stay: it is the same owner. The next owner is told on Today.
+   */
+  async resetOwner() {
+    for (const a of [...this.assistants.values()].filter((x) => x.duty && !this.isRevoked(x.duty.statusId))) await this.dutyOff(a, 'your human\'s key was reset on their house\'s machine: a new grant comes from them if they want you on duty');
+    await this.o.dutyRunner?.forget();
+    for (const al of [...this.allowances.values()]) { await this.revoke(al.statusId); this.news({ about: 'allowance', revoked: true, note: 'your human\'s key was reset on their house\'s machine, so the allowance it signed ended' }, al.kid); }
+    this.allowances.clear();
+    await this.saveAllowances();
+    if (this.pushState) { this.pushState.subs = []; await this.savePushes(); }
+    await this.clearRecovery();
+    this.tokenUntil = 0;
+    this.ownerJwk = null;
+    this.ownerSeen = 0;
+    await this.o.clearOwnerKey?.();
+    this.token = await secret(join(this.o.dataDir, 'pairing-token'), true);
+    this.ownerReset = new Date().toISOString();
+    await saveWhole(join(this.o.dataDir, 'owner-reset.json'), JSON.stringify({ at: this.ownerReset }));
+    return { token: this.token };
+  }
+  private ownerReset?: string;
+
   async init() {
     this.ownerJwk = await this.o.readOwnerKey();
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
@@ -900,6 +928,7 @@ export class OwnerDesk {
     setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); }, 60_000).unref();
     this.dutyLog = await loadJson(join(this.o.dataDir, 'duty-log.json'), []);
     this.readLog = await loadJson(join(this.o.dataDir, 'read-log.json'), []);
+    this.ownerReset = (await loadJson<{ at?: string }>(join(this.o.dataDir, 'owner-reset.json'), {})).at;
     for (const r of await loadJson<RemovedAi[]>(join(this.o.dataDir, 'removed-ais.json'), [])) this.removed.set(r.kid, r);
     this.contacts = new Map(await loadJson(join(this.o.dataDir, 'contacts.json'), []));
     this.firstContacts = new Map(await loadJson(join(this.o.dataDir, 'first-contacts.json'), []));

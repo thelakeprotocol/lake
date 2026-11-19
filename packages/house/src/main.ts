@@ -18,7 +18,7 @@ const { values: a } = parseCli({
   about: 'A Lake house: your Solid pod and the housekeeper that answers by your rules (https://lake.doneinfifty.com/docs/join).',
   usage: 'lake-house --name <you> [--data <dir>] [--rules <rules.yaml>] [--lake <node url>] [--join <lake url>] [--relay] …',
   example: 'NODE_ENV=production lake-house --name you --data ./my-house --rules personas/research.yaml --lake http://localhost:7000 --issuer-url http://localhost:4300/issuer --auditor-url http://localhost:4300/auditor',
-  notes: { 'make-houses': 'a hosted Lake makes a house on POST /t/new for a newcomer\'s AI (LAKE_MAKE_HOUSES_TOKEN guards it; LAKE_MAKES_PER_HOUR, 12)', 'unclaimed-seconds': 'how long a made house waits for a phone before it is removed', 'max-unclaimed': 'how many made houses may wait at once', name: 'your house\'s name (its pod and WebID)', data: 'where the pod, its keys and the house\'s state live: back this folder up', rules: 'your rules.yaml', port: 'the house\'s HTTP port (A2A, panel at /owner/, page at /)', 'pod-port': 'the Solid pod\'s port', lake: 'the Lake node(s) to announce to, comma-separated', join: 'a Lake that serves its specialists under /s/ (the sandbox does): node, issuer and auditor in one', 'issuer-url': 'where your pack\'s demo records come from', 'auditor-url': 'who certifies the converter', relay: 'reached through the node: nothing to open on your router', handle: 'open your door under this handle', tenants: 'host this many houses in one process', 'public-url': 'the address others reach this house at', connector: 'the Lake\'s MCP connector, for an AI on duty the house runs (default: this site\'s /mcp)', 'duty-model': 'a model this house offers owners for their AI on duty: stub, anthropic or anthropic:<model> (an operator\'s ANTHROPIC_API_KEY)' },
+  notes: { 'reset-owner': 'on the house\'s own machine, with the house stopped: forget the paired phone and the recovery code, end the duty grants and allowances the old key signed, and print a fresh one-use pairing link (not on a hosted Lake)', 'make-houses': 'a hosted Lake makes a house on POST /t/new for a newcomer\'s AI (LAKE_MAKE_HOUSES_TOKEN guards it; LAKE_MAKES_PER_HOUR, 12)', 'unclaimed-seconds': 'how long a made house waits for a phone before it is removed', 'max-unclaimed': 'how many made houses may wait at once', name: 'your house\'s name (its pod and WebID)', data: 'where the pod, its keys and the house\'s state live: back this folder up', rules: 'your rules.yaml', port: 'the house\'s HTTP port (A2A, panel at /owner/, page at /)', 'pod-port': 'the Solid pod\'s port', lake: 'the Lake node(s) to announce to, comma-separated', join: 'a Lake that serves its specialists under /s/ (the sandbox does): node, issuer and auditor in one', 'issuer-url': 'where your pack\'s demo records come from', 'auditor-url': 'who certifies the converter', relay: 'reached through the node: nothing to open on your router', handle: 'open your door under this handle', tenants: 'host this many houses in one process', 'public-url': 'the address others reach this house at', connector: 'the Lake\'s MCP connector, for an AI on duty the house runs (default: this site\'s /mcp)', 'duty-model': 'a model this house offers owners for their AI on duty: stub, anthropic or anthropic:<model> (an operator\'s ANTHROPIC_API_KEY)' },
   options: {
     name: { type: 'string' },
     rules: { type: 'string', default: process.env.LAKE_RULES ?? '/rules.yaml' },
@@ -54,6 +54,7 @@ const { values: a } = parseCli({
     seed: { type: 'string', default: process.env.LAKE_SEED },
     'owner-url': { type: 'string', default: process.env.LAKE_OWNER_URL },
     'open-pairing': { type: 'boolean', default: process.env.LAKE_OPEN_PAIRING === '1' },
+    'reset-owner': { type: 'boolean', default: false },
     // A hosted house whose owner runs this Lake: told, as a note from the Lake, when someone claims a house, uses an invite
     // or pairs a phone with the house they were invited into (14 Nov: "how do we know when a real second human uses the Lake?").
     operator: { type: 'string', default: process.env.LAKE_OPERATOR },
@@ -125,6 +126,8 @@ const issuerUrls = Object.fromEntries(packs.filter((p) => p.source).map((p, i) =
 const common = { packs, issuerUrls, auditorUrl: a['auditor-url'] ?? 'http://auditor:4400', personUrl: a['person-url'], tellerUrls: (a.tellers ?? '').split(',').map((u) => u.trim()).filter(Boolean), lakeUrl: a.lake, seed: a.seed, sandbox, domain: a.domain,
   demoDomains: a['demo-domain']!.split(',').map((d) => d.trim().toLowerCase()).filter(Boolean), connector: a.connector, dutyModel: a['duty-model'] };
 
+// Resetting an owner is for a house its owner runs: on a hosted Lake it would be the operator taking a house (round 101).
+if (a['reset-owner'] && a.tenants) { console.error('lake-house: --reset-owner is for a house you run yourself. A hosted house\'s owner moves their key from their own phone (a pairing link or a recovery code); the operator can\'t reset it.'); process.exit(2); }
 if (a.tenants) await hosted(Number(a.tenants));
 else await single();
 
@@ -159,7 +162,9 @@ async function single() {
   }
 
   if (a.relay && !a.lake) throw new Error('--relay needs at least one Lake node (--lake or LAKE_NODE_URL) to relay through');
-  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], lanHost, openPairing: a['open-pairing'], leaseHours: a['open-pairing'] && a['lease-hours'] ? Number(a['lease-hours']) || undefined : undefined, emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
+  const house = await startHouse({ ...common, name, rulesText, owner, dataDir: podOpts.dataDir, publicUrl: baseUrl, ownerUrl: a['owner-url'], lanHost, openPairing: a['open-pairing'], resetOwner: a['reset-owner'], leaseHours: a['open-pairing'] && a['lease-hours'] ? Number(a['lease-hours']) || undefined : undefined, emit, say, quiet: a.json, relay: a.relay ? { localPort: port } : undefined });
+  // --reset-owner: done once the house has started on its folder; it stops, and the next start prints the same link.
+  if (a['reset-owner']) { say('start the house again as usual and open the link above on your phone (it works once).'); await house.leave().catch(() => {}); pod?.stop(); setTimeout(() => process.exit(0), 300).unref(); return; }
   const server = house.app.listen(port, async () => {
     say(a.relay ? `reached through the Lake's relay: ${house.card.supportedInterfaces.map((i) => i.url).join(' · ')}` : `A2A on ${baseUrl}/a2a · card at ${baseUrl}/.well-known/agent-card.json${sandbox ? ' · sandbox Lake' : ''}`);
     await house.join();

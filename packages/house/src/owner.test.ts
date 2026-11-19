@@ -637,6 +637,34 @@ describe('what an attacker tried (round 16)', () => {
   const from = (key: string) => ({ name: `${key}'s AI`, domain: `${key}.example`, webId: `https://${key}.example/#a`, url: `https://${key}.example/a2a`, key: `${key}-key-0123456789abcdefghij`, checked: false });
   const settle = () => new Promise((r) => setTimeout(r, 20));
 
+  // Round 101, a self-hoster: a house moved with no recovery code locked its owner out for good.
+  it('resets the owner on the house\'s machine: the old phone and recovery code go, a fresh one-use link pairs, the AIs stay, and Today says so', async () => {
+    const h = await house({ openPairing: false });
+    const tokenOf = () => (h.desk as unknown as { token: string }).token;
+    const phone = await generateIdentity('phone-1');
+    expect(await h.post('/pair', { publicJwk: phone.publicJwk, token: tokenOf() })).toMatchObject({ paired: true });
+    const asPhone = async (pp: Record<string, unknown>, who = phone) => h.post('/api', await signMessage(pp, who, { iss: 'http://h/me' }));
+    const { code } = await asPhone({ kind: 'panel.assistant.invite', label: 'Helper', reads: [] });
+    const ai = await generateIdentity('ai-r');
+    await h.post('/assistant', { publicJwk: ai.publicJwk, code, label: 'Helper', url: 'https://ai-r.example/a2a' });
+    expect((await asPhone({ kind: 'panel.recovery.make' })).code ?? 'none').toBeTruthy();
+    const before = tokenOf();
+    const { token } = await h.desk.resetOwner();
+    expect(token).not.toBe(before);
+    // The old phone is no owner now, and nobody pairs without the new link.
+    expect(await asPhone({ kind: 'list' })).toHaveProperty('error');
+    expect(await h.post('/pair', { publicJwk: (await generateIdentity('x')).publicJwk })).toHaveProperty('error');
+    const fresh = await generateIdentity('phone-2');
+    expect(await h.post('/pair', { publicJwk: fresh.publicJwk, token })).toMatchObject({ paired: true });
+    const list = await asPhone({ kind: 'list' }, fresh);
+    expect(list.assistants.map((x: { label: string }) => x.label)).toEqual(['Helper']);
+    // Used once: the same link pairs nobody else.
+    expect(await h.post('/pair', { publicJwk: (await generateIdentity('y')).publicJwk, token })).toHaveProperty('error');
+    const today = await asPhone({ kind: 'panel.today', tz: 0 }, fresh);
+    expect(JSON.stringify(today)).toContain('owner key was reset on its machine');
+    h.close();
+  });
+
   it('the overview an AI reads is bounded and gated: what waits always, yeses with records, money with money (round 86)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}), overview: async () => ({ name: 'h', pending: 2, keys: 3, yeses: { now: 1, yeses: 3, by: [] }, earned: 9, money: { total: 9, today: { USD: 4 } } }) } });
     h.desk.addNote({ from: from('dee'), text: 'Can you lend me a ladder?' });

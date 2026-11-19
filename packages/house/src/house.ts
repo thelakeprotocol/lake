@@ -61,6 +61,8 @@ export interface HouseOptions {
   seed?: string;
   sandbox: boolean;
   openPairing?: boolean;
+  /** Forget the paired owner on start and print a fresh one-use pairing link (a house its owner runs; never hosted). */
+  resetOwner?: boolean;
   /** With open pairing: a claim lasts this long, then the house resets for the next person. */
   leaseHours?: number;
   /** A hosted Lake's invites: the owner makes a one-time link that gives someone a house of their own. */
@@ -407,7 +409,9 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     },
   });
   touchPanel = () => desk.touch();
-  const pairing = await desk.init();
+  let pairing = await desk.init();
+  // --reset-owner, on the house's own machine (round 101): the phone forgotten, a fresh one-use link printed below.
+  if (o.resetOwner) { pairing = { paired: false, token: (await desk.resetOwner()).token }; say('owner key reset on this machine: the old phone and any recovery code no longer open this house.'); }
   const ownerUrl = `${(o.ownerUrl ?? o.publicUrl).replace(/\/$/, '')}/owner/`;
   if (pairing.paired) say(`owner paired. Approvals app: ${ownerUrl}`);
   else if (!o.quiet) {
