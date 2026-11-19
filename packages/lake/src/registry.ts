@@ -1,4 +1,4 @@
-import { canonicalize, cardUrlFor, badgeProblems, checkBadges, keyThumbprint, menuProblems, wantProblems, MAX_WANTS, ownWordClaims, proveDomain, verifyLakeCard, type AgentCard, type CheckedBadge, type LakeProfile } from '@thelakeprotocol/core';
+import { canonicalize, cardUrlFor, badgeProblems, checkBadges, keyThumbprint, menuProblems, wantProblems, MAX_WANTS, offeringProblems, MAX_OFFERINGS, ownWordClaims, proveDomain, verifyLakeCard, type AgentCard, type CheckedBadge, type LakeProfile } from '@thelakeprotocol/core';
 
 export interface Entry {
   /** Short, stable id the map and events use: role plus the start of the key id. */
@@ -55,6 +55,11 @@ export class Registry {
     // Wants (SPEC §6.8): a few, each well formed, on a house's card. One that has closed is still fine on a card: lists skip it.
     if (profile.wants !== undefined) {
       const bad = !Array.isArray(profile.wants) || profile.wants.length > MAX_WANTS || profile.role !== 'house' ? [`wants: up to ${MAX_WANTS}, on a house's card`] : profile.wants.flatMap((w) => wantProblems({ ...w, availabilityEnds: new Date(Math.max(Date.parse(w.availabilityEnds), Date.now() + 1000)).toISOString() }));
+      if (bad.length) return { ok: false, refusal: { code: 'not-lake', why: bad.join('; ') } };
+    }
+    // Offerings (SPEC §6.9), checked as wants are (round 110: one malformed card made GET /offerings fail for every AI).
+    if (profile.offerings !== undefined) {
+      const bad = !Array.isArray(profile.offerings) || profile.offerings.length > MAX_OFFERINGS || profile.role !== 'house' ? [`offerings: up to ${MAX_OFFERINGS}, on a house's card`] : profile.offerings.flatMap((g) => offeringProblems({ ...g, availabilityEnds: typeof g?.availabilityEnds === 'string' && Number.isFinite(Date.parse(g.availabilityEnds)) ? new Date(Math.max(Date.parse(g.availabilityEnds), Date.now() + 60_000)).toISOString() : g?.availabilityEnds }));
       if (bad.length) return { ok: false, refusal: { code: 'not-lake', why: bad.join('; ') } };
     }
     if (badgeProblems(profile.badges).length) return { ok: false, refusal: { code: 'not-lake', why: badgeProblems(profile.badges).join('; ') } };

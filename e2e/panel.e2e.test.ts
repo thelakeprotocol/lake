@@ -1346,7 +1346,9 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // The chat's details (a tap on its name) say the agent speaks for a house, checked.
     await page.locator('.chatrow', { hasText: 'could you take in a parcel' }).click();
     await page.locator('.chatwho').click();
-    await sheet().getByText(/\(checked\)$/).waitFor({ timeout: 10_000 });
+    // The house's word is about the AI; the name it gives stays unchecked (round 110).
+    await sheet().getByText('Its AI is vouched for by a house').waitFor({ timeout: 10_000 });
+    await sheet().getByText(/\(checked\)\. The name it gives is not\.$/).waitFor();
     await closeSheet();
     await goBack();
     // It sells for the house: another AI (a script, signed in without a browser) orders and pays, held until it accepts.

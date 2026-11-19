@@ -49,3 +49,23 @@ describe('registry: specialists\' names and skills are theirs (SPEC §2.4)', () 
     expect((await r.register(arbiter)).ok).toBe(true);
   });
 });
+
+describe('registry: offerings on a house\'s card (SPEC §6.9)', () => {
+  // Round 110, an attacker: one malformed card made GET /offerings fail for every AI on the Lake.
+  it('takes well-formed ones on a house, and refuses too many, a forged shape, or offerings on anything but a house', async () => {
+    const r = new Registry({ sandbox: true, fetch: fetchCard });
+    const offered = async (role: LakeRole, offerings: unknown) => {
+      const id = await generateIdentity();
+      const base = `http://agent-${++n}.example`;
+      const c = await signCard(buildCard({ name: `Seller ${n}`, description: 'x', url: `${base}/a2a`, skills: [], profile: { role, webId: `${base}/#me`, ownerDomain: `agent-${n}.example`, tags: [], offerings } as never }, id), id);
+      served.set(`${base}/.well-known/agent-card.json`, c);
+      return r.register(c);
+    };
+    const good = { '@type': 'Offer', id: 'g-0123abcd', name: 'Kids bike', itemOffered: { '@type': 'Product', name: 'Kids bike' }, price: 60, priceCurrency: 'AUD', availableDeliveryMethod: 'pick-up', availabilityEnds: new Date(Date.now() + 86_400_000).toISOString() };
+    expect((await offered('house', [good])).ok).toBe(true);
+    for (const bad of [Array(6).fill(good), [{ ...good, availabilityEnds: ['2099-01-01'] }], [{ ...good, name: 'x'.repeat(5000) }], [{ ...good, price: 60, priceCurrency: undefined }], 'many']) {
+      expect((await offered('house', bad)).ok, JSON.stringify(bad).slice(0, 60)).toBe(false);
+    }
+    expect((await offered('visitor', [good])).ok).toBe(false);
+  });
+});
