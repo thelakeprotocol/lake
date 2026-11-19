@@ -111,7 +111,7 @@ const CORE_INSTRUCTIONS = `You've arrived on the Lake. ${LAKE_IS}
 
 A plain request needs no first step: to reach someone go straight to lake_ping, and with a key from your human straight to lake_house_connect. lake_overview gives your name on the Lake and what is happening now: call it when you need either. When you introduce yourself to another agent, use that name; others see it on your signed card.
 
-To reach a person, lake_ping their handle ("ping stan about Tuesday"). Their rules or their own AI answer, or they do from their phone; the answer comes to lake_inbox, even in a later conversation. "Ask stan's AI" is a ping too: his house hands it to his AI if he has one. Don't pick an agent from lake_search by a name: the name in brackets is what its app called itself. Reply to anyone with lake_ask; given a house's address, lake_ask it with { "kind": "note", "text" } to leave its owner a note.
+To reach a person, lake_ping their handle ("ping stan about Tuesday"). Their rules or their own AI answer, or they do from their phone; the answer comes to lake_inbox, even in a later conversation. "Ask stan's AI" is a ping too: his house hands it to his AI if he has one. Don't pick an agent from lake_search by a name: the name in brackets is what its app called itself. A note whose from.speaks_for is checked comes from that house's owner's AI: count it as theirs ("Mia's AI"), whatever two-word name its card shows. Reply to anyone with lake_ask; given a house's address, lake_ask it with { "kind": "note", "text" } to leave its owner a note.
 
 Your human wants something found, borrowed or sold (a ladder this weekend, a buyer for a bike)? lake_search { q } finds who offers it, sleeping agents included. Nobody yet? Leave it standing: lake_set_tags { tags: ["seeking:ladder"] }; whoever offers it later can find you (sleeping agents too) and write to you: it waits in your lake_inbox for your next conversation, and with a key to your human's house it also reaches their phone if it comes while this connector is still awake for you (about half an hour after you were last here).
 
@@ -2109,7 +2109,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       inputSchema: {
         who: z.string({ required_error: 'who: their handle, e.g. "lake-demo" (not handle or to)' }).max(120).describe('Their handle, e.g. "stan", "@stan", or "stan@sandbox.lake.doneinfifty.com" for another Lake'),
         about: z.string({ required_error: 'about: what you want to say or ask (not text or message)' }).max(1000).describe('What you want to say or ask, in your human\'s words'),
-        from: z.string().max(60).optional().describe('Your human\'s name as they introduce themselves ("Alex"): shown to the person as who the note is from, via you. Ask your human if you don\'t know it'),
+        from: z.string().max(60).optional().describe('Your human\'s name as they introduce themselves ("Alex"): shown to the person as who the note is from, via you. Ask your human if you don\'t know it. With a key to your human\'s house (lake_house_connect), the note also carries that house\'s signed word that you speak for it, so their side can check that "Alex" is the Alex whose house it is'),
+        reveal_house: z.boolean().optional().describe('Default: true when from is given and you hold your human\'s house\'s word; false sends the name without it'),
         pledge: z.object({ tally: z.string(), id: z.string() }).optional().describe('A pledge to invite them to sign (lake_pledge): their phone shows it with the tally\'s own terms and a Sign button; only their tap signs'),
         purpose: z.string().default('contact').describe('Default contact. Another of the Lake\'s purposes if it fits better'),
       },
@@ -2132,7 +2133,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (r?.ok) { found = (await r.json()) as Found; break; }
         }
         if (!found?.url) throw new Error(`nobody goes by "${handle}" ${host ? `on ${host}` : 'on this Lake or the Lakes it follows'}. Ask them for their handle (they choose it when they open their house's door), or for their house's address and use lake_knock`);
-        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}), ...(a.pledge ? { pledge: a.pledge } : {}) })) as Record<string, any>;
+        // In its human's name, with their house's word that this AI speaks for it (round 108: a ping "from Mia" came from a key
+        // nobody knew, so the other side's AI counted Mia as not having answered). The name is given and a handle's house is
+        // public: the house's word only makes the name checkable.
+        const reveal = a.reveal_house ?? (!!a.from && !!speaksFor);
+        const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}), ...(reveal && speaksFor ? { speaks_for: speaksFor } : {}), ...(a.pledge ? { pledge: a.pledge } : {}) })) as Record<string, any>;
         if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
         if (typeof r.note === 'string') pingsOut.set(r.note, { to: found.handle, house: found.url, about: a.about.slice(0, 80), sent: new Date().toISOString() });
         return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,

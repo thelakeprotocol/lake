@@ -497,6 +497,8 @@ describe('the owner', () => {
     expect(JSON.stringify(await tool('lake_search', { q: 'sam' }))).toContain('Sam (house)');
     // Sam sees it on the phone and answers there; it goes back to Alex's AI, signed by Sam's house.
     const note = ((await ownerCall({ kind: 'list' })).notes as { id: string; text: string; from: { as?: string } }[]).find((x) => x.text.startsWith('Dinner on Tuesday?'))!;
+    // An AI with no house of its human's carries no house's word: the name stays unchecked (round 108).
+    expect((note.from as { speaks_for?: unknown }).speaks_for).toBeUndefined();
     // Who it's from, as Alex's AI says: shown on Sam's phone as "Alex, via <their AI>" (unchecked words).
     expect(note.from.as).toBe('Alex');
     expect(await ownerCall({ kind: 'panel.note.reply', id: note.id, text: 'Yes! 7pm at mine?' })).toEqual({ ok: true });

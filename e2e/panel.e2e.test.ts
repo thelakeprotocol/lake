@@ -1542,6 +1542,14 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(seen).toMatchObject({ for_people: true, shared: true, replies: 1, matches: [], next: expect.stringContaining('task') });
     expect(JSON.stringify(seen)).not.toContain('first aid');
     expect(await one.call('lake_want', { action: 'close', id: sitter.want.id })).toMatchObject({ ok: true });
+    // A ping in its human's name carries their house's word that this AI speaks for it, checked on arrival (round 108: "from
+    // Mia" from a key nobody knew was counted as a stranger's). Here it pings its own house's handle.
+    expect(await one.call('lake_ping', { who: 'panelowner', about: 'Checking who I speak for', from: 'Robin' })).toMatchObject({ kind: 'pinged' });
+    // The house tells its AI of the note with who sent it, as it checked them.
+    let told = '';
+    for (let i = 0; i < 10 && !/"as":"Robin"/.test(told); i++) told = JSON.stringify(await one.call('lake_inbox', { wait_seconds: 3 }));
+    expect(told).toMatch(/"as":"Robin"/);
+    expect(told).toMatch(/"speaks_for":\{"house":"[^"]+","checked":true/);
     await tab('Today');
     await shopper.close(); await one.c.close();
     await tidy();
