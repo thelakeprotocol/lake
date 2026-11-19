@@ -67,6 +67,7 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
       ais.length > 1 && !chat?.toAi ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a?.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a?.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
       chat && latest ? h('div', { class: 'tell-about' }, h('small', {}, `About ${chat.name}'s message${chat.toAi ? ` to ${ai}` : ''}`), h('p', {}, latest.text)) : h('p', { class: 'muted-line' }, chats.length ? 'Who is this about?' : 'Nobody has written to you yet, so there is nobody to write to.'),
       others.length ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Who it is about' }, ...others.map((c) => h('button', { key: c.key, type: 'button', class: `chip${chat?.key === c.key ? ' on' : ''}`, 'aria-pressed': String(chat?.key === c.key), onClick: () => setPicked(c.key) }, chip(c)))) : null,
+      h('label', { class: 'tell-label' }, 'In your words (you can edit this)'),
       h('ion-textarea', { value: text, autoGrow: true, rows: 2, maxlength: 300, placeholder: `What should ${ai} do? A few words.`, 'aria-label': 'Your instruction', class: 'tell-input', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
       h('div', { class: 'tell-chips ideas' }, ...IDEAS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))),
       chat?.toAi && !a ? h('p', { class: 'muted-line' }, 'The AI they wrote to is no longer connected, so nobody can answer them from there.') : null,
@@ -93,6 +94,7 @@ export function AskBox({ v }: { v: ListView }) {
     !a ? [h('p', { class: 'muted-line', key: 'n' }, v.assistants.length ? 'Your AIs here run on their own for Replies or Away. Connect one you chat with, like Claude or ChatGPT, and it does these for you.' : 'No AI is connected yet. Connect one under My AI, like Claude or ChatGPT, and it does these for you.'),
       h('div', { class: 'card-actions', key: 'c' }, h('ion-button', { shape: 'round', class: 'lake-btn', onClick: () => push('#ai') }, 'Connect an AI'))]
       : [ais.length > 1 ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI', key: 'w' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
+        h('label', { class: 'tell-label', key: 'l' }, 'In your words'),
         h('ion-textarea', { key: 't', value: text, autoGrow: true, rows: 2, maxlength: 300, placeholder: `A few words. ${cap(ai)} does it and tells you how it went.`, 'aria-label': 'What you want done', class: 'tell-input', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
         h('div', { class: 'tell-chips ideas', key: 'i' }, ...ERRANDS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))),
         h('p', { class: 'muted-line', key: 's' }, starts(a, ai)),

@@ -39,7 +39,7 @@ export interface Consent { id: string; visitor: string; fields: { name: string; 
 export interface StandingYes { jkt: string; domain: string; purpose: string; fields: string[]; retention: string; floor?: { amount: number; currency: string }; added: string; until: string; uses: number }
 export type AccessRow = { id: string; domain?: string; webId?: string; reputation: number | null; yeses: Consent[]; standing: StandingYes[]; asked: number; blocked: number; lastAsked?: string; last?: { decision: string; reason: string; at: string }; asks: { at: string; decision: string; reason: string }[]; canSee: boolean };
 export type DutyEntry = { id: string; by: string; at: string; tool: string; action: string; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: string; ref: string }; undone?: string; booking?: 'held' | 'confirmed' | 'declined' | 'expired' | 'withdrawn' };
-export type DutyInfo = { kid: string; label: string; seenAt?: string; kinds: string[]; cap: number; until: string; hours?: { from: string; to: string; tz: string }; state: { on: true; used: number } | { on: false; why: string }; off?: { at: string; why: string; night?: boolean }; runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] }; summary: { handled: number; waiting: number; blocked: number; refused: number } };
+export type DutyInfo = { role?: 'messages' | 'away'; kid: string; label: string; seenAt?: string; kinds: string[]; cap: number; until: string; hours?: { from: string; to: string; tz: string }; state: { on: true; used: number } | { on: false; why: string }; off?: { at: string; why: string; night?: boolean }; runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] }; summary: { handled: number; waiting: number; blocked: number; refused: number } };
 export type DutyLog = { duties: DutyInfo[]; entries: DutyEntry[] };
 export type Signed = { kind?: string; count?: number; threshold?: number; error?: string; problems?: string[] };
 
@@ -227,10 +227,17 @@ export const ROLES: Record<Role, { name: string; line: string }> = {
   shopping: { name: 'Shopping', line: 'Posts what you\'re looking for and pays for what you accept, up to what you sign.' },
   away: { name: 'Away', line: 'At night: replies, sets aside, holds times you\'re free for you to confirm. Never money.' },
 };
+/**
+ * The role an AI on duty was hired into: as the owner chose it, or, for a grant from before that was kept, by its hours
+ * (round 106: "may hold times" made a daytime Replies AI read as Away; the hours are what the owner picked).
+ */
+export const roleOfDuty = (d: Pick<DutyInfo, 'role' | 'hours' | 'kinds'>): 'messages' | 'away' => d.role ?? (d.hours ? (d.hours.from > d.hours.to ? 'away' : 'messages') : d.kinds.includes('book') ? 'away' : 'messages');
 export const rolesOf = (a: { kid: string; allowance?: { until: string } }, duties: DutyInfo[]): Role[] => {
   const d = duties.find((x) => x.kid === a.kid && dutyLive(x));
-  return [...(d ? [d.kinds.includes('book') ? 'away' as const : 'messages' as const] : []), ...(a.allowance && Date.parse(a.allowance.until) > Date.now() ? ['shopping' as const] : [])];
+  return [...(d ? [roleOfDuty(d)] : []), ...(a.allowance && Date.parse(a.allowance.until) > Date.now() ? ['shopping' as const] : [])];
 };
+/** An AI on duty's own line: on now, or off until its hours start (round 106: "Here now" only meant it looked lately). */
+export const dutyNow = (d: DutyInfo) => d.state.on ? 'on duty now' : d.hours && /off hours/.test(d.state.why) ? `off until ${d.hours.from}` : 'off duty';
 export const dutyLive = (d: DutyInfo) => !(d.off && !d.off.night) && Date.parse(d.until) > Date.now() && !(!d.state.on && /took you off duty|has ended/.test(d.state.why));
 export const watching = (r: NonNullable<DutyInfo['runner']>) => {
   const late = Date.now() - Date.parse(r.last) > 3 * r.every * 1000;

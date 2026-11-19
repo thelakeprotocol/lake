@@ -26,10 +26,12 @@ export async function seedBigHouse(o: { pod: string; owner: string; house: strin
   for (const f of ['agreements', 'receipts', 'audit']) await mkdir(join(o.pod, f), { recursive: true });
   const files: [string, string][] = [];
   const now = Date.now();
+  // Today's few fall after midnight (20 Nov: run at 00:30, the newest were spread over three hours, all of them yesterday).
+  const today = Math.max(120_000, Math.min(3 * 3_600_000, now - new Date(now).setHours(0, 0, 0, 0) - 60_000));
   for (let i = 0; i < o.consents; i++) {
     const offer = randomUUID(), domain = REQUESTERS[i % REQUESTERS.length]!;
     // The newest few today (what Today and Money's "today" count), the rest over four months.
-    const at = i < (o.today ?? 20) ? now - randomInt(60_000, 3 * 3_600_000) : now - randomInt(DAY, 120 * DAY);
+    const at = i < (o.today ?? 20) ? now - randomInt(60_000, today) : now - randomInt(DAY, 120 * DAY);
     const v = { OFFER: offer, OWNER: o.owner, HOUSE: o.house, PAYMENTS: o.payments, N: String(i), SUFFIX: 'WLSHPizOwjIA', DOMAIN: domain, VALID: `${new Date(at).toISOString()}/${new Date(at + 2 * DAY).toISOString()}`, AT: new Date(at + 60_000).toISOString(), AMOUNT: String(randomInt(1, 10)), PAYER: `https://${domain}/#agent`, PAYER_NAME: `Research agent (${domain})` };
     files.push([`agreements/${offer}.consent.jsonld$.json`, fill(tpl.consent!, v)], [`agreements/${offer}.agreement.json`, fill(tpl.agreement!, v)]);
     if (i < o.receipts) {

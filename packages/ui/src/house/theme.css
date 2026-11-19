@@ -586,7 +586,11 @@ ion-card.lake-card ion-card-content .task-did p { margin: 0; }
 .tell-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .chip { border: 1px solid var(--lake-line); background: var(--lake-surface); color: var(--lake-text); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 600; min-height: 38px; cursor: pointer; }
 .chip.on { border-color: var(--lake-mint); background: color-mix(in srgb, var(--lake-mint) 14%, var(--lake-surface)); }
-.tell-input { --background: var(--lake-surface-2); border-radius: 14px; --padding-start: 12px; --padding-end: 12px; --padding-top: 10px; margin-top: 10px; font-size: 16px; }
+.tell-input { --background: var(--lake-surface-2); border-radius: 14px; --padding-start: 12px; --padding-end: 12px; --padding-top: 10px; margin-top: 6px; font-size: 16px;
+  /* A box with an edge in both themes (19 Nov: in dark it read as plain text), and a caret colour that says type here. */
+  border: 1.5px solid color-mix(in srgb, var(--lake-muted) 55%, transparent); --placeholder-color: var(--lake-muted); --placeholder-opacity: 1; caret-color: var(--lake-mint); }
+.tell-input.has-focus { border-color: var(--lake-mint); }
+.tell-label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--lake-muted); }
 /* Today's first card: what you want done, for your AI (round 105). */
 .ask-box .ask-h { font-size: 18px; font-weight: 700; margin: 0 0 4px; color: var(--lake-text); }
 .ask-box .muted-line { margin-top: 8px; }

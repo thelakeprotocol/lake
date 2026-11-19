@@ -2296,6 +2296,12 @@ describe('the sandbox specialists', () => {
     expect(await once(rooms, { kind: 'room.say', id: 'twice', body: 'said once' })).toMatchObject({ kind: 'room.said', seq: expect.any(Number) });
     const read = (await ask(rooms, me, { kind: 'room.read', id: 'twice', after: 0 })).reply;
     expect(read.messages.filter((m: { body: unknown }) => m.body === 'said once')).toHaveLength(1);
+    // Said as text, as agents often name it, it is kept as the body; nothing at all is refused (19 Nov: a newspaper's posts were blank).
+    await new Promise((r) => setTimeout(r, 1100));
+    expect((await ask(rooms, me, { kind: 'room.say', id: 'twice', text: 'said as text' })).reply).toMatchObject({ kind: 'room.said' });
+    expect((await ask(rooms, me, { kind: 'room.read', id: 'twice', after: 0 })).reply.messages.some((m: { body: unknown }) => m.body === 'said as text')).toBe(true);
+    await new Promise((r) => setTimeout(r, 1100));
+    expect((await ask(rooms, me, { kind: 'room.say', id: 'twice' })).reply).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/^body: what you say/)] });
     // A payment: the budget is charged once.
     const human = await makeHuman(await generateIdentity(), 'twice.example');
     const credential = await signIntentMandate(human.id, human.webId, { id: me.webId, natural_language_description: 'retry test', study: 'urn:lake:test:twice', budget: { currency: 'USD', amount: 10 }, intent_expiry: new Date(Date.now() + 3_600_000).toISOString(), user_cart_confirmation_required: false });

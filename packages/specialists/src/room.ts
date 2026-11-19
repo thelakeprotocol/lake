@@ -185,10 +185,14 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       // A room waiting to fill is a lobby: members may talk, marked as before the start (run 25's waiting room was mute, so
       // everything went one-to-one). A bubble stays silent until it starts, so nobody's opening is sealed before the others are in.
       if (waitingFor && r.mode === 'bubble') return { kind: 'refused', problems: [`it starts when ${r.startWith} have joined: waiting for ${waitingFor} more (read with wait to know when)`] };
-      const text = JSON.stringify(p.body ?? '');
+      // What was said: body, or text as agents often name it (19 Nov: a newspaper's posts sent as text were kept empty and
+      // nobody could read them); nothing at all is refused, not kept as a blank.
+      const said0 = p.body ?? (typeof p.text === 'string' ? p.text : undefined);
+      if (said0 === undefined || said0 === '') return { kind: 'refused', problems: ['body: what you say (a string, or an object)'] };
+      const text = JSON.stringify(said0);
       if (r.mode === 'bubble') {
         // Blind: only a JWE for the members can be said here (General JSON: protected, recipients, iv, ciphertext, tag).
-        const b = p.body as { sealed?: { recipients?: { header?: { kid?: string } }[]; ciphertext?: string } } | undefined;
+        const b = said0 as { sealed?: { recipients?: { header?: { kid?: string } }[]; ciphertext?: string } } | undefined;
         if (!b?.sealed?.ciphertext || !Array.isArray(b.sealed.recipients)) return { kind: 'refused', problems: ['body: { sealed: <a JWE, General JSON, for the members\' keys> }; the connector seals it'] };
         if (text.length > MAX_SEALED) return { kind: 'refused', problems: [`a sealed body: up to ${MAX_SEALED} characters`] };
       } else if (text.length > MAX_BODY) return { kind: 'refused', problems: [`body: up to ${MAX_BODY} characters`] };
@@ -200,7 +204,7 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       // (run 35's had to send theirs again one-to-one). A bubble keeps no signatures: it is blind.
       const kid = profile.publicJwk.kid!;
       if (r.mode === 'room') (r.cards ??= {})[kid] = card;
-      const said: Said = { seq: r.said.length + 1, at: new Date().toISOString(), from: me.handle, body: p.body, ...(waitingFor ? { lobby: true } : {}), ...(r.mode === 'room' ? { signed: { card: kid, envelope } } : {}) };
+      const said: Said = { seq: r.said.length + 1, at: new Date().toISOString(), from: me.handle, body: said0, ...(waitingFor ? { lobby: true } : {}), ...(r.mode === 'room' ? { signed: { card: kid, envelope } } : {}) };
       r.said.push(said);
       wake(id);
       if (r.said.length > 2000) close(r, 'long enough');

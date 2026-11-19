@@ -204,7 +204,7 @@ const MAX_GRANT_MS = 48 * 3_600_000;
  * The owner's AI on duty while they're away (SPEC §6.1): what their signed grant lets it do, how many actions a night, in
  * which hours. Its bit on the status list is the kill switch.
  */
-export interface Duty { statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean };
+export interface Duty { /** The role it was hired into (Replies by day, Away at night): the owner's label, outside the signed grant. */ role?: 'messages' | 'away'; statusId: string; credential: string; kinds: DutyKind[]; cap: number; hours?: { from: string; to: string; tz: string }; until: string; at: string; /** Off for the night (its cap) or for good (refusals, undos, the owner): why and since when. */ off?: { at: string; why: string; night?: boolean };
   /** Where its runner runs, since when, when it last looked, and the gaps when it didn't (the computer slept): said honestly. */ runner?: { host: string; since: string; last: string; every: number; gaps: { from: string; to: string }[] } }
 /** One thing the AI on duty did, or was refused: what the owner's morning page shows, with its signed reply and an undo. */
 export interface DutyEntry { id: string; /** The assistant's key. */ by: string; at: string; tool: string; action: string; /** Stopped by a limit (tonight's, or one person's), not a rule broken: doesn't count towards going off duty. */ limit?: boolean; to?: { name?: string; webId?: string; key?: string; url?: string }; text?: string; reply?: unknown; refused?: string; receipt?: string; undo?: { kind: 'agenda' | 'block' | 'standing' | 'correction' | 'close'; ref: string }; undone?: string; /** A booking is a time the house held for the owner (SPEC §6.1): how it stands now. */ booking?: Booked }
@@ -499,7 +499,7 @@ export class OwnerDesk {
   private connects = new Map<string, { ask: string; app: string; from: string; number: string; back: string; at: number }>();
   private connectTimes: number[] = [];
   private invites = new Map<string, { label: string; until: number; duty?: Duty; reads?: Reads[] }>();
-  private dutyDrafts = new Map<string, { statusId: string; draft: Record<string, unknown> }>();
+  private dutyDrafts = new Map<string, { statusId: string; draft: Record<string, unknown>; role?: 'messages' | 'away' }>();
   /**
    * Senders the owner's side had never answered, by key, the first time each wrote (SPEC §9.0): whether the door note
    * went to them, and whether they wrote again within a week, which is what the note should change.
@@ -2531,7 +2531,7 @@ export class OwnerDesk {
       }
       // AI on duty: the owner signs what it may do while they're away; the grant comes with a one-time code for the runner.
       if (p.kind === 'panel.duty.draft') {
-        const q = p as unknown as { kinds?: unknown; cap?: number; days?: number; hours?: { from?: string; to?: string; tz?: string } };
+        const q = p as unknown as { kinds?: unknown; cap?: number; days?: number; hours?: { from?: string; to?: string; tz?: string }; role?: string };
         const kinds = Array.isArray(q.kinds) ? [...new Set(q.kinds.map(String))] : [];
         if (!kinds.length || kinds.some((k) => !DUTY_KINDS.includes(k as DutyKind))) return void res.status(400).json({ error: `kinds: one or more of ${DUTY_KINDS.join(', ')} (never money)` });
         const cap = Math.round(Number(q.cap ?? 10)), days = Math.round(Number(q.days ?? 7));
@@ -2548,7 +2548,7 @@ export class OwnerDesk {
         if (!this.o.statusUrl) return void res.status(501).json({ error: 'this house cannot keep a duty grant' });
         const statusId = `duty:${randomBytes(6).toString('hex')}`;
         const draft = dutyDraft(this.o.webId, { kinds: kinds as DutyKind[], cap, until: new Date(Date.now() + days * 86_400_000), ...(hours ? { hours } : {}) }, statusEntry(this.o.statusUrl(), await this.statusIndex(statusId)));
-        this.dutyDrafts.set(statusId, { statusId, draft });
+        this.dutyDrafts.set(statusId, { statusId, draft, ...(q.role === 'messages' || q.role === 'away' ? { role: q.role } : {}) });
         return void res.json({ id: statusId, draft, note: 'sign it on this device and send it back with panel.duty.set' });
       }
       if (p.kind === 'panel.duty.set') {
@@ -2561,7 +2561,7 @@ export class OwnerDesk {
         const same = ['issuer', 'type', 'credentialSubject', 'credentialStatus'].every((k) => JSON.stringify((vc as unknown as Record<string, unknown>)[k]) === JSON.stringify(d.draft[k]));
         if (!same) return void res.status(400).json({ error: 'the duty grant does not match its draft' });
         const sub = vc.credentialSubject as unknown as { kinds: DutyKind[]; cap: number; until: string; hours?: Duty['hours'] };
-        const duty: Duty = { statusId: d.statusId, credential: String(q.credential), kinds: sub.kinds, cap: sub.cap, until: sub.until, ...(sub.hours ? { hours: sub.hours } : {}), at: new Date().toISOString() };
+        const duty: Duty = { ...(d.role ? { role: d.role } : {}), statusId: d.statusId, credential: String(q.credential), kinds: sub.kinds, cap: sub.cap, until: sub.until, ...(sub.hours ? { hours: sub.hours } : {}), at: new Date().toISOString() };
         this.dutyDrafts.delete(d.statusId);
         const code = oneTimeCode();
         this.invites.set(code, { label: String(q.label ?? 'AI on duty').slice(0, 60), until: Date.now() + 15 * 60_000, duty });
@@ -2601,7 +2601,7 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.duty.log') {
         const since = Number((p as unknown as { since?: number }).since) || Date.now() - 24 * 3_600_000;
-        const duties = [...this.assistants.values()].filter((a) => a.duty).map((a) => ({ kid: a.kid, label: a.label, seenAt: a.seenAt, kinds: a.duty!.kinds, cap: a.duty!.cap, until: a.duty!.until, ...(a.duty!.hours ? { hours: a.duty!.hours } : {}), state: this.dutyState(a), ...(a.duty!.off ? { off: a.duty!.off } : {}), ...(a.duty!.runner ? { runner: a.duty!.runner } : {}), summary: this.dutySummary(a, since) }));
+        const duties = [...this.assistants.values()].filter((a) => a.duty).map((a) => ({ kid: a.kid, label: a.label, seenAt: a.seenAt, ...(a.duty!.role ? { role: a.duty!.role } : {}), kinds: a.duty!.kinds, cap: a.duty!.cap, until: a.duty!.until, ...(a.duty!.hours ? { hours: a.duty!.hours } : {}), state: this.dutyState(a), ...(a.duty!.off ? { off: a.duty!.off } : {}), ...(a.duty!.runner ? { runner: a.duty!.runner } : {}), summary: this.dutySummary(a, since) }));
         return void res.json({ duties, entries: this.dutyLog.filter((e) => Date.parse(e.at) >= since) });
       }
       if (p.kind === 'panel.duty.undo') {

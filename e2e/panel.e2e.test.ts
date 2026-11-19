@@ -835,7 +835,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     for (let i = 0; i < 23; i++) await asAssistant({ kind: 'assistant.suggest', text: `Suggestion number ${i + 1}` });
     const rows = page.locator('ion-item.note-row');
     await page.locator('ion-list.notes', { hasText: 'From your AI (' }).waitFor({ timeout: 5000 });
-    expect(await rows.count()).toBe(3);
+    // The list draws as the notes come in: waited for, not counted at the first row (20 Nov: 2 of 3 under the suite's load).
+    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBe(3);
     await page.locator('ion-item.see-all', { hasText: /Show all \d+/ }).click();
     expect(await rows.count()).toBeGreaterThan(20);
     await rows.filter({ hasText: 'Suggestion number 23' }).click();
@@ -1867,6 +1868,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await on.locator('.lake-pill', { hasText: 'On now' }).waitFor({ timeout: 10_000 });
     expect(await on.textContent()).toMatch(new RegExp(`Night AI · ${from}–${to} · 2 of 10 today`));
     expect(await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).textContent()).toContain('Away');
+    // Its row says it's on duty now, not "Here now"; Replies can still be hired by another AI while it holds Away (round 106).
+    expect(await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).textContent()).toContain('on duty now');
+    await page.locator('.roles ion-item.role-messages', { hasText: 'Hire' }).waitFor();
+    expect(await page.locator('.roles').getByText(/stop that to hire this/).count()).toBe(0);
     await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).click();
     await page.getByText('Replies, notes set aside and bookings only, never money').waitFor();
     await tidy();
