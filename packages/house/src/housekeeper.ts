@@ -53,6 +53,8 @@ export interface HousekeeperOptions {
   wantIn?: (payload: Record<string, unknown>, profile: LakeProfile, card: AgentCard) => Promise<Record<string, unknown>>;
   /** Whether one of the owner's offerings (SPEC §6.9) is still open, for a note about it. */
   offeringLive?: (id: string) => boolean;
+  /** Whether one of the owner's wants (SPEC §6.8) is open, for a note answering it. */
+  wantLive?: (id: string) => boolean;
   /** A payments agent this house trusts says a held cart got a new delivery that ended a dispute (round 104). */
   holdRevised?: (hold: string, sha256: string) => Promise<void>;
   /** The nodes this house follows, and its links to them (for intents). */
@@ -629,7 +631,7 @@ export class Housekeeper {
    * assistant is told, with the sender's address to answer: so a neighbour reaches the assistant without anyone saying
    * which agent it is. Text only, shown as the sender's words; it decides nothing. A few an hour from one sender.
    */
-  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown; as?: unknown; pledge?: unknown; reply?: unknown; offering?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string, key: string): Promise<LakeData> {
+  private async note(p: { text?: unknown; speaks_for?: unknown; purpose?: unknown; as?: unknown; pledge?: unknown; reply?: unknown; offering?: unknown; want?: unknown }, from: LakeProfile, card: AgentCard, domainVia: string, key: string): Promise<LakeData> {
     const text = typeof p.text === 'string' ? p.text.trim() : '';
     if (!text || text.length > 1000) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note: { kind: "note", text, purpose? } (text 1 to 1000 characters; purpose, e.g. contact or marketing, defaults to contact)' });
     if (looksLikeInjection(text)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'a note is for the owner to read, not instructions' });
@@ -643,6 +645,9 @@ export class Housekeeper {
     // About one of the owner's offerings (SPEC §6.9): filed with it, so the owner sees what it is about; one no longer open says so.
     const offering = typeof p.offering === 'string' && p.offering ? p.offering : undefined;
     if (offering && !this.o.offeringLive?.(offering)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'this house no longer offers that (taken down, gone or past its date)' });
+    // Answering one of the owner's wants (round 111: a sitter's AI wrote about Mia's want and its line still said "0 replies").
+    const want = typeof p.want === 'string' && p.want ? p.want : undefined;
+    if (want && !this.o.wantLive?.(want)) return this.reply({ kind: 'rejected', code: 'malformed', why: 'this house isn\'t looking for that any more (closed, bought or past its date)' });
     // A note is a knock at the door like any other: counted, and in the owner's activity (run 47: four notes, "knocksToday: 0").
     this.o.emit(makeEvent('knock', this.actor, `agent:${from.ownerDomain}`, { purpose }));
     const said = noteDecision(this.o.rules, { purpose, requester: from.ownerDomain }, { reputation: this.o.signals?.().reputation[from.ownerDomain] });
@@ -659,7 +664,7 @@ export class Housekeeper {
     const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
     // The person the AI writes for, as they name themselves ("Alex"): shown as their words, never checked.
     const as = typeof p.as === 'string' ? p.as.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) : '';
-    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}) });
+    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).

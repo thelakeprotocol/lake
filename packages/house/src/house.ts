@@ -446,6 +446,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     // A shop's offer for something the owner is looking for, or word that it sent what was bought (SPEC §6.8).
     holdRevised: async (hold, sha256) => panel.wantRevised?.(hold, sha256),
     offeringLive: (id) => offerings.live(id),
+    wantLive: (id) => wants.open().some((w) => w.id === id),
     wantIn: async (p, profile, from) => {
       if (p.kind === 'want.offer') {
         // The house will write to the address on the seller's card (a receipt, word that the offer ended): never one on

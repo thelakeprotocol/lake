@@ -1040,6 +1040,12 @@ describe('the owner', () => {
     expect(await ownerCall({ kind: 'panel.offering.close', id })).toEqual({ ok: true });
     expect((await ask(houses.strict!, buyer, { kind: 'note', text: 'Still for sale?', offering: id })).reply).toMatchObject({ kind: 'rejected', why: expect.stringContaining('no longer offers that') });
     expect((await ownerCall({ kind: 'list' })).offerings.some((g: { id: string }) => g.id === id)).toBe(false);
+    // The other way: a note answering one of the owner's wants names it, and counts as a reply to it (round 111).
+    const wanted = await asAi({ kind: 'assistant.want', people: true, name: 'Babysitter, Friday 6 to 10', properties: { When: 'Friday 6-10pm' } });
+    expect((await ask(houses.strict!, buyer, { kind: 'note', text: 'I can babysit Friday, first aid certificate.', want: wanted.want.id })).reply).toMatchObject({ kind: 'noted' });
+    expect((await ownerCall({ kind: 'list' })).wants.find((w: { want: { id: string } }) => w.want.id === wanted.want.id)).toMatchObject({ replies: 1 });
+    expect((await ask(houses.strict!, buyer, { kind: 'note', text: 'Still looking?', want: 'w-00000000' })).reply).toMatchObject({ kind: 'rejected', why: expect.stringContaining('isn\'t looking for that') });
+    await ownerCall({ kind: 'panel.want.close', id: wanted.want.id });
     await ownerCall({ kind: 'panel.assistant.revoke', kid: ai.publicJwk.kid });
   });
 
