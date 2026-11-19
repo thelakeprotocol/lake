@@ -78,7 +78,9 @@ const replyMode = async (who: 'me' | 'ai') => { await page.locator('.replymode')
 
 const lostKey = async (p: Page) => {
   const said = p.getByText(/isn't your house's key any more/);
-  await said.waitFor({ timeout: 3000 }).catch(async () => { await p.locator('ion-tab-button', { hasText: 'People' }).click(); await said.waitFor({ timeout: 5000 }); });
+  // It hears on its next look; a page with no tab bar (a setting opened from You) gets one by reloading (19 Nov: under the
+  // whole suite's load the 3 s wait ran out on such a page, and the People tab it then tapped wasn't there).
+  await said.waitFor({ timeout: 10_000 }).catch(async () => { await p.reload(); await said.waitFor({ timeout: 15_000 }); });
 };
 
 let assistant: Identity;
