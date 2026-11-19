@@ -563,6 +563,12 @@ export async function createPayments(o: SpecialistOptions & {
       h.delivered = { sha256: sha, revision: (h.delivered?.revision ?? 0) + 1, at: Date.now() };
       if (filed) h.until = Date.now() + h.reviewMs!;
       await save();
+      // A revision that answers a dispute is told to the buyer (round 104: filed here straight, it ended the dispute unseen,
+      // and the buyer's clock ran out while their phone still said the money was coming back).
+      if (open && h.payerUrl) {
+        const told = { kind: 'hold.revised', hold: h.id, ...(h.cart ? { cart: h.cart.id } : {}), sha256: sha, revision: h.delivered.revision, until: new Date(h.until).toISOString() };
+        deliverWithRetries(async () => sendLake(h.payerUrl!, { lake: '0.1', card: s.card, envelope: (await signMessage(told, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
+      }
       return { kind: 'delivered', hold: h.id, revision: h.delivered.revision, until: new Date(h.until).toISOString(), note: `filed: the buyer accepts or disputes it by its sha256; with no answer by then it is released to you` } as never;
     }
     if (p.kind === 'capture') {
@@ -580,6 +586,8 @@ export async function createPayments(o: SpecialistOptions & {
       if (!Number.isInteger(part) || part < 1 || part >= h.amount) return { kind: 'refused', problems: [`amount: part of the ${h.currency} ${h.amount / 100} held, at least 0.01; leave it out to refund it all`] };
       h.amount -= part;
       spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - part));
+      // A part refund is the seller answering (round 104): the week stops, and the rest is held until they agree.
+      delete h.answerBy;
       await save();
       const credential = await s.vc('LakeReceipt', { id: h.payer, payer: h.payer, amount: { currency: h.currency, value: part / 100 }, agreement: agreementOf(h), cart: h.cart, seller: h.seller ?? h.payee, ...(h.about?.seller_name ? { seller_name: h.about.seller_name } : {}), intentMandate: h.digest, settlement: 'voided', settlementId: randomUUID(), voids: h.id, partial: true, still_held: h.amount / 100, why: 'the seller refunded part of it' }, 3650);
       const logged = o.log ? await o.log(credential, 'void').then(({ index, origin }) => ({ index, origin })).catch(() => undefined) : undefined;

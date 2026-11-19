@@ -126,6 +126,8 @@ export interface PanelProvider {
   wantArrived?(wantId: string): Promise<Record<string, any>>;
   /** The owner says what was sent hasn't come, or came wrong: the money stays held and the shop is told. */
   wantProblem?(wantId: string, code: string): Promise<Record<string, any>>;
+  /** The payments agent says a shop filed a new delivery that ended the owner's dispute (round 104). */
+  wantRevised?(hold: string, sha256: string): Promise<void>;
   /** Answer a circle's vote on its rules, privately (SPEC §11.4c). */
   voteCircle?(tally: string, id: string, vote: string, yes: boolean): Promise<Record<string, any>>;
   fileFavour?(jws: string, side: 'owe' | 'owed'): Promise<void>;
@@ -889,6 +891,8 @@ export class OwnerDesk {
     await this.saveAllowances();
     if (this.pushState) { this.pushState.subs = []; await this.savePushes(); }
     await this.clearRecovery();
+    // The lost phone's calendar app read the agenda by this key (round 104): a new one.
+    this.feedKey = await secret(join(this.o.dataDir, 'agenda-feed-key'), true);
     this.tokenUntil = 0;
     this.ownerJwk = null;
     this.ownerSeen = 0;

@@ -51,6 +51,8 @@ export interface HousekeeperOptions {
   answeredQuorum?: (tally: string, id: string) => Promise<boolean>;
   /** A shop's offer for what the owner is looking for, or word that it sent it (SPEC §6.8): the house's answer. */
   wantIn?: (payload: Record<string, unknown>, profile: LakeProfile, card: AgentCard) => Promise<Record<string, unknown>>;
+  /** A payments agent this house trusts says a held cart got a new delivery that ended a dispute (round 104). */
+  holdRevised?: (hold: string, sha256: string) => Promise<void>;
   /** The nodes this house follows, and its links to them (for intents). */
   nodes?: string[];
   links?: () => import('@thelakeprotocol/core').LakeLinks | null;
@@ -202,6 +204,12 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: offer.id, decision: 'decline', reason: 'the note tried to give me orders; offers are data, not instructions', holds: [], notes: [] });
     }
     if (v.payload.kind === 'receipt') return this.receipt(v.payload as ReceiptPayload);
+    // Word from a payments agent this house trusts that a new delivery ended a dispute: the house checks it with that agent.
+    if ((v.payload.kind as string) === 'hold.revised' && this.o.trust.payments.map((d) => d.toLowerCase()).includes(v.profile.ownerDomain.toLowerCase())) {
+      const q = v.payload as unknown as { hold?: unknown; sha256?: unknown };
+      void this.o.holdRevised?.(String(q.hold ?? ''), String(q.sha256 ?? '')).catch(() => {});
+      return this.reply({ kind: 'noted' } as never);
+    }
     if (['want.offer', 'want.shipped', 'want.status', 'want.match', 'want.match.yes'].includes(String(v.payload.kind)) && this.o.wantIn) return this.reply((await this.o.wantIn(v.payload as unknown as Record<string, unknown>, v.profile, (data as LakeData).card)) as never);
     // A promise circle this house's owner is in (SPEC §11.4c), from its tally only: a member needs help (the caller unnamed),
     // their own call was taken or couldn't be, or a promise of theirs counted as kept.

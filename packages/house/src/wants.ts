@@ -261,6 +261,23 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
      * reach the house, and an arbiter asked whether that arrived would say yes and release the money for a parcel that
      * never came. Nobody on the Lake can rule on a parcel, so no ruling moves this money: only the two of them do.
      */
+    /**
+     * The payments agent says the shop filed a new delivery that ended the dispute (round 104): with the owner's problem still
+     * standing and no new note through the house, it is disputed again, for the new delivery. The payments agent checks
+     * the sha256 is its latest, so a false word changes nothing.
+     */
+    async revised(hold: string, sha256: string, x: { payments: string; send: (url: string, payload: Record<string, unknown>) => Promise<{ payload: Record<string, any> }> }) {
+      const r = list.find((w) => w.offers.some((o) => o.hold === hold));
+      const offer = r?.offers.find((o) => o.hold === hold);
+      if (!r || !offer?.problem || !/^[0-9a-f]{64}$/.test(sha256) || offer.shipped?.sha256 === sha256) return null;
+      const { payload } = await x.send(x.payments, { kind: 'dispute', hold, sha256, code: 'not_as_described' });
+      if (payload.kind !== 'disputed') return null;
+      offer.shipped = { ...(offer.shipped ?? { note: '', at: new Date().toISOString() }), sha256 };
+      offer.problem = { ...offer.problem, held: true, ...(typeof payload.until === 'string' && Number.isFinite(Date.parse(payload.until)) ? { until: payload.until } : {}) };
+      await save();
+      deliverWithRetries(() => x.send(offer.seller.url, { kind: 'want.problem', want: r.want.id, cart: offer.cart.contents.id, hold, problem: offer.problem!.code, held: true, at: new Date().toISOString(), ...(offer.problem!.until ? { until: offer.problem!.until } : {}) }));
+      return { want: r.want, offer };
+    },
     async problem(wantId: string, code: string, x: { payments: string; send: (url: string, payload: Record<string, unknown>) => Promise<{ payload: Record<string, any> }> }) {
       const r = find(wantId);
       const offer = r?.offers.find((o) => o.id === r.bought);

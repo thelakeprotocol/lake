@@ -438,6 +438,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     answeredQuorum: async (tally, id) => { const r = await owner.fetch(`${owner.podRoot}wallet/quorums.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => [])) as { tally: string; id: string }[]).some((x) => x.tally === tally && x.id === id) : false; },
     signals: () => signals,
     // A shop's offer for something the owner is looking for, or word that it sent what was bought (SPEC §6.8).
+    holdRevised: async (hold, sha256) => panel.wantRevised?.(hold, sha256),
     wantIn: async (p, profile, from) => {
       if (p.kind === 'want.offer') {
         // The house will write to the address on the seller's card (a receipt, word that the offer ended): never one on
@@ -1291,6 +1292,20 @@ function panelFor(x: {
       const out = await x.wants.arrived(wantId, { payments, send });
       if (!('error' in out)) x.note('want.arrived', `"${r!.want.name}" arrived: ${offer.seller.name} is paid`);
       return out;
+    },
+    async wantRevised(hold, sha256) {
+      // An honest shop files the delivery and then sends its note: give the note a minute to land before calling it unseen.
+      await new Promise((ok) => setTimeout(ok, Number(process.env.LAKE_REVISE_GRACE_MS) || 60_000).unref?.());
+      const r = x.wants.all().find((w) => w.offers.some((o) => o.hold === hold));
+      const offer = r?.offers.find((o) => o.hold === hold);
+      if (!offer) return;
+      const payments = await paymentsFor(offer.cart);
+      if (!payments) return;
+      const out = await x.wants.revised(hold, sha256, { payments, send }).catch(() => null);
+      if (!out) return;
+      const by = out.offer.problem?.until ? `, and comes back to you if it does neither by ${new Date(out.offer.problem.until).toUTCString().slice(0, 16)}` : '';
+      x.note('want.problem', `${out.offer.seller.name} filed something new for "${out.want.name}" without a note through your house. Your problem still stands: your money stays held until it sends it again or refunds you${by}`);
+      x.desk().notifyOwner('want', `${out.offer.seller.name.slice(0, 40)} filed something new for "${out.want.name.slice(0, 50)}". Your problem still stands.`, `./#want=${out.want.id}`);
     },
     async wantProblem(wantId, code) {
       const r = x.wants.find(wantId), offer = r?.offers.find((o) => o.id === r.bought);

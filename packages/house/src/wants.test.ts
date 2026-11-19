@@ -66,6 +66,31 @@ describe('how a bought want ends at the payments agent', () => {
     expect(await w.problem('w1', 'not_arrived', x)).toMatchObject({ error: 'washer is paid already for this one' });
   });
 
+  // Round 104, an attacker: a shop filed a new delivery straight with the payments agent, ending the dispute unseen.
+  it('a new delivery filed without a note while a problem stands is disputed again, and the shop told; an honest one is left alone', async () => {
+    const { w, saved } = await open([{ want: want('w1'), offers: [offer('o1', 'washer', 'paid', 'hold-1')], bought: 'o1', at: new Date().toISOString() }]);
+    const washer = { webId: 'https://washer.example/#agent' } as LakeProfile;
+    const sent: { url: string; payload: Record<string, any> }[] = [];
+    const until = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const x = { payments: 'https://pay.example/a2a', send: async (url: string, payload: Record<string, unknown>) => { sent.push({ url, payload }); return { payload: { kind: payload.kind === 'dispute' ? 'disputed' : 'ok', until } }; } };
+    await w.shippedIn({ want: 'w1', note: 'Posted', sha256: 'a'.repeat(64) }, washer);
+    // Nothing to do with no problem standing, or for the note the house already has.
+    expect(await w.revised('hold-1', 'c'.repeat(64), x)).toBeNull();
+    await w.problem('w1', 'not_right', x);
+    expect(saved()[0]!.offers[0]!.problem).toMatchObject({ held: true, until });
+    expect(await w.revised('hold-1', 'a'.repeat(64), x)).toBeNull();
+    sent.length = 0;
+    expect(await w.revised('hold-1', 'c'.repeat(64), x)).toMatchObject({ offer: { problem: { code: 'not_right', held: true } } });
+    expect(sent[0]).toEqual({ url: 'https://pay.example/a2a', payload: { kind: 'dispute', hold: 'hold-1', sha256: 'c'.repeat(64), code: 'not_as_described' } });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sent[1]).toMatchObject({ url: 'https://washer.example/a2a', payload: { kind: 'want.problem', problem: 'not_right', held: true, until } });
+    // "It arrived" now names the latest delivery.
+    expect(saved()[0]!.offers[0]!.shipped!.sha256).toBe('c'.repeat(64));
+    // An honest shop sends its note: the problem is answered, and a late word about that delivery changes nothing.
+    expect(await w.shippedIn({ want: 'w1', note: 'Sent again', sha256: 'd'.repeat(64) }, washer)).toMatchObject({ ok: true, again: true });
+    expect(await w.revised('hold-1', 'd'.repeat(64), x)).toBeNull();
+  });
+
   it('a newer dispatch note is kept as the latest, the same one twice is one, and six is the most', async () => {
     const { w, saved } = await open([{ want: want('w1'), offers: [offer('o1', 'washer', 'paid', 'hold-1')], bought: 'o1', at: new Date().toISOString() }]);
     const washer = { webId: 'https://washer.example/#agent' } as LakeProfile;

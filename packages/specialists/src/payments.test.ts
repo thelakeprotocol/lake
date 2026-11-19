@@ -99,6 +99,11 @@ describe('a held payment follows the delivery (SPEC §6.5)', () => {
     await ask(seller, { kind: 'delivered', hold: answered, sha256: sha('v1') });
     await ask(buyer, { kind: 'dispute', hold: answered, sha256: sha('v1'), code: 'not_as_described' });
     await ask(seller, { kind: 'delivered', hold: answered, sha256: sha('v2') });
+    // A part refund is the seller answering too (round 104): the week stops, and the rest waits for them to agree.
+    const { hold: part } = await payHeld();
+    await ask(seller, { kind: 'delivered', hold: part, sha256: sha('chair') });
+    await ask(buyer, { kind: 'dispute', hold: part, sha256: sha('chair'), code: 'not_as_described' });
+    expect(await ask(seller, { kind: 'void', hold: part, amount: 0.5 })).toMatchObject({ kind: 'voided', partial: true });
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(Date.now() + 8 * 86_400_000);
@@ -106,6 +111,7 @@ describe('a held payment follows the delivery (SPEC §6.5)', () => {
       // The unanswered one went back to the buyer; the answered one was released after its review time, as before.
       expect(await ask(seller, { kind: 'delivered', hold, sha256: sha('too late') })).toMatchObject({ kind: 'refused', problems: ['it was voided already'] });
       expect(await ask(buyer, { kind: 'capture', hold: answered, sha256: sha('v2') })).toMatchObject({ kind: 'refused', problems: ['it was captured already'] });
+      expect(await ask(buyer, { kind: 'capture', hold: part, sha256: sha('chair') })).toMatchObject({ kind: 'captured' });
     } finally { vi.useRealTimers(); }
   });
 

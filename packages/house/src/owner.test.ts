@@ -648,7 +648,7 @@ describe('what an attacker tried (round 16)', () => {
     const ai = await generateIdentity('ai-r');
     await h.post('/assistant', { publicJwk: ai.publicJwk, code, label: 'Helper', url: 'https://ai-r.example/a2a' });
     expect((await asPhone({ kind: 'panel.recovery.make' })).code ?? 'none').toBeTruthy();
-    const before = tokenOf();
+    const before = tokenOf(), feed = (await asPhone({ kind: 'panel.agenda.feed' })).path;
     const { token } = await h.desk.resetOwner();
     expect(token).not.toBe(before);
     // The old phone is no owner now, and nobody pairs without the new link.
@@ -658,6 +658,8 @@ describe('what an attacker tried (round 16)', () => {
     expect(await h.post('/pair', { publicJwk: fresh.publicJwk, token })).toMatchObject({ paired: true });
     const list = await asPhone({ kind: 'list' }, fresh);
     expect(list.assistants.map((x: { label: string }) => x.label)).toEqual(['Helper']);
+    // The lost phone's calendar app read the agenda by its old key: a new one now.
+    expect((await asPhone({ kind: 'panel.agenda.feed' }, fresh)).path).not.toBe(feed);
     // Used once: the same link pairs nobody else.
     expect(await h.post('/pair', { publicJwk: (await generateIdentity('y')).publicJwk, token })).toHaveProperty('error');
     const today = await asPhone({ kind: 'panel.today', tz: 0 }, fresh);
