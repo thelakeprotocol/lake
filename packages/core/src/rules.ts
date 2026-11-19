@@ -250,7 +250,7 @@ export function evaluate(rules: Rules, offer: Offer, ctx: Context = {}): Decisio
     const keeps = r.retention === 'none' && offer.retention !== 'none';
 
     if (keeps) return { decision: 'decline', rule: n, reason: `it wants to keep your data (${offer.retention}); your rule ${n} allows no retention`, code: 'retention' };
-    if (unlisted.length) return { decision: 'ask', rule: n, reason: `your rule ${n} would join this, but it also asks for ${list(unlisted)}, which rule ${n} doesn't cover, so it's your call` };
+    if (unlisted.length) return { decision: 'ask', rule: n, reason: `one of your rules would say yes to this, but it also asks for ${list(unlisted)}, which that rule doesn't cover, so it's your call` };
     if (denied.length || cheap) {
       // In the offer's own currency (a floor here is in it too); priceUsd keeps its name for the amount.
       const counter = { fields: offer.fields.filter((f) => !denied.includes(f)), priceUsd: Math.max(price.amount, floor?.amount ?? 0), ...(price.currency !== 'USD' ? { currency: price.currency } : {}) };

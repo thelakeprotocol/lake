@@ -56,7 +56,7 @@ export function MyDataPage({ backTo }: { backTo: () => void }) {
   // An AI that reads the records and hasn't been here for days still reads them: said, since nothing else would.
   const stale = (a: Assistant) => !!a.seenAt && Date.now() - Date.parse(a.seenAt) > 3 * 86_400_000;
   return h(Page, { title: 'My data', back: backTo, backLabel: 'You' },
-    h('p', { class: 'muted-line pad top-line' }, `${holders.length ? `${holders.length === 1 ? '1 agent has' : `${holders.length} agents have`} your yes now.` : 'No agent has your yes now.'} ${ais.length ? `${ais.length === 1 ? '1 of your AIs' : `${ais.length} of your AIs`} can read your records.` : 'No AI reads your records.'}`),
+    h('p', { class: 'muted-line pad top-line' }, `${holders.length ? `${holders.length === 1 ? '1 agent can' : `${holders.length} agents can`} use your data now.` : 'No agent can use your data now.'} ${ais.length ? `${ais.length === 1 ? '1 of your AIs' : `${ais.length} of your AIs`} can read your records.` : 'No AI reads your records.'}`),
     h(Section, { title: 'Who can use it', cls: 'data-who' },
       ...holders.slice(0, 5).map((r) => {
         const open = r.yeses.filter((c) => c.status === 'active'), latest = [...open].sort((x, y) => y.until.localeCompare(x.until))[0]!;

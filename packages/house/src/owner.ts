@@ -329,8 +329,14 @@ export interface Task {
   ended?: { at: string; /** The AI's own line on how it ended. */ text?: string; /** Why the house ended it. */ why?: string };
   /** The owner has seen how it ended: its card goes. */
   ok?: true;
+  /**
+   * Something to get done, about nobody's chat (round 105, a first-time owner: Today opened on a research request when the
+   * promise is "ask your AI to find a babysitter"): the AI does it with its own tools and says how it went. It sends
+   * nothing through the house.
+   */
+  errand?: true;
 }
-const TASK_MESSAGES = 5, TASK_HOURS = 24;
+const TASK_MESSAGES = 5, TASK_HOURS = 24, ERRAND_DAYS = 7;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
@@ -622,6 +628,11 @@ export class OwnerDesk {
   /** Tasks past their time end, and those whose conversation the owner cleared away. */
   private sweepTasks() {
     for (const t of this.tasks.filter((x) => x.state === 'open')) {
+      if (t.errand) {
+        if (Date.parse(t.until) <= Date.now()) this.endTask(t, 'back', { why: 'A week went by and it didn\'t say how it went.' });
+        else if (!this.assistants.has(t.by)) this.endTask(t, 'stopped', { why: 'That AI is no longer connected.' }, false);
+        continue;
+      }
       if (Date.parse(t.until) <= Date.now()) {
         const last = t.did.at(-1)?.at;
         const wroteSince = !!last && this.notes.some((n) => OwnerDesk.conv(n.from) === t.to.key && n.at > last);
@@ -642,7 +653,8 @@ export class OwnerDesk {
   }
   /** What an assistant's runner is told waits under its tasks: one stamp per thing to do (a new task, or a new note in its conversation). */
   private taskStamps(kid: string): string[] {
-    return this.tasks.filter((t) => t.state === 'open' && t.by === kid && Date.parse(t.until) > Date.now()).flatMap((t) => {
+    // An errand isn't a runner's: its three task tools can't do one (an AI you chat with picks it up).
+    return this.tasks.filter((t) => t.state === 'open' && !t.errand && t.by === kid && Date.parse(t.until) > Date.now()).flatMap((t) => {
       const last = t.did.at(-1)?.at ?? '';
       const fresh = this.notes.filter((n) => OwnerDesk.conv(n.from) === t.to.key && n.at > (last || t.at)).map((n) => n.at).sort().at(-1);
       // After its first message, a note it has read and left unanswered isn't something to do ("let me check" needs no answer).
@@ -2266,7 +2278,7 @@ export class OwnerDesk {
           if (first) this.touch();
           return void res.json({
             tasks: open.map((t) => ({
-              id: t.id, your_humans_words: t.text, with: t.to.name, left: t.left, until: t.until, given: t.at,
+              id: t.id, your_humans_words: t.text, with: t.to.name, ...(t.errand ? { kind: 'errand', note_for_you: 'about nobody\'s chat: do it with your own tools, then lake_house_suggest { task, outcome, text }' } : {}), left: t.left, until: t.until, given: t.at,
               ...(t.to.via ? { wrote_to: 'you, at your own address: lake_house_reply sends your answer from you (your human\'s house only counts it), and it must not name your human\'s house or say where they live on the Lake' } : {}),
               // The conversation, oldest first: their notes and what was answered, yours included.
               conversation: this.notes.filter((n) => OwnerDesk.conv(n.from) === t.to.key).sort((a, b) => a.at.localeCompare(b.at)).map((n, i, all) => { const said = this.answersTo(n, all[i + 1]?.at); return { note: n.id, they_wrote: n.text, at: n.at, ...(said.length ? { answered: said } : {}) }; }),
@@ -2715,6 +2727,24 @@ export class OwnerDesk {
         this.news({ about: 'task', task: task.id, words: text, with: task.to.name, about_note: note.id, messages: TASK_MESSAGES, until: task.until, how: 'your human\'s own instruction about one conversation, and their go-ahead for it alone: lake_house { view: "tasks" } has the conversation and how to answer' }, a.kid);
         // The house's own runner starts on it now; one on a computer finds it at its next look.
         this.wakeFor(a.kid);
+        this.touch();
+        return void res.json({ ok: true, task: this.taskView(task) });
+      }
+      // Something to get done, in a few words, about nobody's chat (round 105): Today's "What would you like to get done?".
+      if (p.kind === 'panel.errand.set') {
+        const q = p as unknown as { by?: string; text?: string };
+        const text = typeof q.text === 'string' ? q.text.trim().slice(0, 300) : '';
+        if (!text) return void res.status(400).json({ error: 'text: what you want done, in a few words' });
+        // An AI you chat with: one that runs on its own for Replies or Away works through a task's three tools.
+        const chat = [...this.assistants.values()].filter((x) => !x.duty?.runner);
+        const a = this.assistants.get(String(q.by ?? '')) ?? (chat.length === 1 ? chat[0] : undefined);
+        if (!a) return void res.status(400).json({ error: this.assistants.size ? 'which of your AIs: by, its key' : 'no AI is connected yet', ...(this.assistants.size ? {} : { needs: 'ai' }) });
+        if (a.duty?.runner) return void res.status(409).json({ error: `${shortLabel(a.label)} runs on its own for your Replies or Away: give this to an AI you chat with` });
+        const now = Date.now();
+        const task: Task = { id: randomBytes(6).toString('hex'), by: a.kid, to: { key: `errand:${randomBytes(6).toString('hex')}`, name: 'you' }, note: '', text, left: 0, until: new Date(now + ERRAND_DAYS * 86_400_000).toISOString(), at: new Date(now).toISOString(), state: 'open', did: [], errand: true };
+        this.tasks = [task, ...this.tasks];
+        await this.saveTasks();
+        this.news({ about: 'errand', task: task.id, words: text, until: task.until, how: 'your human asked you to get something done, in their own words. Use your own tools (lake_want with people: true for someone\'s help, lake_ask or lake_ping to reach someone by handle, lake_house_suggest to ask them something), and say how it went with lake_house_suggest { task, outcome, text }. Spend nothing they didn\'t agree to.' }, a.kid);
         this.touch();
         return void res.json({ ok: true, task: this.taskView(task) });
       }

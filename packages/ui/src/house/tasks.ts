@@ -77,6 +77,30 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
   return h(Sheet, { open, onClose, title: `Tell ${v?.assistants.length === 1 ? aiOf(v.assistants[0]!.label) : 'your AI'} what to do` }, open ? body() : null);
 }
 
+/**
+ * "What would you like to get done?", at the top of Today (round 105, a first-time owner: Today opened on a research
+ * request, and the promise is "ask your AI to find a babysitter"). A few words to an AI you chat with; it does it with its
+ * own tools and says how it went on the card below.
+ */
+export function AskBox({ v }: { v: ListView }) {
+  const [text, setText] = useState('');
+  const [aiKid, setAiKid] = useState<string | null>(null);
+  // An AI that runs on its own (Replies, Away) works through a task's three tools: errands go to one you chat with.
+  const ais = v.assistants.filter((q) => !q.runs);
+  const a = ais.find((q) => q.kid === aiKid) ?? ais[0], ai = a ? aiOf(a.label) : 'your AI';
+  return h('ion-card', { class: 'lake-card ask-box', key: 'ask' }, h('ion-card-content', {},
+    h('h2', { class: 'ask-h' }, 'What would you like to get done?'),
+    !a ? [h('p', { class: 'muted-line', key: 'n' }, v.assistants.length ? 'Your AIs here run on their own for Replies or Away. Connect one you chat with, like Claude or ChatGPT, and it does these for you.' : 'No AI is connected yet. Connect one under My AI, like Claude or ChatGPT, and it does these for you.'),
+      h('div', { class: 'card-actions', key: 'c' }, h('ion-button', { shape: 'round', class: 'lake-btn', onClick: () => push('#ai') }, 'Connect an AI'))]
+      : [ais.length > 1 ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI', key: 'w' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
+        h('ion-textarea', { key: 't', value: text, autoGrow: true, rows: 2, maxlength: 300, placeholder: `A few words. ${cap(ai)} does it and tells you how it went.`, 'aria-label': 'What you want done', class: 'tell-input', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
+        h('div', { class: 'tell-chips ideas', key: 'i' }, ...ERRANDS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))),
+        h('p', { class: 'muted-line', key: 's' }, starts(a, ai)),
+        h('div', { class: 'card-actions', key: 'b' }, h(Btn, { label: `Send to ${ai}`, icon: 'sparkles', expand: 'block', cls: 'ask-send', disabled: !text.trim(),
+          run: async () => { await must({ kind: 'panel.errand.set', by: a.kid, text: text.trim() }); setText(''); void toast(`Sent to ${ai}`); } }))]));
+}
+const ERRANDS = ['Find a babysitter for Friday evening', 'Ask Sam about coffee next week', 'Find someone to help move a sofa'];
+
 /** The button that opens it, on an AI's note that is about someone who can be answered. */
 export function TellButton({ x, onSent, fallback }: { x: Note; onSent?: () => void; fallback?: () => void }) {
   const list = useHouse<ListView>({ kind: 'list' });
@@ -112,13 +136,23 @@ export function TaskCard({ t, v }: { t: TaskV; v: ListView }) {
   const okBtn = (main: boolean) => h(Btn, main ? { key: 'ok', label: 'OK', size: 'small', run: ok() } : { key: 'ok', label: 'OK', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: ok() });
   const again = h('ion-button', { key: 'again', shape: 'round', size: 'small', class: 'lake-btn', onClick: () => setTell(true) }, t.state === 'cant' ? `Tell ${ai} again` : `Tell ${ai} what to do`);
   const handedOver = inChat.at(-1)?.mode === 'ai';
+  if (t.errand) {
+    const [eActs, eQuiet]: [Child[], Child[]] = open ? [[], [h(Btn, { key: 'stop', label: 'Take it back', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: () => must({ kind: 'panel.task.stop', id: t.id }) })]] : [[okBtn(true)], []];
+    return h('ion-card', { class: `lake-card task-card errand ${t.state}` }, h('ion-card-content', {},
+      h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), `You asked ${ai}`, pill),
+      h('p', { class: 'task-words' }, `“${t.text}”`),
+      !open && t.ended?.text ? h('div', { class: 'task-did report' }, h('small', {}, `${Ai} says`), h('p', {}, t.ended.text)) : null,
+      h('p', { class: 'muted-line task-status' }, open ? (t.seen ? `${Ai} is working on it.` : `Not started yet. ${starts(a, ai)}`) : t.ended?.text ? '' : t.ended?.why ?? ''),
+      eActs.length ? h('div', { class: 'card-actions' }, ...eActs) : null,
+      eQuiet.length ? h('div', { class: 'card-foot quiet' }, ...eQuiet) : null));
+  }
   const [acts, quiet]: [Child[], Child[]] = open ? [[], [t.did.length ? quietBtn('chat', 'Open chat', toChat) : null, h(Btn, { key: 'stop', label: 'Take it back', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: () => must({ kind: 'panel.task.stop', id: t.id }), done: 'Taken back' })]]
     : t.state === 'done' ? [[okBtn(true)], [quietBtn('chat', 'Open chat', toChat), handedOver ? null : h(Btn, { key: 'keep', label: `Let ${ai} keep answering ${name}`, size: 'small', fill: 'clear', color: 'medium', run: ok(() => must({ kind: 'panel.chat.mode', key: t.to.key, mode: 'ai' })), done: `${Ai} replies to ${name} from now on, while it's on duty` })]]
       : [[again], [quietBtn('chat', t.to.via ? 'Open chat' : 'Reply yourself', toChat), okBtn(false)]];
   return h('ion-card', { class: `lake-card task-card ${t.state}` }, h('ion-card-content', {},
-    h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), `You told ${ai}`, pill),
+    h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), t.errand ? `You asked ${ai}` : `You told ${ai}`, pill),
     h('p', { class: 'task-words' }, `“${t.text}”`),
-    h('p', { class: 'muted-line' }, `About ${name}'s message${t.to.via ? ` to ${ai}` : ''}.`),
+    t.errand ? null : h('p', { class: 'muted-line' }, `About ${name}'s message${t.to.via ? ` to ${ai}` : ''}.`),
     last ? h('div', { onClick: (e: Event) => (e.currentTarget as HTMLElement).classList.toggle('open'), class: 'task-did' }, h('small', {}, last.pending ? `${Ai} is sending this to ${name}` : `${Ai} wrote to ${name}${t.to.via ? ', from its own address' : ''}${t.did.length > 1 ? ` (${t.did.length} messages, the latest)` : ''}`), h('p', {}, last.text)) : null,
     theirs ? h('div', { onClick: (e: Event) => (e.currentTarget as HTMLElement).classList.toggle('open'), class: 'task-did theirs' }, h('small', {}, `${name} answered`), h('p', {}, theirs.text)) : null,
     !open && t.ended?.text ? h('div', { onClick: (e: Event) => (e.currentTarget as HTMLElement).classList.toggle('open'), class: 'task-did report' }, h('small', {}, `${Ai} says`), h('p', {}, t.ended.text)) : null,

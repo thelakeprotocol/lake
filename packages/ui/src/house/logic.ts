@@ -26,7 +26,7 @@ export interface Connect { id: string; app: string; from: string; number: string
 export type WantOfferV = { id: string; at: string; seller: { name: string; domain: string }; total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string; matched?: string[]; delivery?: string; note?: string; over?: boolean; state: 'open' | 'paid' | 'shipped' | 'arrived' | 'refunded'; shipped?: { note: string; at: string; again?: boolean }; ended?: string; /** The owner said it hasn't come, or came wrong; `held`: the money stays held for it. */ problem?: { code: 'not_arrived' | 'not_right'; at: string; held: boolean; until?: string }; /** When the shop is paid if the owner says nothing. */ payBy?: string };
 export type WantV = { want: { id: string; name: string; description?: string; areaServed?: string; availabilityEnds: string; eligibleQuantity?: { value: number }; itemOffered: { '@type'?: 'Product' | 'Service'; additionalProperty: { name: string; value: string }[] } }; limit?: { amount: number; currency: string }; closed?: string; bought?: string; at: string; offers: WantOfferV[]; /** People who match it (a want for someone's help, SPEC §6.8): the points, and who only once both said yes. */ matches?: { id: string; at: string; matched: string[]; state: 'open' | 'yes' | 'revealed'; matcher?: { name: string }; revealed?: { name: string; handle?: string; note?: string } }[]; /** Replies through a link the owner shared (SPEC §6.8): all, those still waiting for an answer, and whether a link is out. */ replies?: number; repliesWaiting?: number; shared?: boolean };
 /** What you told one of your AIs to do about one chat (SPEC §6.1, a task): how far it got and how it ended. */
-export type TaskV = { id: string; by: string; label: string; to: { key: string; name: string; web?: true; /** They wrote to the AI's own address: its answers go from there. */ via?: true }; note: string; suggestion?: string; text: string; left: number; until: string; at: string; state: 'open' | 'done' | 'back' | 'cant' | 'stopped'; seen?: string; did: { text: string; at: string; note: string; /** On its way from the AI's own address. */ pending?: boolean }[]; ended?: { at: string; text?: string; why?: string }; ok?: true };
+export type TaskV = { /** Something to get done, about nobody's chat (round 105). */ errand?: true; id: string; by: string; label: string; to: { key: string; name: string; web?: true; /** They wrote to the AI's own address: its answers go from there. */ via?: true }; note: string; suggestion?: string; text: string; left: number; until: string; at: string; state: 'open' | 'done' | 'back' | 'cant' | 'stopped'; seen?: string; did: { text: string; at: string; note: string; /** On its way from the AI's own address. */ pending?: boolean }[]; ended?: { at: string; text?: string; why?: string }; ok?: true };
 /** Tasks that show a card: the open ones, and those that ended some way you haven't said OK to (one you took back shows nothing). */
 export const taskCards = (v?: { tasks?: TaskV[] }) => (v?.tasks ?? []).filter((t) => !t.ok && t.state !== 'stopped');
 export type RemovedAi = { kid: string; label: string; addedAt: string; seenAt?: string; removedAt: string; reads?: Reads[]; tried?: { n: number; last: string; kinds: string[] } };
@@ -112,7 +112,7 @@ export const chatsOf = (notes: DoorNote[], ais: Assistant[] = []): Chat[] => {
 
 /** People you know, and new people (a lookalike is new until you say otherwise), each newest first. */
 export const peopleOf = (chats: Chat[]) => ({ known: chats.filter((c) => c.trust === 'known'), fresh: chats.filter((c) => c.trust !== 'known') });
-/** New people whose last word is older than a week: what "Clear older than 7 days" takes. */
+/** New people whose last word is older than a week: what "Clear old chats" takes. */
 export const stale = (chats: Chat[], now = Date.now()) => chats.filter((c) => Date.parse(c.at) < now - 7 * 86_400_000);
 
 // ---- inbox ----
@@ -172,7 +172,7 @@ export const dataState = (a?: { agents: AccessRow[] }, record?: { ok: boolean })
   if (record && !record.ok) return { text: 'Your record failed its check', tone: 'red' };
   if (!a) return { text: '' };
   const y = yesNow(a.agents);
-  return { text: y.agents ? `${y.agents === 1 ? '1 agent has' : `${y.agents} agents have`} your yes${y.next ? ` · ${y.agents === 1 ? 'ends' : 'next ends'} in ${hoursLeft(y.next)}` : ''}` : 'No agent has your yes now' };
+  return { text: y.agents ? `${y.agents === 1 ? '1 agent can' : `${y.agents} agents can`} use your data${y.next ? ` · ${y.agents === 1 ? 'ends' : 'next ends'} in ${hoursLeft(y.next)}` : ''}` : 'No agent can use your data now' };
 };
 export const sumsOf = (rs: { amount: number; currency: string }[]) => { const by = new Map<string, number>(); for (const r of rs) by.set(r.currency, (by.get(r.currency) ?? 0) + r.amount); return [...by].map(([c, n]) => money$(Math.round(n * 100) / 100, c)).join(' + '); };
 export const moneyState = (m?: { receipts: { amount: number; currency: string; settlement?: string }[]; spent?: { amount: number; currency: string; settlement?: string }[] }): RowState => {

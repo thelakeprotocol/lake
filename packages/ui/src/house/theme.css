@@ -587,6 +587,9 @@ ion-card.lake-card ion-card-content .task-did p { margin: 0; }
 .chip { border: 1px solid var(--lake-line); background: var(--lake-surface); color: var(--lake-text); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 600; min-height: 38px; cursor: pointer; }
 .chip.on { border-color: var(--lake-mint); background: color-mix(in srgb, var(--lake-mint) 14%, var(--lake-surface)); }
 .tell-input { --background: var(--lake-surface-2); border-radius: 14px; --padding-start: 12px; --padding-end: 12px; --padding-top: 10px; margin-top: 10px; font-size: 16px; }
+/* Today's first card: what you want done, for your AI (round 105). */
+.ask-box .ask-h { font-size: 18px; font-weight: 700; margin: 0 0 4px; color: var(--lake-text); }
+.ask-box .muted-line { margin-top: 8px; }
 .tell-scope { font-size: 13.5px; }
 .tell .card-actions .tell-send { flex: 1; }
 .tell-row { display: contents; }

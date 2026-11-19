@@ -5,7 +5,7 @@ import { adviceOf, doorOf, dutyStrip, duration, grantFor, time, when, money$, ne
 import { ReadsToggles } from './ai';
 import { WantRow, WelcomeCard, blockAsk, wantNeedsYou } from './chats';
 import { push } from './nav';
-import { TaskCard, TellButton } from './tasks';
+import { AskBox, TaskCard, TellButton } from './tasks';
 
 // Inbox: everything that waits for your tap, newest first. Data requests your rules left to you, your AI's questions and
 // suggestions, app sign-ins, your circle's calls; and what's coming up.
@@ -48,6 +48,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     // Your AI on duty in one line; a tap shows each thing it did, with Undo (Grok: "the number stays abstract" without them).
     today.data?.duty ? h('button', { class: 'duty-strip', key: 'duty', onClick: () => document.querySelector('ion-list.handled')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
       h('ion-icon', { name: 'moon-outline' }), h('span', {}, dutyStrip(today.data.duty))) : null,
+    h(AskBox, { v, key: 'ask' }),
     h('h3', { class: 'section-h', key: 'nh' }, 'Needs your attention'),
     connectedNote ? h('ion-card', { class: 'lake-card ok-card', key: 'cn' }, h('ion-card-content', {}, h('p', {}, connectedNote), h('ion-button', { size: 'small', fill: 'clear', onClick: () => { connectedNote = ''; } }, 'OK'))) : null,
     ...(v.connects ?? []).map((c) => h(ConnectCard, { key: `c-${c.id}`, c })),

@@ -993,6 +993,33 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     } finally { await sam.close().catch(() => {}); }
   });
 
+  it('asks for something to get done at the top of Today: a few words to its AI, a card that says how it went (round 105)', async () => {
+    await tab('Today');
+    const box = page.locator('ion-card.ask-box');
+    await box.getByRole('heading', { name: 'What would you like to get done?' }).waitFor({ timeout: 10_000 });
+    // First on the page, above what needs the owner.
+    expect(await page.evaluate(() => { const b = document.querySelector('ion-card.ask-box'), n = [...document.querySelectorAll('h3.section-h')].find((x) => x.textContent === 'Needs your attention'); return !!b && !!n && !!(b.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
+    await box.getByRole('button', { name: 'Find a babysitter for Friday evening' }).click();
+    await tidy();
+    await box.locator('ion-button.ask-send').click();
+    // Gone before the next test looks for its own "Sent to Nova" (19 Nov: two toasts at once under the suite's load).
+    const sent = page.locator('ion-toast', { hasText: 'Sent to Nova' });
+    await sent.waitFor({ timeout: 6000 });
+    await sent.waitFor({ state: 'detached', timeout: 15_000 });
+    const card = page.locator('ion-card.task-card.errand', { hasText: 'Find a babysitter for Friday evening' });
+    await card.locator('.card-kicker', { hasText: 'You asked Nova' }).getByText('Working on it').waitFor({ timeout: 6000 });
+    // The AI finds it with its tasks, about nobody's chat, and says how it went.
+    const mine = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string; kind?: string; your_humans_words: string }[] };
+    const errand = mine.tasks.find((t) => t.kind === 'errand')!;
+    expect(errand.your_humans_words).toBe('Find a babysitter for Friday evening');
+    expect(await asAssistant({ kind: 'assistant.task.done', id: errand.id, outcome: 'done', text: 'Posted it as someone\'s help; I\'ll tell you when someone answers.' })).toMatchObject({ ok: true });
+    await card.getByText('Done').waitFor({ timeout: 6000 });
+    await card.locator('.task-did.report', { hasText: 'Nova says' }).getByText('Posted it as someone').waitFor();
+    await tidy();
+    await card.getByRole('button', { name: 'OK', exact: true }).click();
+    await card.waitFor({ state: 'detached', timeout: 6000 });
+  });
+
   it('a task that ends with a time agreed: the card holds it for the owner\'s OK, their tap puts it in the agenda, and the other side is told (round 95)', async () => {
     const got: Record<string, any>[] = [];
     const mia = await joinLake({ name: 'Mia (Claude)', domain: 'mia.example', node: nodeUrl, port: await freePort(), onMessage: async (m) => { got.push(m.payload as Record<string, any>); return { kind: 'received' }; } });
@@ -1168,7 +1195,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('You');
     await page.locator('.you-row.door', { hasText: 'panelowner · open' }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.rules', { hasText: /otherwise|No rules/ }).waitFor({ timeout: 10_000 });
-    await page.locator('.you-row.mydata', { hasText: /your yes/ }).waitFor({ timeout: 10_000 });
+    await page.locator('.you-row.mydata', { hasText: /can use your data/ }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.money', { hasText: /spent|held|earned|Nothing yet/ }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.phone', { hasText: /recovery code|Notifications off|can read it/ }).waitFor({ timeout: 10_000 });
     expect(await page.locator('ion-item.you-row').count()).toBe(5);
@@ -1656,7 +1683,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // You says how My data stands; My data says who has a yes and what it lets them do, for what it was given (14 Nov: a
     // yes for care read "in a study").
     await tab('You');
-    await page.locator('.you-row.mydata', { hasText: /agents? ha(s|ve) your yes · (next )?ends in/ }).click();
+    await page.locator('.you-row.mydata', { hasText: /agents? can use your data · (next )?ends in/ }).click();
     await page.locator('ion-item.holder', { hasText: 'clinic.example' }).first().getByText(/May use medications for care · .+ left/).waitFor({ timeout: 10_000 });
     await tidy();
     // Listed in Who has access, with how often it was used; removed, it asks again.

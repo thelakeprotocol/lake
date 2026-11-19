@@ -1092,6 +1092,26 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  // Round 105, a first-time owner: "What would you like to get done?" on Today, about nobody's chat.
+  it('an errand: the owner\'s few words to an AI they chat with, told as news, listed with its tasks, ended by its report', async () => {
+    const h = await withReplies();
+    expect(await h.owner({ kind: 'panel.errand.set', text: 'Find a babysitter for Friday' })).toMatchObject({ needs: 'ai' });
+    const a = await h.connect('Helper');
+    h.told.length = 0;
+    expect(await h.owner({ kind: 'panel.errand.set', text: '  ' })).toHaveProperty('error');
+    const set = await h.owner({ kind: 'panel.errand.set', text: 'Find a babysitter for Friday evening' });
+    expect(set.task).toMatchObject({ errand: true, state: 'open', left: 0, label: 'Helper', text: 'Find a babysitter for Friday evening' });
+    await settle();
+    expect(h.told.find((t) => t.p.about === 'errand')?.p).toMatchObject({ words: 'Find a babysitter for Friday evening', how: expect.stringContaining('lake_want') });
+    const mine = await a.call({ kind: 'assistant.tasks' });
+    expect(mine.tasks[0]).toMatchObject({ kind: 'errand', your_humans_words: 'Find a babysitter for Friday evening', conversation: [] });
+    // It sends nothing through the house, and a runner's task loop doesn't pick it up.
+    expect((h.desk as unknown as { taskStamps: (k: string) => string[] }).taskStamps(a.id.publicJwk.kid!)).toEqual([]);
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Posted it; two people may fit.' })).toMatchObject({ ok: true });
+    expect((await h.owner({ kind: 'list' })).tasks[0]).toMatchObject({ errand: true, state: 'done', ended: { text: 'Posted it; two people may fit.' } });
+    h.close();
+  });
+
   it('a task ends when the owner answers, takes it back or gives another; when its time runs out; and with its AI', async () => {
     const h = await withReplies();
     // No AI: said so, with what's needed.

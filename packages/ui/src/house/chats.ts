@@ -40,7 +40,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
         ...(all ? fresh : fresh.slice(0, FEW)).map((c) => h(ChatRow, { key: c.key, c })),
         more || old.length ? h('div', { class: 'people-more', key: 'more' },
           more ? h('ion-button', { fill: 'clear', size: 'small', class: 'show-all', onClick: () => setAll(!all) }, all ? 'Show fewer' : `Show all ${fresh.length}`) : null,
-          old.length ? h(Btn, { label: `Clear older than 7 days (${old.length})`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-old', run: () => clearChats(old, bump) })
+          old.length ? h(Btn, { label: `Clear ${old.length} old ${old.length === 1 ? 'chat' : 'chats'} (quiet for a week)`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-old', run: () => clearChats(old, bump) })
             : more && all ? h(Btn, { label: `Clear all ${fresh.length}`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-new', run: () => clearChats(fresh, bump) }) : null) : null) : null,
       known.length || fresh.length ? null
         : h(Empty, { key: 'empty', icon: 'people-outline', title: 'Nobody has written yet', text: door.data?.handle ? `People reach you by asking their AI to ping ${door.data.handle}.` : 'Pick a handle, and anyone\'s AI can reach you.', action: h('ion-button', { shape: 'round', fill: 'outline', onClick: () => push('#door') }, door.data?.handle ? 'Share your handle' : 'Pick your handle') }),
