@@ -59,6 +59,11 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     ...tasks.map((t) => h(TaskCard, { key: `t-${t.id}`, t, v })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
     wants.length ? h(Section, { title: 'Looking for', key: 'wants', cls: 'chat-list wants' }, ...wants.map((x) => h(WantRow, { key: x.want.id, w: x }))) : null,
+    // What you have to sell or give away, on your house while it's up (round 109); a note about one lands in People.
+    v.offerings?.length ? h(Section, { title: 'Offering', key: 'offerings', cls: 'offerings' }, ...v.offerings.map((g) => h('ion-item', { key: g.id, lines: 'full', class: 'lake-row offering-row' },
+      h('div', { slot: 'start', class: 'row-icon tint-mint' }, h('ion-icon', { name: 'pricetag-outline' })),
+      h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, g.name), h('p', {}, [g.price !== undefined ? money$(g.price, g.priceCurrency ?? 'AUD') : 'Free or to agree', 'pick-up', g.asked ? `${plural(g.asked, 'person', 'people')} asked` : 'nobody asked yet', `until ${new Date(g.availabilityEnds).toLocaleDateString([], { day: 'numeric', month: 'short' })}`].join(' · '))),
+      h('div', { slot: 'end' }, h(Btn, { label: 'Take down', size: 'small', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.offering.close', id: g.id }), ask: { header: `Take down "${g.name}"?`, sub: 'Nobody finds it after this. Chats about it stay in People.', button: 'Take down' } }))))) : null,
     w?.people ? h(Section, { key: 'wait', cls: 'waiting' },
       knownN ? h(Row, { icon: 'chatbubbles-outline', tint: 'amber', label: `${plural(knownN, 'person', 'people')} you know ${knownN === 1 ? 'is' : 'are'} waiting`, sub: 'For your answer, in People', onClick: () => push('#chats'), cls: 'wait-known' }) : null,
       newN ? h(Row, { icon: 'people-outline', label: `${newN}${w.more ? '+' : ''} new ${newN === 1 ? 'person' : 'people'} wrote${!w.since ? '' : new Date(w.since).toDateString() === new Date().toDateString() ? ' today' : ` since ${new Date(w.since).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`}`, sub: newN === 1 ? 'No answer yet' : 'None has an answer yet', onClick: () => push('#chats'), cls: 'wait-new' }) : null) : null,

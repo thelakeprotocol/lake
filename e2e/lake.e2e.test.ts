@@ -1014,6 +1014,35 @@ describe('the owner', () => {
     expect((await ask(`${tally}/a2a`, opener, { kind: 'tally.sign', id: 'people-test' })).reply.kind).toBe('refused');
   });
 
+  it('an offering: what an owner has to sell stays on their house, findable when their AI is gone, and a note about it reaches them (round 109)', async () => {
+    const ai = await generateIdentity('selling-ai');
+    const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Selling AI' });
+    expect((await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: ai.publicJwk, code, label: 'Selling AI' }) })).status).toBe(200);
+    const asAi = async (p: Record<string, unknown>) => (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, ai, { iss: 'assistant' })) })).json();
+    // A price needs its currency, never assumed.
+    expect(await asAi({ kind: 'assistant.offering', name: 'Kids bike, 24 inch', price: 60 })).toMatchObject({ error: expect.stringContaining('currency') });
+    const posted = await asAi({ kind: 'assistant.offering', name: 'Kids bike, 24 inch', description: 'Blue, good tyres', price: 60, currency: 'aud', area: 'Ascot, AU-QLD', tag: 'bike' });
+    expect(posted).toMatchObject({ ok: true, offering: { '@type': 'Offer', name: 'Kids bike, 24 inch', price: 60, priceCurrency: 'AUD', availableDeliveryMethod: 'pick-up', tag: 'bike' } });
+    const id = posted.offering.id as string;
+    // On the house's card, with its tag, and at the node's /offerings: the AI has nothing to do with it from here on.
+    let listed: { offering: { id: string }; house: { url: string } }[] = [];
+    for (let i = 0; i < 30 && !listed.some((x) => x.offering.id === id); i++) { listed = await (await fetch(`${node}/offerings?q=bike`)).json(); if (!listed.some((x) => x.offering.id === id)) await new Promise((r) => setTimeout(r, 300)); }
+    expect(listed.find((x) => x.offering.id === id)).toMatchObject({ house: { url: expect.stringContaining(houses.strict!.replace(/^http:\/\//, '')) } });
+    const card = await verifyLakeCard(await (await fetch(cardUrlFor(`${houses.strict}/a2a`))).json());
+    expect(card.tags).toContain('offering:bike');
+    // A buyer's AI asks about it: a note filed with the offering, counted on the owner's list.
+    const buyer = await visitor('buyer.example');
+    expect((await ask(houses.strict!, buyer, { kind: 'note', text: 'Is the bike still there? I could pick it up Saturday.', offering: id })).reply).toMatchObject({ kind: 'noted' });
+    const list = await ownerCall({ kind: 'list' });
+    expect(list.notes.find((n: { text: string }) => n.text.startsWith('Is the bike still there?'))).toMatchObject({ offering: id });
+    expect(list.offerings.find((g: { id: string }) => g.id === id)).toMatchObject({ asked: 1 });
+    // Taken down on the phone: gone from the node, and a note about it is turned away plainly.
+    expect(await ownerCall({ kind: 'panel.offering.close', id })).toEqual({ ok: true });
+    expect((await ask(houses.strict!, buyer, { kind: 'note', text: 'Still for sale?', offering: id })).reply).toMatchObject({ kind: 'rejected', why: expect.stringContaining('no longer offers that') });
+    expect((await ownerCall({ kind: 'list' })).offerings.some((g: { id: string }) => g.id === id)).toBe(false);
+    await ownerCall({ kind: 'panel.assistant.revoke', kid: ai.publicJwk.kid });
+  });
+
   it('people who match: a want for help on one house, a match from another, two yeses, and each has the other (16 Nov)', async () => {
     // The same owner holds both houses here (paired above): strict looks for help, research's owner may give it.
     const rWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(`${houses.research}/a2a`))).json())).webId;

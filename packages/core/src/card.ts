@@ -3,7 +3,7 @@ import * as jose from 'jose';
 import type { Identity } from './crypto.js';
 import type { MenuItem } from './trade.js';
 import type { Badge } from './badges.js';
-import type { Want } from './want.js';
+import type { Offering, Want } from './want.js';
 import { LAKE_EXTENSION_URI, LAKE_VERSION } from './lake.js';
 
 export type LakeRole = 'house' | 'specialist' | 'visitor' | 'agent' | 'node';
@@ -27,6 +27,8 @@ export interface LakeProfile {
   menu?: MenuItem[];
   /** Houses: what their owner is looking for (SPEC §6.8), so sellers come to them. Never what they'd pay. */
   wants?: Want[];
+  /** Houses: what their owner has to sell, give away or help with (SPEC §6.9), at an asking price if any. */
+  offerings?: Offering[];
   /**
    * Credentials others signed about this agent (SPEC §2.5): a register's authorisation, say, each with the A2A address of
    * its issuer, whose own card gives the key it checks against. Tags, names and menu labels are the agent's own words; a

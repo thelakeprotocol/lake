@@ -1019,6 +1019,14 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
     await card.getByRole('button', { name: 'OK', exact: true }).click();
     await card.waitFor({ state: 'detached', timeout: 6000 });
+    // Something to sell, on the house (round 109): on Today under Offering, with Take down.
+    expect(await asAssistant({ kind: 'assistant.offering', name: 'Kids bike, 24 inch', price: 60, currency: 'AUD', tag: 'bike' })).toMatchObject({ ok: true });
+    const row = page.locator('ion-item.offering-row', { hasText: 'Kids bike, 24 inch' });
+    await row.getByText(/A\$60(\.00)? · pick-up · nobody asked yet · until/).waitFor({ timeout: 10_000 });
+    await tidy();
+    await row.getByRole('button', { name: 'Take down' }).click();
+    await confirmSheet('Take down');
+    await row.waitFor({ state: 'detached', timeout: 10_000 });
   });
 
   it('a task that ends with a time agreed: the card holds it for the owner\'s OK, their tap puts it in the agenda, and the other side is told (round 95)', async () => {

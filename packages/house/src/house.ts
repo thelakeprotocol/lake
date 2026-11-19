@@ -14,6 +14,7 @@ import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
 import { leftWindow, OwnerDesk, type PanelProvider } from './owner.js';
 import { openWants, type Wants } from './wants.js';
+import { openOfferings, type Offerings } from './offerings.js';
 import { Parser } from 'n3';
 import { parseDocument, type YAMLMap, type YAMLSeq } from 'yaml';
 import { createPodMcpServer, unsafePath } from './pod-mcp.js';
@@ -226,6 +227,11 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     load: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/wants.json`).catch(() => null); return r?.ok ? r.json() : []; },
     save: (list) => put(owner, 'wallet/wants.json', JSON.stringify(list), 'application/json'),
   });
+  // What the owner has to sell, give away or help with (SPEC §6.9): on the card while the house is up, whoever posted it.
+  const offerings = await openOfferings({
+    load: async () => { const r = await owner.fetch(`${owner.podRoot}wallet/offerings.json`).catch(() => null); return r?.ok ? r.json() : []; },
+    save: (list) => put(owner, 'wallet/offerings.json', JSON.stringify(list), 'application/json'),
+  });
   // Where to send what the owner buys: in /wallet/ (only the owner's key reads it), given to a seller only with a purchase.
   const deliveryAddress = async (): Promise<PostalAddress | null> => { const r = await owner.fetch(`${owner.podRoot}wallet/delivery-address.json`).catch(() => null); return r?.ok ? ((await r.json().catch(() => null)) as PostalAddress | null) : null; };
   // The card is the house's public face, so the owner's rules decide what it says: its interest tags, and whether it names
@@ -246,7 +252,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
           skills: show
             ? o.packs.map((p) => ({ id: `${p.id}-study`, name: p.title, description: `Considers ${p.title.toLowerCase()} offers by its owner's rules`, tags: r.tags ?? [] }))
             : [{ id: 'offers', name: 'Offers', description: 'Considers offers by its owner\'s rules', tags: r.tags ?? [] }],
-          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: r.tags ?? [], packs: show ? o.packs.map(packId) : [], ...(r.door?.handle ? { handle: r.door.handle } : {}), ...(wants.open().length ? { wants: wants.open() } : {}) },
+          profile: { role: 'house', webId: owner.webId, ownerDomain: o.domain ?? new URL(o.publicUrl).hostname, tags: [...new Set([...(r.tags ?? []), ...offerings.open().flatMap((g) => (g.tag ? [`offering:${g.tag}`] : []))])], packs: show ? o.packs.map(packId) : [], ...(r.door?.handle ? { handle: r.door.handle } : {}), ...(wants.open().length ? { wants: wants.open() } : {}), ...(offerings.open().length ? { offerings: offerings.open() } : {}) },
         },
         id,
       ),
@@ -346,7 +352,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
   };
   // A record written again (withdrawn, or by a study that ran) is read again at the next look.
   filed.onChange((path) => { if (path.endsWith('.consent.jsonld')) consentCache.delete(path); });
-  const panel = panelFor({ o, owner, filed, id, actor, activity, note, card, recard, health, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, deliveryAddress });
+  const panel = panelFor({ o, owner, filed, id, actor, activity, note, card, recard, health, desk: () => desk, keeper: () => keeperRef!, signals: () => signals, trustFrom, nodes, relayed, records, consentCache, consentIndex, wants, offerings, deliveryAddress });
   // Looked at a little after start, so the first look at Who has access has a fresh index.
   setTimeout(() => void consentIndex.relist().catch(() => {}), 20_000).unref();
   // The owner's AI on duty, run here when they choose (duty-runner.ts): as awake as the house.
@@ -439,6 +445,7 @@ export async function startHouse(o: HouseOptions): Promise<House> {
     signals: () => signals,
     // A shop's offer for something the owner is looking for, or word that it sent what was bought (SPEC §6.8).
     holdRevised: async (hold, sha256) => panel.wantRevised?.(hold, sha256),
+    offeringLive: (id) => offerings.live(id),
     wantIn: async (p, profile, from) => {
       if (p.kind === 'want.offer') {
         // The house will write to the address on the seller's card (a receipt, word that the offer ended): never one on
@@ -638,6 +645,7 @@ function panelFor(x: {
   consentCache: Map<string, Record<string, unknown>>;
   consentIndex: { listedAt: number; relist: () => Promise<void> };
   wants: Wants;
+  offerings: Offerings;
   deliveryAddress: () => Promise<PostalAddress | null>;
 }): PanelProvider {
   const { owner } = x;
@@ -1262,6 +1270,15 @@ function panelFor(x: {
         return { ok: true, revealed };
       } catch (e) { return { error: `their house didn't answer (${(e as Error).message}): your yes is kept; try again in a minute` }; }
     },
+    async postOffering(input, by) {
+      const g = await x.offerings.post(input, by);
+      await x.recard(x.keeper().rules);
+      x.note('offering.posted', `You're offering "${g.name}"${g.price !== undefined ? ` for ${g.priceCurrency ?? ''} ${g.price}`.replace('  ', ' ') : ''}, pick-up: other people's AIs can find it while your house is up, until ${new Date(g.availabilityEnds).toUTCString().slice(0, 16)}. Take it down on Today.`);
+      return g;
+    },
+    async closeOffering(id) { const ok = await x.offerings.close(id); if (ok) await x.recard(x.keeper().rules); return ok; },
+    offeringsList: () => x.offerings.all(),
+    offeringLive: (id) => x.offerings.live(id),
     async postWant(input, limit, by) { const w = await x.wants.post(input, limit, by); await x.recard(x.keeper().rules); x.note('want.posted', `You're looking for "${w.name}": shops can offer until ${new Date(w.availabilityEnds).toLocaleDateString()}`); return w; },
     async closeWant(id) { const ok = await x.wants.close(id); if (ok) { await x.recard(x.keeper().rules); tellEnded(); } return ok; },
     wantOffer: (wantId, offerId) => x.wants.find(wantId)?.offers.find((o) => o.id === offerId),

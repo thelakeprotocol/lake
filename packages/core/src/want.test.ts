@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deliversTo, makeWant, purchaseDraft, wantFit, wantProblems } from './want.js';
+import { deliversTo, makeOffering, makeWant, offeringProblems, purchaseDraft, wantFit, wantProblems } from './want.js';
 
 describe('wants (SPEC §6.8)', () => {
   const want = () => makeWant({ name: 'Handheld shower head', properties: { Type: 'Handheld', 'Spray modes': 3, Finish: 'Chrome' }, area: 'AU-QLD', currency: 'AUD', days: 7 });
@@ -54,5 +54,16 @@ describe('a delivery address', () => {
     expect(a).toEqual({ '@type': 'PostalAddress', name: 'Sam Example', streetAddress: '12 Example St', addressLocality: 'Brisbane', addressRegion: 'QLD', postalCode: '4000', addressCountry: 'AU' });
     expect(postalAddressProblems(a)).toEqual([]);
     expect(addressLine(a)).toBe('12 Example St, Brisbane QLD 4000');
+  });
+});
+
+describe('an offering (SPEC §6.9, round 109)', () => {
+  it('is a schema.org Offer with a public asking price in a named currency, pick-up, within two weeks', () => {
+    const g = makeOffering({ name: 'Kids bike, 24 inch', price: 60, currency: 'aud', tag: 'bike', days: 30 });
+    expect(g).toMatchObject({ '@type': 'Offer', id: expect.stringMatching(/^g-[0-9a-f]{8}$/), price: 60, priceCurrency: 'AUD', availableDeliveryMethod: 'pick-up', tag: 'bike' });
+    expect(Date.parse(g.availabilityEnds) - Date.now()).toBeLessThanOrEqual(14 * 86_400_000 + 1000);
+    expect(() => makeOffering({ name: 'Bike', price: 60 })).toThrow(/priceCurrency/);
+    expect(() => makeOffering({ name: 'Bike', tag: 'Two Words' })).toThrow(/tag/);
+    expect(offeringProblems({ ...g, availabilityEnds: new Date(Date.now() - 1000).toISOString() })).toEqual([expect.stringContaining('availabilityEnds')]);
   });
 });

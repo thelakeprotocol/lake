@@ -365,6 +365,22 @@ export async function createNode(o: NodeOptions): Promise<{ server: Server; card
     cacheable(req, res, { ...hit, status: 'open' });
   });
 
+  // What people have to sell, give away or help with (SPEC §6.9): the other way round from /wants, the same filters, from
+  // houses that are up, whoever posted them (round 109: a bike on an AI's own card went when the AI did).
+  const openOfferings = () => {
+    const now = Date.now();
+    return registry.all().filter((e) => e.profile.role === 'house' && !e.asleep).flatMap((e) => (e.profile.offerings ?? []).filter((g) => Date.parse(g.availabilityEnds) > now).map((g) => ({ offering: g, house: { url: e.card.supportedInterfaces[0]?.url, webId: e.profile.webId, name: e.card.name, ...(e.profile.handle ? { handle: e.profile.handle } : {}) } })));
+  };
+  app.get('/offerings', (req, res) => {
+    const words = (str(req.query.q) ?? '').toLowerCase().split(/\s+/).filter((w) => w.length >= 2);
+    const area = (str(req.query.area) ?? '').toLowerCase().trim();
+    const out = openOfferings()
+      .filter((x) => !words.length || ((t) => words.every((w) => t.includes(w)))([x.offering.name, x.offering.description ?? '', x.offering.tag ?? '', x.offering.areaServed ?? ''].join(' ').toLowerCase()))
+      .filter((x) => !area || (x.offering.areaServed ?? '').toLowerCase().split(/[\s,;/]+/).some((t) => t === area || t.startsWith(`${area}-`)))
+      .sort((a, b) => b.offering.availabilityEnds.localeCompare(a.offering.availabilityEnds));
+    cacheable(req, res, out.slice(0, 200));
+  });
+
   const guildList = () => [...guilds].map(([tag, members]) => ({ tag, members }));
   // A demo reset: counters, history, quarantines, reputation and guilds go; houses and specialists stay.
   app.post('/reset', (req, res) => {

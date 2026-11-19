@@ -81,6 +81,69 @@ export function makeWant(o: { name: string; description?: string; properties?: R
   return w;
 }
 
+/**
+ * An offering (SPEC §6.9): the other way round from a want. Something a person has to sell, give away or help with, on
+ * their house's card, so it stays findable while the house is up and their AI is gone (round 109: a bike listed on an
+ * AI's own card was findable for five minutes after its last call). Shaped as a schema.org Offer. Its price is the
+ * asking price, public; handed over in person (pick-up), paid as the two agree.
+ */
+export interface Offering {
+  '@type': 'Offer';
+  /** The house's own id for it: `g-<8 hex>`. */
+  id: string;
+  name: string;
+  description?: string;
+  itemOffered: { '@type': 'Product' | 'Service'; name: string };
+  /** The asking price, public; none when free or to be agreed. */
+  price?: number;
+  priceCurrency?: string;
+  areaServed?: string;
+  availableDeliveryMethod: 'pick-up';
+  /** One word others' AIs look for (seeking:<tag> finds it): "bike". */
+  tag?: string;
+  availabilityEnds: string;
+}
+export const MAX_OFFERINGS = 5;
+
+/** What an offering needs to be listed: short words, a sane price, a date within two weeks. Empty when it's fine. */
+export function offeringProblems(g: unknown, now = Date.now()): string[] {
+  const x = g as Partial<Offering> | null;
+  if (!x || typeof x !== 'object') return ['an offering is { name, itemOffered, availabilityEnds }'];
+  const out: string[] = [];
+  if (x['@type'] !== 'Offer') out.push('@type: "Offer" (schema.org)');
+  if (!/^g-[0-9a-f]{8}$/.test(String(x.id ?? ''))) out.push('id: g-<8 hex>');
+  if (!text(x.name, 80)) out.push('name: what, in up to 80 characters');
+  if (x.description !== undefined && !text(x.description, 280)) out.push('description: up to 280 characters');
+  if ((x.itemOffered?.['@type'] !== 'Product' && x.itemOffered?.['@type'] !== 'Service') || !text(x.itemOffered?.name, 80)) out.push('itemOffered: { @type: "Product" or "Service", name }');
+  if (x.price !== undefined && !(typeof x.price === 'number' && x.price >= 0 && x.price <= 100_000)) out.push('price: 0 to 100000');
+  if (x.price !== undefined && !isCurrency(x.priceCurrency)) out.push('priceCurrency: an ISO 4217 code with a price (AUD, USD…)');
+  if (x.areaServed !== undefined && !text(x.areaServed, 40)) out.push('areaServed: up to 40 characters');
+  if (x.tag !== undefined && !/^[a-z0-9-]{2,24}$/.test(String(x.tag))) out.push('tag: one word, 2 to 24 lowercase letters, digits or dashes');
+  if (x.availableDeliveryMethod !== 'pick-up') out.push('availableDeliveryMethod: "pick-up"');
+  const ends = Date.parse(String(x.availabilityEnds ?? ''));
+  if (!Number.isFinite(ends) || ends < now || ends > now + MAX_WANT_DAYS * 86_400_000 + 60_000) out.push(`availabilityEnds: a time within ${MAX_WANT_DAYS} days`);
+  return out;
+}
+
+/** An offering from plain words (what an AI writes for its human): checked, ready for a card. */
+export function makeOffering(o: { name: string; description?: string; people?: boolean; price?: number; currency?: string; area?: string; tag?: string; days?: number }, now = Date.now()): Offering {
+  const g: Offering = {
+    '@type': 'Offer',
+    id: `g-${createHash('sha256').update(`${o.name}|${now}|${Math.random()}`).digest('hex').slice(0, 8)}`,
+    name: o.name.trim(),
+    ...(o.description?.trim() ? { description: o.description.trim() } : {}),
+    itemOffered: { '@type': o.people ? 'Service' : 'Product', name: o.name.trim() },
+    ...(o.price !== undefined ? { price: Math.round(o.price * 100) / 100, ...(o.currency ? { priceCurrency: o.currency.toUpperCase() } : {}) } : {}),
+    ...(o.area?.trim() ? { areaServed: o.area.trim() } : {}),
+    availableDeliveryMethod: 'pick-up',
+    ...(o.tag?.trim() ? { tag: o.tag.trim().toLowerCase() } : {}),
+    availabilityEnds: new Date(now + Math.min(Math.max(o.days ?? 7, 1), MAX_WANT_DAYS) * 86_400_000).toISOString(),
+  };
+  const problems = offeringProblems(g, now);
+  if (problems.length) throw new Error(problems.join('; '));
+  return g;
+}
+
 const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9/.½ ]+/g, ' ').split(/\s+/).filter((t) => (t.length > 1 || /\d/.test(t)) && !STOP.has(t));
 const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'of', 'for', 'to', 'in', 'with', 'one', 'new', 'old', 'my', 'it', 'is', 'approx', 'approx.', 'about', 'around', 'roughly', 'standard', 'typical', 'usual']);
 /** A value as a shop would list it: what's in brackets is an aside ("1 (single)", "1/2 inch BSP (standard AU hose)"). */
