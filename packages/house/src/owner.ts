@@ -786,14 +786,17 @@ export class OwnerDesk {
     // Money in: amounts by currency, held ones said so.
     // At most a second and a half: Money reads receipts from the pod, and a house with many (or a pod that's busy) left
     // Today blank for half a minute and more (13 Nov). The line is left out then; the reading carries on and is cached.
-    const money = (await Promise.race([panel.money().catch(() => null), new Promise((r) => setTimeout(r, 1500).unref?.())])) as { receipts?: { amount: number; currency: string; at: string; settlement?: string }[] } | null | undefined;
+    const money = (await Promise.race([panel.money().catch(() => null), new Promise((r) => setTimeout(r, 1500).unref?.())])) as { receipts?: { amount: number; currency: string; at: string; settlement?: string; about?: { question?: string } | null }[] } | null | undefined;
     const inToday = (money?.receipts ?? []).filter((r) => after(r.at) && r.settlement !== 'voided');
     if (inToday.length) {
       const by = new Map<string, number>();
       for (const r of inToday) by.set(r.currency, Math.round(((by.get(r.currency) ?? 0) + r.amount) * 100) / 100);
       const sums = [...by].map(([c, v]) => (c === 'USD' ? `$${v}` : c === 'AUD' ? `A$${v}` : `${c} ${v}`)).join(' and ');
       const held = inToday.filter((r) => r.settlement === 'held').length;
-      lines.push({ by: 'money', text: `${sums} came in today (${plural(inToday.length, 'payment')}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money', tile: { big: sums, label: 'came in today', detail: `${plural(inToday.length, 'payment')}${held ? `, ${held} held` : ''}` } });
+      // What it was for, when the house knows (round 107: "$5 came in today" beside a study made a wary owner think he'd been charged).
+      const studies = inToday.filter((r) => r.about?.question).length;
+      const forWhat = studies === inToday.length ? `, for answering ${plural(studies, 'study', 'studies')}` : studies ? `, ${studies} for answering studies` : '';
+      lines.push({ by: 'money', text: `${sums} came in today (${plural(inToday.length, 'payment')}${forWhat}${held ? `, ${held} held until delivery` : ''})`, at: inToday[0]!.at, to: '#money', tile: { big: sums, label: 'came in today', detail: `${plural(inToday.length, 'payment')}${held ? `, ${held} held` : ''}` } });
     }
     // Shops: offers for what the owner is looking for.
     for (const w of panel.wantsList?.() ?? []) {

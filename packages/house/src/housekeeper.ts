@@ -289,6 +289,12 @@ export class Housekeeper {
       return this.reply({ kind: 'decision', offerId: id, decision: 'decline', reason: 'withdrawn: the owner won\'t be asked', holds: [], notes: [] });
     }
     if ((v.payload.kind as string) === 'note') return this.note(v.payload as unknown as { text?: unknown }, v.profile, (data as LakeData).card, v.domainVia, jkt);
+    // An answer to a note this house's owner or their AI sent, from the other side's phone (round 107: a parent's reply from
+    // her phone to the babysitter's house was turned away as malformed): it reaches the owner as a note in that chat.
+    if ((v.payload.kind as string) === 'note.reply') {
+      const r = v.payload as unknown as { text?: unknown };
+      return this.note({ text: r.text }, v.profile, (data as LakeData).card, v.domainVia, jkt);
+    }
     if (v.payload.kind === 'quote') return this.reply(await this.market.quote(v.payload as QuotePayload, v.profile, (data as LakeData).card) as Reply);
     // A hello is how a newcomer's agent starts (run 49: its first message here was rejected as malformed): answered with
     // what this door takes, not delivered (a note is the sender's deliberate words for the owner).

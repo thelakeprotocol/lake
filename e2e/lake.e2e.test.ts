@@ -595,6 +595,9 @@ describe('the owner', () => {
     // The same words again are the same note; "your call" means it (a recommendation is dropped, not the note refused).
     const twice = (await ask(houses.strict!, neighbour, { kind: 'note', text: 'Could you take in a parcel for me at 3 pm? Happy to return the favour.' })).reply;
     expect(twice.note).toBe((await ownerCall({ kind: 'list' })).notes[0].id);
+    // A reply from another house's phone to a note this house sent lands as a note too (round 107: it was turned away as malformed).
+    expect((await ask(houses.strict!, neighbour, { kind: 'note.reply', note: 'n-elsewhere', text: 'Yes, Friday 6 to 10 works for me.' })).reply).toMatchObject({ kind: 'noted' });
+    expect((await ownerCall({ kind: 'list' })).notes.some((n: { text: string }) => n.text === 'Yes, Friday 6 to 10 works for me.')).toBe(true);
     const neutral = await asHelper({ kind: 'assistant.suggest', text: 'Coffee with Ana: which day?', note: twice.note, advice: 'your_call', ask: { choices: ['Tuesday', 'Thursday'], recommend: 0 } });
     expect((await ownerCall({ kind: 'list' })).suggestions.find((x: any) => x.id === neutral.id).ask).toEqual({ choices: ['Tuesday', 'Thursday'] });
     // What the owner agreed to lives in their house: the assistant writes it in, the owner sees and removes it.
