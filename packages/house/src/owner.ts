@@ -233,7 +233,7 @@ export interface RemovedAi { kid: string; jwk: JWK; label: string; addedAt: stri
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Someone (not the owner's AI) invited the owner to sign this pledge, in a note: who, and whether the owner's side knows them. */
@@ -1246,7 +1246,14 @@ export class OwnerDesk {
     this.touch();
     if (payload.about === 'request.waiting') this.notifyOwner('request', 'A request is waiting for your answer.');
     // Who, not what: the name they gave (or their AI's), so the owner knows at a glance; the words stay in the panel.
-    if (payload.about === 'note') { const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined; this.notifyOwner('note', f?.as ? `${f.as} left you a note${f.web ? '' : ', via their AI'}.` : f?.name && !f.web ? `${f.name.replace(/ \(.*\)$/, '')} left you a note.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`); }
+    // A stranger or a lookalike is marked as the chat row marks them (round 117, an attacker among households: a note from
+    // "Vic" read on the phone like a neighbour's).
+    if (payload.about === 'note') {
+      const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean } | undefined;
+      const name = f?.as ?? (f?.name && !f.web ? f.name.replace(/ \(.*\)$/, '') : '');
+      this.notifyOwner('note', k?.lookalike ? `Someone saying they're ${name || 'someone you know'}, with a different key, left you a note. Careful.`
+        : name ? `${name}${k && !k.yes ? ' (first contact, not checked)' : ''} left you a note${f?.as && !f.web ? ', via their AI' : ''}.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`);
+    }
     if (!this.o.tell) return;
     // Requests carry fields and prices, a study answered is what the house did with the records, offers, purchases and
     // money in are money: only to an assistant allowed to read them, so never to one on duty. Money earned through an
@@ -1749,6 +1756,7 @@ export class OwnerDesk {
     const pledge: NonNullable<Suggestion['pledge']> = { tally, id: id.slice(0, 80) };
     const t = await this.o.panel?.pledgeTerms?.(tally, pledge.id);
     if (!t || t.error) throw new Error(String(t?.error ?? 'no such pledge'));
+    if (t.opened_by?.name) pledge.openedBy = { name: String(t.opened_by.name).slice(0, 80), house: t.opened_by.house === true };
     if (t.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year), ...(Array.isArray(t.circle.kinds) ? { kinds: (t.circle.kinds as unknown[]).map(String) } : {}) };
     if (t.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
     if (t.money) pledge.money = { amount: Number(t.money.contribution.amount), currency: String(t.money.contribution.currency), payee: String(t.money.payee.name ?? t.money.payee.webId), threshold: Number(t.threshold), deadline: String(t.deadline), count: Number(t.count), ...(t.money.bond ? { bond: Number(t.money.bond.amount) } : {}), text: String(t.text) };

@@ -16,6 +16,8 @@ interface Tally {
   threshold: number;
   deadline: number;
   opener: string;
+  /** The verified card that opened it, shown to all (20 Nov: a pledge's text said "hosted by Priya Nair" and nothing said who opened it). */
+  openedBy?: { name: string; url: string; house: boolean };
   /** gathering: still finding its quorum (SPEC §11.4b); nobody can sign until it opens. */
   state: 'gathering' | 'open' | 'triggered' | 'lapsed';
   /** When it filled: a listed pledge stays in tally.list for a day after, so agents see what bound. */
@@ -178,7 +180,9 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const saveClearings = () => writeFile(clearingsFile, JSON.stringify([...clearings.values()].filter((x) => x.state === 'proposed' || Date.now() - x.at < 30 * 86_400_000))).catch(() => {});
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
   const counted = (t: Tally) => (t.blind ? t.blind.passes.length : t.signers.length);
-  const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state, ...(t.peopleOnly ? { people_only: true } : {}),
+  const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state,
+    // Who opened it, never who signed: a host named in the text is the opener's own claim.
+    ...(t.openedBy ? { opened_by: { name: t.openedBy.name, domain: t.opener, url: t.openedBy.url, house: t.openedBy.house } } : {}), ...(t.peopleOnly ? { people_only: true } : {}),
     // A blind pledge binds only when enough signers have revealed themselves, not just when enough passes are in (run 21:
     // "make pledges actually bind"): an anonymous signature is cheap until its signer stands by it.
     ...(t.blind ? { blind: true, issuer: t.blind.issuer, revealed: t.blind.passes.filter((x) => x.revealed).length, bound: t.blind.passes.filter((x) => x.revealed).length >= t.threshold } : {}),
@@ -1093,7 +1097,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         if (wrong) return { kind: 'refused', problems: [`money.bond: pay the bond held for this pledge first (hold: true, pledge: { tally: ${s.webId}, id: "${id}", bond: true, until }, agreement ${pledgeAgreement(s.webId, id, true)}), then open it with { bond: { hold } }: ${wrong}`] };
         bond = { hold: String(r.hold), amount: Math.round(Number(r.amount) * 100) };
       }
-      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
+      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, openedBy: { name: String(card.name ?? '').slice(0, 80), url: card.supportedInterfaces?.[0]?.url ?? '', house: profile.role === 'house' }, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
         ...(money ? { money: { contribution: cents, currency, payee: { webId: String(money.payee!.webId), url: String(money.payee!.url), ...(typeof money.payee!.name === 'string' ? { name: money.payee!.name.slice(0, 80) } : {}) }, ...(bond ? { bond } : {}), counted: [] } } : {}) };
       if (p.circle !== undefined) {
         const c = p.circle as { promise?: unknown; times?: unknown; kinds?: unknown; tags?: unknown; limit?: unknown; sisters?: unknown };

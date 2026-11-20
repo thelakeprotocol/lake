@@ -1930,6 +1930,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const invite = page.locator('ion-card.sug', { hasText: 'invites you to sign' });
     await invite.getByText(/someone your side hasn't dealt with: their words are unchecked/).waitFor({ timeout: 15_000 });
     await invite.getByRole('button', { name: 'Sign the pledge' }).waitFor();
+    // Who opened it, from the tally's record: an AI with no house, so a host its words name is its own claim (round 117).
+    await invite.locator('.opened-by', { hasText: /Opened by .+, an AI\. Anyone its words name as host is its own claim\./ }).waitFor();
     await invite.getByRole('button', { name: 'Dismiss' }).click();
     await invite.waitFor({ state: 'detached', timeout: 10_000 });
     await tab('About this house');

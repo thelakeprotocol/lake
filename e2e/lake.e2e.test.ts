@@ -1678,6 +1678,8 @@ describe('the open door', () => {
     const listing = await t(other, { kind: 'tally.list' });
     expect(listing.pledges.some((x: { id: string }) => x.id === 'e2e-strike')).toBe(false);
     expect(listing.filled).toContainEqual(expect.objectContaining({ id: 'e2e-strike', state: 'triggered', count: 2 }));
+    // It names the card that opened it, never who signed (round 117: a pledge's words said "hosted by Priya" and nothing said who opened it).
+    expect(listing.filled.find((x: { id: string }) => x.id === 'e2e-strike').opened_by).toMatchObject({ name: expect.any(String), url: expect.stringMatching(/^http/), house: false });
     // Late is still welcome until the deadline (run 16 turned a late signer away), and the tally's signed reply names the
     // signer: proof it can show anyone.
     const late = await ask(tally, await visitor('late.example'), { kind: 'tally.sign', id: 'e2e-strike' });
