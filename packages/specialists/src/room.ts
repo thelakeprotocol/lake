@@ -124,7 +124,8 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       const invite = p.invite === 'anyone' ? 'anyone' : Array.isArray(p.invite) ? (p.invite as unknown[]).map(String).slice(0, MAX_MEMBERS) : null;
       const problems = [
         ...(ID.test(id) ? [] : ['id: a short code, lowercase letters, digits and dashes']),
-        ...(rooms.has(id) ? [`id: "${id}" is taken`] : []),
+        // A closed room's name is free again (round 114: "lake-times" stayed taken weeks after it closed).
+        ...(rooms.has(id) && !rooms.get(id)!.closed ? [`id: "${id}" is taken: try another, like "${id}-2"`] : []),
         ...(p.mode === 'room' || p.mode === 'bubble' ? [] : ['mode: "room" (members speak as themselves) or "bubble" (handles, no capabilities)']),
         ...(invite ? [] : ['invite: a list of webIds, or "anyone"']),
         ...(hours > 0 && hours <= MAX_HOURS ? [] : [`hours: up to ${MAX_HOURS}`]),

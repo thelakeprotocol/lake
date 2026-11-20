@@ -1562,7 +1562,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   };
   const findOrder = (id: string, role: Order['role']) => {
     const hits = [...orders.values()].filter((x) => x.role === role && (x.cart === id || x.cart.startsWith(id)));
-    if (hits.length !== 1) throw new Error(hits.length ? 'that matches several carts; give more of the id' : `no cart of yours with that id, as ${role} (action: "orders" lists them)`);
+    if (hits.length !== 1) throw new Error(hits.length ? 'that matches several carts; give more of the id' : role === 'seller' && [...received].some((x) => x.message.kind === 'trade.split.ask' && String(x.message.cart).startsWith(id)) ? 'that is a team cart you are a member of: its lead delivers it. Send your part to the lead by note (lake_ask), and they include it' : `no cart of yours with that id, as ${role} (action: "orders" lists them)`);
     return hits[0]!;
   };
 
@@ -1623,7 +1623,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           mine.consent = await me.consentToShare({ cart: id, splitHash: hash, amount: mine.amount, currency });
           teams.set(id, t);
           const asked = await Promise.all(shares.filter((x) => x !== mine).map((x) => me.ask(x.url, { kind: 'trade.split.ask', cart: id, split_hash: hash, amount: x.amount, currency, total, for: t.items.map((i) => i.label).join(', '), buyer: t.buyer.name, team: shares.map((y) => ({ name: y.name, amount: y.amount })) }).then(() => x.name, (e: Error) => `${x.name} (not reached: ${e.message})`)));
-          return json({ team_cart: id, total: { currency, value: total }, asked, next: 'each member agrees with lake_sell { action: "consent", cart }; when the last does, the cart goes to the buyer by itself, and you hear of it in lake_inbox' });
+          return json({ team_cart: id, total: { currency, value: total }, asked, next: `you are in already (you opened it); still to agree: ${asked.length ? asked.join(', ') : 'nobody'}, each with lake_sell { action: "consent", cart }. When the last does, the cart goes to the buyer by itself, and you hear of it in lake_inbox. You deliver the whole cart, your members' parts included: ask them to send you theirs by note` });
         }
         if (a.action === 'consent') {
           const ask = [...received].reverse().find((x) => x.message.kind === 'trade.split.ask' && x.message.cart === a.cart);
@@ -1631,7 +1631,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const q = ask.message as Record<string, any>;
           const consent = await me.consentToShare({ cart: String(q.cart), splitHash: String(q.split_hash), amount: Number(q.amount), currency: String(q.currency) });
           const reply = await me.ask(String(ask.from.url), { kind: 'trade.split.consent', cart: q.cart, consent });
-          return json({ agreed: { cart: q.cart, share: `${q.currency} ${q.amount}` }, lead_said: reply, note: 'your share is paid to you when the buyer accepts the work; you get a receipt of your own' });
+          return json({ agreed: { cart: q.cart, share: `${q.currency} ${q.amount}` }, lead_said: reply, note: 'your share is paid to you when the buyer accepts the work; you get a receipt of your own. The lead delivers the whole cart: send your part to the lead (lake_ask a note with its text), not to the buyer' });
         }
         if (a.action === 'withdraw') {
           const x = findOrder(a.cart ?? '', 'seller');
@@ -2594,7 +2594,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (r.kind !== 'count.opened') throw new Error(`the Leader would not open it: ${((r.problems as string[] | undefined) ?? [String(r.kind)]).join('; ')}`);
           countsOpened.set(a.id, { leader: { url: leader.url, domain: leader.domain }, helper: { url: helper.url, domain: helper.domain }, options: a.options });
           const line = `lake_count { action: "answer", id: "${a.id}", options: ${JSON.stringify(a.options)}, leader: "${leader.url}", helper: "${helper.url}", choice: "<one of the options>" }`;
-          return json({ kind: 'count.opened', id: a.id, options: a.options, deadline, leader: leader.url, helper: helper.url, tell_each_voter: line, then: 'when all have answered (or at the deadline): lake_count { action: "close", id, voters: [their webIds or urls] }' });
+          return json({ kind: 'count.opened', id: a.id, options: a.options, deadline, leader: leader.url, helper: helper.url, tell_each_voter: line, then: 'a total needs at least 3 answers, and each voter answers with exactly these options (tell them the options). when all have answered (or at the deadline): lake_count { action: "close", id, voters: [their webIds or urls] }' });
         }
         if (a.action === 'answer') {
           // Free or busy, worked out by the human's house from their free hours: the model passes the slot, never the bit.
@@ -2678,7 +2678,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // Waited for here when asked (run 85: an agent asked about fifty times for one round).
         const due = roundTimeMs(a.round) - Date.now();
         if (due > 0 && a.wait_seconds && due <= a.wait_seconds * 1000) await new Promise((ok) => setTimeout(ok, due + 1500));
-        if (roundTimeMs(a.round) > Date.now()) return json({ round: a.round, at: new Date(roundTimeMs(a.round)).toISOString(), out: false, wait_seconds: Math.ceil((roundTimeMs(a.round) - Date.now()) / 1000), next: 'call again with wait_seconds (up to 60) and it answers when the round is out' });
+        if (roundTimeMs(a.round) > Date.now()) return json({ round: a.round, at: new Date(roundTimeMs(a.round)).toISOString(), out: false, wait_seconds: Math.ceil((roundTimeMs(a.round) - Date.now()) / 1000), next: `the round is ${Math.ceil((roundTimeMs(a.round) - Date.now()) / 1000)} s away: a call with wait_seconds waits only when the round is that close or closer (up to 60), and answers at once otherwise` });
         const beacon = await getBeacon(a.round);
         if (!a.options || a.label === undefined) return json({ round: a.round, beacon, note: a.options ? 'label is missing: the name for this draw that everyone agreed on before the round, e.g. "coinflip:<game>". Give it with options to draw.' : 'Give options (what to draw from) and label (the name for this draw that everyone agreed on, e.g. "coinflip:<game>") to draw from it.' });
         const index = pick(beacon.randomness, a.label, a.options.length);

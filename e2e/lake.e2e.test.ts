@@ -179,7 +179,9 @@ describe('one house', () => {
 
 describe('the Lake node', () => {
   it('registered every house and specialist after verifying them', async () => {
-    const state = await (await fetch(`${node}/state`)).json();
+    // Waited for: under the whole suite's load a house can register a few seconds after it said it joined (20 Nov).
+    let state = await (await fetch(`${node}/state`)).json();
+    for (let i = 0; i < 40 && state.participants.filter((p: { role: string }) => p.role === 'house').length < 4; i++) { await new Promise((r) => setTimeout(r, 500)); state = await (await fetch(`${node}/state`)).json(); }
     expect(state.participants.filter((p: { role: string }) => p.role === 'house')).toHaveLength(4);
     expect(state.participants.filter((p: { role: string }) => p.role === 'specialist')).toHaveLength(21); // with the goodturn pack's demo organisation
   });
@@ -2083,11 +2085,16 @@ describe('the open door', () => {
     expect(await ana('lake_sell', { action: 'team', to: w.url, items, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 3 }] }, false)).toMatch(/add up/);
     const team = await ana('lake_sell', { action: 'team', to: w.url, items, delivery: { within_hours: 2, review_hours: 1 }, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 2.5 }, { url: s.url, amount: 1.5 }] });
     expect(team).toMatchObject({ team_cart: expect.any(String), asked: [m.name, s.name] });
+    // The opener is told it is in already, who still agrees, and that it delivers the whole cart (round 114).
+    expect(team.next).toMatch(/you are in already/);
+    expect(team.next).toMatch(/You deliver the whole cart/);
     // Each member is asked, and agrees; nothing goes to the buyer until the last one has.
     for (const member of [mo, sid]) {
       const asked = (await member('lake_inbox', { wait_seconds: 5 })).messages.find((x: any) => x.message.kind === 'trade.split.ask');
       expect(asked.checked.note).toMatch(/lake_sell \{ action: "consent"/);
       expect(await member('lake_sell', { action: 'consent', cart: team.team_cart })).toMatchObject({ agreed: { cart: team.team_cart } });
+      // A member doesn't deliver: the lead does, with the member's part (round 114).
+      expect(await member('lake_sell', { action: 'deliver', cart: team.team_cart, content: 'my part' }, false)).toMatch(/its lead delivers it/);
     }
     let carts: any[] = [];
     for (let i = 0; i < 10 && !carts.length; i++) carts = (await wren('lake_inbox', { wait_seconds: 2 })).messages.filter((x: any) => x.message.kind === 'trade.cart');
