@@ -1462,17 +1462,23 @@ function panelFor(x: {
     offerPrice: (id) => x.keeper().market.priceOf(id),
     async exportAll() {
       // Everything in the pod, so the owner can move house. Includes the wallet: it is theirs.
+      // Listed folder by folder, read 32 at a time and from disk where the pod runs here (20 Nov: one file at a time over
+      // HTTP, the demo house's export ran past a minute and Download everything never finished).
       const files: Record<string, string> = {};
+      const paths: string[] = [];
       const walk = async (path: string) => {
         for (const child of await listContainer(owner, path)) {
           if (child.endsWith('/')) await walk(child);
-          else {
-            const r = await owner.fetch(owner.podRoot + child);
-            if (r.ok) files[child] = await r.text();
-          }
+          else paths.push(child);
         }
       };
       await walk('');
+      for (let i = 0; i < paths.length; i += 32) {
+        await Promise.all(paths.slice(i, i + 32).map(async (child) => {
+          const t = await x.filed.read(child).catch(() => null);
+          if (t !== null) files[child] = t;
+        }));
+      }
       return { lake: '0.1', exportedAt: new Date().toISOString(), webId: owner.webId, files };
     },
   };

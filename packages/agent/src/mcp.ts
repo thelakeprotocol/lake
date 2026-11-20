@@ -2148,7 +2148,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const r = (await (await agent()).ask(found.url, { kind: 'note', text: a.about, purpose: a.purpose, ...(a.from ? { as: a.from } : {}), ...(reveal && speaksFor ? { speaks_for: speaksFor } : {}), ...(a.pledge ? { pledge: a.pledge } : {}) })) as Record<string, any>;
         if (r.kind !== 'noted') return json({ kind: r.kind, to: found.name, reply: r });
         if (typeof r.note === 'string') pingsOut.set(r.note, { to: found.handle, house: found.url, about: a.about.slice(0, 80), sent: new Date().toISOString() });
-        return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url,
+        return json({ kind: 'pinged', to: found.name, handle: found.handle, note: r.note, ...(found.lake ? { lake: found.lake } : {}), house: found.url, ...(a.reveal_house && !speaksFor ? { house_word: 'not attached: you hold no key to your human\'s house (lake_house_connect), so it shows as from you, unchecked. Don\'t tell your human it was verifiable' } : {}),
           next: `Tell your human, briefly: sent to ${found.handle}, signed from them; they'll see it on their phone. No ids or addresses. Their answer comes to lake_inbox (kind note.reply), even in a later conversation: check it when your human asks. Until then lake_inbox lists it under waiting_on, with how to see where it stands.` });
       } catch (e) {
         return fail(e);

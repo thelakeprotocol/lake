@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -200,6 +200,16 @@ describe('the owner\'s app on a big house, at phone size', () => {
     for (const kind of ['panel.access', 'panel.consents']) expect(JSON.stringify(await asAi({ kind })).length, kind).toBeLessThan(200_000);
     // An AI that may read neither gets what waits, and nothing of the yeses or money.
     expect(errors).toEqual([]);
+  }, 120_000);
+
+  it('downloads everything within seconds on a big house (20 Nov: one file at a time, it ran past a minute and never finished)', async () => {
+    await page.evaluate(() => { location.hash = '#move'; });
+    await settle(page, 10_000);
+    const t = Date.now();
+    const [download] = await Promise.all([page.waitForEvent('download', { timeout: 30_000 }), page.locator('.ion-page:not(.ion-page-hidden)').last().getByRole('button', { name: 'Download everything' }).click()]);
+    expect(Date.now() - t).toBeLessThan(20_000);
+    const files = Object.keys(JSON.parse(await readFile((await download.path())!, 'utf8')).files);
+    expect(files.length).toBeGreaterThan(5000);
   }, 120_000);
 
   it('takes a yes back, then every yes, within seconds on a big house, and the page says so (round 85, a privacy-minded owner)', async () => {
