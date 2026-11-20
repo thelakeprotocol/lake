@@ -858,6 +858,12 @@ export class OwnerDesk {
     }
     const studies = events.filter((e) => e.kind === 'compute.done');
     if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')} today, as unreadable shares`, at: studies[0]!.at, to: '#mydata', tile: { big: String(studies.length), label: studies.length === 1 ? 'study answered' : 'studies answered', detail: 'today · nothing readable left' } });
+    // An agreement the other side moved today: who, and to what (round 120: Sam's house had Mia's cancel in a second, and
+    // his Today said nothing; he found it by looking at the agenda).
+    for (const a of this.agenda.filter((x) => x.agreement?.changed.by === 'them' && after(x.agreement.changed.at))) {
+      const g = a.agreement!, verb = { agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'marked done', withdrawn: 'withdrew', proposed: 'proposed' }[g.status];
+      lines.push({ by: 'house', text: `${g.with.name} ${verb}: ${a.what}${a.when ? `, ${a.when}` : ''}. Both agendas show it ${g.status}`, at: g.changed.at, to: '#inbox' });
+    }
     const blocked = events.filter((e) => e.kind === 'attack.blocked');
     // What failed, in plain words, and that nothing was read; it opens Who has access, whose "blocked today" counts the same
     // (round 118: three people in a simulation asked what "weren't what they claimed" meant).
@@ -1666,7 +1672,12 @@ export class OwnerDesk {
   }
   private answerWebNote(id: string, text: string, by: string, final = true): { ok: true } | { error: string } {
     const w = this.webNotes.get(this.webNotes.get(id)?.thread ?? id);
-    if (!w) return { error: 'that note came from a Lake agent, not the web: answer it with lake_ask to the from.url in its house.news (this tool is for notes left over plain web)' };
+    // How to answer a Lake agent for its human, with the house's word attached when the human knows them (round 120: an AI
+    // sent its reply bare, and the other side rightly called it unproven).
+    if (!w) {
+      const n = this.notes.find((x) => x.id === id), known = !!n?.from.key && !!this.knownBy(n.from.key);
+      return { error: `that note came from a Lake agent, not the web: answer it with lake_ask { to: its from.url, message: { kind: "note", text }${known ? ', reveal_house: true }: your human knows them, and reveal_house carries the house\'s word that you speak for it; without it they see an unproven name' : ' } (add reveal_house: true for your human to show the house\'s word that you speak for it)'} (this tool is for notes left over plain web)` };
+    }
     const t = text.trim().slice(0, 1000);
     if (!t) return { error: 'text: the answer, up to 1000 characters' };
     w.answers = [...(w.answers ?? []), { text: t, at: new Date().toISOString(), by, final }].slice(-20);
@@ -2194,7 +2205,7 @@ export class OwnerDesk {
             const item: AgendaItem = { id: randomBytes(6).toString('hex'), what, when: start ? this.whenWords(start.toISOString()) : `by ${this.whenWords(due!.toISOString())}`, ...(start ? { start: start.toISOString(), ...(minutes ? { minutes } : {}) } : {}), ...(due ? { due: due.toISOString() } : {}), ...(q.where ? { where: String(q.where).slice(0, 120) } : {}), with: other.name, agreement: { id, with: other, role: 'proposed', status: 'proposed', changed: { by: 'you', at: new Date().toISOString() } }, by: assistant.label, at: new Date().toISOString() };
             this.agenda = [...this.agenda, item].slice(-100);
             await this.saveAgenda();
-            return void res.json({ ok: true, id: item.id, agreement: id, status: `proposed: it waits for ${other.name}'s own tap on their phone; you hear (house.news agreement.agreed or declined). Never say it is agreed before that` });
+            return void res.json({ ok: true, id: item.id, agreement: id, status: `proposed: it waits for ${other.name}'s own tap on their phone. Your human has nothing to tap: their Today lists it under Coming up as "Waiting for ${other.name}". Never say a card is waiting for them, and never say it is agreed before house.news agreement.agreed` });
           }
           if (q.remove) {
             // A held time taken back: the one who was told about it is told it is off.

@@ -79,7 +79,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
         h('div', { class: 'tile-top' }, h('ion-icon', { name: BY[l.by].icon }), h('span', { class: 'tile-time' }, time(l.at))),
         h('b', { class: 'tile-big' }, l.tile!.big), h('span', { class: 'tile-label' }, l.tile!.label),
         l.tile!.detail ? h('span', { class: 'tile-detail' }, l.tile!.detail) : null))) : null,
-      ...(lines.some((l) => !l.tile) ? lines.filter((l) => !l.tile).map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => push(l.to), cls: 'handled-row',
+      ...(lines.some((l) => !l.tile) ? lines.filter((l) => !l.tile).map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => (l.to === '#inbox' ? document.querySelector('ion-list.coming-up')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) : push(l.to)), cls: 'handled-row',
         below: l.undo || l.person ? h('div', { class: 'handled-acts' },
           l.undo ? h(Btn, { label: 'Undo', size: 'small', fill: 'outline', run: () => call({ kind: 'panel.duty.undo', entry: l.undo }), done: 'Undone' }) : null,
           // Keeps that person for the owner: their messages wait for them, and the AI on duty leaves them alone.
@@ -88,7 +88,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     // Notes that need nothing from you: one short line each, the newest few; the whole note opens in a sheet (12 Nov: a
     // wall of long notes drowned the few that need you).
     notes.length ? h(Notes, { key: 'notes', notes }) : null,
-    v.agenda?.length ? h(Section, { title: 'Coming up', key: 'ag' }, ...v.agenda.map((a) => h(AgendaRow, { key: a.id, a }))) : null);
+    v.agenda?.length ? h(Section, { title: 'Coming up', key: 'ag', cls: 'coming-up' }, ...v.agenda.map((a) => h(AgendaRow, { key: a.id, a }))) : null);
 }
 
 /** A data request your rules left to you: what it wants, what your rules suggest, the suggested answer first. */

@@ -1064,6 +1064,8 @@ describe('the owner', () => {
     // Proposed: waiting for the other owner's tap, never agreed by the AI.
     const proposed = await asAi({ kind: 'assistant.agenda', house: `${houses.research}/a2a`, what: 'Babysitting Leo and Ava', start: friday, minutes: 240 });
     expect(proposed).toMatchObject({ ok: true, agreement: expect.stringMatching(/^ag-[0-9a-f]{8}$/), status: expect.stringContaining('waits for') });
+    // The AI is told its own human has nothing to tap (run 97: an AI promised its human a card that didn't exist).
+    expect(proposed.status).toContain('Your human has nothing to tap');
     const mine = () => ownerCall({ kind: 'list' }).then((l) => l.agenda.find((a: { id: string }) => a.id === proposed.id));
     expect(await mine()).toMatchObject({ agreement: { status: 'proposed', role: 'proposed' } });
     // The other house's phone: a card with Yes, agreed. Their tap puts it in their agenda and tells this house.
@@ -1076,6 +1078,8 @@ describe('the owner', () => {
     // They cancel from their phone: this house's copy follows, cancelled by them.
     expect(await researchCall({ kind: 'panel.agreement.set', id: theirs.id, status: 'cancelled' })).toEqual({ ok: true, status: 'cancelled' });
     expect(await mine()).toMatchObject({ agreement: { status: 'cancelled', changed: { by: 'them' } } });
+    // And this owner's Today says who cancelled what (round 120: the cancel showed only on the agenda).
+    expect((await ownerCall({ kind: 'panel.today', tz_offset: 0 })).lines.map((l: { text: string }) => l.text)).toContainEqual(expect.stringMatching(/^.+ cancelled: Babysitting Leo and Ava.*\. Both agendas show it cancelled$/));
     // Nothing moves an ended agreement again.
     expect(await ownerCall({ kind: 'panel.agreement.set', id: proposed.id, status: 'done' })).toMatchObject({ error: expect.stringContaining('cancelled') });
     // A promise with a due date, and a no.

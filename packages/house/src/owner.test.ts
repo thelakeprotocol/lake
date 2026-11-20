@@ -847,6 +847,25 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('tells an AI how to answer a Lake agent\'s note with the house\'s word, when its human knows them (round 120)', async () => {
+    const h = await house();
+    const id = h.desk.addNote({ from: from('sam'), text: 'Can you sit Friday?' })!;
+    const answer = () => (h.desk as unknown as { answerWebNote: (id: string, text: string, by: string) => { error?: string } }).answerWebNote(id, 'Yes', 'ai');
+    expect(answer().error).toContain('add reveal_house: true');
+    (h.desk as unknown as { contacts: Map<string, { name: string; webId: string; at: string }> }).contacts.set(from('sam').key, { name: 'Sam', webId: from('sam').webId, at: new Date().toISOString() });
+    expect(answer().error).toContain('reveal_house: true }: your human knows them');
+    h.close();
+  });
+
+  it('puts the other side\'s move on an agreement on Today: who, and to what (round 120)', async () => {
+    const h = await house();
+    const at = new Date().toISOString();
+    h.desk.agenda = [{ id: 'a1', what: 'Babysitting Leo and Ava', when: 'Fri 6:00 pm', start: at, by: 'Nova', at, agreement: { id: 'ag-0000abcd', with: { url: 'https://sam.example/a2a', key: 'k', name: 'Sam' }, role: 'proposed', status: 'cancelled', changed: { by: 'them', at } } } as never];
+    const lines = (await h.desk.today(0)).lines.map((l: { text: string }) => l.text);
+    expect(lines).toContain('Sam cancelled: Babysitting Leo and Ava, Fri 6:00 pm. Both agendas show it cancelled');
+    h.close();
+  });
+
   it('says in plain words what the house turned away, that nothing was read, and opens Who has access (round 118)', async () => {
     const at = new Date().toISOString();
     const blocked = (why: string) => ({ at, kind: 'attack.blocked', subject: 'evil.example', data: { why, claimed: 'evil.example' } });
