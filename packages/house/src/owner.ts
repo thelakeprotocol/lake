@@ -861,8 +861,8 @@ export class OwnerDesk {
     const blocked = events.filter((e) => e.kind === 'attack.blocked');
     // What failed, in plain words, and that nothing was read; it opens Who has access, whose "blocked today" counts the same
     // (round 118: three people in a simulation asked what "weren't what they claimed" meant).
-    const whys = [...new Set(blocked.map((e) => BLOCKED_WHY[String(e.data?.why)] ?? 'it failed its checks'))];
-    if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that failed their checks (${whys.slice(0, 3).join('; ')}${whys.length > 3 ? '; …' : ''}). Nothing was read or given out`, at: blocked[0]!.at, to: '#access', tile: { big: String(blocked.length), label: 'failed their checks', detail: 'nothing was read' } });
+    const whys = [...new Set(blocked.map((e) => BLOCKED_WHY[String(e.data?.why)] ?? 'it didn\'t pass a check'))];
+    if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that didn't pass the house's checks (${whys.slice(0, 3).join('; ')}${whys.length > 3 ? '; …' : ''}). Nothing was read or given out`, at: blocked[0]!.at, to: '#access', tile: { big: String(blocked.length), label: 'turned away', detail: 'nothing was read' } });
     // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
     for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
       const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';

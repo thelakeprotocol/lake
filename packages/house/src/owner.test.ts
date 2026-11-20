@@ -852,7 +852,7 @@ describe('what an attacker tried (round 16)', () => {
     const blocked = (why: string) => ({ at, kind: 'attack.blocked', subject: 'evil.example', data: { why, claimed: 'evil.example' } });
     const h = await house({ panel: { activity: () => [blocked('bad-signature'), blocked('replayed'), blocked('bad-signature')], money: async () => ({}) } });
     const line = (await h.desk.today(0)).lines.find((l: { by: string; text: string }) => l.by === 'house' && l.text.startsWith('Turned away'));
-    expect(line).toMatchObject({ text: 'Turned away 3 messages that failed their checks (its signature didn\'t match the name on it; it was an old message sent again). Nothing was read or given out', to: '#access', tile: { big: '3', label: 'failed their checks' } });
+    expect(line).toMatchObject({ text: 'Turned away 3 messages that didn\'t pass the house\'s checks (its signature didn\'t match the name on it; it was an old message sent again). Nothing was read or given out', to: '#access', tile: { big: '3', label: 'turned away' } });
     h.close();
   });
 
