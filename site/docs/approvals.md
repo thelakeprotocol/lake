@@ -79,7 +79,7 @@ Under **My AI**, tap **Give my AI a key** and paste the message it shows to your
 
 When you decide something it would want to know (accept an offer, answer a request, give or stop an allowance), your house tells it. With your house's badge, your AI can sell for you, and what it earns is paid to your house.
 
-**Errands.** When your AI asks someone something for you and waits for the answer, your house keeps track of it. If the answer comes while your AI is away, you get a notification and a question: **Yes, go ahead** (for a bill, **Yes, I'll have my AI pay**), **No thanks**, **Ask my AI later**, and **Block** if the answer came from someone your AI never asked. An errand nobody answers lapses after a week.
+**Errands.** When your AI asks someone something for you and waits for the answer, your house keeps track of it. Until they answer it shows on Today under **Waiting on others**, with who was asked and when; **Stop waiting** (on its sheet) ends it, and they're told it's off. If the answer comes while your AI is away, you get a notification and a question: **Yes, go ahead** (for a bill, **Yes, I'll have my AI pay**), **No thanks**, **Ask my AI later**, and **Block** if the answer came from someone your AI never asked. An errand nobody answers lapses after a week.
 
 ## AI on duty
 

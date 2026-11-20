@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { call, must, useBump, useHouse } from './api';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { adviceOf, doorOf, dutyStrip, duration, grantFor, time, when, money$, needsDecision, nice, plural, sameAsks, shortName, signDraft, signPledge, tableLine, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
+import { adviceOf, doorOf, dutyStrip, duration, grantFor, time, when, money$, needsDecision, waitingOn, ago, nice, plural, sameAsks, shortName, signDraft, signPledge, tableLine, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
 import { ReadsToggles } from './ai';
 import { WantRow, WelcomeCard, blockAsk, wantNeedsYou } from './chats';
 import { push } from './nav';
@@ -35,7 +35,10 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const groups = sameAsks(v.requests);
   // What you told an AI to do shows its own card until you've seen how it ended; the note it was about waits under it.
   const tasks = taskCards(v), tasked = new Set(tasks.map((t) => t.suggestion));
-  const decide = v.suggestions.filter((x) => needsDecision(x) && !tasked.has(x.id)), notes = v.suggestions.filter((x) => !needsDecision(x) && !tasked.has(x.id));
+  const decide = v.suggestions.filter((x) => needsDecision(x) && !tasked.has(x.id)), notes = v.suggestions.filter((x) => !needsDecision(x) && !waitingOn(x) && !tasked.has(x.id));
+  // What your AI asked someone and waits on: apart, as waiting (round 119: titled like an answer, it drew seven taps, and
+  // Dismiss quietly told the other side no).
+  const waits = v.suggestions.filter(waitingOn);
   const waiting = v.assistants.filter((a) => a.waiting);
   // What you're looking for shows here while it needs you: an offer to say yes to, or a parcel to say arrived (the rest is under Money).
   const wants = (v.wants ?? []).filter(wantNeedsYou);
@@ -58,6 +61,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     ...groups.map((all) => h(RequestCard, { key: all[0]!.id, all })),
     ...tasks.map((t) => h(TaskCard, { key: `t-${t.id}`, t, v })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
+    waits.length ? h(Waits, { key: 'waits', waits }) : null,
     wants.length ? h(Section, { title: 'Looking for', key: 'wants', cls: 'chat-list wants' }, ...wants.map((x) => h(WantRow, { key: x.want.id, w: x }))) : null,
     // What you have to sell or give away, on your house while it's up (round 109); a note about one lands in People.
     v.offerings?.length ? h(Section, { title: 'Offering', key: 'offerings', cls: 'offerings' }, ...v.offerings.map((g) => h('ion-item', { key: g.id, lines: 'full', class: 'lake-row offering-row' },
@@ -158,6 +162,17 @@ function AgendaRow({ a }: { a: AgendaItem }) {
     h('div', { slot: 'end' }, h(Btn, { fill: 'clear', color: 'medium', size: 'small', label: h('ion-icon', { name: 'close', slot: 'icon-only' }), label2: `Remove ${a.what}`, cls: 'agenda-remove', run: () => must({ kind: 'panel.agenda.remove', id: a.id }), done: 'Removed' })));
 }
 
+function Waits({ waits }: { waits: Note[] }) {
+  const [open, setOpen] = useState<Note | null>(null);
+  return h('div', {},
+    h(Section, { title: 'Waiting on others', cls: 'waits' },
+      ...waits.map((x) => h('ion-item', { key: x.id, button: true, detail: false, lines: 'full', class: 'lake-row wait-row', onClick: () => setOpen(x) },
+        h('div', { slot: 'start', class: 'row-icon tint-amber' }, h('ion-icon', { name: 'hourglass-outline' })),
+        h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, x.errand!.what, ' ', h(Pill, { text: 'Waiting', tone: 'amber' })),
+          h('p', {}, `${shortName(x.from)} asked ${x.errand!.with?.name ? shortName(x.errand!.with.name) : 'them'} ${ago(x.at)}. Nothing to do until they answer.`))))),
+    h(Sheet, { open: !!open, onClose: () => setOpen(null), title: open ? 'Waiting' : undefined }, open ? h(SuggestionCard, { x: open, onDone: () => setOpen(null) }) : null));
+}
+
 function Notes({ notes }: { notes: Note[] }) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState<Note | null>(null);
@@ -189,7 +204,8 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
-  const kicker = x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house asks` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const waiter = x.errand?.with?.name ? shortName(x.errand.with.name) : 'an answer';
+  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house asks` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
   const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;
@@ -222,7 +238,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   if (x.pledge && !x.pledge.quorum) acts.push(h(Btn, { key: 'pl', label: x.pledge.money ? `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)} and sign` : 'Sign the pledge', run: async () => { await signPledge(x.pledge!.tally, x.pledge!.id); await dismiss(); }, ...(x.pledge.money ? { ask: { header: `Put in ${money$(x.pledge.money.amount, x.pledge.money.currency)}?`, sub: `Held until ${new Date(x.pledge.money.deadline).toLocaleDateString()}: paid on only if ${x.pledge.money.threshold} sign; otherwise back to you.`, button: 'Put in and sign', destructive: false } } : {}) }));
   if (gone) return null;
   return h('ion-card', { class: 'lake-card sug' }, h('ion-card-content', {},
-    h('div', { class: 'card-kicker' }, h('ion-icon', { name: x.booking ? 'calendar-outline' : x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
+    h('div', { class: 'card-kicker' }, h('ion-icon', { name: waitingOn(x) ? 'hourglass-outline' : x.booking ? 'calendar-outline' : x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
     x.invitedBy ? h('p', { class: `private-line${x.invitedBy.known ? '' : ' warn-text'}` }, h('ion-icon', { name: x.invitedBy.known ? 'person-outline' : 'alert-circle-outline' }), x.invitedBy.known ? ` From ${x.invitedBy.name}, someone your side knows. The terms below are the tally's own.` : ` From ${x.invitedBy.name}, someone your side hasn't dealt with: their words are unchecked. The terms below are the tally's own.`) : null,
     // Who opened it, from the tally's record: a host named in the pledge's words is only the opener's claim (round 117).
     x.pledge?.openedBy ? h('p', { class: 'private-line opened-by' }, h('ion-icon', { name: x.pledge.openedBy.house ? 'home-outline' : 'sparkles-outline' }), x.pledge.openedBy.house ? ` Opened by ${/ \(house\)$/.test(x.pledge.openedBy.name) ? `${x.pledge.openedBy.name.replace(/ \(house\)$/, '')}'s house` : x.pledge.openedBy.name}.` : ` Opened by ${shortName(x.pledge.openedBy.name)}, an AI. Anyone its words name as host is its own claim.`) : null,
@@ -231,6 +247,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
       h('p', { class: 'muted-line', key: 'ht' }, `Your AI pencilled this in. ${x.booking.with} was told you'll confirm it yourself.`)]
       : h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
     !x.booking?.what && !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
+    waitingOn(x) ? h('p', { class: 'muted-line' }, `${shortName(x.from)} asked ${x.errand?.with?.name ? shortName(x.errand.with.name) : 'them'} ${ago(x.at)}. When they answer, it shows here; until ${new Date(x.errand!.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}.`) : null,
     x.matchOut ? h('div', { class: 'spec-chips' }, ...x.matchOut.points.map((pt) => h('span', { key: pt, class: `field-tag${x.matchOut!.matched.includes(pt) ? ' match-yes' : ' match-no'}` }, x.matchOut!.matched.includes(pt) ? pt : `${pt}: not said`))) : null,
     x.matchOut?.revealed ? [h('p', { class: 'offer-note', key: 'mr' }, `You both said yes${x.matchOut.revealedName ? `: ${x.matchOut.revealedName}` : ''}.`), x.matchOut.revealed !== 'yes' ? h('ion-button', { key: 'mh', size: 'small', shape: 'round', onClick: () => push(`#note=${encodeURIComponent(x.matchOut!.revealed!)}`) }, 'Say hello') : null]
       : x.matchOut?.sent ? h('p', { class: 'muted-line' }, 'Sent. If they say yes, their name appears here.') : null,
@@ -255,7 +272,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
       x.note && x.mute && !block ? h(Btn, { label: 'Block', fill: 'clear', size: 'small', color: 'medium', run: async () => { await call({ kind: 'panel.note.mute', id: x.note }); await dismiss(); }, ask: blockAsk() }) : null,
       // A spinner while it goes, and the card leaves the moment the house has it (14 Nov: nothing showed, then a few seconds
       // later the card was simply gone); a failure says so, like any other button.
-      ownNo ? null : h(Btn, { label: 'Dismiss', fill: 'clear', size: 'small', color: 'medium', cls: 'foot-end', run: async () => { await must({ kind: 'panel.assistant.dismiss', id: x.id }); setGone(true); onDone?.(); } }))));
+      ownNo ? null : h(Btn, { label: waitingOn(x) ? 'Stop waiting' : 'Dismiss', fill: 'clear', size: 'small', color: 'medium', cls: 'foot-end', run: async () => { await must({ kind: 'panel.assistant.dismiss', id: x.id }); setGone(true); onDone?.(); }, ...(waitingOn(x) ? { ask: { header: `Stop waiting for ${waiter}?`, sub: `${shortName(x.from)} tells them it's off.`, button: 'Stop waiting' } } : {}) }))));
 }
 
 function Quorum({ x }: { x: Note }) {

@@ -1451,6 +1451,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // and the owner's pick goes back to the one who answered (5 Nov: the house holds the errand, not the chat).
     const errand = await one.call('lake_ask', { to: shopperUrl0, text: 'Could you lend my human a ladder on Saturday?', expect_reply: true, what: 'a ladder on Saturday' });
     expect(errand.errand).toMatchObject({ id: expect.any(String), until: expect.any(String) });
+    // Waiting, it shows as waiting on the one asked, apart from what needs the owner: no card, nothing to tap but the row
+    // (round 119: titled like an answer, it drew seven taps in a simulation, and Dismiss told the other side no).
+    await tab('Today');
+    const wait = page.locator('ion-list.waits ion-item', { hasText: 'a ladder on Saturday' });
+    await wait.getByText(/asked .+\. Nothing to do until they answer\./).waitFor({ timeout: 10_000 });
+    expect(await page.locator('ion-card.sug', { hasText: 'a ladder on Saturday' }).count()).toBe(0);
+    await wait.click();
+    await sheet().locator('.card-kicker', { hasText: /^Waiting for / }).waitFor();
+    await sheet().getByRole('button', { name: 'Stop waiting' }).waitFor();
+    await closeSheet();
     await shopperInbox();
     await page.waitForTimeout(3500);
     const answer = JSON.parse(((await shopper.callTool({ name: 'lake_ask', arguments: { to: me.url, kind: 'message', text: 'Yes, 9am, I will leave it by the gate.' } })).content as { text: string }[])[0]!.text);
@@ -1458,6 +1468,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('Today');
     const ladder = page.locator('ion-card.sug', { hasText: 'a ladder on Saturday' });
     await ladder.getByText('Yes, 9am, I will leave it by the gate.').waitFor({ timeout: 5000 });
+    await ladder.locator('.card-kicker', { hasText: / answered / }).waitFor();
     expect(await ladder.getByRole('button', { name: 'Block them' }).count()).toBe(0); // the one it asked is no stranger
     await ladder.getByRole('button', { name: 'No thanks' }).click();
     let declined: { message?: { text?: string } }[] = [];
