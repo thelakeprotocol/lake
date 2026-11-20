@@ -961,6 +961,8 @@ export class OwnerDesk {
     // The last owner's notes, mutes and agenda were theirs: the next one starts with none, and a new calendar address.
     this.notes = [];
     this.closedNotes.clear();
+    // Saved too (20 Nov: only memory was cleared, and a restart gave the next claimant the last owner's notes).
+    await this.saveNotes();
     this.webNotes.clear();
     await this.saveWebNotes();
     // Their share links too: they pointed at the last owner's wants (round 112).

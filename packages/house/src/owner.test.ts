@@ -112,10 +112,14 @@ describe('an assistant\'s questions to the owner', () => {
     again.close();
     const third = await leasedDesk(again.stored(), d.dir);
     expect(third.desk.suggestions.map((x) => x.id)).toEqual(['q1']);
+    third.desk.addNote({ from: { name: 'Vic', domain: 'vic.example', webId: 'https://vic.example/#a', checked: false }, text: 'the last owner\'s note' });
+    await new Promise((r) => setTimeout(r, 50));
     await third.post('/api', await signMessage({ kind: 'release' }, phone, { iss: 'http://h/me' }));
     third.close();
     const next = await leasedDesk(null, d.dir);
     expect(next.desk.suggestions).toEqual([]);
+    // Nor the last owner's notes, after a restart (20 Nov: release cleared them only in memory).
+    expect(next.desk.notes).toEqual([]);
     next.close();
   });
 });
