@@ -1688,7 +1688,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const c = await checkCart(cart, (await key).publicJwk);
           orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? ''), url: a.to, webId: buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
           const reply = await me.ask(a.to, { kind: 'trade.cart', cart });
-          return json({ sent: c.id, total: c.total, expires: c.expires, their_reply: reply });
+          return json({ sent: c.id, total: c.total, expires: c.expires, their_reply: reply, ...((reply as { code?: string }).code === 'not-a-buyer' ? { note: 'that address is a person\'s house, not a buyer\'s agent: it won\'t pay a cart. Its owner buys from their phone: answer a want of theirs (lake_want find), or leave them a note' } : {}) });
         }
         if (a.action === 'deliver' || a.action === 'revise') {
           const x = findOrder(a.cart ?? '', 'seller');

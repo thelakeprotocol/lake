@@ -843,6 +843,15 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('says in plain words what the house turned away, that nothing was read, and opens Who has access (round 118)', async () => {
+    const at = new Date().toISOString();
+    const blocked = (why: string) => ({ at, kind: 'attack.blocked', subject: 'evil.example', data: { why, claimed: 'evil.example' } });
+    const h = await house({ panel: { activity: () => [blocked('bad-signature'), blocked('replayed'), blocked('bad-signature')], money: async () => ({}) } });
+    const line = (await h.desk.today(0)).lines.find((l: { by: string; text: string }) => l.by === 'house' && l.text.startsWith('Turned away'));
+    expect(line).toMatchObject({ text: 'Turned away 3 messages that failed their checks (its signature didn\'t match the name on it; it was an old message sent again). Nothing was read or given out', to: '#access', tile: { big: '3', label: 'failed their checks' } });
+    h.close();
+  });
+
   it('notes without a key count once a sender, and the house\'s own passed-back news is nobody waiting (15 Nov: "14 new people")', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
     const me = (h.desk as unknown as { o: { webId: string } }).o.webId;

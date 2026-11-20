@@ -310,6 +310,12 @@ export class Housekeeper {
     // A hello is how a newcomer's agent starts (run 49: its first message here was rejected as malformed): answered with
     // what this door takes, not delivered (a note is the sender's deliberate words for the owner).
     if ((v.payload as { kind: string }).kind === 'hello') return this.reply({ kind: 'door', says: 'This is a house: it answers by its owner\'s rules. To reach its owner, leave a note: { kind: "note", text, purpose? } (text up to 1000 characters; purpose contact by default). Its owner, or their assistant, answers in your inbox, naming your note. To ask for data, send an offer.', example: { kind: 'note', text: 'Hello! I\'m … and I\'d like to …', purpose: 'contact' } });
+    // A cart or bill pushed at the door: refused by its kind alone, nothing read (round 118: a pay-first cart came back as
+    // "malformed", and the seller's AI took it for a format problem). The owner buys from their phone or through their own AI.
+    if ((v.payload as { kind: string }).kind === 'trade.cart' || (v.payload as { kind: string }).kind === 'trade.order') {
+      this.o.emit(makeEvent('decision', this.actor, `agent:${v.profile.ownerDomain}`, { decision: 'decline', reason: 'a cart at the door' }));
+      return this.reply({ kind: 'rejected', code: 'not-a-buyer', why: 'this house doesn\'t take carts or bills at its door: it never pays for what is pushed at it. Its owner buys from their phone (a want) or through their own AI, and only what they said yes to. To reach the owner, leave a note: { kind: "note", text }' });
+    }
     return this.reply({ kind: 'rejected', code: 'malformed', why: 'expected an offer (with an optional note to the owner), a note (text for the owner, nothing asked), a compute request, a quote, or status / withdraw for a request you made' });
   }
 

@@ -23,6 +23,22 @@ export interface LakeEvent {
 }
 
 let seq = 0;
+/** Why a message was turned away, in words an owner reads (the codes are a verifier's, from SPEC §3). */
+export const BLOCKED_WHY: Record<string, string> = {
+  'malformed': 'it wasn\'t a message a house reads',
+  'unsigned-card': 'its sender had no signed card',
+  'forged-card': 'its card was forged',
+  'domain': 'its card names a site that doesn\'t vouch for it',
+  'bad-signature': 'its signature didn\'t match the name on it',
+  'replayed': 'it was an old message sent again',
+  'expired': 'it had expired',
+  'impersonation': 'it claimed to come from someone else',
+  'quarantined': 'its key was already blocked for trying before',
+  'prompt-injection': 'it tried to give orders to an AI',
+  'trying-labels': 'it kept trying different purposes to get a yes',
+  'forged-grant': 'it showed a key it was never given',
+};
+
 export function makeEvent(kind: EventKind, actor: string, subject?: string, data?: LakeEvent['data'], at = new Date()): LakeEvent {
   return { id: `${at.getTime().toString(36)}-${(seq++).toString(36)}`, kind, at: at.toISOString(), actor, subject, data };
 }
@@ -70,11 +86,12 @@ export function describe(e: LakeEvent): string {
         : d.released ? `A held payment of ${money} was released to its seller.`
         : d.cart ? `A seller-signed cart was paid: ${money}.` : `Payments settled ${money} with ${d.count} participant(s).`;
     }
+    // In plain words, not the code (round 118: owners asked what "unsigned-card" meant).
     // Worded for what it is: a quarantined key is the agent's own key (run 21's assistant read "an agent claiming" as an
     // impersonation of that agent); an impersonation names who pretended to be whom.
     case 'attack.blocked': return d.why === 'quarantined' ? `${e.actor} turned away a quarantined key${d.claimed ? ` (its card says ${d.claimed})` : ''}.`
       : d.why === 'impersonation' && d.from ? `${e.actor} blocked ${d.from}, whose offer claimed to come from ${d.claimed}.`
-      : `${e.actor} blocked ${d.claimed ? `a message claiming to be from ${d.claimed}` : e.subject}: ${d.why}.`;
+      : `${e.actor} blocked ${d.claimed ? `a message claiming to be from ${d.claimed}` : e.subject}: ${BLOCKED_WHY[String(d.why)] ?? d.why}.`;
     case 'agent.quarantined': return `Immune response: ${d.claimed ? `the key claiming ${d.claimed}` : e.subject} quarantined after ${d.blocks} blocked attempts. No human involved.`;
     case 'guild.formed': return `Guild formed: ${d.members} houses for ${d.tag} now bargain as one.`;
     case 'study.result': return `${e.actor} got its answer from ${d.participants} houses${d.summary ? `: ${d.summary}` : ''}.`;

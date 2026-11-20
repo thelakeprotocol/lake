@@ -596,6 +596,9 @@ describe('the owner', () => {
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: 'Could you take in a parcel for me at 3 pm? Happy to return the favour.' })).reply).toMatchObject({ kind: 'noted' });
     expect((await ownerCall({ kind: 'list' })).notes[0]).toMatchObject({ from: { domain: 'neighbour.example', checked: false }, text: expect.stringMatching(/^Could you take in a parcel/) });
     expect((await ask(houses.strict!, neighbour, { kind: 'note', text: '' })).reply).toMatchObject({ kind: 'rejected' });
+    // A cart pushed at a house's door is refused plainly by its kind, not as malformed (round 118: a pay-first cart's
+    // seller read "malformed" as a format problem).
+    expect((await ask(houses.strict!, neighbour, { kind: 'trade.cart', cart: { items: [{ label: 'Folding table', price: 20, currency: 'AUD' }] } })).reply).toMatchObject({ kind: 'rejected', code: 'not-a-buyer', why: expect.stringContaining('doesn\'t take carts') });
     // The same words again are the same note; "your call" means it (a recommendation is dropped, not the note refused).
     const twice = (await ask(houses.strict!, neighbour, { kind: 'note', text: 'Could you take in a parcel for me at 3 pm? Happy to return the favour.' })).reply;
     expect(twice.note).toBe((await ownerCall({ kind: 'list' })).notes[0].id);
