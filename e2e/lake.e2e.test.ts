@@ -1989,7 +1989,10 @@ describe('the open door', () => {
     expect(revised).toMatchObject({ delivered: fourth.cart, revision: 2, revises: expect.stringMatching(/^[0-9a-f]{64}$/), their_reply: { kind: 'received' } });
     const [rev] = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.filter((m: any) => m.message.kind === 'trade.deliver');
     expect(rev.checked).toMatchObject({ cart: fourth.cart, revision: 2, matches_what_the_seller_signed: true, replaces_what_you_got: true, answers_your_dispute: true });
-    expect(await buyer('lake_buy', { action: 'accept', cart: fourth.cart })).toMatchObject({ accepted: fourth.cart, held_payment: 'released to the seller' });
+    // An answer naming the delivery the buyer read: an older one is refused, pointing at the newer (round 115).
+    const firstSha = createHash('sha256').update('Rain on the tin roof / the gutters sing all evening / the cat does not care').digest('hex');
+    expect(await buyer('lake_buy', { action: 'accept', cart: fourth.cart, delivery: firstSha.slice(0, 12) }, false)).toMatch(/a newer delivery came \(revision 2/);
+    expect(await buyer('lake_buy', { action: 'accept', cart: fourth.cart, delivery: rev.message.sha256.slice(0, 12) })).toMatchObject({ accepted: fourth.cart, held_payment: 'released to the seller' });
     expect(await poet('lake_sell', { action: 'revise', cart: fourth.cart, content: 'one more' }, false)).toMatch(/accepted.*final/);
     for (let i = 0; i < 20 && (await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === fourth.cart).payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));
     expect((await poet('lake_sell', { action: 'orders' })).orders.find((x: any) => x.cart === fourth.cart)).toMatchObject({ status: 'accepted', payment: 'released', delivered: { revision: 2 } });

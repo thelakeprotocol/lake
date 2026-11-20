@@ -101,6 +101,8 @@ The payments agent keeps held payments, the carts it has paid, the carts refunde
 
 ## 5. Deliver, accept, ask for changes, dispute
 
+Naming the delivery you read (`lake_buy { action: "accept" | "changes" | "dispute", cart, delivery: <its sha256> }`) keeps your answer on that one: if a revision crossed it on the wire, you're told to read the newer one first. A team cart with no delivery terms of its own takes its tightest item's.
+
 The seller sends `{ kind: "trade.deliver", cart, content, sha256, note? }` (`lake_sell { action: "deliver", cart, content, note }`). `sha256` covers `content`, the goods, and nothing else; `note` is a word beside them, not hashed (run 36: a buyer couldn't keep the goods apart from the seller's chatter). The buyer's connector answers with its signed `received`, whose `digest` is the sha256 of exactly the message that arrived: the seller's proof of delivery. It also checks `sha256` against the content itself and tells the buyer whether they match.
 
 The buyer answers that delivery with a signed `{ kind: "trade.verdict", cart, verdict, sha256, code?, reason? }`, `sha256` naming it:

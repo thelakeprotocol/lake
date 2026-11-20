@@ -920,7 +920,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         ...(misses ? { meets_the_carts_terms: !misses.length, ...(misses.length ? { misses } : {}) } : {}),
         ...(revision ? { revision, replaces_what_you_got: !!before && p.revises === before, ...(p.answers ? { answers_your_dispute: !!o.dispute && p.answers === o.dispute } : {}) } : {}),
         money: moneyLine(o),
-        next: `check it, then lake_buy { action: "accept" } (releases a held payment), { action: "changes", reason } (ask for a revision), or { action: "dispute", code, reason }` } };
+        next: `check it, then lake_buy { action: "accept", cart, delivery: "${String(p.sha256 ?? '').slice(0, 12)}" } (releases a held payment), { action: "changes", cart, delivery, reason } (ask for a revision), or { action: "dispute", cart, delivery, code, reason }: naming the delivery keeps your answer on the one you read` } };
     }
     if (p.kind === 'trade.ruling' && o) {
       o.ruling = String(p.ruling ?? '').slice(0, 500);
@@ -1618,7 +1618,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           if (!shares.some((x) => x.webId === me.webId)) throw new Error('members: you lead the team, so you are one of them (your own url and share)');
           const id = randomUUID();
           const hash = splitHash(shares, currency, total);
-          const t: Team = { id, to: a.to, buyer: { name: String(buyerCard.name ?? ''), webId: buyer.webId }, items: a.items.map((x) => ({ label: x.label, amount: { currency, value: x.price } })), minutes: a.minutes, brief: a.brief, delivery: a.delivery, splitHash: hash, shares };
+          // No terms for the whole cart: the tightest item's (round 115: items promised 2 h and 4 h, and the hold gave 24).
+          const tightest = (k: 'within_hours' | 'review_hours') => { const v = (a.items ?? []).map((x) => (x as { delivery?: Record<string, unknown> }).delivery?.[k]).filter((n): n is number => typeof n === 'number'); return v.length ? Math.min(...v) : undefined; };
+          const teamDelivery = a.delivery ?? (tightest('within_hours') !== undefined || tightest('review_hours') !== undefined ? { ...(tightest('within_hours') !== undefined ? { within_hours: tightest('within_hours') } : {}), ...(tightest('review_hours') !== undefined ? { review_hours: tightest('review_hours') } : {}) } : undefined);
+          const t: Team = { id, to: a.to, buyer: { name: String(buyerCard.name ?? ''), webId: buyer.webId }, items: a.items.map((x) => ({ label: x.label, amount: { currency, value: x.price } })), minutes: a.minutes, brief: a.brief, delivery: teamDelivery, splitHash: hash, shares };
           const mine = shares.find((x) => x.webId === me.webId)!;
           mine.consent = await me.consentToShare({ cart: id, splitHash: hash, amount: mine.amount, currency });
           teams.set(id, t);
@@ -1791,6 +1794,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         cart: z.string().optional().describe('pay / accept / dispute / arbitrate: the cart id (a unique start is enough)'),
         code: z.enum(['not_received', 'not_as_described']).default('not_as_described').describe('dispute: nothing arrived (the Arbiter can rule on that from signatures), or it is not what you ordered (no ruling settles that: it stays held until a revision you accept or a refund)'),
         reason: z.string().max(500).optional().describe('changes / dispute: what is wrong, in words (data for the seller; it decides nothing)'),
+        delivery: z.string().optional().describe('accept / changes / dispute: the sha256 of the delivery you read (lake_inbox shows it); a unique start is enough. If a newer one came meanwhile, you are told to read it first'),
         evidence: z.boolean().default(false).describe('orders: include every signed message, to show an arbiter'),
         pays_in: z.string().regex(/^[A-Z]{3}$/).optional().describe('order: pay another way the menu lists: HUR (deeds: certified hours of community service you hold, from lake_deed) or FAV (a favour). Leave it out to pay in money'),
       },
@@ -1892,6 +1896,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const verdict = a.action === 'accept' ? 'accepted' : a.action === 'changes' ? 'changes' : 'disputed';
           const code = a.action === 'changes' ? 'changes_requested' : a.action === 'dispute' ? a.code : undefined;
           const sha = x.delivered?.sha256;
+          // The answer is about the delivery the buyer read (round 115: a revision crossed a request for changes on the wire,
+          // and the request was recorded against the revision the buyer had not seen).
+          if (a.delivery && sha && !sha.startsWith(String(a.delivery).toLowerCase())) throw new Error(`a newer delivery came (revision ${x.delivered!.revision}, sha256 ${sha}) after the one you name: read it in lake_inbox first, then answer that one`);
           const said = { kind: 'trade.verdict', cart: x.cart, verdict, ...(sha ? { sha256: sha } : {}), ...(code ? { code } : {}), ...(a.reason ? { reason: a.reason } : {}) };
           // A held payment follows the answer, at the payments agent first: if it refuses (another delivery came meanwhile,
           // say), nothing is said to the seller.
