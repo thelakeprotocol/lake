@@ -81,6 +81,8 @@ export async function openWants(o: { load: () => Promise<WantRecord[]>; save: (l
       await save();
       return want;
     },
+    /** A released house (round 112): the last owner's wants were theirs, not the next claimant's. */
+    async reset() { list = []; await save(); },
     async close(id: string) {
       const r = find(id);
       if (!r) return false;

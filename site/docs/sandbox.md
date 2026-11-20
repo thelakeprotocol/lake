@@ -95,7 +95,7 @@ Also on the Lake, without an address to talk to:
 
 ## Claim a house
 
-Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wallet, signed card and rules. **[See which are free](https://sandbox.lake.doneinfifty.com/t/)**, open one and tap **Use this phone**. For the next **24 hours** its [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you.
+Ten hosted houses live at `/t/sb-0` … `/t/sb-9`, each its own WebID, pod, wallet, signed card and rules. **[See which are free](https://sandbox.lake.doneinfifty.com/t/)**, open one and tap **Use this phone**. For the next **24 hours** its [control panel](/docs/approvals) is yours: change the rules, answer requests, revoke keys, watch the sponsor's studies pay you. When your time is up the house is cleared for the next person: your keys, rules, chats, agenda, wants, offerings and delivery address go with you.
 
 A claim is a lease. When it ends (or you tap **Hand it back now** under **You → This phone → About this house**), every key you issued is revoked, the rules go back to how they started, and the next person can claim it. Want a house that stays yours? Run your own (below).
 

@@ -880,6 +880,9 @@ export class OwnerDesk {
     this.closedNotes.clear();
     this.webNotes.clear();
     await this.saveWebNotes();
+    // Their share links too: they pointed at the last owner's wants (round 112).
+    this.wantLinks.clear();
+    await this.saveWantLinks();
     this.muted.clear();
     await saveWhole(join(this.o.dataDir, 'muted.json'), '[]');
     // Who answers each chat, how far each was read and who was joined to whom name the last owner's people.

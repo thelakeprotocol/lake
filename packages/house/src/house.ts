@@ -411,6 +411,12 @@ export async function startHouse(o: HouseOptions): Promise<House> {
       activity.length = 0;
       // And with no shopping list open or offers waiting: those were the last owner's too.
       await keeperRef?.market.reset();
+      // Nor their wants, offerings or delivery address (round 112: the next claimant found the last owner's bike listing
+      // and wants in a house just claimed, and their address was still in the pod).
+      await wants.reset();
+      await offerings.reset();
+      await owner.fetch(`${owner.podRoot}wallet/delivery-address.json`, { method: 'DELETE' }).catch(() => {});
+      await recard(fresh).catch(() => {});
       say('the lease ended: keys revoked, owner forgotten, rules reset. Anyone can claim this house now.');
     },
   });

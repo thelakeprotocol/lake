@@ -23,6 +23,8 @@ export async function openOfferings(o: { load: () => Promise<OfferingRecord[]>; 
       await save();
       return offering;
     },
+    /** A released house (round 112): the last owner's offerings were theirs. */
+    async reset() { list = []; await save(); },
     async close(id: string) {
       const r = list.find((x) => x.offering.id === id);
       if (!r || r.closed) return false;

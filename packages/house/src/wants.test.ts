@@ -166,3 +166,14 @@ describe('people who match a want for someone\'s help (SPEC §6.8)', () => {
     expect(await w.matchIn({ want: 'w1', matched: ['When'] }, house('sam').profile, house('sam').card)).toMatchObject({ ok: false, why: expect.stringContaining('no longer open') });
   });
 });
+
+describe('a released house (round 112)', () => {
+  it('keeps none of the last owner\'s wants', async () => {
+    const { w, saved } = await open([{ want: want('w1'), offers: [], at: new Date().toISOString() }]);
+    expect(w.open()).toHaveLength(1);
+    await w.reset();
+    expect(w.open()).toEqual([]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(saved()).toEqual([]);
+  });
+});
