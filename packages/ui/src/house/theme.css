@@ -642,3 +642,6 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 /* "Reading …": the spinner beside its words. */
 .reading-line { display: flex; align-items: center; gap: 8px; }
 .reading-line ion-spinner { width: 20px; height: 20px; flex: none; }
+/* An agreement both houses hold (round 113): one that ended reads crossed out. */
+.agreement-row h3.struck { text-decoration: line-through; opacity: .7; }
+.agreement-acts { display: flex; gap: 2px; }

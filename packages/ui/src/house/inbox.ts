@@ -133,7 +133,24 @@ function ConnectCard({ c }: { c: Connect }) {
       h(Btn, { label: 'No', fill: 'outline', color: 'medium', run: async () => { await call({ kind: 'panel.connect.answer', id: c.id, yes: false }); connectedNote = 'Turned down.'; } }))));
 }
 
+// An agreement both houses hold (round 113): its status as both phones show it, and the owner's own Cancel or Done.
+const agreementPill = (g: NonNullable<AgendaItem['agreement']>, due?: string): [string, 'mint' | 'amber' | 'muted' | 'red'] =>
+  g.status === 'proposed' ? [`Waiting for ${g.with.name}`, 'amber'] : g.status === 'agreed' ? [due ? 'Owed' : 'Agreed', due ? 'amber' : 'mint']
+    : g.status === 'done' ? ['Done', 'mint'] : [`${{ declined: 'Declined', cancelled: 'Cancelled', withdrawn: 'Withdrawn' }[g.status]}${g.changed.by === 'them' ? ` by ${g.with.name}` : ''}`, g.status === 'cancelled' ? 'red' : 'muted'];
+function AgreementRow({ a }: { a: AgendaItem }) {
+  const g = a.agreement!, [pill, tone] = agreementPill(g, a.due), over = ['declined', 'cancelled', 'withdrawn'].includes(g.status);
+  return h('ion-item', { lines: 'full', class: `lake-row agreement-row ${g.status}` },
+    h('div', { slot: 'start', class: `row-icon tint-${tone === 'red' ? 'amber' : tone === 'muted' ? 'muted' : tone}` }, h('ion-icon', { name: a.due ? 'hand-right-outline' : 'calendar-outline' })),
+    h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what), h('p', {}, [a.when, a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
+      g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null),
+    h(Pill, { text: pill, tone }),
+    g.status === 'agreed' ? h('div', { slot: 'end', class: 'agreement-acts' },
+      h(Btn, { key: 'd', label: 'Done', size: 'small', fill: 'clear', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'done' }), done: `Marked done. ${g.with.name} was told.` }),
+      h(Btn, { key: 'c', label: 'Cancel', size: 'small', fill: 'clear', color: 'danger', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'cancelled' }), ask: { header: `Cancel "${a.what}"?`, sub: `${g.with.name}'s house is told, and their copy shows it cancelled.`, button: 'Cancel it' }, done: `Cancelled. ${g.with.name} was told.` }))
+      : g.status === 'proposed' && g.role === 'proposed' ? h('div', { slot: 'end' }, h(Btn, { label: 'Withdraw', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'withdrawn' }) })) : null);
+}
 function AgendaRow({ a }: { a: AgendaItem }) {
+  if (a.agreement) return h(AgreementRow, { a });
   return h('ion-item', { lines: 'full', class: 'lake-row' },
     h('div', { slot: 'start', class: `row-icon tint-${!a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber'}` }, h('ion-icon', { name: 'calendar-outline' })),
     h('ion-label', {}, h('h3', {}, a.what), h('p', {}, [a.when, a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · '))),
@@ -172,7 +189,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   const dismiss = () => call({ kind: 'panel.assistant.dismiss', id: x.id });
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
-  const kicker = x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const kicker = x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house asks` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
   const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;
@@ -180,7 +197,15 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   const acts: Child[] = [];
   // A time your AI pencilled in: yours to confirm (the house tells them either way). Nothing else to do with it.
   // Someone looking for help your AI says you match: Send is your yes (they see the points, not your name, until they say yes).
-  if (x.matchOut && !x.matchOut.sent) acts.push(h(Btn, { key: 'mo', label: 'Offer to help', run: () => must({ kind: 'panel.want.match.send', id: x.id }), ask: { header: 'Offer to help?', sub: 'They see which of their points you fit, not your name. If they say yes too, you each see the other\'s name and can write to each other.', button: 'Offer to help', destructive: false }, done: 'Sent. If they say yes, their name appears here.' }));
+  // Another house asks you to agree (round 113): your own Yes or No, and their house is told.
+  if (x.agreementIn) acts.push(
+    h(Btn, { key: 'ay', label: 'Yes, agreed', run: () => must({ kind: 'panel.agreement.answer', id: x.id, yes: true }), done: `Agreed. ${x.agreementIn.from.name} was told, and it's in your agenda.` }),
+    h(Btn, { key: 'an', label: 'No', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.agreement.answer', id: x.id, yes: false }), done: `${x.agreementIn.from.name} was told no.` }));
+  // Your AI proposes cancelling or marking done an agreement: only your tap does it.
+  else if (x.agreementAsk) acts.push(
+    h(Btn, { key: 'aa', label: x.agreementAsk.status === 'cancelled' ? 'Cancel it' : 'Mark done', color: x.agreementAsk.status === 'cancelled' ? 'danger' : 'primary', run: () => must({ kind: 'panel.agreement.set', id: x.agreementAsk!.id, status: x.agreementAsk!.status }) }),
+    h(Btn, { key: 'ak', label: 'Keep it', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.assistant.dismiss', id: x.id }) }));
+  else if (x.matchOut && !x.matchOut.sent) acts.push(h(Btn, { key: 'mo', label: 'Offer to help', run: () => must({ kind: 'panel.want.match.send', id: x.id }), ask: { header: 'Offer to help?', sub: 'They see which of their points you fit, not your name. If they say yes too, you each see the other\'s name and can write to each other.', button: 'Offer to help', destructive: false }, done: 'Sent. If they say yes, their name appears here.' }));
   else if (x.booking) acts.push(
     h(Btn, { key: 'bk', label: 'Confirm', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Confirm' }), done: `Confirmed. ${x.booking.with} was told.` }),
     h(Btn, { key: 'bd', label: 'Decline', fill: 'outline', color: 'medium', run: () => must({ kind: 'panel.assistant.answer', id: x.id, choice: 'Decline' }), done: `Declined. ${x.booking.with} was told.` }));

@@ -1049,6 +1049,50 @@ describe('the owner', () => {
     await ownerCall({ kind: 'panel.assistant.revoke', kid: ai.publicJwk.kid });
   });
 
+  it('an agreement both houses hold: proposed by one AI, agreed by the other owner\'s tap, cancelled by either side and followed by both (round 113)', async () => {
+    const researchCall = async (payload: Record<string, unknown>) => (await fetch(`${houses.research}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, owner, { iss: 'owner' })) })).json();
+    const ai = await generateIdentity('agreeing-ai');
+    const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'Agreeing AI' });
+    await fetch(`${houses.strict}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: ai.publicJwk, code, label: 'Agreeing AI' }) });
+    const asAi = async (p: Record<string, unknown>) => (await fetch(`${houses.strict}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(p, ai, { iss: 'assistant' })) })).json();
+    const friday = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    // Proposed: waiting for the other owner's tap, never agreed by the AI.
+    const proposed = await asAi({ kind: 'assistant.agenda', house: `${houses.research}/a2a`, what: 'Babysitting Leo and Ava', start: friday, minutes: 240 });
+    expect(proposed).toMatchObject({ ok: true, agreement: expect.stringMatching(/^ag-[0-9a-f]{8}$/), status: expect.stringContaining('waits for') });
+    const mine = () => ownerCall({ kind: 'list' }).then((l) => l.agenda.find((a: { id: string }) => a.id === proposed.id));
+    expect(await mine()).toMatchObject({ agreement: { status: 'proposed', role: 'proposed' } });
+    // The other house's phone: a card with Yes, agreed. Their tap puts it in their agenda and tells this house.
+    const card = (await researchCall({ kind: 'list' })).suggestions.find((x: { agreementIn?: { id: string } }) => x.agreementIn?.id === proposed.agreement);
+    expect(card).toMatchObject({ agreementIn: { what: 'Babysitting Leo and Ava', start: friday } });
+    expect(await researchCall({ kind: 'panel.agreement.answer', id: card.id, yes: true })).toEqual({ ok: true, status: 'agreed' });
+    expect(await mine()).toMatchObject({ agreement: { status: 'agreed', changed: { by: 'them' } } });
+    const theirs = (await researchCall({ kind: 'list' })).agenda.find((a: { agreement?: { id: string } }) => a.agreement?.id === proposed.agreement);
+    expect(theirs).toMatchObject({ agreement: { status: 'agreed', role: 'asked' }, start: friday });
+    // They cancel from their phone: this house's copy follows, cancelled by them.
+    expect(await researchCall({ kind: 'panel.agreement.set', id: theirs.id, status: 'cancelled' })).toEqual({ ok: true, status: 'cancelled' });
+    expect(await mine()).toMatchObject({ agreement: { status: 'cancelled', changed: { by: 'them' } } });
+    // Nothing moves an ended agreement again.
+    expect(await ownerCall({ kind: 'panel.agreement.set', id: proposed.id, status: 'done' })).toMatchObject({ error: expect.stringContaining('cancelled') });
+    // A promise with a due date, and a no.
+    const promise = await asAi({ kind: 'assistant.agenda', house: `${houses.research}/a2a`, what: 'A new folding table', due: new Date(Date.now() + 2 * 86_400_000).toISOString() });
+    const pcard = (await researchCall({ kind: 'list' })).suggestions.find((x: { agreementIn?: { id: string } }) => x.agreementIn?.id === promise.agreement);
+    await researchCall({ kind: 'panel.agreement.answer', id: pcard.id, yes: false });
+    expect((await ownerCall({ kind: 'list' })).agenda.find((a: { id: string }) => a.id === promise.id)).toMatchObject({ due: expect.any(String), agreement: { status: 'declined' } });
+    // An agreed one the AI wants cancelled: a card for this owner; only the owner's tap cancels it.
+    const third = await asAi({ kind: 'assistant.agenda', house: `${houses.research}/a2a`, what: 'Coffee on Tuesday', start: friday });
+    const tcard = (await researchCall({ kind: 'list' })).suggestions.find((x: { agreementIn?: { id: string } }) => x.agreementIn?.id === third.agreement);
+    await researchCall({ kind: 'panel.agreement.answer', id: tcard.id, yes: true });
+    const toCancel = await asAi({ kind: 'assistant.agenda', id: third.id, status: 'cancelled' });
+    expect(toCancel).toMatchObject({ ok: true, note: expect.stringContaining('nothing has changed') });
+    expect((await ownerCall({ kind: 'list' })).agenda.find((a: { id: string }) => a.id === third.id)).toMatchObject({ agreement: { status: 'agreed' } });
+    expect(await ownerCall({ kind: 'panel.agreement.set', id: third.id, status: 'cancelled' })).toEqual({ ok: true, status: 'cancelled' });
+    expect((await researchCall({ kind: 'list' })).agenda.find((a: { agreement?: { id: string } }) => a.agreement?.id === third.agreement)).toMatchObject({ agreement: { status: 'cancelled', changed: { by: 'them' } } });
+    // Only a house moves an agreement, and only the one it is with.
+    const stranger = await visitor('stranger.example');
+    expect((await ask(houses.strict!, stranger, { kind: 'agreement.update', id: proposed.agreement, status: 'agreed' })).reply).toMatchObject({ kind: 'rejected', why: expect.stringContaining('between two houses') });
+    await ownerCall({ kind: 'panel.assistant.revoke', kid: ai.publicJwk.kid });
+  });
+
   it('people who match: a want for help on one house, a match from another, two yeses, and each has the other (16 Nov)', async () => {
     // The same owner holds both houses here (paired above): strict looks for help, research's owner may give it.
     const rWebId = (await verifyLakeCard(await (await fetch(cardUrlFor(`${houses.research}/a2a`))).json())).webId;

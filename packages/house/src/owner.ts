@@ -10,8 +10,9 @@ import type { HouseRunner } from './duty-runner.js';
 import {
   allowanceDraft, looksLikeInjection, cartTerms, type CartMandate, dutyDraft, postalAddress, postalAddressProblems, type PostalAddress, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
-  type Offering,
+  type Offering, cardUrlFor, verifyLakeCard, keyThumbprint,
 } from '@thelakeprotocol/core';
+import { callsHome } from './net.js';
 
 /** When the owner was last at their desk, as a visitor waiting on an ask hears it: a bucket, never a time (SPEC §5). */
 export type OwnerActive = 'within the hour' | 'today' | 'this week' | 'not this week' | 'no owner';
@@ -260,6 +261,10 @@ export interface Suggestion {
   matchOut?: { house: string; want: string; wantName: string; matched: string[]; points: string[]; sent?: string; /** Both said yes: the note from their house to answer, and the name they gave. */ revealed?: string; revealedName?: string };
   /** A time the AI on duty pencilled in: the house holds it, and Confirm or Decline here is the owner's own word on it. */
   booking?: { id: string; until: string; start: string; with: string; what?: string };
+  /** Another house asks this owner to agree to something (round 113): Yes, agreed or No is their own tap. */
+  agreementIn?: { id: string; what: string; start?: string; minutes?: number; due?: string; where?: string; from: Agreement['with'] };
+  /** The owner's AI proposes cancelling, or marking done, an agreement: only their tap does it. */
+  agreementAsk?: { id: string; status: 'cancelled' | 'done'; what: string };
   at: string;
 }
 /**
@@ -304,8 +309,26 @@ export interface AgendaItem {
   held?: { until: string; note: string; kid: string; to: { name: string; key?: string; url?: string; web?: true } };
   /** When the owner confirmed a held time themselves. */
   confirmed?: string;
+  /** A promise with no time of its own: done by this date ("a new table by Saturday"). */
+  due?: string;
+  /** Held by both houses (round 113): the same id in each, its status moved only by an owner's tap and signed messages. */
+  agreement?: Agreement;
   by: string; at: string;
 }
+/**
+ * An agreement both houses hold (SPEC §6.1, round 113: a cancelled babysitting and a promised table lived only in chats,
+ * and the other side's agenda never changed). One side's AI proposes it; the other owner's tap agrees; either owner then
+ * cancels it or marks it done, and the other house's copy follows. The words never decide: only taps and signed updates.
+ */
+export interface Agreement {
+  id: string;
+  /** The other house, from its verified card: where updates go, and the only key whose updates count. */
+  with: { url: string; key: string; name: string };
+  role: 'proposed' | 'asked';
+  status: AgreementStatus;
+  changed: { by: 'you' | 'them'; at: string };
+}
+export type AgreementStatus = 'proposed' | 'agreed' | 'declined' | 'cancelled' | 'done' | 'withdrawn';
 /**
  * A task: what the owner told one of their AIs to do about one conversation, in a few words of their own (SPEC §6.1). Their
  * signed tap is the go-ahead for that conversation only: that one AI may read it and send its sender a few messages through
@@ -347,7 +370,7 @@ const TASK_MESSAGES = 5, TASK_HOURS = 24, ERRAND_DAYS = 7;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
-export interface NoteSender { /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
+export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 /**
  * A one-time code for an AI to pair with: never starting with "-" or "_", which a command line would read as an option
@@ -605,6 +628,63 @@ export class OwnerDesk {
   private saveRemoved() {
     this.removedSave ??= setTimeout(() => { this.removedSave = undefined; void saveWhole(join(this.o.dataDir, 'removed-ais.json'), JSON.stringify([...this.removed.values()])).catch(() => {}); }, 1000);
     this.removedSave.unref?.();
+  }
+  /** Another house, from its own signed card at its address: where agreements go, and the key whose updates count. */
+  private async houseAt(url: string): Promise<Agreement['with']> {
+    const home = callsHome(url, { publicUrl: this.o.publicUrl ?? '', podRoot: '' });
+    if (home) throw new Error(`that address can't be used: ${home}`);
+    const card = await (await fetch(cardUrlFor(url), { signal: AbortSignal.timeout(10_000) })).json() as AgentCard;
+    const profile = await verifyLakeCard(card);
+    if (profile.role !== 'house') throw new Error('that address is not a house: an agreement is between two houses');
+    return { url: card.supportedInterfaces?.[0]?.url ?? url, key: await keyThumbprint(profile.publicJwk), name: String(card.name ?? 'their house').replace(/ \(house\)$/, '').slice(0, 80) };
+  }
+  private agreementWords(a: AgendaItem) { return `${a.what.slice(0, 80)}${a.start ? `, ${this.whenWords(a.start)}` : a.due ? `, by ${this.whenWords(a.due)}` : ''}`; }
+  /** Moves this house's copy and tells the other house, signed by this house. */
+  private async agreementMove(a: AgendaItem, status: AgreementStatus): Promise<{ ok: true } | { error: string }> {
+    const g = a.agreement!;
+    const sent = await this.o.panel?.replyAgent?.(g.with.url, { kind: 'agreement.update', id: g.id, status }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
+    if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return { error: `${g.with.name}'s house couldn't be told, so nothing changed: try again in a moment` };
+    g.status = status; g.changed = { by: 'you', at: new Date().toISOString() };
+    await this.saveAgenda();
+    this.news({ about: `agreement.${status}`, agenda: a.id, what: a.what, with: g.with.name, note: `your human marked it ${status}; ${g.with.name}'s house was told` });
+    this.touch();
+    return { ok: true };
+  }
+  /** Another house asks this owner to agree to something: a card with their own Yes or No. */
+  agreementIn(p: Record<string, unknown>, from: Agreement['with']): Record<string, unknown> {
+    const id = String(p.id ?? ''), what = String(p.what ?? '').trim().slice(0, 200);
+    const start = p.start ? new Date(String(p.start)) : undefined, due = p.due ? new Date(String(p.due)) : undefined;
+    if (!/^ag-[0-9a-f]{8}$/.test(id) || !what || (!start && !due) || (start && Number.isNaN(start.getTime())) || (due && Number.isNaN(due.getTime()))) return { kind: 'refused', problems: ['agreement: { id: ag-<8 hex>, what, start or due }'] };
+    if (looksLikeInjection(what)) return { kind: 'refused', problems: ['an agreement says what is agreed, not instructions'] };
+    if (this.suggestions.some((x) => x.agreementIn?.id === id) || this.agenda.some((x) => x.agreement?.id === id)) return { kind: 'agreement.received', id };
+    if (this.suggestions.filter((x) => x.agreementIn).length >= 20) return { kind: 'refused', problems: ['too many agreements wait for this owner already'] };
+    const minutes = Number.isInteger(p.minutes) && (p.minutes as number) >= 5 && (p.minutes as number) <= 720 ? p.minutes as number : undefined;
+    const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: `${from.name}'s house`, text: `${from.name}'s house asks you to agree: ${what}${start ? `, ${this.whenWords(start.toISOString())}` : `, by ${this.whenWords(due!.toISOString())}`}.`, agreementIn: { id, what, ...(start ? { start: start.toISOString() } : {}), ...(minutes ? { minutes } : {}), ...(due ? { due: due.toISOString() } : {}), ...(typeof p.where === 'string' && p.where ? { where: p.where.slice(0, 120) } : {}), from }, at: new Date().toISOString() };
+    this.suggestions = [sug, ...this.suggestions];
+    this.trimSuggestions();
+    void this.saveSuggestions();
+    this.notifyOwner('suggestion', `${from.name}'s house asks you to agree: ${what.slice(0, 60)}.`);
+    this.touch();
+    return { kind: 'agreement.received', id };
+  }
+  /** The other house moved an agreement: this copy follows, if it came from that house's own key and the move is one it may make. */
+  agreementUpdate(p: Record<string, unknown>, key: string): Record<string, unknown> {
+    const id = String(p.id ?? ''), status = String(p.status ?? '') as AgreementStatus;
+    // Withdrawn before this owner answered: the card goes.
+    const card = this.suggestions.find((x) => x.agreementIn?.id === id && x.agreementIn.from.key === key);
+    if (card && status === 'withdrawn') { this.suggestions = this.suggestions.filter((x) => x !== card); void this.saveSuggestions(); this.touch(); return { kind: 'agreement.updated', id, status }; }
+    const a = this.agenda.find((x) => x.agreement?.id === id);
+    if (!a?.agreement || a.agreement.with.key !== key) return { kind: 'refused', problems: ['no agreement with your house by that id'] };
+    const g = a.agreement;
+    const may = (g.status === 'proposed' && g.role === 'proposed' && (status === 'agreed' || status === 'declined')) || (g.status === 'agreed' && (status === 'cancelled' || status === 'done'));
+    if (!may) return { kind: 'refused', problems: [`it is ${g.status}: it can't become ${status} now`] };
+    g.status = status; g.changed = { by: 'them', at: new Date().toISOString() };
+    void this.saveAgenda();
+    const words = { agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'marked done' }[status as 'agreed'] ?? status;
+    this.notifyOwner('agenda', `${g.with.name} ${words}: ${this.agreementWords(a)}.`);
+    this.news({ about: `agreement.${status}`, agenda: a.id, what: a.what, with: g.with.name, note: `${g.with.name} ${words} it, from their own phone` });
+    this.touch();
+    return { kind: 'agreement.updated', id, status };
   }
   /** A task as its owner's panel and its AI see it. */
   private taskView(t: Task) {
@@ -2072,7 +2152,37 @@ export class OwnerDesk {
           }
         }
         if (p.kind === 'assistant.agenda') {
-          const q = p as unknown as { what?: string; when?: string; start?: string; minutes?: number; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string; id?: string; re?: string };
+          const q = p as unknown as { what?: string; when?: string; start?: string; minutes?: number; where?: string; with?: string; note?: string; agreed?: AgendaItem['agreed']; remove?: string; id?: string; re?: string; house?: string; due?: string; status?: string };
+          // Cancel or mark done an agreement both houses hold: the AI proposes, only the owner's tap does it (round 113).
+          if (q.id && (q.status === 'cancelled' || q.status === 'done')) {
+            const a = this.agenda.find((x) => x.id === q.id && x.agreement);
+            if (!a?.agreement || a.agreement.status !== 'agreed') return void res.status(404).json({ error: 'no agreed agreement with that id: only an agreed one is cancelled or done' });
+            const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: assistant.label, by: assistant.kid, text: `${q.status === 'cancelled' ? 'Cancel' : 'Mark done'}: ${this.agreementWords(a)}, with ${a.agreement.with.name}?${q.note ? ` ${String(q.note).slice(0, 300)}` : ''}`, agreementAsk: { id: a.id, status: q.status, what: a.what }, at: new Date().toISOString() };
+            this.suggestions = [sug, ...this.suggestions];
+            this.trimSuggestions();
+            await this.saveSuggestions();
+            this.notifyOwner('suggestion', `${shortLabel(assistant.label)} asks you to ${q.status === 'cancelled' ? 'cancel' : 'mark done'}: ${a.what.slice(0, 50)}.`);
+            return void res.json({ ok: true, id: sug.id, note: `your human taps it on their phone; their house then tells ${a.agreement.with.name}'s house. Until then nothing has changed: say so` });
+          }
+          // An agreement with another house (round 113): proposed here, agreed only by the other owner's tap.
+          if (q.house) {
+            const what = String(q.what ?? '').trim().slice(0, 200);
+            const start = q.start ? new Date(String(q.start)) : undefined, due = q.due ? new Date(String(q.due)) : undefined;
+            if (!what || (!start && !due)) return void res.status(400).json({ error: 'agenda with house: what, and start (a time) or due (a promise, done by a date)' });
+            if ((start && Number.isNaN(start.getTime())) || (due && Number.isNaN(due.getTime()))) return void res.status(400).json({ error: 'start and due: dates and times (ISO 8601, with an offset)' });
+            const note = this.notes.find((x) => x.id === q.house);
+            let other: Agreement['with'];
+            try { other = note ? (note.from.house && note.from.url && note.from.key ? { url: note.from.url, key: note.from.key, name: (note.from.as ?? note.from.name).replace(/ \(house\)$/, '').slice(0, 80) } : (() => { throw new Error('that note isn\'t from a house: name a note their house sent, or their house\'s address'); })()) : await this.houseAt(String(q.house)); }
+            catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
+            const id = `ag-${randomBytes(4).toString('hex')}`;
+            const minutes = Number.isInteger(q.minutes) && q.minutes! >= 5 && q.minutes! <= 720 ? q.minutes! : undefined;
+            const sent = await this.o.panel?.replyAgent?.(other.url, { kind: 'agreement', id, what, ...(start ? { start: start.toISOString() } : {}), ...(minutes ? { minutes } : {}), ...(due ? { due: due.toISOString() } : {}), ...(q.where ? { where: String(q.where).slice(0, 120) } : {}) }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
+            if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `${other.name}'s house didn't take it: ${((sent as { problems?: string[]; why?: string } | null)?.problems ?? [(sent as { why?: string } | null)?.why ?? 'no answer']).join('; ')}` });
+            const item: AgendaItem = { id: randomBytes(6).toString('hex'), what, when: start ? this.whenWords(start.toISOString()) : `by ${this.whenWords(due!.toISOString())}`, ...(start ? { start: start.toISOString(), ...(minutes ? { minutes } : {}) } : {}), ...(due ? { due: due.toISOString() } : {}), ...(q.where ? { where: String(q.where).slice(0, 120) } : {}), with: other.name, agreement: { id, with: other, role: 'proposed', status: 'proposed', changed: { by: 'you', at: new Date().toISOString() } }, by: assistant.label, at: new Date().toISOString() };
+            this.agenda = [...this.agenda, item].slice(-100);
+            await this.saveAgenda();
+            return void res.json({ ok: true, id: item.id, agreement: id, status: `proposed: it waits for ${other.name}'s own tap on their phone; you hear (house.news agreement.agreed or declined). Never say it is agreed before that` });
+          }
           if (q.remove) {
             // A held time taken back: the one who was told about it is told it is off.
             if (this.agenda.some((x) => x.id === q.remove && x.by === assistant.label && x.held)) { await this.settleBooking(String(q.remove), 'withdrawn'); return void res.json({ ok: true, note: 'the house told them it is off' }); }
@@ -2779,6 +2889,35 @@ export class OwnerDesk {
         this.news({ about: 'errand', task: task.id, words: text, until: task.until, how: 'your human asked you to get something done, in their own words. Use your own tools (lake_want with people: true for someone\'s help, lake_ask or lake_ping to reach someone by handle, lake_house_suggest to ask them something), and say how it went with lake_house_suggest { task, outcome, text }. Spend nothing they didn\'t agree to.' }, a.kid);
         this.touch();
         return void res.json({ ok: true, task: this.taskView(task) });
+      }
+      // An agreement another house asked for: this owner's own Yes or No (round 113).
+      if (p.kind === 'panel.agreement.answer') {
+        const q = p as unknown as { id?: string; yes?: boolean };
+        const sug = this.suggestions.find((x) => x.id === String(q.id ?? '') && x.agreementIn);
+        if (!sug?.agreementIn) return void res.status(404).json({ error: 'no agreement waiting with that id' });
+        const g = sug.agreementIn, status: AgreementStatus = q.yes === true ? 'agreed' : 'declined';
+        const sent = await this.o.panel?.replyAgent?.(g.from.url, { kind: 'agreement.update', id: g.id, status }).catch(() => null);
+        if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `${g.from.name}'s house couldn't be told, so nothing changed: try again in a moment` });
+        this.suggestions = this.suggestions.filter((x) => x !== sug);
+        if (status === 'agreed') this.agenda = [...this.agenda, { id: randomBytes(6).toString('hex'), what: g.what, when: g.start ? this.whenWords(g.start) : `by ${this.whenWords(g.due!)}`, ...(g.start ? { start: g.start, ...(g.minutes ? { minutes: g.minutes } : {}) } : {}), ...(g.due ? { due: g.due } : {}), ...(g.where ? { where: g.where } : {}), with: g.from.name, agreement: { id: g.id, with: g.from, role: 'asked' as const, status, changed: { by: 'you' as const, at: new Date().toISOString() } }, by: 'you', at: new Date().toISOString() }].slice(-100);
+        await Promise.all([this.saveSuggestions(), this.saveAgenda()]);
+        this.news({ about: `agreement.${status}`, what: g.what, with: g.from.name, note: `your human ${status === 'agreed' ? 'agreed to it' : 'said no'}; ${g.from.name}'s house was told` });
+        this.touch();
+        return void res.json({ ok: true, status });
+      }
+      // Cancel, mark done or withdraw an agreement both houses hold: the owner's tap, then the other house is told.
+      if (p.kind === 'panel.agreement.set') {
+        const q = p as unknown as { id?: string; status?: string };
+        const a = this.agenda.find((x) => x.agreement && (x.id === q.id || x.agreement.id === q.id));
+        if (!a?.agreement) return void res.status(404).json({ error: 'no agreement with that id' });
+        const g = a.agreement, status = String(q.status ?? '') as AgreementStatus;
+        const may = (g.status === 'agreed' && (status === 'cancelled' || status === 'done')) || (g.status === 'proposed' && g.role === 'proposed' && status === 'withdrawn');
+        if (!may) return void res.status(409).json({ error: `it is ${g.status}: it can't become ${status}` });
+        const r = await this.agreementMove(a, status);
+        if ('error' in r) return void res.status(502).json(r);
+        this.suggestions = this.suggestions.filter((x) => x.agreementAsk?.id !== a.id);
+        await this.saveSuggestions();
+        return void res.json({ ok: true, status });
       }
       if (p.kind === 'panel.task.ok') {
         const t = this.tasks.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
