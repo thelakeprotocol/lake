@@ -1465,14 +1465,15 @@ function panelFor(x: {
       // Listed folder by folder, read 32 at a time and from disk where the pod runs here (20 Nov: one file at a time over
       // HTTP, the demo house's export ran past a minute and Download everything never finished).
       const files: Record<string, string> = {};
-      const paths: string[] = [];
+      // Listed from disk where the pod runs here (a folder of thousands made the pod server's listing take a minute).
+      const paths: string[] = (await x.filed.walk()) ?? [];
       const walk = async (path: string) => {
         for (const child of await listContainer(owner, path)) {
           if (child.endsWith('/')) await walk(child);
           else paths.push(child);
         }
       };
-      await walk('');
+      if (!paths.length) await walk('');
       for (let i = 0; i < paths.length; i += 32) {
         await Promise.all(paths.slice(i, i + 32).map(async (child) => {
           const t = await x.filed.read(child).catch(() => null);

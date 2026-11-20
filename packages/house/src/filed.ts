@@ -87,6 +87,23 @@ export async function filedIndex(pod: OwnerSession, file: string, folders: strin
      * to find it: on a big house the page loaded for ever). The server keeps a file as <name>, or <name>$.<ext> when it
      * added a type; which one is learnt from the folder, listed again at most every five seconds when a name is missing.
      */
+    /**
+     * Every file in the pod, as paths from its root, read from disk for a pod this house runs (20 Nov: the export asked the
+     * pod server for a listing of a folder of 5,800 files, and ran past a minute); null when the pod isn't on this machine.
+     */
+    async walk(): Promise<string[] | null> {
+      if (!pod.disk) return null;
+      const out: string[] = [];
+      const go = async (rel: string) => {
+        for (const e of await readdir(join(pod.disk!, rel), { withFileTypes: true }).catch(() => [])) {
+          if (e.name.startsWith('.')) continue;
+          if (e.isDirectory()) await go(`${rel}${e.name}/`);
+          else if (e.isFile() && !/\.(meta|acl)$/.test(e.name)) out.push(rel + e.name.split('$')[0]!);
+        }
+      };
+      await go('');
+      return out;
+    },
     async read(path: string): Promise<string | null> {
       const folder = folderOf(path);
       if (pod.disk && folder) {
