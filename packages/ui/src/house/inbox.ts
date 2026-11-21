@@ -59,7 +59,10 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     ...tasks.map((t) => h(TaskCard, { key: `t-${t.id}`, t, v })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
     // An AI that isn't reading: one quiet row each, under what needs a decision (21 Nov: a loud card per AI sat on top).
-    waiting.length ? h(Section, { key: 'ais-waiting', cls: 'ais-waiting' }, ...waiting.map((a) => h(Row, { key: a.kid, icon: 'alert-circle-outline', tint: 'amber', label: `${shortName(a.label)} isn't reading`, sub: waitingLine(a), cls: 'warn-row', onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`) }))) : null,
+    waiting.length ? h(Section, { key: 'ais-waiting', cls: 'ais-waiting' }, waiting.length === 1
+      ? h(Row, { icon: 'alert-circle-outline', tint: 'amber', label: `${shortName(waiting[0]!.label)} isn't reading`, sub: waitingLine(waiting[0]!), cls: 'warn-row', onClick: () => push(`#aikey=${encodeURIComponent(waiting[0]!.kid)}`) })
+      // Several behind: one row (ChatGPT, 21 Nov: "merge them into one compact row").
+      : h(Row, { icon: 'alert-circle-outline', tint: 'amber', label: `${waiting.length} AIs aren't reading`, sub: `${waiting.map((a) => shortName(a.label)).join(' and ')} have messages waiting: open your AI app and ask it to check the Lake.`, cls: 'warn-row', onClick: () => push('#ai') })) : null,
     waits.length ? h(Waits, { key: 'waits', waits }) : null,
     wants.length ? h(Section, { title: 'Looking for', key: 'wants', cls: 'chat-list wants' }, ...wants.map((x) => h(WantRow, { key: x.want.id, w: x }))) : null,
     // What you have to sell or give away, on your house while it's up (round 109); a note about one lands in People.
@@ -206,7 +209,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
   const waiter = x.errand?.with?.name ? shortName(x.errand.with.name) : 'an answer';
-  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' || x.errand?.state === 'answered' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house asks` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' || x.errand?.state === 'answered' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house proposes` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
   const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;

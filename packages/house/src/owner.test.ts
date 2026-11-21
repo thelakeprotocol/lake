@@ -900,6 +900,26 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('says whether a known name on a new key writes from the same house as before (run 100)', async () => {
+    const h = await house();
+    const contacts = (h.desk as unknown as { contacts: Map<string, { name: string; webId: string; at: string }> }).contacts;
+    const priya = { name: 'Priya Nair (house)', domain: 'sandbox.example', webId: 'https://sandbox.example/t/sb-2/#me', url: 'https://sandbox.example/t/sb-2/a2a', key: 'priya-house-key-0123456789abcdefghijklmnopqrstu', checked: false };
+    h.desk.addNote({ from: priya, text: 'Salad would be lovely' });
+    contacts.set(priya.key, { name: priya.name, webId: priya.webId, at: new Date().toISOString() });
+    const twin = (from: Record<string, unknown>) => (h.desk as unknown as { twinOf: (f: unknown) => { sameHouse?: boolean } | undefined }).twinOf(from);
+    expect(twin({ name: 'Priya Nair', key: 'priya-phone-key-0123456789abcdefghijklmnopqrstu', url: 'https://sandbox.example/t/sb-2/a2a' })).toMatchObject({ sameHouse: true });
+    expect(twin({ name: 'Priya Nair', key: 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz012', url: 'https://sandbox.example/t/sb-4/a2a' })).toMatchObject({ sameHouse: false });
+    h.close();
+  });
+
+  it('puts another house\'s agreement to the owner as a proposal, and a pledge with its own words (run 100)', async () => {
+    const h = await house();
+    const r = h.desk.agreementIn({ id: 'ag-0000abcd', what: 'BBQ plates, A$5 a head. You cover no-shows.', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://vic.example/a2a', key: 'vic-house-key', name: 'Vic Lorne' });
+    expect(r).toMatchObject({ kind: 'agreement.received' });
+    expect(h.desk.suggestions[0]!.text).toMatch(/^Vic Lorne's house proposes: BBQ plates, A\$5 a head\. You cover no-shows, by .+\. Nothing is agreed until you tap Yes\. You haven't dealt with Vic Lorne before\.$/);
+    h.close();
+  });
+
   it('counts all of today\'s events, not a page of them (21 Nov: 11 on Today, 25 on Who has access)', async () => {
     const at = new Date().toISOString();
     const all = Array.from({ length: 150 }, () => ({ at, kind: 'attack.blocked', subject: 'x', data: { why: 'forged-card' } }));
@@ -1181,6 +1201,22 @@ describe('what an attacker tried (round 16)', () => {
     expect((h.desk as unknown as { taskStamps: (k: string) => string[] }).taskStamps(a.id.publicJwk.kid!)).toEqual([]);
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Posted it; two people may fit.' })).toMatchObject({ ok: true });
     expect((await h.owner({ kind: 'list' })).tasks[0]).toMatchObject({ errand: true, state: 'done', ended: { text: 'Posted it; two people may fit.' } });
+    h.close();
+  });
+
+  it('an errand the AI is waiting on stays open with its line, and ends with its report (run 101)', async () => {
+    const h = await withReplies();
+    const a = await h.connect('Helper');
+    const set = await h.owner({ kind: 'panel.errand.set', text: 'Ask Priya whether Sam is a good sitter' });
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'waiting' })).toHaveProperty('error');
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'waiting', text: 'Asked Priya; waiting on her answer' })).toMatchObject({ ok: true });
+    expect((await h.owner({ kind: 'list' })).tasks[0]).toMatchObject({ errand: true, state: 'open', did: [{ text: 'Asked Priya; waiting on her answer' }] });
+    // Only for an errand: under a task about a chat, the next note comes to the AI anyway.
+    const note = h.desk.addNote({ from: from('sam'), text: 'Selling a bike' })!;
+    const chat = (await h.owner({ kind: 'panel.task.set', note, text: 'Say no' })).task as { id: string };
+    expect((await a.call({ kind: 'assistant.task.done', id: chat.id, outcome: 'waiting', text: 'x' })).error).toContain('errand');
+    expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Priya says she doesn\'t know Sam well enough' })).toMatchObject({ ok: true });
+    expect((await h.owner({ kind: 'list' })).tasks.find((t: { id: string }) => t.id === set.task.id)).toMatchObject({ state: 'done', ended: { text: 'Priya says she doesn\'t know Sam well enough' } });
     h.close();
   });
 

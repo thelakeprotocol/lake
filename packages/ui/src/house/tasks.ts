@@ -148,7 +148,9 @@ export function TaskCard({ t, v }: { t: TaskV; v: ListView }) {
       h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), `You asked ${ai}`, pill),
       h('p', { class: 'task-words' }, `“${t.text}”`),
       !open && t.ended?.text ? h('div', { class: 'task-did report' }, h('small', {}, `${Ai} says`), h('p', {}, t.ended.text)) : null,
-      h('p', { class: 'muted-line task-status' }, open ? (t.seen ? `${Ai} is working on it.` : `Not started yet. ${starts(a, ai)}`) : t.ended?.text ? '' : t.ended?.why ?? ''),
+      // Open and waiting on someone: the AI's own line (round 127), until it reports how it ended.
+      open && t.did.length ? h('div', { class: 'task-did report' }, h('small', {}, `${Ai} says`), h('p', {}, t.did.at(-1)!.text)) : null,
+      h('p', { class: 'muted-line task-status' }, open ? (t.did.length ? `${Ai} is waiting on an answer.` : t.seen ? `${Ai} is working on it.` : `Not started yet. ${starts(a, ai)}`) : t.ended?.text ? '' : t.ended?.why ?? ''),
       eActs.length ? h('div', { class: 'card-actions' }, ...eActs) : null,
       eQuiet.length ? h('div', { class: 'card-foot quiet' }, ...eQuiet) : null));
   }

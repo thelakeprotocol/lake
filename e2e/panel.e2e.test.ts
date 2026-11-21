@@ -774,11 +774,13 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(await again.ask(`${house}/a2a`, { kind: 'note', text: 'Alex again, on a new phone: still on for Thursday?' })).toMatchObject({ kind: 'noted' });
       await tab('People');
       const row = page.locator('.people-new .chatrow', { hasText: 'still on for Thursday' });
-      await row.locator('.row-via.careful', { hasText: 'Says they\'re Alex, with a different key' }).waitFor({ timeout: 8000 });
+      // Alex's new key writes from another address than the Alex this house knows: careful, and why (run 100).
+      await row.locator('.row-via.careful', { hasText: /Says they're Alex(, with a different key|, from a different house: careful)/ }).waitFor({ timeout: 8000 });
       await tidy();
       await row.click();
       // Said plainly in the chat, with the one tap that files it with Alex (asked first: it makes their AI answer it too).
-      await page.locator('.newstrip.threat', { hasText: 'A new phone or AI app does that; so does someone pretending.' }).waitFor();
+      // What to do next, said on the strip (run 100: "the warning never tells me what to do next").
+      await page.locator('.newstrip.threat', { hasText: /another way (first|before you send an address, money or codes)/ }).waitFor();
       await tidy();
       await page.locator('.same-person').click();
       await page.locator('ion-action-sheet').getByText('File this with Alex?').waitFor();
@@ -1743,7 +1745,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
   it('puts the owner\'s AI on duty: a signed grant and a code, the morning page with Undo, and off duty in two taps (5 Nov)', async () => {
     await tab('My AI');
     // Roles on My AI (round 90): Away is hired from its row, its preset in a sheet.
-    await page.locator('.roles ion-item.role-away', { hasText: 'Hire' }).click();
+    await page.locator('.roles ion-item.role-away', { hasText: 'Set up' }).click();
     const card = sheet();
     // This house offers a model, so it can run the AI itself: one tap. This test runs it elsewhere, to pair its own stand-in.
     await card.locator('ion-segment-button', { hasText: 'In my house' }).waitFor({ timeout: 10_000 });
@@ -1902,7 +1904,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).textContent()).toContain('Away');
     // Its row says it's on duty now, not "Here now"; Replies can still be hired by another AI while it holds Away (round 106).
     expect(await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).textContent()).toContain('on duty now');
-    await page.locator('.roles ion-item.role-messages', { hasText: 'Hire' }).waitFor();
+    await page.locator('.roles ion-item.role-messages', { hasText: 'Set up' }).waitFor();
     expect(await page.locator('.roles').getByText(/stop that to hire this/).count()).toBe(0);
     await page.locator('ion-item.ai-row', { hasText: 'Night AI' }).click();
     await page.getByText('Replies, notes set aside and bookings only, never money').waitFor();
@@ -1911,8 +1913,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await on.getByRole('button', { name: 'Stop' }).click();
     await confirmSheet('Stop');
     // Stopped: Away is free to hire again, and Messages has the day preset.
-    await page.locator('.roles ion-item.role-away', { hasText: 'Hire' }).waitFor({ timeout: 10_000 });
-    await page.locator('.roles ion-item.role-messages', { hasText: 'Hire' }).click();
+    await page.locator('.roles ion-item.role-away', { hasText: 'Set up' }).waitFor({ timeout: 10_000 });
+    await page.locator('.roles ion-item.role-messages', { hasText: 'Set up' }).click();
     await sheet().getByRole('button', { name: 'Sign and hire' }).waitFor({ timeout: 10_000 });
     expect(await sheet().getByLabel('On duty from').inputValue().catch(async () => sheet().getByLabel('On duty from').evaluate((e) => (e as HTMLInputElement & { value: string }).value))).toBe('08:00');
     await closeSheet();
@@ -1944,6 +1946,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const invite = page.locator('ion-card.sug', { hasText: 'invites you to sign' });
     await invite.getByText(/someone your side hasn't dealt with: their words are unchecked/).waitFor({ timeout: 15_000 });
     await invite.getByRole('button', { name: 'Sign the pledge' }).waitFor();
+    // The pledge's own words, not its id (run 100: the card said "invites you to sign: street-bbq-plates").
+    await invite.getByText(/invites you to sign: Our street helps out\./).waitFor();
     // Who opened it, from the tally's record: an AI with no house, so a host its words name is its own claim (round 117).
     await invite.locator('.opened-by', { hasText: /Opened by .+, an AI\. Anyone its words name as host is its own claim\./ }).waitFor();
     await invite.getByRole('button', { name: 'Dismiss' }).click();

@@ -48,13 +48,16 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     ]);
 }
 
+/** A lookalike's line in the list: calm when the new key writes from the same house, careful when not. */
+const twinLine = (name: string, sameHouse?: boolean) => sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}, from a different house: careful` : `Says they're ${name}, with a different key`;
+
 function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
   const ai = c.lastBy === 'ai' ? shortName(c.notes.at(-1)?.answered?.by ?? '') || 'Your AI' : '';
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow${c.unread ? ' unread' : ''}`, onClick: () => push(`#chat=${encodeURIComponent(c.key)}`) },
     h('div', { slot: 'start' }, h(Avatar, { name: c.name, ring: c.trust === 'lookalike' ? 'lookalike' : undefined })),
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
-      c.trust === 'lookalike' ? h('div', { class: 'row-via careful' }, `Says they're ${shortName(c.twin?.name ?? c.name)}, with a different key`) : null,
+      c.trust === 'lookalike' ? h('div', { class: `row-via${c.twin?.sameHouse ? '' : ' careful'}` }, twinLine(shortName(c.twin?.name ?? c.name), c.twin?.sameHouse)) : null,
       c.toAi ? h('div', { class: 'row-via to-ai' }, h('ion-icon', { name: 'sparkles-outline' }), c.via) : null,
       twin && !c.toAi && c.trust !== 'lookalike' && c.agent ? h('div', { class: 'row-via' }, `Through ${shortName(c.agent)}`) : null,
       // What a new sender is, before it's opened (round 84: "Visitor from early.example: a person, a bot, spam?").
@@ -235,7 +238,10 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
   // It turns them away at the door and tells them so: what messaging apps call Block, so it says Block (13 Nov).
   const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Block', fill: 'outline', color: 'medium', size: 'small', run: async () => { await must({ kind: 'panel.note.mute', id: latest.id }); void toast(`${c.name} blocked`); back('#chats'); }, ask: blockAsk(c.name) }) : null;
   if (c.trust === 'lookalike') return h('div', { class: 'newstrip threat', role: 'note' },
-    h('p', {}, h('b', {}, `Says they're ${name || c.name}, with a different key.`), ' A new phone or AI app does that; so does someone pretending.'),
+    // What it is and what to do next (run 100: "the warning never tells me what to do next"); Grok's words, adapted.
+    twin?.sameHouse === true ? h('p', {}, h('b', {}, `Says they're ${name}: a new key, from the same house as before.`), ' Most likely a new phone or AI app. Still check with them another way before you send an address, money or codes.')
+      : twin?.sameHouse === false ? h('p', {}, h('b', {}, `Says they're ${name}, but writes from a different house.`), ` Don't send an address, money or codes here. Check with ${name} another way first.`)
+      : h('p', {}, h('b', {}, `Says they're ${name || c.name}, with a different key.`), ' A new phone or AI app does that; so does someone pretending. Check with them another way before you send an address, money or codes.'),
     h('div', { class: 'newstrip-acts' },
       twin && latest.from.key ? h(Btn, { key: 'same', label: `This is ${name}`, fill: 'outline', size: 'small', cls: 'same-person',
         run: async () => { await must({ kind: 'panel.person.same', key: latest.from.key, as: twin.key }); void toast(`Filed with ${name}`); bump(); },

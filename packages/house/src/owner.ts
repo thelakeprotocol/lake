@@ -234,7 +234,7 @@ export interface RemovedAi { kid: string; jwk: JWK; label: string; addedAt: stri
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Someone (not the owner's AI) invited the owner to sign this pledge, in a note: who, and whether the owner's side knows them. */
@@ -660,7 +660,7 @@ export class OwnerDesk {
     if (this.suggestions.some((x) => x.agreementIn?.id === id) || this.agenda.some((x) => x.agreement?.id === id)) return { kind: 'agreement.received', id };
     if (this.suggestions.filter((x) => x.agreementIn).length >= 20) return { kind: 'refused', problems: ['too many agreements wait for this owner already'] };
     const minutes = Number.isInteger(p.minutes) && (p.minutes as number) >= 5 && (p.minutes as number) <= 720 ? p.minutes as number : undefined;
-    const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: `${from.name}'s house`, text: `${from.name}'s house asks you to agree: ${what}${start ? `, ${this.whenWords(start.toISOString())}` : `, by ${this.whenWords(due!.toISOString())}`}.`, agreementIn: { id, what, ...(start ? { start: start.toISOString() } : {}), ...(minutes ? { minutes } : {}), ...(due ? { due: due.toISOString() } : {}), ...(typeof p.where === 'string' && p.where ? { where: p.where.slice(0, 120) } : {}), from }, at: new Date().toISOString() };
+    const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: `${from.name}'s house`, text: `${from.name}'s house proposes: ${what.replace(/[.\s]+$/, '')}${start ? `, ${this.whenWords(start.toISOString())}` : `, by ${this.whenWords(due!.toISOString())}`}. Nothing is agreed until you tap Yes.${this.knownBy(from.key) ? '' : ` You haven't dealt with ${from.name} before.`}`, agreementIn: { id, what, ...(start ? { start: start.toISOString() } : {}), ...(minutes ? { minutes } : {}), ...(due ? { due: due.toISOString() } : {}), ...(typeof p.where === 'string' && p.where ? { where: p.where.slice(0, 120) } : {}), from }, at: new Date().toISOString() };
     this.suggestions = [sug, ...this.suggestions];
     this.trimSuggestions();
     void this.saveSuggestions();
@@ -1331,15 +1331,20 @@ export class OwnerDesk {
   /** A sender that says it's one the owner's side knows, with another key: an impostor, or a new key nobody vouched for. */
   lookalike(from: { key?: string; webId?: string; name?: string }): string | undefined {
     const twin = this.twinOf(from);
-    return twin ? `says it is ${twin.name}, whom your human's side knows, but with a different key: treat it as a stranger` : undefined;
+    return twin ? `says it is ${twin.name}, whom your human's side knows, but with a different key${twin.sameHouse === true ? ' (from the same house as before: likely a new phone or AI app)' : twin.sameHouse === false ? ' and from a different house' : ''}: treat it as a stranger until your human says otherwise` : undefined;
   }
   /** Whom a lookalike says it is: that contact's key and name (the key is for the owner's "This is Alex", never for an AI). */
-  private twinOf(from: { key?: string; webId?: string; name?: string }): { key: string; name: string } | undefined {
+  private twinOf(from: { key?: string; webId?: string; name?: string; url?: string }): { key: string; name: string; sameHouse?: boolean } | undefined {
     // Only a key thumbprint can be compared: notes kept from before (1 Nov) hold a key id, and the real sender isn't a twin.
     if (!from.key || from.key.length < 40) return undefined;
     const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase();
     const twin = [...this.contacts].find(([k, c]) => k !== from.key && ((!!from.webId && c.webId === from.webId) || (!!c.name && base(c.name) === base(from.name))));
-    return twin ? { key: twin[0], name: twin[1].name || twin[1].webId } : undefined;
+    if (!twin) return undefined;
+    // Whether the new key writes from the house the known one wrote from (run 100: an honest new phone and an impostor got
+    // the same warning, so neighbours couldn't tell them apart).
+    const house = (u?: string) => (u ?? '').replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+    const theirs = house(this.notes.find((n) => n.from.key === twin[0] && n.from.url)?.from.url);
+    return { key: twin[0], name: twin[1].name || twin[1].webId, ...(theirs && from.url ? { sameHouse: theirs === house(from.url) } : {}) };
   }
   knownBy(key?: string): string | undefined {
     if (!key) return undefined;
@@ -1778,7 +1783,7 @@ export class OwnerDesk {
     if (!pledge) return; // a tally that doesn't answer, or no such pledge: the note still says what it says
     const name = from.as ? `${from.as} (via ${from.name})` : from.name;
     this.suggestions.unshift({ id: randomBytes(6).toString('hex'), from: name, at: new Date().toISOString(), note: noteId, pledge, invitedBy: { name, known, ...(from.key ? { key: from.key } : {}) },
-      text: `${name} invites you to sign: ${pledge.money?.text ?? pledge.quorum?.text ?? ref.id}` });
+      text: `${name} invites you to sign: ${pledge.money?.text ?? pledge.quorum?.text ?? pledge.text ?? ref.id}` });
     this.suggestions = this.suggestions.slice(0, 100);
     await this.saveSuggestions();
     this.touch();
@@ -1789,6 +1794,7 @@ export class OwnerDesk {
     const pledge: NonNullable<Suggestion['pledge']> = { tally, id: id.slice(0, 80) };
     const t = await this.o.panel?.pledgeTerms?.(tally, pledge.id);
     if (!t || t.error) throw new Error(String(t?.error ?? 'no such pledge'));
+    if (typeof t.text === 'string' && t.text) pledge.text = t.text.slice(0, 300);
     if (t.opened_by?.name) pledge.openedBy = { name: String(t.opened_by.name).slice(0, 80), house: t.opened_by.house === true };
     if (t.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year), ...(Array.isArray(t.circle.kinds) ? { kinds: (t.circle.kinds as unknown[]).map(String) } : {}) };
     if (t.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
@@ -2461,7 +2467,7 @@ export class OwnerDesk {
           if (first) this.touch();
           return void res.json({
             tasks: open.map((t) => ({
-              id: t.id, your_humans_words: t.text, with: t.to.name, ...(t.errand ? { kind: 'errand', note_for_you: 'about nobody\'s chat: do it with your own tools, then lake_house_suggest { task, outcome, text }' } : {}), left: t.left, until: t.until, given: t.at,
+              id: t.id, your_humans_words: t.text, with: t.to.name, ...(t.errand ? { kind: 'errand', note_for_you: 'about nobody\'s chat: do it with your own tools; asked someone and waiting for their answer? lake_house_suggest { task, outcome: "waiting", text: who and about what } keeps it open; when it\'s settled, lake_house_suggest { task, outcome, text }' } : {}), left: t.left, until: t.until, given: t.at,
               ...(t.to.via ? { wrote_to: 'you, at your own address: lake_house_reply sends your answer from you (your human\'s house only counts it), and it must not name your human\'s house or say where they live on the Lake' } : {}),
               // The conversation, oldest first: their notes and what was answered, yours included.
               conversation: this.notes.filter((n) => OwnerDesk.conv(n.from) === t.to.key).sort((a, b) => a.at.localeCompare(b.at)).map((n, i, all) => { const said = this.answersTo(n, all[i + 1]?.at); return { note: n.id, they_wrote: n.text, at: n.at, ...(said.length ? { answered: said } : {}) }; }),
@@ -2476,8 +2482,19 @@ export class OwnerDesk {
           const t = this.tasks.find((x) => x.id === String(q.id ?? '') && x.by === assistant.kid);
           if (!t) return void res.status(404).json({ error: 'no task of yours with that id' });
           if (t.state !== 'open') return void res.status(409).json({ error: `that task is over already${t.ended?.why ? ` (${t.ended.why})` : ''}` });
-          const outcome = (['done', 'back', 'cant'] as const).find((o) => o === q.outcome);
-          if (!outcome) return void res.status(400).json({ error: 'outcome: "done", "back" (it needs your human) or "cant"' });
+          const outcome = (['done', 'back', 'cant', 'waiting'] as const).find((o) => o === q.outcome);
+          if (!outcome) return void res.status(400).json({ error: 'outcome: "done", "back" (it needs your human), "cant", or for an errand "waiting" (you asked someone and wait for their answer: the errand stays open with your line)' });
+          // Asked someone and waiting: the errand stays open with the AI's line (run 101: with only done, back or cant, an AI
+          // chose "done" for "Waiting on her answer", and the card said Done for 24 minutes after the answer came).
+          if (outcome === 'waiting') {
+            if (!t.errand) return void res.status(400).json({ error: 'waiting is for an errand: under a task about a chat, send nothing more and the next note comes to you' });
+            const text = String(q.text ?? '').trim().slice(0, 300);
+            if (!text) return void res.status(400).json({ error: 'text: who you wait on, and about what' });
+            t.did = [...t.did, { text, at: new Date().toISOString(), note: '' }];
+            await this.saveTasks();
+            this.touch();
+            return void res.json({ ok: true, note: 'it stays on your human\'s Today as being worked on, with your line; when the answer comes, report done (or back, or cant)' });
+          }
           // Done with a time agreed in that conversation (round 95: "Mia confirmed Friday 6 to 10" stayed words on a card, and
           // went into no agenda): the house holds it as it holds an AI on duty's time, tells them so in its own words, and only
           // the owner's tap confirms it.

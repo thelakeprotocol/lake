@@ -51,22 +51,22 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
             h('p', {}, `${shortName(d.label)} · ${d.hours ? `${d.hours.from}–${d.hours.to}` : 'While you\'re away'} · ${d.state.on ? d.state.used : d.summary.handled} of ${d.cap} today · until ${new Date(d.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}`),
             d.runner ? h('p', {}, watching(d.runner)) : null, !d.state.on && !/off hours/.test(d.state.why) ? h('p', { class: 'warn-text' }, d.state.why) : null),
           h('div', { slot: 'end' }, h(Btn, { label: 'Stop', size: 'small', fill: 'outline', color: 'danger', run: () => call({ kind: 'panel.duty.off', kid: d.kid }), ask: { header: `Stop ${shortName(d.label)}'s ${ROLES[role].name}?`, sub: 'It stops now. You can hire it again any time.', button: 'Stop' } }))))
-          : [h(Row, { key: role, icon: role === 'away' ? 'moon-outline' : 'chatbubbles-outline', tint: 'violet', label: ROLES[role].name, sub: ROLES[role].line, cls: `role-${role}`, note: 'Hire', onClick: () => { setPreset(role); setSetup(true); } })];
+          : [h(Row, { key: role, icon: role === 'away' ? 'moon-outline' : 'chatbubbles-outline', tint: 'violet', label: ROLES[role].name, sub: ROLES[role].line, cls: `role-${role}`, note: 'Set up', onClick: () => { setPreset(role); setSetup(true); } })];
       }),
       // Every AI with a spending allowance (round 106: two had one, the row named one).
       ...(() => {
         const shoppers = ais.filter((a) => rolesOf(a, live).includes('shopping'));
         const can = ais.filter((a) => a.canHaveAllowance && !onDuty.has(a.kid));
         return shoppers.length ? shoppers.map((s) => h(Row, { key: `shopping-${s.kid}`, icon: 'wallet-outline', tint: 'mint', label: ROLES.shopping.name, sub: `${shortName(s.label)} · up to ${money$(s.allowance!.amount, s.allowance!.currency)} · until ${new Date(s.allowance!.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}`, cls: 'role-shopping', onClick: () => push(`#aikey=${encodeURIComponent(s.kid)}`) }))
-          : [h(Row, { key: 'shopping', icon: 'wallet-outline', tint: 'violet', label: ROLES.shopping.name, sub: can.length ? ROLES.shopping.line : `${ROLES.shopping.line} Connect an AI you chat with first.`, cls: 'role-shopping', note: 'Hire', onClick: () => (can.length ? push(`#aikey=${encodeURIComponent(can[0]!.kid)}`) : setConnect(true)) })];
+          : [h(Row, { key: 'shopping', icon: 'wallet-outline', tint: 'violet', label: ROLES.shopping.name, sub: can.length ? ROLES.shopping.line : `${ROLES.shopping.line} Connect an AI you chat with first.`, cls: 'role-shopping', note: 'Set up', onClick: () => (can.length ? push(`#aikey=${encodeURIComponent(can[0]!.kid)}`) : setConnect(true)) })];
       })()),
     // Two ways to run it, said plainly (13 Nov: "what about just log in with your Claude subscription?"). A subscription
     // signs in only to Claude's own apps, so it runs your AI on your computer, in Claude Code; a house runs it with a key.
     runner.data ? h(Section, { title: 'Where your AI runs' },
-      h(Row, { icon: 'laptop-outline', tint: 'violet', label: 'On your computer', sub: 'With your Claude subscription, in Claude Code. Answers within seconds while the computer is on.', onClick: () => { setSetupWhere('computer'); setSetup(true); } }),
+      h(Row, { icon: 'laptop-outline', tint: 'violet', label: 'On your computer', sub: 'Uses Claude Code, on your Claude plan, while your computer is on.', onClick: () => { setSetupWhere('computer'); setSetup(true); } }),
       runner.data.model?.whose === 'yours'
         ? h(Row, { icon: 'key-outline', tint: 'violet', label: 'Your own Claude key', sub: `${runner.data.model.model ?? 'Claude'}${runner.data.running ? ' · running in your house' : ''}`, note: h(Btn, { label: 'Remove', size: 'small', fill: 'clear', color: 'danger', run: () => must({ kind: 'panel.model.clear' }), ask: { header: 'Remove your Claude key from your house?', sub: runner.data.running ? 'Your AI on duty stops unless your house offers one.' : undefined, button: 'Remove' } }) })
-        : h(Row, { icon: 'key-outline', tint: 'violet', label: runner.data.model ? 'Always on: your house offers one' : 'Always on, in your house', sub: runner.data.model ? `Awake whenever your house is${runner.data.running ? ' (running now)' : ''}. Or use your own Claude API key.` : 'With a Claude API key, awake whenever your house is. You pay Anthropic for what it uses.', onClick: () => setKeySheet(true) })) : null,
+        : h(Row, { icon: 'key-outline', tint: 'violet', label: runner.data.model ? 'Always on: your house offers one' : 'Always on, in your house', sub: runner.data.model ? `Awake whenever your house is${runner.data.running ? ' (running now)' : ''}. Or use your own Claude API key.` : 'Runs any time, with your own Claude API key.', onClick: () => setKeySheet(true) })) : null,
     h(Night, { log: duty.data }),
     h(Sheet, { open: connect, onClose: () => setConnect(false), title: 'Give your AI a key' }, h(ConnectSheet, { houseUrl: houseBase(), ais })),
     h(Sheet, { open: keySheet, onClose: () => setKeySheet(false), title: 'Your own Claude key' }, h(KeySheet, { done: () => setKeySheet(false) })),
@@ -183,12 +183,13 @@ export function AiKeyPage({ arg }: { arg: string }) {
   const mine = (duty.data?.duties ?? []).find((d) => d.kid === a.kid && dutyLive(d)), onDuty = !!mine;
   return h(Page, { title: shortName(a.label), back: () => back('#ai'), backLabel: 'My AI' },
     h('div', { class: 'bigwho' }, h(Avatar, { name: shortName(a.label), size: 72 }), h('h2', {}, shortName(a.label)), a.waiting ? h(Pill, { text: 'Not reading', tone: 'amber' }) : h(Pill, { text: lastHere(a.seenAt).text, tone: lastHere(a.seenAt).now ? 'mint' : 'muted' })),
-    a.waiting ? h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {}, h('p', {}, waitingLine(a)))) : null,
-    h(Section, {}, h(Row, { icon: 'eye-outline', label: 'Suggests; you decide', sub: `Connected ${dayTime(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: ROLES[(mine?.kinds ?? []).includes('book') ? 'away' : 'messages'].name, sub: dutyMay(mine?.kinds ?? []) }) : null),
+    // A slim row, as on Today (21 Nov: a banner per AI; ChatGPT: "keep the unread message as a slim status row").
+    a.waiting ? h(Section, { cls: 'ais-waiting' }, h(Row, { icon: 'alert-circle-outline', tint: 'amber', label: 'Messages waiting for it', sub: waitingLine(a), cls: 'warn-row', detail: false })) : null,
+    h(Section, {}, h(Row, { icon: 'eye-outline', label: 'You approve its suggestions', sub: `Connected ${dayTime(a.addedAt)}` }), onDuty ? h(Row, { icon: 'moon-outline', tint: 'violet', label: ROLES[(mine?.kinds ?? []).includes('book') ? 'away' : 'messages'].name, sub: dutyMay(mine?.kinds ?? []) }) : null),
     // On duty it reads the notes and its errands only, whatever is switched on here.
     onDuty ? null : h(Section, { title: 'What it can read', cls: 'reads' },
       // The same words wherever it's said (14 Nov: four screens said four things about what it reads).
-      h(Row, { icon: 'chatbubbles-outline', label: 'Who writes to you', sub: 'Always: who wrote and when, its own errands, your agenda and free hours. Their words only in chats you hand it or tell it about', detail: false }),
+      h(Row, { icon: 'chatbubbles-outline', label: 'Who writes to you', sub: 'Always who wrote and when, your agenda and free hours. Their words only in chats you hand it.', detail: false }),
       // While it holds a time on duty it reads only the base, whatever is switched on: said, and the switches wait (14 Nov:
       // they seemed to save, then sprang back off).
       a.dutyHeld ? h('ion-item', { lines: 'full', class: 'reads-held' }, h('ion-label', { class: 'ion-text-wrap' }, h('p', {}, `While ${shortName(a.label)} holds a time on duty (until ${new Date(a.dutyHeld).toLocaleDateString([], { day: 'numeric', month: 'short' })}), it reads only who writes to you and its errands. Take it off duty to let it read more.`),
