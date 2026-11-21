@@ -29,7 +29,7 @@ const BY: Record<TodayLine['by'], { label: string; icon: string; tint: string }>
 export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
-  const today = useHouse<{ since: string; lines: TodayLine[]; waiting?: { people: number; known: number; since?: string; more?: boolean }; duty?: { by: string; since: string; handled: number; needs: number } }>({ kind: 'panel.today', tz_offset: new Date().getTimezoneOffset() });
+  const today = useHouse<{ since: string; lines: TodayLine[]; waiting?: { people: number; known: number; since?: string; more?: boolean }; duty?: { by: string; since: string; handled: number; needs: number } }>({ kind: 'panel.today', tz: Intl.DateTimeFormat().resolvedOptions().timeZone, tz_offset: new Date().getTimezoneOffset() });
   const v = list.data;
   if (!v) return h(Page, { title: 'Today', big: true, status, footer: tabbar }, h(Failed, { error: list.error }));
   const groups = sameAsks(v.requests);
@@ -55,12 +55,11 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     h('h3', { class: 'section-h', key: 'nh' }, 'Needs your attention'),
     connectedNote ? h('ion-card', { class: 'lake-card ok-card', key: 'cn' }, h('ion-card-content', {}, h('p', {}, connectedNote), h('ion-button', { size: 'small', fill: 'clear', onClick: () => { connectedNote = ''; } }, 'OK'))) : null,
     ...(v.connects ?? []).map((c) => h(ConnectCard, { key: `c-${c.id}`, c })),
-    ...waiting.map((a) => h('ion-card', { key: `w-${a.kid}`, class: 'lake-card warn-card' }, h('ion-card-content', {},
-      h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'alert-circle-outline' }), `${shortName(a.label)} isn't reading`),
-      h('p', {}, waitingLine(a))))),
     ...groups.map((all) => h(RequestCard, { key: all[0]!.id, all })),
     ...tasks.map((t) => h(TaskCard, { key: `t-${t.id}`, t, v })),
     ...decide.map((x) => h(SuggestionCard, { key: x.id, x })),
+    // An AI that isn't reading: one quiet row each, under what needs a decision (21 Nov: a loud card per AI sat on top).
+    waiting.length ? h(Section, { key: 'ais-waiting', cls: 'ais-waiting' }, ...waiting.map((a) => h(Row, { key: a.kid, icon: 'alert-circle-outline', tint: 'amber', label: `${shortName(a.label)} isn't reading`, sub: waitingLine(a), cls: 'warn-row', onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`) }))) : null,
     waits.length ? h(Waits, { key: 'waits', waits }) : null,
     wants.length ? h(Section, { title: 'Looking for', key: 'wants', cls: 'chat-list wants' }, ...wants.map((x) => h(WantRow, { key: x.want.id, w: x }))) : null,
     // What you have to sell or give away, on your house while it's up (round 109); a note about one lands in People.
@@ -76,7 +75,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       // Counts as tiles (the number first, a few words, the names small), what an AI did as rows with Undo (17 Nov: the
       // owner said the list looked "bland, like a blob of text").
       lines.some((l) => l.tile) ? h('div', { class: 'handled-tiles', key: 'tiles' }, ...lines.filter((l) => l.tile).map((l, i) => h('button', { key: `t${i}`, type: 'button', class: `handled-tile tint-${BY[l.by].tint}`, onClick: () => push(l.to), 'aria-label': l.text },
-        h('div', { class: 'tile-top' }, h('ion-icon', { name: BY[l.by].icon }), h('span', { class: 'tile-time' }, time(l.at))),
+        h('div', { class: 'tile-top' }, h('ion-icon', { name: BY[l.by].icon })),
         h('b', { class: 'tile-big' }, l.tile!.big), h('span', { class: 'tile-label' }, l.tile!.label),
         l.tile!.detail ? h('span', { class: 'tile-detail' }, l.tile!.detail) : null))) : null,
       ...(lines.some((l) => !l.tile) ? lines.filter((l) => !l.tile).map((l, i) => h(Row, { key: i, icon: BY[l.by].icon, tint: BY[l.by].tint, label: l.text, sub: `${BY[l.by].label} · ${time(l.at)}`, onClick: () => (l.to === '#inbox' ? document.querySelector('ion-list.coming-up')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) : push(l.to)), cls: 'handled-row',
@@ -113,7 +112,7 @@ function RequestCard({ all }: { all: Request[] }) {
     // card shows both, the counted lines in the house's words (from the packs' labels).
     r.question ? h('p', { class: 'req-q' }, r.counts?.length ? h('span', { class: 'req-q-by' }, 'Their question') : null, r.question) : null,
     r.counts?.length ? h('div', { class: 'req-counts' }, h('p', {}, `What your house would answer, yes or no, to ${r.counts.length === 1 ? 'this' : 'each'}:`), h('ul', {}, ...r.counts.map((c) => h('li', { key: c }, c))), h('p', { class: 'req-counts-note' }, `Only the yes or no leaves, split in two halves that nobody can read alone.${r.table ? ` The one who asked sees only how many said yes, ${tableLine(r.table)}.` : ''}`)) : null,
-    h('div', { class: 'field-tags', 'aria-label': 'What it wants' }, ...r.fields.map((f) => h('span', { key: f, class: 'field-tag' }, nice(f)))),
+    r.counts?.length ? null : h('div', { class: 'field-tags', 'aria-label': 'What it wants' }, ...r.fields.map((f) => h('span', { key: f, class: 'field-tag' }, nice(f)))),
     h('div', { class: `advice ${suggest === 'deny' ? 'deny' : suggest === 'allow' ? 'allow' : ''}` }, h('ion-icon', { name: suggest === 'deny' ? 'shield-outline' : 'shield-checkmark-outline' }),
       h('div', {}, h('b', {}, a.verdict), [...a.why, ...(r.warnings ?? []).map((w) => `It ${w}`)].map((w) => h('p', { key: w }, w)))),
     h('div', { class: 'decide' }, ...(suggest === 'deny' ? [allowBtn, denyBtn] : [denyBtn, allowBtn])),
@@ -145,7 +144,7 @@ function AgreementRow({ a }: { a: AgendaItem }) {
   const g = a.agreement!, [pill, tone] = agreementPill(g, a.due), over = ['declined', 'cancelled', 'withdrawn'].includes(g.status);
   return h('ion-item', { lines: 'full', class: `lake-row agreement-row ${g.status}` },
     h('div', { slot: 'start', class: `row-icon tint-${tone === 'red' ? 'amber' : tone === 'muted' ? 'muted' : tone}` }, h('ion-icon', { name: a.due ? 'hand-right-outline' : 'calendar-outline' })),
-    h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what), h('p', {}, [a.when, a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
+    h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what), h('p', {}, [whenOf(a), a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
       g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null),
     h(Pill, { text: pill, tone }),
     g.status === 'agreed' ? h('div', { slot: 'end', class: 'agreement-acts' },
@@ -153,11 +152,13 @@ function AgreementRow({ a }: { a: AgendaItem }) {
       h(Btn, { key: 'c', label: 'Cancel', size: 'small', fill: 'clear', color: 'danger', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'cancelled' }), ask: { header: `Cancel "${a.what}"?`, sub: `${g.with.name}'s house is told, and their copy shows it cancelled.`, button: 'Cancel it' }, done: `Cancelled. ${g.with.name} was told.` }))
       : g.status === 'proposed' && g.role === 'proposed' ? h('div', { slot: 'end' }, h(Btn, { label: 'Withdraw', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'withdrawn' }) })) : null);
 }
+// In this phone's own time, from the start or due date when there is one (round 121: the house wrote them in UTC).
+const whenOf = (a: AgendaItem) => (a.start ? dayTime(a.start) : a.due ? `by ${dayTime(a.due)}` : a.when);
 function AgendaRow({ a }: { a: AgendaItem }) {
   if (a.agreement) return h(AgreementRow, { a });
   return h('ion-item', { lines: 'full', class: 'lake-row' },
     h('div', { slot: 'start', class: `row-icon tint-${!a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber'}` }, h('ion-icon', { name: 'calendar-outline' })),
-    h('ion-label', {}, h('h3', {}, a.what), h('p', {}, [a.when, a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · '))),
+    h('ion-label', {}, h('h3', {}, a.what), h('p', {}, [whenOf(a), a.where, a.with ? `with ${a.with}` : ''].filter(Boolean).join(' · '))),
     h(Pill, { text: a.held ? 'Held' : a.confirmed ? 'Confirmed' : a.agreed ? 'Agreed' : 'Proposed', tone: !a.held && (a.confirmed || a.agreed) ? 'mint' : 'amber' }),
     h('div', { slot: 'end' }, h(Btn, { fill: 'clear', color: 'medium', size: 'small', label: h('ion-icon', { name: 'close', slot: 'icon-only' }), label2: `Remove ${a.what}`, cls: 'agenda-remove', run: () => must({ kind: 'panel.agenda.remove', id: a.id }), done: 'Removed' })));
 }
@@ -205,7 +206,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
   const waiter = x.errand?.with?.name ? shortName(x.errand.with.name) : 'an answer';
-  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house asks` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' || x.errand?.state === 'answered' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house asks` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
   const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;

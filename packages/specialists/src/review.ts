@@ -585,6 +585,13 @@ export async function createPayments(o: SpecialistOptions & {
       const part = Math.round(Number(p.amount) * 100);
       if (!Number.isInteger(part) || part < 1 || part >= h.amount) return { kind: 'refused', problems: [`amount: part of the ${h.currency} ${h.amount / 100} held, at least 0.01; leave it out to refund it all`] };
       h.amount -= part;
+      // A team's shares come down with it, the signing seller's first (21 Nov: the shares kept their sizes, and the release
+      // signed A$13 of share receipts out of the A$4 still held). On release they add up to what is held.
+      if (h.split) {
+        let left = part;
+        for (const x of [...h.split.filter((y) => y.webId === from), ...h.split.filter((y) => y.webId !== from)]) { const take = Math.min(left, x.amount); x.amount -= take; left -= take; }
+        h.split = h.split.filter((x) => x.amount > 0);
+      }
       spent.set(h.digest, Math.max(0, (spent.get(h.digest) ?? 0) - part));
       // A part refund is the seller answering (round 104): the week stops, and the rest is held until they agree.
       delete h.answerBy;
@@ -595,7 +602,7 @@ export async function createPayments(o: SpecialistOptions & {
       for (const url of new Set([h.payeeUrl, h.sellerUrl, h.payerUrl].filter((u): u is string => !!u))) {
         deliverWithRetries(async () => sendLake(url, { lake: '0.1', card: s.card, envelope: (await signMessage(envelope, o.id, { iss: s.webId })) as LakeData['envelope'] }, { me: o.id, timeoutMs: 10_000 }));
       }
-      return { kind: 'voided', partial: true, hold: h.id, cart: h.cart!.id, refunded: part / 100, still_held: h.amount / 100, credential, ...(logged ? { logged } : {}) } as never;
+      return { kind: 'voided', partial: true, hold: h.id, cart: h.cart!.id, refunded: part / 100, still_held: h.amount / 100, ...(h.split ? { still_held_as_shares: h.split.map((x) => ({ member: x.webId, amount: x.amount / 100 })) } : {}), credential, ...(logged ? { logged } : {}) } as never;
     }
     if (p.kind === 'dispute') {
       if (from !== h.payer) return { kind: 'refused', problems: ['only the buyer disputes it'] };

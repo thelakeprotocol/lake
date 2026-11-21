@@ -866,12 +866,46 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('a reply the AI already has ends the errand answered, and Today says who answered (round 121)', async () => {
+    const h = await house();
+    const ai = await h.connect('Nova');
+    const priya = { name: 'Priya\'s AI', webId: 'https://priya.example/#agent', key: 'priya-jkt', url: 'https://priya.example/a2a' };
+    const opened = await ai.call({ kind: 'assistant.suggest', text: 'Babysitting Friday 6-10 pm', errand: { kind: 'ask', with: priya } });
+    expect(await ai.call({ kind: 'assistant.forward', errand: opened.id, seen: true, from: { ...priya, domain: 'priya.example' }, text: 'Sorry, can\'t on Friday.' })).toEqual({ ok: true, answered: opened.id });
+    const sug = h.desk.suggestions.find((x) => x.id === opened.id)!;
+    expect(sug.errand).toMatchObject({ state: 'answered', ended: { how: 'answered' } });
+    expect(sug.ask).toBeUndefined(); // nothing to decide: the AI has it
+    expect(sug.text).toContain('Sorry, can\'t on Friday.');
+    expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).lines.map((l: { text: string }) => l.text)).toContain('Priya\'s AI answered Nova about: Babysitting Friday 6-10 pm');
+    h.close();
+  });
+
+  it('writes times in the zone the owner\'s phone said, with no zone after them (round 121)', async () => {
+    const h = await house();
+    const words = () => (h.desk as unknown as { whenWords: (iso: string) => string }).whenWords('2026-11-27T08:00:00.000Z');
+    expect(words()).toBe('Fri, 27 Nov, 08:00 UTC');
+    await h.owner({ kind: 'panel.today', tz: 'Australia/Brisbane', tz_offset: -600 });
+    expect(words()).toBe('Fri, 27 Nov, 18:00');
+    await h.owner({ kind: 'panel.today', tz: 'Not/AZone', tz_offset: 0 });
+    expect(words()).toBe('Fri, 27 Nov, 18:00'); // a zone that isn't one is ignored
+    h.close();
+  });
+
   it('says in plain words what the house turned away, that nothing was read, and opens Who has access (round 118)', async () => {
     const at = new Date().toISOString();
     const blocked = (why: string) => ({ at, kind: 'attack.blocked', subject: 'evil.example', data: { why, claimed: 'evil.example' } });
     const h = await house({ panel: { activity: () => [blocked('bad-signature'), blocked('replayed'), blocked('bad-signature')], money: async () => ({}) } });
     const line = (await h.desk.today(0)).lines.find((l: { by: string; text: string }) => l.by === 'house' && l.text.startsWith('Turned away'));
     expect(line).toMatchObject({ text: 'Turned away 3 messages that didn\'t pass the house\'s checks (its signature didn\'t match the name on it; it was an old message sent again). Nothing was read or given out', to: '#access', tile: { big: '3', label: 'turned away' } });
+    h.close();
+  });
+
+  it('counts all of today\'s events, not a page of them (21 Nov: 11 on Today, 25 on Who has access)', async () => {
+    const at = new Date().toISOString();
+    const all = Array.from({ length: 150 }, () => ({ at, kind: 'attack.blocked', subject: 'x', data: { why: 'forged-card' } }));
+    const h = await house({ panel: { activity: (_since: unknown, limit = 100) => all.slice(0, limit), money: async () => ({}) } });
+    const line = (await h.desk.today(0)).lines.find((l: { text: string }) => l.text.startsWith('Turned away'));
+    expect(line?.tile?.big).toBe('150');
     h.close();
   });
 

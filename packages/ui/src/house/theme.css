@@ -420,9 +420,9 @@ ion-action-sheet { --button-color-destructive: var(--lake-red); }
 .field-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .field-tag .tag-k { color: var(--lake-muted); font-weight: 500; }
 .field-tag { font-size: 13px; font-weight: 600; padding: 5px 10px; border-radius: 10px; background: var(--lake-surface-2); color: var(--lake-text); }
-.advice { display: flex; gap: 10px; padding: 12px; border-radius: 14px; background: var(--lake-surface-2); font-size: 14px; }
-.advice ion-icon { font-size: 22px; flex: none; color: var(--lake-muted); }
-.advice b { display: block; font-size: 14.5px; margin-bottom: 2px; }
+.advice { display: flex; gap: 8px; padding: 8px 10px; border-radius: 12px; background: var(--lake-surface-2); font-size: 13.5px; }
+.advice ion-icon { font-size: 18px; flex: none; color: var(--lake-muted); margin-top: 1px; }
+.advice b { display: block; font-size: 13.5px; font-weight: 500; line-height: 1.4; margin-bottom: 2px; }
 .advice p { margin: 2px 0 0 !important; font-size: 13.5px !important; color: var(--lake-muted); line-height: 1.4; }
 .advice.allow { background: var(--lake-mint-soft); } .advice.allow ion-icon { color: var(--lake-mint); }
 .advice.deny { background: var(--lake-amber-soft); } .advice.deny ion-icon { color: var(--lake-amber); }
@@ -591,9 +591,24 @@ ion-card.lake-card ion-card-content .task-did p { margin: 0; }
   border: 1.5px solid color-mix(in srgb, var(--lake-muted) 55%, transparent); --placeholder-color: var(--lake-muted); --placeholder-opacity: 1; caret-color: var(--lake-mint); }
 .tell-input.has-focus { border-color: var(--lake-mint); }
 .tell-label { display: block; margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--lake-muted); }
-/* Today's first card: what you want done, for your AI (round 105). */
-.ask-box .ask-h { font-size: 18px; font-weight: 700; margin: 0 0 4px; color: var(--lake-text); }
-.ask-box .muted-line { margin-top: 8px; }
+/* Today's first line: what you want done, for your AI. One bar until it's used (21 Nov: "too much of everything"). */
+.ask-box { margin: 4px 16px 6px; }
+.ask-bar { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 50px; padding: 4px 6px 4px 14px; border-radius: 25px;
+  border: 1px solid var(--lake-line); background: var(--lake-surface); color: var(--lake-text); font: inherit; text-align: left; }
+.ask-box.open .ask-bar { border-color: color-mix(in srgb, var(--lake-mint) 60%, var(--lake-line)); }
+.ask-bar > ion-icon:first-child { flex: none; font-size: 18px; color: var(--lake-violet); }
+.ask-input { flex: 1; min-width: 0; --background: transparent; --padding-start: 0; --padding-end: 0; --padding-top: 8px; --padding-bottom: 8px;
+  font-size: 16px; --placeholder-color: var(--lake-muted); --placeholder-opacity: 1; caret-color: var(--lake-mint); min-height: 0; }
+.ask-send { flex: none; margin: 0; --padding-start: 0; --padding-end: 0; width: 40px; height: 40px; --border-radius: 50%; }
+.ask-send ion-icon { margin: 0; font-size: 20px; }
+.ask-send[disabled] { opacity: 0.35; }
+.ask-placeholder { flex: 1; color: var(--lake-muted); font-size: 15px; }
+.ask-go { flex: none; color: var(--lake-muted); }
+.ask-more { padding: 4px 2px 0; }
+.ask-more .tell-chips { margin: 8px 0 2px; }
+.ask-more .chip { min-height: 34px; padding: 6px 12px; font-size: 13.5px; font-weight: 500; }
+/* An AI that isn't reading: an amber row, not a card. */
+.ais-waiting .warn-row .row-icon { color: var(--lake-amber); }
 .tell-scope { font-size: 13.5px; }
 .tell .card-actions .tell-send { flex: 1; }
 .tell-row { display: contents; }
@@ -622,13 +637,13 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .field-tag.match-no { opacity: 0.6; }
 
 /* Handled for you: counts as tiles, the number first. */
-.handled-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 4px 16px 12px; }
-.handled-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 12px; border: 1px solid var(--lake-line); border-radius: 14px; background: var(--lake-surface-2); color: var(--lake-text); font: inherit; text-align: start; cursor: pointer; }
+.handled-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 4px 12px 12px; }
+.handled-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 10px; border: 1px solid var(--lake-line); border-radius: 12px; background: var(--lake-surface-2); color: var(--lake-text); font: inherit; text-align: start; cursor: pointer; }
 .handled-tile .tile-top { display: flex; width: 100%; justify-content: space-between; align-items: center; color: var(--lake-muted); font-size: 12px; }
 .handled-tile .tile-top ion-icon { font-size: 18px; }
-.handled-tile .tile-big { font-size: 26px; line-height: 1.15; font-weight: 750; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.handled-tile .tile-label { font-size: 14px; font-weight: 600; }
-.handled-tile .tile-detail { font-size: 12px; color: var(--lake-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.handled-tile .tile-big { font-size: 22px; line-height: 1.1; font-weight: 750; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.handled-tile .tile-label { font-size: 12.5px; font-weight: 600; line-height: 1.25; }
+.handled-tiles .handled-tile .tile-detail { display: none; } .handled-tile .tile-detail { font-size: 12px; color: var(--lake-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .handled-tile.tint-mint .tile-big, .handled-tile.tint-mint .tile-top ion-icon { color: var(--lake-mint); }
 .handled-tile.tint-blue .tile-big, .handled-tile.tint-blue .tile-top ion-icon { color: var(--lake-blue); }
 .handled-tile.tint-amber .tile-big, .handled-tile.tint-amber .tile-top ion-icon { color: var(--lake-amber); }
@@ -637,7 +652,7 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .stacked-seg .then-row { width: 100%; margin: 10px 0; }
 .chips-help { margin: 0 0 8px; }
 /* One tile, or the odd one at the end, takes the whole row. */
-.handled-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
 
 /* "Reading …": the spinner beside its words. */
 .reading-line { display: flex; align-items: center; gap: 8px; }
@@ -645,3 +660,4 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 /* An agreement both houses hold (round 113): one that ended reads crossed out. */
 .agreement-row h3.struck { text-decoration: line-through; opacity: .7; }
 .agreement-acts { display: flex; gap: 2px; }
+.quiet-danger { margin-left: 0; --padding-start: 0; --padding-end: 0; }

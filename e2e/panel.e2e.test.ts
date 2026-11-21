@@ -812,7 +812,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // The AI's connector reports it (run 58: four buyers waited for an AI whose chat had ended; its human never knew).
     expect(await asAssistant({ kind: 'assistant.waiting', count: 3, senders: 2, since: new Date(Date.now() - 300_000).toISOString() })).toEqual({ ok: true });
     await tab('Today');
-    const card = page.locator('ion-card.warn-card', { hasText: 'Nova isn\'t reading' });
+    const card = page.locator('ion-item.warn-row', { hasText: 'Nova isn\'t reading' });
     await card.getByText(/3 messages waiting since .*open your AI app/).waitFor({ timeout: 5000 });
     await tidy();
     // My AI's row says so too; the one badge, on Today, counts it.
@@ -996,10 +996,13 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
 
   it('asks for something to get done at the top of Today: a few words to its AI, a card that says how it went (round 105)', async () => {
     await tab('Today');
-    const box = page.locator('ion-card.ask-box');
-    await box.getByRole('heading', { name: 'What would you like to get done?' }).waitFor({ timeout: 10_000 });
+    // One line until it's used (21 Nov, the owner: "too much of everything and it's clunky"); the ideas show once tapped.
+    const box = page.locator('.ask-box');
+    await box.locator('.ask-input textarea[placeholder="Ask Nova to get something done"]').waitFor({ timeout: 10_000 });
+    expect(await box.getByRole('button', { name: 'Find a babysitter for Friday evening' }).count()).toBe(0);
     // First on the page, above what needs the owner.
-    expect(await page.evaluate(() => { const b = document.querySelector('ion-card.ask-box'), n = [...document.querySelectorAll('h3.section-h')].find((x) => x.textContent === 'Needs your attention'); return !!b && !!n && !!(b.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
+    expect(await page.evaluate(() => { const b = document.querySelector('.ask-box'), n = [...document.querySelectorAll('h3.section-h')].find((x) => x.textContent === 'Needs your attention'); return !!b && !!n && !!(b.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
+    await box.locator('.ask-input textarea').click();
     await box.getByRole('button', { name: 'Find a babysitter for Friday evening' }).click();
     await tidy();
     await box.locator('ion-button.ask-send').click();
@@ -1369,7 +1372,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('ion-item.ai-row', { hasText: aiName }).getByText(/Here now/).waitFor({ timeout: 5000 });
     // Its chats are closed and the buyer's messages sit unread: its connector tells the house, and the owner is told.
     await tab('Today');
-    await page.locator('ion-card.warn-card', { hasText: `${aiName} isn't reading` }).getByText(/waiting since .*open your AI app/).waitFor({ timeout: 15_000 });
+    await page.locator('ion-item.warn-row', { hasText: `${aiName} isn't reading` }).getByText(/waiting since .*open your AI app/).waitFor({ timeout: 15_000 });
     await tidy();
     // Money says what it was for and who paid, held until the buyer accepts; a tap opens the receipt.
     await tab('Money');

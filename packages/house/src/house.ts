@@ -1097,12 +1097,12 @@ function panelFor(x: {
     // `since`: the seq of the newest entry already seen (or a time): only what came after it (run 31's assistant reread
     // everything on every poll). Activity is kept in memory, so a seq ahead of this house's own means it restarted, and
     // all of it is new.
-    activity(since?: number | string) {
-      if (since === undefined || since === '') return mine().slice(0, 100);
+    activity(since?: number | string, limit = 100) {
+      if (since === undefined || since === '') return mine().slice(0, limit);
       const n = typeof since === 'number' ? since : /^\d+$/.test(since) ? Number(since) : NaN, t = Date.parse(String(since));
       if (Number.isNaN(n) && Number.isNaN(t)) throw new Error('since: the seq of the newest entry you saw, or a time');
       const after = !Number.isNaN(n) ? (n > (x.activity[0]?.seq ?? 0) ? mine() : mine().filter((a) => a.seq > n)) : mine().filter((a) => Date.parse(a.at) > t);
-      return after.slice(0, 100);
+      return after.slice(0, limit);
     },
     agents,
     money,

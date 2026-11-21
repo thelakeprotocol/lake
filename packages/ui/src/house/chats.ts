@@ -35,7 +35,8 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const more = fresh.length > FEW;
   return h(Page, { title: 'People', big: true, status, footer: tabbar },
     !data ? h(Failed, { error: list.error }) : [
-      known.length ? h(Section, { title: 'People you know', key: 'known', cls: 'chat-list people-known' }, ...known.map((c) => h(ChatRow, { key: c.key, c }))) : null,
+      // Two chats under one name are told apart by the AI each wrote through (21 Nov: People listed "Alex" three times).
+      known.length ? h(Section, { title: 'People you know', key: 'known', cls: 'chat-list people-known' }, ...known.map((c) => h(ChatRow, { key: c.key, c, twin: known.filter((x) => x.name === c.name).length > 1 }))) : null,
       fresh.length ? h(Section, { title: `New people · ${fresh.length}`, key: 'new', cls: 'chat-list people-new' },
         ...(all ? fresh : fresh.slice(0, FEW)).map((c) => h(ChatRow, { key: c.key, c })),
         more || old.length ? h('div', { class: 'people-more', key: 'more' },
@@ -47,7 +48,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     ]);
 }
 
-function ChatRow({ c }: { c: Chat }) {
+function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
   const ai = c.lastBy === 'ai' ? shortName(c.notes.at(-1)?.answered?.by ?? '') || 'Your AI' : '';
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow${c.unread ? ' unread' : ''}`, onClick: () => push(`#chat=${encodeURIComponent(c.key)}`) },
     h('div', { slot: 'start' }, h(Avatar, { name: c.name, ring: c.trust === 'lookalike' ? 'lookalike' : undefined })),
@@ -55,6 +56,7 @@ function ChatRow({ c }: { c: Chat }) {
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
       c.trust === 'lookalike' ? h('div', { class: 'row-via careful' }, `Says they're ${shortName(c.twin?.name ?? c.name)}, with a different key`) : null,
       c.toAi ? h('div', { class: 'row-via to-ai' }, h('ion-icon', { name: 'sparkles-outline' }), c.via) : null,
+      twin && !c.toAi && c.trust !== 'lookalike' && c.agent ? h('div', { class: 'row-via' }, `Through ${shortName(c.agent)}`) : null,
       // What a new sender is, before it's opened (round 84: "Visitor from early.example: a person, a bot, spam?").
       !c.toAi && c.trust === 'new' ? h('div', { class: 'row-via' }, c.via) : null,
       h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : ai ? `${ai}: ` : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));

@@ -76,7 +76,8 @@ export interface PanelProvider {
   availability?(): Availability | null;
   setAvailability?(a: Availability | null): Promise<{ ok: true } | { ok: false; error: string }>;
   /** Newest first; with `since` (a seq from an earlier look, or a time), only what came after it. */
-  activity(since?: number | string): { seq: number }[];
+  /** Newest first; at most `limit` (100 by default: a page of the app). */
+  activity(since?: number | string, limit?: number): { seq: number }[];
   agents(): unknown[];
   money(): Promise<unknown>;
   /** A receipt was filed again at this path: a copy kept of it is stale. */
@@ -848,7 +849,9 @@ export class OwnerDesk {
     if (!panel) return { since: new Date(midnight).toISOString(), lines, waiting: this.waitingPeople() };
     // A reset on the house's machine, said for a week: if it wasn't the owner, they learn who has their house.
     if (this.ownerReset && Date.now() - Date.parse(this.ownerReset) < 7 * 86_400_000) lines.push({ by: 'house', text: `This house's owner key was reset on its machine, ${this.whenWords(this.ownerReset)}. The old phone and any recovery code can't open it. If that wasn't you, whoever has that machine has your house.`, at: this.ownerReset, to: '#you' });
-    const events = (panel.activity(new Date(midnight).toISOString()) as unknown as { at: string; kind: string; subject?: string; data?: Record<string, unknown> }[]).filter((e) => after(e.at));
+    // All of today's, not a page of them (21 Nov: a busy house passed 100 events by morning, and Today said 11 turned away
+    // where Who has access, counting them all, said 25).
+    const events = (panel.activity(new Date(midnight).toISOString(), 20_000) as unknown as { at: string; kind: string; subject?: string; data?: Record<string, unknown> }[]).filter((e) => after(e.at));
     const who = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? `${n.slice(0, 2).join(', ')}${n.length > 2 ? ` +${n.length - 2}` : ''}` : undefined; };
     const names = (xs: { subject?: string }[]) => { const n = [...new Set(xs.map((e) => String(e.subject ?? '').replace(/^agent:/, '')).filter(Boolean))]; return n.length ? ` (${n.slice(0, 2).join(', ')}${n.length > 2 ? ` and ${n.length - 2} more` : ''})` : ''; };
     const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -858,6 +861,11 @@ export class OwnerDesk {
     }
     const studies = events.filter((e) => e.kind === 'compute.done');
     if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')} today, as unreadable shares`, at: studies[0]!.at, to: '#mydata', tile: { big: String(studies.length), label: studies.length === 1 ? 'study answered' : 'studies answered', detail: 'today · nothing readable left' } });
+    // An errand answered today: who answered, about what (round 121: the phone kept waiting after the answer came).
+    for (const x of this.suggestions.filter((y) => y.errand?.ended?.how === 'answered' && after(y.errand.ended.at))) {
+      const last = x.errand!.arrivals.at(-1);
+      if (last) lines.push({ by: 'ai', text: `${last.from.name || last.from.domain} answered ${x.from.replace(/ \(.*\)$/, '')} about: ${x.errand!.what}`, at: x.errand!.ended!.at, to: '#inbox' });
+    }
     // An agreement the other side moved today: who, and to what (round 120: Sam's house had Mia's cancel in a second, and
     // his Today said nothing; he found it by looking at the agenda).
     for (const a of this.agenda.filter((x) => x.agreement?.changed.by === 'them' && after(x.agreement.changed.at))) {
@@ -1026,6 +1034,7 @@ export class OwnerDesk {
     for (const k of await loadJson(join(this.o.dataDir, 'muted.json'), []) as string[]) this.muted.add(k);
     for (const [k, n] of await loadJson(join(this.o.dataDir, 'standing-uses.json'), []) as [string, number][]) this.standingUses.set(k, n);
     this.agenda = await loadJson(join(this.o.dataDir, 'agenda.json'), []);
+    this.phoneTz = (await readFile(join(this.o.dataDir, 'phone-tz'), 'utf8').catch(() => '')).trim();
     this.circleRules = await loadJson(join(this.o.dataDir, 'circle-rules.json'), []);
     this.chatModes = await loadJson(join(this.o.dataDir, 'chat-modes.json'), {});
     this.chatSeen = await loadJson(join(this.o.dataDir, 'chat-seen.json'), {});
@@ -1450,9 +1459,17 @@ export class OwnerDesk {
     for (const s of due) { s.errand!.state = 'expired'; s.errand!.ended = { at: new Date(now).toISOString(), how: 'expired' }; this.news({ about: 'errand.ended', errand: this.errandNews(s) }, s.by); }
   }
   /** A time in the owner's own zone, as the house says it (never the AI's words for it). */
+  /** The owner's phone's time zone, as it last said (round 121: with no free hours set, times were written in UTC). */
+  private phoneTz = '';
+  private async notePhoneTz(tz: unknown) {
+    if (typeof tz !== 'string' || !tz || tz.length > 64 || tz === this.phoneTz) return;
+    try { new Intl.DateTimeFormat('en-AU', { timeZone: tz }); } catch { return; }
+    this.phoneTz = tz;
+    await saveWhole(join(this.o.dataDir, 'phone-tz'), tz);
+  }
   private whenWords(iso: string) {
-    const tz = this.o.panel?.availability?.()?.tz;
-    try { return `${new Intl.DateTimeFormat('en-AU', { ...(tz ? { timeZone: tz } : {}), weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))}${tz ? ` (${tz})` : ' UTC'}`; } catch { return iso; }
+    const tz = this.o.panel?.availability?.()?.tz || this.phoneTz;
+    try { return `${new Intl.DateTimeFormat('en-AU', { timeZone: tz || 'UTC', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))}${!tz ? ' UTC' : tz === this.phoneTz ? '' : ` (${tz})`}`; } catch { return iso; }
   }
   /** The house's own word about a held time, to the one who asked: at their private link (web), or to their agent, signed. */
   private async tellBooking(item: AgendaItem, text: string, status: Booked, by: string): Promise<boolean> {
@@ -2495,7 +2512,7 @@ export class OwnerDesk {
         if (p.kind === 'assistant.forward') {
           // Words for the owner that came to their assistant while it was away: shown as a note, the sender's words, marked
           // as passed on by the assistant (its connector, not its judgement).
-          const q = p as unknown as { from?: { name?: string; domain?: string; webId?: string; url?: string; key?: string }; text?: string; errand?: string; arrived?: string; ref?: string; stranger?: boolean };
+          const q = p as unknown as { from?: { name?: string; domain?: string; webId?: string; url?: string; key?: string }; text?: string; errand?: string; seen?: boolean; arrived?: string; ref?: string; stranger?: boolean };
           // As signed: the house checks it itself, so who sent it and where an answer goes come from their signed card and
           // not from the AI's word. It becomes a chat of its own ("wrote to <AI>"), which a task can be about.
           const s = p as unknown as { signed?: unknown; arrived?: string };
@@ -2512,7 +2529,7 @@ export class OwnerDesk {
             return void res.json(id ? { ok: true, note: id, signed_by: v.from.name } : { ok: false, error: 'a few notes an hour from one sender' });
           }
           const text = String(q.text ?? '').trim().slice(0, 1000);
-          if (!text || !q.from?.webId) return void res.status(400).json({ error: 'forward: { from: { name, domain, webId, url }, text }' });
+          if (!text || !q.from?.webId) return void res.status(400).json({ error: 'forward: { from: { name, domain, webId, url }, text, seen? }' });
           if (q.errand) {
             const sug = this.suggestions.find((x) => x.id === q.errand && x.by === assistant.kid && x.errand);
             const er = sug?.errand;
@@ -2521,6 +2538,17 @@ export class OwnerDesk {
             const from = { name: String(q.from.name ?? '').slice(0, 80), domain: String(q.from.domain ?? '').slice(0, 200), webId: String(q.from.webId).slice(0, 300), ...(q.from.url ? { url: String(q.from.url).slice(0, 300) } : {}), ...(q.from.key ? { key: String(q.from.key).slice(0, 100) } : {}) };
             const kind = String(q.arrived ?? 'message').slice(0, 60);
             er.arrivals.push({ at: new Date().toISOString(), from, kind, text, ...(q.ref ? { ref: String(q.ref).slice(0, 200) } : {}) });
+            // The AI is here and has the reply: the errand ends answered, and the owner's phone says so instead of waiting
+            // (run 98: Mia's phone said "waiting on Priya" nine minutes after Priya's no, which only her AI had heard).
+            if (q.seen === true) {
+              er.state = 'answered'; er.ended = { at: new Date().toISOString(), how: 'answered' };
+              sug.text = `${from.name || from.domain} answered ${assistant.label.replace(/ \(.*\)$/, '')} about: ${er.what}\n\n${text}`.slice(0, 1500);
+              sug.at = new Date().toISOString();
+              await this.saveSuggestions();
+              this.notifyOwner('errand', `${from.name || from.domain} answered your AI about: ${er.what}`.slice(0, 160));
+              this.touch();
+              return void res.json({ ok: true, answered: sug.id });
+            }
             er.state = 'held';
             // A cart is a bill: yes means the AI pays when it's back, and the choice says so (run 77: "yes" heard, nobody paid).
             // A stranger's (first contact from that key) can be blocked from here: scam carts come while the AI is away.
@@ -3211,7 +3239,7 @@ export class OwnerDesk {
           'panel.door.set': async () => panel.setDoor?.({ open: (q as { open?: unknown }).open === true, ...(typeof (q as { about?: unknown }).about === 'string' ? { about: String((q as { about: string }).about) } : {}), ...(typeof (q as { name?: unknown }).name === 'string' ? { name: String((q as { name: string }).name) } : {}), ...(typeof (q as { handle?: unknown }).handle === 'string' ? { handle: String((q as { handle: string }).handle) } : {}), ...(typeof (q as { note?: unknown }).note === 'string' ? { note: String((q as { note: string }).note) } : {}) }) ?? { error: 'this house has no door' },
           'panel.rules.set': () => panel.setRules(String(q.text ?? '')),
           'panel.activity': async () => panel.activity((q as { since?: number | string }).since),
-          'panel.today': async () => this.today(Number((q as { tz_offset?: number }).tz_offset) || 0),
+          'panel.today': async () => { await this.notePhoneTz((q as { tz?: unknown }).tz); return this.today(Number((q as { tz_offset?: number }).tz_offset) || 0); },
           'panel.agents': async () => panel.agents(),
           'panel.money': () => panel.money(),
           'panel.consents': () => panel.consents(),

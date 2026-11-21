@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buildCard, cartHash, EMPTY_SHA256, generateIdentity, issueCredential, sendLake, signCard, signCart, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData, type AgentCard, type CartMandate, type DeliveryTerms, type Identity, type LakeData } from '@thelakeprotocol/core';
+import { buildCard, cartHash, signSplitConsent, splitHash, keyThumbprint, EMPTY_SHA256, generateIdentity, issueCredential, sendLake, signCard, signCart, signIntentMandate, signMessage, signPaymentMandate, verifyLakeData, type AgentCard, type CartMandate, type DeliveryTerms, type Identity, type LakeData } from '@thelakeprotocol/core';
 import { createPayments } from './review.js';
 
 type Agent = { id: Identity; card: AgentCard; webId: string };
@@ -70,6 +70,37 @@ describe('a held payment follows the delivery (SPEC §6.5)', () => {
     expect(await ask(seller, { kind: 'delivered', hold, sha256: sha('second') })).toMatchObject({ kind: 'delivered', revision: 2 });
     expect(await ask(buyer, { kind: 'capture', hold, sha256: sha('first') })).toMatchObject({ kind: 'refused', problems: [expect.stringMatching(/the latest is .* \(revision 2\)/)] });
     expect(await ask(buyer, { kind: 'capture', hold, sha256: sha('second') })).toMatchObject({ kind: 'captured' });
+  });
+
+  it('a part refund on a team cart comes out of the refunding seller\'s share, and the release pays shares that add up to what was held (21 Nov)', async () => {
+    const opal = await agent('opal.example', 'opal');
+    const team = [
+      { webId: seller.webId, url: 'https://seller.example/a2a', jkt: await keyThumbprint(seller.id.publicJwk), amount: 9 },
+      { webId: opal.webId, url: 'https://opal.example/a2a', jkt: await keyThumbprint(opal.id.publicJwk), amount: 4 },
+    ];
+    const id = `team-${Date.now()}`, hash = splitHash(team, 'USD', 13);
+    const split = await Promise.all(team.map(async (x, i) => ({ ...x, consent: await signSplitConsent([seller.id, opal.id][i]!, { webId: x.webId, cart: id, splitHash: hash, amount: x.amount, currency: 'USD' }) })));
+    const cart = await signCart({ seller: seller.id, sellerWebId: seller.webId, sellerName: 'Seller', buyerWebId: buyer.webId, items: [{ label: 'Dumplings', amount: { currency: 'USD', value: 9 } }, { label: 'A toast', amount: { currency: 'USD', value: 4 } }], id, split });
+    // The members' cards, as the payments agent fetches them to check each consent.
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (u: string | URL, init?: RequestInit) => (String(u).startsWith('https://seller.example/') ? new Response(JSON.stringify(seller.card)) : String(u).startsWith('https://opal.example/') ? new Response(JSON.stringify(opal.card)) : realFetch(u, init)));
+    try {
+      const own = await signIntentMandate(human.id, human.webId, { id: buyer.webId, natural_language_description: 'a team cart', study: 'none', budget: { currency: 'USD', amount: 20 }, intent_expiry: new Date(Date.now() + 3_600_000).toISOString(), user_cart_confirmation_required: false });
+      const payment = await signPaymentMandate(buyer.id, buyer.webId, { payee: seller.webId, amount: 13, intentMandate: own, agreement: `urn:ap2:cart:${cart.contents.id}`, cart: { detailsId: cart.contents.payment_request.details.id, hash: cartHash(cart.contents) } });
+      const r = await ask(buyer, { kind: 'settle', intent: { credential: own, card: human.card }, payments: [payment], cart: { mandate: cart, card: seller.card }, hold: true });
+      expect(r.kind).toBe('settled');
+      const hold = JSON.parse(Buffer.from(r.receipts[0].credential.split('.')[1], 'base64url').toString()).credentialSubject.settlementId as string;
+      await ask(seller, { kind: 'delivered', hold, sha256: sha('toast, no dumplings') });
+      await ask(buyer, { kind: 'dispute', hold, sha256: sha('toast, no dumplings'), code: 'changes_requested' });
+      const part = await ask(seller, { kind: 'void', hold, amount: 9 });
+      expect(part).toMatchObject({ kind: 'voided', still_held: 4, still_held_as_shares: [{ member: opal.webId, amount: 4 }] });
+      const done = await ask(buyer, { kind: 'capture', hold, sha256: sha('toast, no dumplings') });
+      expect(done.kind).toBe('captured');
+      const sub = (jwt: string) => JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString()).credentialSubject;
+      expect(sub(done.credential)).toMatchObject({ amount: { value: 4 }, paid_as_shares: [{ member: opal.webId, amount: 4 }] });
+      const shares = (done.shares ?? []).map((x: { credential: string }) => sub(x.credential).amount.value);
+      expect(shares.reduce((a: number, b: number) => a + b, 0)).toBe(4);
+    } finally { vi.stubGlobal('fetch', realFetch); }
   });
 
   it('settles a "not as described" dispute by a revision, a part refund and an accept, never by a ruling', async () => {

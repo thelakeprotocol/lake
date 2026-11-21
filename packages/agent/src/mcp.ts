@@ -1021,7 +1021,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // A reply on an errand while this agent is away: filed at its human's house, put to them as a question with what each
         // answer sends back, and the sender told it's held there (not which house) and until when (Fable's review, 5 Nov).
         const hold = async (): Promise<Record<string, unknown>> => {
-          if (!house || !errands.size || fromHouse || Date.now() - Math.max(lastRead, lastActive) <= QUIET_MS) return {};
+          if (!house || !errands.size || fromHouse) return {};
           const jkt = m.from.publicJwk ? await keyThumbprint(m.from.publicJwk as Parameters<typeof keyThumbprint>[0]).catch(() => '') : '';
           const refs = [m.payload.cart, m.payload.order, m.payload.re].filter((v): v is string => typeof v === 'string');
           const hit = [...errands].find(([, e]) => (!!e.key && e.key === jkt) || (!!e.ref && refs.includes(e.ref)));
@@ -1029,6 +1029,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const [id, e] = hit;
           const url = m.card.supportedInterfaces?.[0]?.url;
           const said = typeof m.payload.text === 'string' ? m.payload.text : typeof m.payload.body === 'string' ? m.payload.body : typeof m.payload.note === 'string' ? m.payload.note : `(a ${m.payload.kind}: your AI sees the whole of it in its inbox)`;
+          // Here, the AI has it in its inbox; the house hears too, so the errand ends answered on the owner's phone instead of
+          // waiting (run 98: "waiting on Priya" nine minutes after her no). Only the one it waited on (its key) ends it.
+          if (Date.now() - Math.max(lastRead, lastActive) <= QUIET_MS) {
+            if (e.key && e.key === jkt) void houseCall({ kind: 'assistant.forward', errand: id, seen: true, arrived: m.payload.kind, from: { name: m.card.name, domain: m.from.ownerDomain, webId: m.from.webId, url, key: jkt }, text: said.slice(0, 1000) }).then(() => errands.delete(id)).catch(() => {});
+            return {};
+          }
           const r = (await houseCall({ kind: 'assistant.forward', errand: id, arrived: m.payload.kind, ...(refs[0] ? { ref: refs[0] } : {}), stranger: !e.key || e.key !== jkt, from: { name: m.card.name, domain: m.from.ownerDomain, webId: m.from.webId, url, key: jkt }, text: said.slice(0, 1000) }).catch(() => null)) as { ok?: boolean; choices?: string[]; until?: string } | null;
           if (!r?.ok || !r.choices || !url) return {};
           const cart = m.payload.kind === 'trade.cart';

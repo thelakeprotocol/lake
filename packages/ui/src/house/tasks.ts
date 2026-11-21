@@ -86,20 +86,24 @@ export function TellSheet({ open, onClose, onSent, x, note, suggestion, by }: { 
 export function AskBox({ v }: { v: ListView }) {
   const [text, setText] = useState('');
   const [aiKid, setAiKid] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   // An AI that runs on its own (Replies, Away) works through a task's three tools: errands go to one you chat with.
   const ais = v.assistants.filter((q) => !q.runs);
   const a = ais.find((q) => q.kid === aiKid) ?? ais[0], ai = a ? aiOf(a.label) : 'your AI';
-  return h('ion-card', { class: 'lake-card ask-box', key: 'ask' }, h('ion-card-content', {},
-    h('h2', { class: 'ask-h' }, 'What would you like to get done?'),
-    !a ? [h('p', { class: 'muted-line', key: 'n' }, v.assistants.length ? 'Your AIs here run on their own for Replies or Away. Connect one you chat with, like Claude or ChatGPT, and it does these for you.' : 'No AI is connected yet. Connect one under My AI, like Claude or ChatGPT, and it does these for you.'),
-      h('div', { class: 'card-actions', key: 'c' }, h('ion-button', { shape: 'round', class: 'lake-btn', onClick: () => push('#ai') }, 'Connect an AI'))]
-      : [ais.length > 1 ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI', key: 'w' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
-        h('label', { class: 'tell-label', key: 'l' }, 'In your words'),
-        h('ion-textarea', { key: 't', value: text, autoGrow: true, rows: 2, maxlength: 300, placeholder: `A few words. ${cap(ai)} does it and tells you how it went.`, 'aria-label': 'What you want done', class: 'tell-input', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
-        h('div', { class: 'tell-chips ideas', key: 'i' }, ...ERRANDS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))),
-        h('p', { class: 'muted-line', key: 's' }, starts(a, ai)),
-        h('div', { class: 'card-actions', key: 'b' }, h(Btn, { label: `Send to ${ai}`, icon: 'sparkles', expand: 'block', cls: 'ask-send', disabled: !text.trim(),
-          run: async () => { await must({ kind: 'panel.errand.set', by: a.kid, text: text.trim() }); setText(''); void toast(`Sent to ${ai}`); } }))]));
+  // One line until it's used (21 Nov, the owner: "too much of everything and it's clunky"): a heading, a label, three ideas,
+  // a paragraph and a big button sat above everything that needed them. The rest shows once they tap into it.
+  if (!a) return h('div', { class: 'ask-box ask-empty', key: 'ask' }, h('button', { type: 'button', class: 'ask-bar', onClick: () => push('#ai') },
+    h('ion-icon', { name: 'sparkles', 'aria-hidden': 'true' }), h('span', { class: 'ask-placeholder' }, v.assistants.length ? 'Connect an AI you chat with to get things done' : 'Connect an AI to get things done for you'), h('ion-icon', { name: 'chevron-forward', class: 'ask-go' })));
+  const send = async () => { await must({ kind: 'panel.errand.set', by: a.kid, text: text.trim() }); setText(''); setOpen(false); void toast(`Sent to ${ai}. ${starts(a, ai)}`); };
+  const shown = open || !!text;
+  return h('div', { class: `ask-box${shown ? ' open' : ''}`, key: 'ask' },
+    h('div', { class: 'ask-bar' },
+      h('ion-icon', { name: 'sparkles', 'aria-hidden': 'true' }),
+      h('ion-textarea', { value: text, autoGrow: true, rows: 1, maxlength: 300, placeholder: `Ask ${ai} to get something done`, 'aria-label': 'What you want done', class: 'ask-input', onionFocus: () => setOpen(true), onionInput: (e: CustomEvent) => setText(String((e.detail as { value?: string }).value ?? '')) }),
+      h(Btn, { label: '', icon: 'arrow-up', cls: 'ask-send', disabled: !text.trim(), label2: `Send to ${ai}`, run: send })),
+    shown ? h('div', { class: 'ask-more' },
+      ais.length > 1 ? h('div', { class: 'tell-chips', role: 'group', 'aria-label': 'Which AI' }, ...ais.map((q) => h('button', { key: q.kid, type: 'button', class: `chip${a.kid === q.kid ? ' on' : ''}`, 'aria-pressed': String(a.kid === q.kid), onClick: () => setAiKid(q.kid) }, aiOf(q.label)))) : null,
+      !text ? h('div', { class: 'tell-chips ideas' }, ...ERRANDS.map((t) => h('button', { key: t, type: 'button', class: 'chip', onClick: () => setText(t) }, t))) : null) : null);
 }
 const ERRANDS = ['Find a babysitter for Friday evening', 'Ask Sam about coffee next week', 'Find someone to help move a sofa'];
 
