@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
-import { call, must, useBump, useHouse } from './api';
+import { call, key, must, state, useBump, useHouse } from './api';
+import { signEnvelope } from '../owner-crypto';
 import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
 import { adviceOf, doorOf, dutyStrip, duration, grantFor, time, when, money$, needsDecision, waitingOn, ago, nice, plural, sameAsks, shortName, signDraft, signPledge, tableLine, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
 import { ReadsToggles } from './ai';
@@ -245,6 +246,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: waitingOn(x) ? 'hourglass-outline' : x.booking ? 'calendar-outline' : x.circle ? 'people-outline' : x.pledge ? 'hand-left-outline' : x.sender ? 'warning-outline' : 'sparkles-outline' }), kicker, advice),
     x.invitedBy ? h('p', { class: `private-line${x.invitedBy.known ? '' : ' warn-text'}` }, h('ion-icon', { name: x.invitedBy.known ? 'person-outline' : 'alert-circle-outline' }), x.invitedBy.known ? ` From ${x.invitedBy.name}, someone your side knows. The terms below are the tally's own.` : ` From ${x.invitedBy.name}, someone your side hasn't dealt with: their words are unchecked. The terms below are the tally's own.`) : null,
     // Who opened it, from the tally's record: a host named in the pledge's words is only the opener's claim (round 117).
+    x.pledge?.peopleOnly ? h(PersonStamp, {}) : null,
     x.pledge?.openedBy ? h('p', { class: 'private-line opened-by' }, h('ion-icon', { name: x.pledge.openedBy.house ? 'home-outline' : 'sparkles-outline' }), x.pledge.openedBy.house ? ` Opened by ${/ \(house\)$/.test(x.pledge.openedBy.name) ? `${x.pledge.openedBy.name.replace(/ \(house\)$/, '')}'s house` : x.pledge.openedBy.name}.` : ` Opened by ${shortName(x.pledge.openedBy.name)}, an AI. Anyone its words name as host is its own claim.`) : null,
     // A held time, from its own fields and in this phone's time (the house's own sentence names the free hours' zone).
     x.booking?.what ? [h('h3', { class: 'held-what', key: 'hw' }, x.booking.what), h('p', { class: 'held-when', key: 'hn' }, `${dayTime(x.booking.start)} · with ${x.booking.with}`),
@@ -277,6 +279,17 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
       // A spinner while it goes, and the card leaves the moment the house has it (14 Nov: nothing showed, then a few seconds
       // later the card was simply gone); a failure says so, like any other button.
       ownNo ? null : h(Btn, { label: waitingOn(x) ? 'Stop waiting' : 'Dismiss', fill: 'clear', size: 'small', color: 'medium', cls: 'foot-end', run: async () => { await must({ kind: 'panel.assistant.dismiss', id: x.id }); setGone(true); onDone?.(); }, ...(waitingOn(x) ? { ask: { header: `Stop waiting for ${waiter}?`, sub: `${shortName(x.from)} tells them it's off.`, button: 'Stop waiting' } } : {}) }))));
+}
+
+/** A pledge that counts people once each needs this owner's person stamp: said on the card, one tap to get it (run 104:
+ * three neighbours tapped Sign and were sent to "You, This phone, then About this house"). */
+function PersonStamp() {
+  const o = useHouse<{ person?: { stamped: boolean; checker?: string } }>({ kind: 'panel.overview' });
+  const p = o.data?.person;
+  if (!p || p.stamped) return null;
+  return h('div', { class: 'private-line person-stamp' }, h('ion-icon', { name: 'finger-print-outline' }),
+    p.checker ? [' It counts each person once: get your person stamp first. ', h(Btn, { key: 'st', label: 'Get my person stamp', size: 'small', fill: 'outline', run: async () => must({ kind: 'panel.person.request', consent: await signEnvelope({ kind: 'personhood.consent', house: state.webId }, key, state.webId || 'owner') }), done: 'Stamped: you can sign it now.' })]
+      : ' It counts each person once, and this house has no person checker set, so it can\'t be signed from here.');
 }
 
 function Quorum({ x }: { x: Note }) {

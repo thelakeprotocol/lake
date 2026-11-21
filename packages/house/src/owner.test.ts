@@ -900,6 +900,14 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('puts a pledge that counts people to the owner with that said, so the card can offer the stamp (run 104)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), pledgeTerms: async () => ({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', threshold: 4, state: 'open', people_only: true, deadline: new Date(Date.now() + 86_400_000).toISOString() }) } });
+    h.desk.addNote({ from: from('priya'), text: 'Will you sign?', pledge: { tally: 'https://tally.example/a2a', id: 'street-bbq' } });
+    for (let i = 0; i < 20 && !h.desk.suggestions.some((x) => x.pledge); i++) await settle();
+    expect(h.desk.suggestions.find((x) => x.pledge)?.pledge).toMatchObject({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', peopleOnly: true });
+    h.close();
+  });
+
   it('says whether a known name on a new key writes from the same house as before (run 100)', async () => {
     const h = await house();
     const contacts = (h.desk as unknown as { contacts: Map<string, { name: string; webId: string; at: string }> }).contacts;
