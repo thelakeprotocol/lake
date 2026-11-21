@@ -2941,7 +2941,10 @@ describe('the weekly shop, priced inside the house', () => {
     // The first yes is put in touch with the caller; the other is told it's taken.
     const yes = await buyers[1]!.call({ kind: 'panel.circle.answer', note: ask1.id, accept: true });
     expect(yes).toMatchObject({ kind: 'circle.matched', caller: { url: expect.stringContaining(buyers[0]!.url.replace(/^http:\/\//, '')) } });
-    expect(await buyers[2]!.call({ kind: 'panel.circle.answer', note: ask2.id, accept: true })).toMatchObject({ kind: 'refused' });
+    // Told it's taken, whichever way it lands first: refused by the tally, or the house already knowing (22 Nov: CI got
+    // { error: 'it is taken' } where this machine got { kind: 'refused' }).
+    const late = await buyers[2]!.call({ kind: 'panel.circle.answer', note: ask2.id, accept: true }) as { kind?: string; error?: string };
+    expect(late.kind === 'refused' || /taken/.test(String(late.error))).toBe(true);
     const caller = async () => ((await buyers[0]!.call({ kind: 'list' })).suggestions as { id: string; circle?: { role: string; state: string; call: string; contact?: string } }[]).find((x) => x.circle?.role === 'caller' && x.circle.call === called.call)!;
     for (let i = 0; i < 20 && (await caller()).circle!.state !== 'matched'; i++) await new Promise((ok) => setTimeout(ok, 500));
     expect((await caller()).circle).toMatchObject({ state: 'matched', contact: expect.stringContaining(buyers[1]!.url.replace(/^http:\/\//, '')) });
