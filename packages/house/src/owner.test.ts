@@ -918,7 +918,9 @@ describe('what an attacker tried (round 16)', () => {
     const day = 86_400_000, now = Date.now();
     const item = (status: string, extra: Record<string, unknown> = {}, start = new Date(now + day).toISOString()) => ({ start, minutes: 60, agreement: { id: 'ag-0000abcd', with: { url: 'https://sam.example/a2a', key: 'sam-key', name: 'Sam' }, role: 'proposed', status, changed: { by: 'you', at: new Date(now).toISOString() }, ...extra } }) as never;
     // Before its time: done can be asked, cancel is fine, not kept isn't yet.
-    expect(agreementMayMove(item('agreed'), 'done_asked', 'you')).toBeUndefined();
+    expect(agreementMayMove(item('agreed'), 'done_asked', 'you')).toMatch(/after it starts/); // a booking isn't done before it starts (run 106)
+    expect(agreementMayMove(item('agreed', {}, new Date(now - 60_000).toISOString()), 'done_asked', 'you')).toBeUndefined();
+    expect(agreementMayMove(item('done_asked', { asked: { by: 'them', at: new Date(now).toISOString() } }), 'cancelled', 'you')).toBeUndefined();
     expect(agreementMayMove(item('agreed'), 'cancelled', 'them')).toBeUndefined();
     expect(agreementMayMove(item('agreed'), 'not_kept', 'you')).toMatch(/after its time/);
     // After it: no cancel, but not kept.
@@ -984,10 +986,13 @@ describe('what an attacker tried (round 16)', () => {
   });
 
   it('puts a pledge that counts people to the owner with that said, so the card can offer the stamp (run 104)', async () => {
-    const h = await house({ panel: { activity: () => [], money: async () => ({}), pledgeTerms: async () => ({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', threshold: 4, state: 'open', people_only: true, deadline: new Date(Date.now() + 86_400_000).toISOString() }) } });
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), pledgeTerms: async () => ({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', threshold: 4, state: 'open', people_only: true, deadline: new Date(Date.now() + 86_400_000).toISOString() }), signPledge: async () => ({ kind: 'tally.signed', count: 2 }) } });
     h.desk.addNote({ from: from('priya'), text: 'Will you sign?', pledge: { tally: 'https://tally.example/a2a', id: 'street-bbq' } });
     for (let i = 0; i < 20 && !h.desk.suggestions.some((x) => x.pledge); i++) await settle();
     expect(h.desk.suggestions.find((x) => x.pledge)?.pledge).toMatchObject({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', peopleOnly: true });
+    // Signed from the card: it says so, with the count then (run 106: it kept inviting 22 minutes later).
+    await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'street-bbq' });
+    expect(h.desk.suggestions.find((x) => x.pledge)?.pledge).toMatchObject({ threshold: 4, signed: { count: 2 } });
     h.close();
   });
 

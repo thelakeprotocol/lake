@@ -234,7 +234,7 @@ export interface RemovedAi { kid: string; jwk: JWK; label: string; addedAt: stri
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** It counts people once each: signing needs a person stamp (run 104). */ peopleOnly?: true; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** It counts people once each: signing needs a person stamp (run 104). */ peopleOnly?: true; /** How many it needs. */ threshold?: number; /** This owner signed it: how many had then, and whether it filled (run 106: the card said "invites you to sign" 22 min after). */ signed?: { at: string; count?: number; filled?: true }; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Someone (not the owner's AI) invited the owner to sign this pledge, in a note: who, and whether the owner's side knows them. */
@@ -349,7 +349,9 @@ export function agreementMayMove(a: { start?: string; minutes?: number; due?: st
   const g = a.agreement!, over = now >= agreementEnd(a);
   if (g.status === 'agreed') {
     if (to === 'cancelled') return over ? 'its time has passed: it was done, or not kept' : undefined;
-    if (to === 'done_asked' || to === 'disputed') return undefined;
+    // A booking isn't done before it starts (run 106: done 8 s after agreeing to a Friday job, then no cancel).
+    if (to === 'done_asked') return a.start && now < Date.parse(a.start) ? 'done comes after it starts' : undefined;
+    if (to === 'disputed') return undefined;
     if (to === 'not_kept') return over ? undefined : 'not kept is for after its time';
   }
   if (g.status === 'done_asked') {
@@ -359,6 +361,7 @@ export function agreementMayMove(a: { start?: string; minutes?: number; due?: st
       return 'the other side confirms it done';
     }
     if (to === 'agreed' || to === 'disputed') return undefined;
+    if (to === 'cancelled') return over ? 'its time has passed: it was done, or not kept' : undefined;
     if (to === 'not_kept') return over ? undefined : 'not kept is for after its time';
   }
   if (g.status === 'disputed' && (to === 'done_asked' || to === 'cancelled' || to === 'disputed')) return undefined;
@@ -919,6 +922,10 @@ export class OwnerDesk {
     }
     // An agreement the other side moved today: who, and to what (round 120: Sam's house had Mia's cancel in a second, and
     // his Today said nothing; he found it by looking at the agenda).
+    // A done this owner said, waiting for the other side (run 106: Sam's Today said nothing while he waited).
+    for (const a of this.agenda.filter((x) => x.agreement?.status === 'done_asked' && x.agreement.asked?.by === 'you')) {
+      lines.push({ by: 'house', text: `You said done: ${a.what}. Waiting for ${a.agreement!.with.name} to confirm`, at: a.agreement!.asked!.at, to: '#inbox' });
+    }
     for (const a of this.agenda.filter((x) => x.agreement?.changed.by === 'them' && after(x.agreement.changed.at))) {
       const g = a.agreement!, what = `${a.what}${a.when ? `, ${a.when}` : ''}`, said = g.reason ? ` Their words: "${g.reason}"` : '';
       const text = g.status === 'done_asked' ? `${g.with.name} says done: ${what}. Confirm it, or say it isn't` : g.status === 'done' && g.auto ? `${what}: counted as done, nobody answered in 3 days`
@@ -1848,6 +1855,19 @@ export class OwnerDesk {
     this.touch();
   }
 
+  /** The owner signed a pledge: its card says so, with the count then, instead of asking again. */
+  private pledgeSigned<T>(tally: string, id: string, result: T): T {
+    const reply = (result ?? {}) as Record<string, unknown>;
+    if (reply?.kind === 'tally.signed' || reply?.kind === 'tally.triggered') {
+      const t = tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+      for (const x of this.suggestions.filter((y) => y.pledge && y.pledge.id === id && y.pledge.tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === t)) {
+        x.pledge!.signed = { at: new Date().toISOString(), ...(typeof reply.count === 'number' ? { count: reply.count } : {}), ...(reply.kind === 'tally.triggered' ? { filled: true as const } : {}) };
+      }
+      void this.saveSuggestions();
+      this.touch();
+    }
+    return result;
+  }
   /** A pledge as the owner's card shows it: what it costs, from the tally's own terms, never anyone's account of them. */
   private async pledgeFor(tally: string, id: string): Promise<NonNullable<Suggestion['pledge']>> {
     const pledge: NonNullable<Suggestion['pledge']> = { tally, id: id.slice(0, 80) };
@@ -1855,6 +1875,7 @@ export class OwnerDesk {
     if (!t || t.error) throw new Error(String(t?.error ?? 'no such pledge'));
     if (typeof t.text === 'string' && t.text) pledge.text = t.text.slice(0, 300);
     if (t.people_only === true) pledge.peopleOnly = true;
+    if (Number.isInteger(t.threshold)) pledge.threshold = Number(t.threshold);
     if (t.opened_by?.name) pledge.openedBy = { name: String(t.opened_by.name).slice(0, 80), house: t.opened_by.house === true };
     if (t.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year), ...(Array.isArray(t.circle.kinds) ? { kinds: (t.circle.kinds as unknown[]).map(String) } : {}) };
     if (t.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
@@ -3046,7 +3067,7 @@ export class OwnerDesk {
         const reason = typeof q.reason === 'string' && q.reason.trim() ? q.reason.trim().slice(0, 120) : undefined;
         const why = g.status === 'proposed' ? (g.role === 'proposed' && status === 'withdrawn' ? undefined : `it is proposed: it can't become ${status}`) : status === 'done_asked' && g.status === 'done_asked' ? 'you said it\'s done already: it waits for the other side' : agreementMayMove(a, status, 'you');
         // Said with the time it opens (run 105: "after its time" read as the start, and Mia tried ten times).
-        if (why) return void res.status(409).json({ error: /^not kept is for after/.test(why) ? `not kept opens when it ends, ${this.whenWords(new Date(agreementEnd(a)).toISOString())}` : why });
+        if (why) return void res.status(409).json({ error: /^not kept is for after/.test(why) ? `not kept opens when it ends, ${this.whenWords(new Date(agreementEnd(a)).toISOString())}` : why === 'done comes after it starts' ? `done comes after it starts, ${this.whenWords(a.start!)}` : why });
         if ((status === 'not_kept' || status === 'disputed') && !reason) return void res.status(400).json({ error: `reason: a line on why it's ${status === 'not_kept' ? 'not kept' : 'disputed'}, for the other side` });
         if (reason && looksLikeInjection(reason)) return void res.status(400).json({ error: 'a reason says what happened, not instructions' });
         const r = await this.agreementMove(a, status, reason ? { reason } : {});
@@ -3627,7 +3648,7 @@ export class OwnerDesk {
           },
           'panel.pledge.sign': async () => {
             const w = q as { tally?: string; id?: string; draft?: string; credential?: string };
-            if (!w.draft) return panel.signPledge(String(w.tally ?? ''), String(w.id ?? ''));
+            if (!w.draft) return this.pledgeSigned(String(w.tally ?? ''), String(w.id ?? ''), await panel.signPledge(String(w.tally ?? ''), String(w.id ?? '')));
             const d = this.pledgeDrafts.get(String(w.draft));
             if (!d) return { error: 'no contribution drafted with that id: start again' };
             let vc;
@@ -3635,7 +3656,7 @@ export class OwnerDesk {
             if (!['issuer', 'type', 'credentialSubject', 'credentialStatus'].every((k) => JSON.stringify((vc as unknown as Record<string, unknown>)[k]) === JSON.stringify(d.draft[k]))) return { error: 'the contribution does not match its draft' };
             if (!this.o.vouchOwner) return { error: 'this house cannot pay' };
             this.pledgeDrafts.delete(String(w.draft));
-            return panel.signPledge(d.tally, d.id, { credential: String(w.credential), owner: await this.o.vouchOwner(this.ownerJwk!) });
+            return this.pledgeSigned(d.tally, d.id, await panel.signPledge(d.tally, d.id, { credential: String(w.credential), owner: await this.o.vouchOwner(this.ownerJwk!) }));
           },
           'panel.pledge.reveal': () => panel.revealPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
           'panel.pledge.withdraw': async () => panel.withdrawPledge?.(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')) ?? { error: 'this house can\'t take a signature back' },
