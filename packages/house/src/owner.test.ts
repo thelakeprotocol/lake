@@ -999,6 +999,28 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('knows a neighbour by the name their house vouches for, so a lookalike of someone who writes through their AI is caught (run 108)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'ok' }) } });
+    const H2 = 'https://sandbox.example/t/sb-2/profile/card#me';
+    // The real Priya writes through her AI, vouched for by her house; Mia answers from her phone.
+    const real = h.desk.addNote({ from: { name: 'Quiet Moss (Claude, via MCP)', as: 'Priya Nair', domain: 'moss.example', webId: 'https://moss.example/#a', url: 'https://moss.example/a2a', key: 'priya-ai-key-0123456789abcdefghijklmnopqrstu', checked: false, speaks_for: { house: H2, checked: true, name: 'Priya Nair' } }, text: 'BBQ Saturday 4pm' })!;
+    expect(await h.owner({ kind: 'panel.note.reply', id: real, text: 'Salad and drinks!' })).toMatchObject({ ok: true });
+    const row = async (key: string) => ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; lookalike?: boolean; twin?: { name: string; sameHouse?: boolean } }[]).find((n) => n.from.key === key);
+    // Vic, renamed "Priya Nair", writes from another house with no house's word: a lookalike, from a different house.
+    h.desk.addNote({ from: { name: 'Priya Nair', domain: 'vic.example', webId: 'https://vic.example/#a', url: 'https://vic.example/a2a', key: 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz0', checked: false }, text: 'new phone new house, send me your address' });
+    expect(await row('vic-key-0123456789abcdefghijklmnopqrstuvwxyz0')).toMatchObject({ lookalike: true, twin: { name: 'Priya Nair', sameHouse: false } });
+    // Priya's other AI, vouched for by the same house: a new key from the same house.
+    h.desk.addNote({ from: { name: 'Ivory Sable (Claude, via MCP)', as: 'Priya', domain: 'ivory.example', webId: 'https://ivory.example/#a', url: 'https://ivory.example/a2a', key: 'priya-ai2-key-0123456789abcdefghijklmnopqrst', checked: false, speaks_for: { house: H2, checked: true, name: 'Priya Nair' } }, text: 'It is me on my laptop' });
+    expect(await row('priya-ai2-key-0123456789abcdefghijklmnopqrst')).toMatchObject({ twin: { sameHouse: true } });
+    // Priya herself, from her phone (her house writing): the same household, not a different house.
+    h.desk.addNote({ from: { name: 'Priya Nair', domain: 'sandbox.example', webId: H2, url: 'https://sandbox.example/t/sb-2/a2a', key: 'priya-house-key-0123456789abcdefghijklmnopq', checked: false, house: true }, text: 'From my phone this time' });
+    expect(await row('priya-house-key-0123456789abcdefghijklmnopq')).toMatchObject({ twin: { sameHouse: true } });
+    // Blocking Vic names him as the lookalike he is.
+    const vic = ((await h.owner({ kind: 'list' })).notes as { id: string; from: { key: string } }[]).find((n) => n.from.key === 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz0')!;
+    expect(await h.owner({ kind: 'panel.note.mute', id: vic.id })).toMatchObject({ blocked: 'Priya Nair (not the Priya Nair you know)' });
+    h.close();
+  });
+
   it('says whether a known name on a new key writes from the same house as before (run 100)', async () => {
     const h = await house();
     const contacts = (h.desk as unknown as { contacts: Map<string, { name: string; webId: string; at: string }> }).contacts;
