@@ -949,6 +949,9 @@ describe('what an attacker tried (round 16)', () => {
     expect(h.desk.agreementUpdate({ id: 'ag-0000beef', status: 'not_kept', reason: 'No table on Saturday' }, 'sam-key')).toMatchObject({ status: 'not_kept' });
     expect((await h.desk.today(0)).lines.map((l: { text: string }) => l.text)).toContainEqual('Sam says not kept: Return the folding table, Sat. Their words: "No table on Saturday"');
     expect(await h.owner({ kind: 'panel.agreement.set', id: 'a2', status: 'cancelled' })).toMatchObject({ error: expect.stringContaining('not kept') });
+    // Before its end, not kept says when it opens (run 105: "after its time" read as the start; ten tries).
+    h.desk.agenda = [{ id: 'a3', what: 'Pick up the bike', when: 'soon', start: new Date(now + 3600_000).toISOString(), minutes: 15, by: 'Nova', at: new Date(now).toISOString(), agreement: { id: 'ag-0000f00d', with: { url: 'https://sam.example/a2a', key: 'sam-key', name: 'Sam' }, role: 'proposed', status: 'agreed', changed: { by: 'them', at: new Date(now).toISOString() } } } as never];
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a3', status: 'not_kept', reason: 'no show' })).toMatchObject({ error: expect.stringMatching(/^not kept opens when it ends, /) });
     h.close();
   });
 

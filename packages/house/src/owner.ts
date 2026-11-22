@@ -3043,7 +3043,8 @@ export class OwnerDesk {
         const status: AgreementStatus = asked === 'done' && (g.status === 'agreed' || g.status === 'disputed' || (g.status === 'done_asked' && g.asked?.by === 'you')) ? 'done_asked' : asked;
         const reason = typeof q.reason === 'string' && q.reason.trim() ? q.reason.trim().slice(0, 120) : undefined;
         const why = g.status === 'proposed' ? (g.role === 'proposed' && status === 'withdrawn' ? undefined : `it is proposed: it can't become ${status}`) : status === 'done_asked' && g.status === 'done_asked' ? 'you said it\'s done already: it waits for the other side' : agreementMayMove(a, status, 'you');
-        if (why) return void res.status(409).json({ error: why });
+        // Said with the time it opens (run 105: "after its time" read as the start, and Mia tried ten times).
+        if (why) return void res.status(409).json({ error: /^not kept is for after/.test(why) ? `not kept opens when it ends, ${this.whenWords(new Date(agreementEnd(a)).toISOString())}` : why });
         if ((status === 'not_kept' || status === 'disputed') && !reason) return void res.status(400).json({ error: `reason: a line on why it's ${status === 'not_kept' ? 'not kept' : 'disputed'}, for the other side` });
         if (reason && looksLikeInjection(reason)) return void res.status(400).json({ error: 'a reason says what happened, not instructions' });
         const r = await this.agreementMove(a, status, reason ? { reason } : {});

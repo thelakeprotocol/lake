@@ -2302,7 +2302,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         to: z.string().optional().describe('Same as agent_url'),
         text: z.string().optional().describe('Shorthand, with no message: sends { kind: "note", text }'),
         kind: z.string().optional().describe('Shorthand, with no message: the kind to send with text'),
-        reveal_house: z.boolean().default(false).describe('Tell the other agent which house is your human\'s, deliberately: the message then carries the house\'s word that you speak for it, which their side checks'),
+        reveal_house: z.boolean().optional().describe('Tell the other agent which house is your human\'s: the message then carries the house\'s word that you speak for it, which their side checks. Left out, a note to someone your human\'s side already knows carries it (they know your human); false sends it without'),
         expect_reply: z.boolean().default(false).describe('You wait on their answer for your human (a favour, a quote, a time): your human\'s house keeps it as an errand, so a reply that comes after you have gone is put to them, not lost. Needs lake_house_connect'),
         what: z.string().max(300).optional().describe('With expect_reply: what you are waiting on, in a few words for your human ("a lift to the airport on Friday")'),
       },
@@ -2322,6 +2322,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (!message) throw new Error('message: the payload, e.g. { "kind": "note", "text": "…" } (or just text)');
         const a = { ...input, agent_url, message };
         if (typeof a.message.kind !== 'string') throw new Error('the message needs a "kind"');
+        // To someone your human's side already knows, a note carries the house's word unless told not to (run 105: Sam's AI's
+        // apology reached Mia as "first contact, not checked", and she ignored it). Known is the house's call, by their key.
+        if (a.reveal_house === undefined && speaksFor && house && (a.message.kind === 'note' || a.message.kind === 'note.reply')) {
+          const them = await whoIs(a.agent_url).catch(() => null);
+          if (them?.key && (await houseCall({ kind: 'assistant.known', key: them.key }).catch(() => null) as { known?: boolean } | null)?.known === true) a.reveal_house = true;
+        }
         // Which house is your human's is theirs to tell (run 40: assistants told strangers "Tom's agent (sb-1)"). A message
         // to anyone but the house itself that names it waits for a second, deliberate send.
         const named = !a.reveal_house && !(house && a.agent_url.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === house) ? namesHouse(a.message) : null;
