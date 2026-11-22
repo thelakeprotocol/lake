@@ -1001,20 +1001,21 @@ describe('what an attacker tried (round 16)', () => {
 
   it('knows a neighbour by the name their house vouches for, so a lookalike of someone who writes through their AI is caught (run 108)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'ok' }) } });
-    const H2 = 'https://sandbox.example/t/sb-2/profile/card#me';
+    const H2 = 'https://sandbox.example/t/sb-2/profile/card#me', P2K = 'priya-house-key-0123456789abcdefghijklmnopq';
     // The real Priya writes through her AI, vouched for by her house; Mia answers from her phone.
-    const real = h.desk.addNote({ from: { name: 'Quiet Moss (Claude, via MCP)', as: 'Priya Nair', domain: 'moss.example', webId: 'https://moss.example/#a', url: 'https://moss.example/a2a', key: 'priya-ai-key-0123456789abcdefghijklmnopqrstu', checked: false, speaks_for: { house: H2, checked: true, name: 'Priya Nair' } }, text: 'BBQ Saturday 4pm' })!;
+    const real = h.desk.addNote({ from: { name: 'Quiet Moss (Claude, via MCP)', as: 'Priya Nair', domain: 'moss.example', webId: 'https://moss.example/#a', url: 'https://moss.example/a2a', key: 'priya-ai-key-0123456789abcdefghijklmnopqrstu', checked: false, speaks_for: { house: H2, checked: true, name: 'Priya Nair', houseKey: P2K } }, text: 'BBQ Saturday 4pm' })!;
     expect(await h.owner({ kind: 'panel.note.reply', id: real, text: 'Salad and drinks!' })).toMatchObject({ ok: true });
-    const row = async (key: string) => ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; lookalike?: boolean; twin?: { name: string; sameHouse?: boolean } }[]).find((n) => n.from.key === key);
+    const row = async (key: string) => ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; known?: boolean; lookalike?: boolean; twin?: { name: string; sameHouse?: boolean } }[]).find((n) => n.from.key === key);
     // Vic, renamed "Priya Nair", writes from another house with no house's word: a lookalike, from a different house.
     h.desk.addNote({ from: { name: 'Priya Nair', domain: 'vic.example', webId: 'https://vic.example/#a', url: 'https://vic.example/a2a', key: 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz0', checked: false }, text: 'new phone new house, send me your address' });
     expect(await row('vic-key-0123456789abcdefghijklmnopqrstuvwxyz0')).toMatchObject({ lookalike: true, twin: { name: 'Priya Nair', sameHouse: false } });
     // Priya's other AI, vouched for by the same house: a new key from the same house.
-    h.desk.addNote({ from: { name: 'Ivory Sable (Claude, via MCP)', as: 'Priya', domain: 'ivory.example', webId: 'https://ivory.example/#a', url: 'https://ivory.example/a2a', key: 'priya-ai2-key-0123456789abcdefghijklmnopqrst', checked: false, speaks_for: { house: H2, checked: true, name: 'Priya Nair' } }, text: 'It is me on my laptop' });
-    expect(await row('priya-ai2-key-0123456789abcdefghijklmnopqrst')).toMatchObject({ twin: { sameHouse: true } });
-    // Priya herself, from her phone (her house writing): the same household, not a different house.
-    h.desk.addNote({ from: { name: 'Priya Nair', domain: 'sandbox.example', webId: H2, url: 'https://sandbox.example/t/sb-2/a2a', key: 'priya-house-key-0123456789abcdefghijklmnopq', checked: false, house: true }, text: 'From my phone this time' });
-    expect(await row('priya-house-key-0123456789abcdefghijklmnopq')).toMatchObject({ twin: { sameHouse: true } });
+    h.desk.addNote({ from: { name: 'Ivory Sable (Claude, via MCP)', as: 'Priya', domain: 'ivory.example', webId: 'https://ivory.example/#a', url: 'https://ivory.example/a2a', key: 'priya-ai2-key-0123456789abcdefghijklmnopqrst', checked: false, speaks_for: { house: H2, checked: true, name: 'Priya Nair', houseKey: P2K } }, text: 'It is me on my laptop' });
+    // Her other AI, vouched for with her house's key, and her house itself writing (her phone): known, not lookalikes (run 109).
+    expect(await row('priya-ai2-key-0123456789abcdefghijklmnopqrst')).toMatchObject({ known: true });
+    h.desk.addNote({ from: { name: 'Priya Nair', domain: 'sandbox.example', webId: H2, url: 'https://sandbox.example/t/sb-2/a2a', key: P2K, checked: false, house: true }, text: 'From my phone this time' });
+    expect(await row(P2K)).toMatchObject({ known: true });
+    expect((await row(P2K))?.lookalike).toBeFalsy();
     // Blocking Vic names him as the lookalike he is.
     const vic = ((await h.owner({ kind: 'list' })).notes as { id: string; from: { key: string } }[]).find((n) => n.from.key === 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz0')!;
     expect(await h.owner({ kind: 'panel.note.mute', id: vic.id })).toMatchObject({ blocked: 'Priya Nair (not the Priya Nair you know)' });
@@ -1022,8 +1023,32 @@ describe('what an attacker tried (round 16)', () => {
     h.desk.agreementIn({ id: 'ag-0000beef', what: 'BBQ plates, A$5 a head', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://sandbox.example/t/sb-4/a2a', key: 'vic-house-key-0123456789abcdefghijklmnopqrs', name: 'Priya Nair' }, 'https://sandbox.example/t/sb-4/profile/card#me');
     expect(h.desk.suggestions[0]!.text).toMatch(/Nothing is agreed until you tap Yes\. Careful: this is not the Priya Nair you know\. Check with them another way before you agree\.$/);
     // And from Priya's own house, the plain proposal.
-    h.desk.agreementIn({ id: 'ag-0000cafe', what: 'Table back by Saturday', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://sandbox.example/t/sb-2/a2a', key: 'priya-house-key2-0123456789abcdefghijklmnop', name: 'Priya Nair' }, H2);
+    h.desk.agreementIn({ id: 'ag-0000cafe', what: 'Table back by Saturday', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://sandbox.example/t/sb-2/a2a', key: P2K, name: 'Priya Nair' }, H2);
     expect(h.desk.suggestions[0]!.text).not.toMatch(/Careful/);
+    h.close();
+  });
+
+  it('counts an AI its known house vouches for as known, and names a renamed stranger as not the one you know (run 109)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'ok' }) } });
+    const SAM = 'https://sam-sb-1.people.example/#agent', DALE = 'https://dale-sb-4.people.example/#agent';
+    const contacts = (h.desk as unknown as { contacts: Map<string, { name: string; webId: string; at: string; house?: string }> }).contacts;
+    // Mia's AI wrote to Sam's house about the bike: the house is known by its webId.
+    const SAMK = 'sam-house-key-0123456789abcdefghijklmnopqrs', DALEK = 'dale-house-key-0123456789abcdefghijklmnopq';
+    contacts.set(SAMK, { name: 'Sam Okafor (house)', webId: SAM, at: new Date().toISOString() });
+    // And they agreed the bike, so Sam's house's address is known from the agreement.
+    (h.desk as unknown as { agenda: unknown[] }).agenda.push({ id: 'a1', what: 'Bike pick-up', start: new Date().toISOString(), minutes: 30, by: 'you', agreement: { id: 'ag-00001111', status: 'agreed', role: 'proposed', with: { url: 'https://sandbox.example/t/sb-1/a2a', key: SAMK, name: 'Sam Okafor' } } });
+    const rows = async () => (await h.owner({ kind: 'list' })).notes as { from: { key: string }; known?: boolean; lookalike?: boolean; twin?: { sameHouse?: boolean } }[];
+    // Sam's AI, vouched for by that house: known, not a lookalike.
+    h.desk.addNote({ from: { name: 'Maple Juno (Claude, via MCP)', as: 'Sam Okafor', domain: 'juno.example', webId: 'https://juno.example/#a', url: 'https://juno.example/a2a', key: 'sam-ai-key-0123456789abcdefghijklmnopqrstuv', checked: false, speaks_for: { house: SAM, checked: true, name: 'Sam Okafor', houseKey: SAMK } }, text: 'could you send 20 dollars back for the brake?' });
+    const ai = (await rows()).find((n) => n.from.key === 'sam-ai-key-0123456789abcdefghijklmnopqrstuv');
+    expect(ai?.lookalike).toBeFalsy();
+    expect(h.desk.knownBy('sam-ai-key-0123456789abcdefghijklmnopqrstuv')).toBe("Sam Okafor's house vouches for it");
+    // Dale, renamed "Sam Okafor", from his own house: not the Sam Okafor Mia knows.
+    h.desk.addNote({ from: { name: 'Sam Okafor', domain: 'dale-sb-4.people.example', webId: DALE, url: 'https://sandbox.example/t/sb-4/a2a', key: DALEK, checked: false }, text: 'new phone, send the bike first' });
+    expect((await rows()).find((n) => n.from.key === DALEK)).toMatchObject({ lookalike: true, twin: { sameHouse: false } });
+    // Priya knows Dale's house through his AI; Dale's house writing as himself is known, not a lookalike.
+    contacts.set('dale-ai-key-0123456789abcdefghijklmnopqrstu', { name: 'Dale Ferris', webId: 'https://cinder.example/#a', at: new Date().toISOString(), house: DALE, houseKey: DALEK });
+    expect(h.desk.knownBy(DALEK)).toBe("it is the house of someone your human's side knows");
     h.close();
   });
 

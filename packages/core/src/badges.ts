@@ -68,6 +68,8 @@ export async function checkBadges(profile: LakeProfile, opts: { sandbox?: boolea
       const status = await checkCredentialStatus(vc as never).catch(() => ({ checked: true as const, revoked: true }));
       if (status.checked && status.revoked) return null;
       const type = vc.type.find((t) => t !== 'VerifiableCredential') ?? 'VerifiableCredential';
+      // A house's word for its AI must name the AI's key: where a webId is only a claim, an unpinned one could be replayed onto any key.
+      if (type === 'LakeAssistantKey' && !sub.cnf?.jkt) return null;
       return { by: issuer.ownerDomain, issuer: b.issuer, issuerWebId: issuer.webId, ...(typeof card.name === 'string' ? { name: card.name.slice(0, 80) } : {}), jkt: await keyThumbprint(issuer.publicJwk), type, says: describe(type, sub), subject: sub };
     } catch {
       return null;
@@ -101,11 +103,12 @@ export function ownWordClaims(card: { name: string; description?: string; menu?:
 export interface SpeaksFor { house: string; url: string; vouch: Badge }
 
 /** Whether a sender's claim to speak for a house checks: the house's own word, for the sender's key, unrevoked. */
-export async function checkSpeaksFor(sender: LakeProfile, claim: unknown, opts: { sandbox?: boolean } = {}): Promise<{ house: string; checked: boolean; name?: string; why?: string }> {
+export async function checkSpeaksFor(sender: LakeProfile, claim: unknown, opts: { sandbox?: boolean } = {}): Promise<{ house: string; checked: boolean; name?: string; houseKey?: string; why?: string }> {
   const c = claim as Partial<SpeaksFor> | undefined;
   const house = String(c?.house ?? '');
   if (!house || !c?.vouch?.credential || !c.vouch.issuer) return { house, checked: false, why: 'a claim with no word from the house: just words' };
   const ok = (await checkBadges({ ...sender, badges: [c.vouch] }, opts)).find((b) => b.type === 'LakeAssistantKey' && b.issuerWebId === house);
   // The house's own card name, so a reader can say whose AI it is ("Mia's house vouches for it": run 106).
-  return ok ? { house, checked: true, ...(ok.name ? { name: ok.name.replace(/ \(house\)$/, '') } : {}) } : { house, checked: false, why: 'the word it carries doesn\'t check: not from that house, for this agent, or taken back' };
+  // And the house's key: where domains aren't proved (a sandbox) a webId is only a claim, and the key is what tells houses apart.
+  return ok ? { house, checked: true, houseKey: ok.jkt, ...(ok.name ? { name: ok.name.replace(/ \(house\)$/, '') } : {}) } : { house, checked: false, why: 'the word it carries doesn\'t check: not from that house, for this agent, or taken back' };
 }

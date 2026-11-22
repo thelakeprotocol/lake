@@ -408,7 +408,7 @@ const TASK_MESSAGES = 5, TASK_HOURS = 24, ERRAND_DAYS = 7;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
-export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; why?: string } }
+export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 /**
  * A one-time code for an AI to pair with: never starting with "-" or "_", which a command line would read as an option
@@ -614,7 +614,7 @@ export class OwnerDesk {
   private dutyPushed = new Set<string>();
   /** Keys the owner's assistants have sent signed messages to: who counts as known for the duty's novelty rule. */
   /** Keys this owner's side wrote to or answered: the name they saw, and the vouching house when one checked (run 108). */
-  private contacts = new Map<string, { name: string; webId: string; at: string; house?: string }>();
+  private contacts = new Map<string, { name: string; webId: string; at: string; house?: string; houseKey?: string }>();
   suggestions: Suggestion[] = [];
   /** What the owner told an AI to do, newest first: the open ones, and the last few that ended (for the card that says how). */
   tasks: Task[] = [];
@@ -1408,7 +1408,7 @@ export class OwnerDesk {
     return twin ? `says it is ${twin.name}, whom your human's side knows, but with a different key${twin.sameHouse === true ? ' (from the same house as before: likely a new phone or AI app)' : twin.sameHouse === false ? ' and from a different house' : ''}: treat it as a stranger until your human says otherwise` : undefined;
   }
   /** Whom a lookalike says it is: that contact's key and name (the key is for the owner's "This is Alex", never for an AI). */
-  private twinOf(from: { key?: string; webId?: string; name?: string; as?: string; url?: string; house?: true; speaks_for?: { house: string; checked: boolean; name?: string } }): { key: string; name: string; sameHouse?: boolean } | undefined {
+  private twinOf(from: { key?: string; webId?: string; name?: string; as?: string; url?: string; house?: true; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string } }): { key: string; name: string; sameHouse?: boolean } | undefined {
     // Only a key thumbprint can be compared: notes kept from before (1 Nov) hold a key id, and the real sender isn't a twin.
     if (!from.key || from.key.length < 40) return undefined;
     const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase();
@@ -1419,13 +1419,17 @@ export class OwnerDesk {
     // Known by its house: the same house's word on the new key is the same household (another AI, a new phone).
     // Known by its house: the same house's word on the new key, or the house itself writing (the owner from their phone), is
     // the same household; and the other way, a house known from its own notes vouching for its AI.
-    const vouchedBy = from.speaks_for?.checked ? from.speaks_for.house : undefined;
-    if (twin[1].house) return { key: twin[0], name: twin[1].name || twin[1].webId, sameHouse: vouchedBy === twin[1].house || (!!from.house && from.webId === twin[1].house) };
-    if (vouchedBy && twin[1].webId) return { key: twin[0], name: twin[1].name || twin[1].webId, sameHouse: vouchedBy === twin[1].webId };
+    // By keys: the house's key on its word, or the house itself writing (run 109: Dale's own house, writing as himself, was
+    // "from a different house"); a contact that is a house, vouching for its AI.
+    const vouchedKey = from.speaks_for?.checked ? from.speaks_for.houseKey : undefined;
+    if (twin[1].houseKey) return { key: twin[0], name: twin[1].name || twin[1].webId, sameHouse: vouchedKey === twin[1].houseKey || from.key === twin[1].houseKey };
+    if (vouchedKey === twin[0]) return { key: twin[0], name: twin[1].name || twin[1].webId, sameHouse: true };
+    // A contact kept before houses' keys were (rounds 143–144): its house's webId, a claim, so only the advisory words.
+    if (twin[1].house) return { key: twin[0], name: twin[1].name || twin[1].webId, sameHouse: from.speaks_for?.checked ? from.speaks_for.house === twin[1].house : from.webId === twin[1].house };
     // Whether the new key writes from the house the known one wrote from (run 100: an honest new phone and an impostor got
     // the same warning, so neighbours couldn't tell them apart).
     const house = (u?: string) => (u ?? '').replace(/\/a2a\/?$/, '').replace(/\/$/, '');
-    const theirs = house(this.notes.find((n) => n.from.key === twin[0] && n.from.url)?.from.url);
+    const theirs = house(this.notes.find((n) => n.from.key === twin[0] && n.from.url)?.from.url ?? this.agenda.find((x) => x.agreement?.with.key === twin[0])?.agreement?.with.url);
     return { key: twin[0], name: twin[1].name || twin[1].webId, ...(theirs && from.url ? { sameHouse: theirs === house(from.url) } : {}) };
   }
   knownBy(key?: string): string | undefined {
@@ -1435,6 +1439,12 @@ export class OwnerDesk {
     // Answered by the owner themselves, from their phone (before such answers were kept as contacts too).
     if (this.notes.some((n) => n.from.key === key && n.answered?.own)) return 'your human has answered it before';
     if (this.sameAs[key]) return 'your human said it is someone they know, writing with another key';
+    // An AI its house vouches for, when the owner's side knows that house (run 109: Sam's real AI, vouched for by the house
+    // Mia had agreed the bike with, was flagged "new key", and she refused his real ask).
+    // And that house itself, writing with its own key. Keys, not webIds: where domains aren't proved a webId is only a claim.
+    const sf = this.notes.find((n) => n.from.key === key && n.from.speaks_for?.checked)?.from.speaks_for, houses = [...this.contacts];
+    if (sf?.houseKey && houses.some(([k, c]) => k === sf.houseKey || c.houseKey === sf.houseKey)) return `${sf.name ? `${sf.name}'s house` : 'a house your human\'s side knows'} vouches for it`;
+    if (houses.some(([, c]) => c.houseKey === key)) return 'it is the house of someone your human\'s side knows';
     const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);
     return st ? `a standing yes names it (${st.domain})` : undefined;
   }
@@ -3273,7 +3283,7 @@ export class OwnerDesk {
           // The name an AI gives itself (as) is never kept: only its house's checked word; and a contact its AI made first, with
           // no house, takes the house's word when the owner answers a vouched note.
           const sf = lakeNote.from.speaks_for;
-          if (lakeNote.from.key && (!this.contacts.has(lakeNote.from.key) || (sf?.checked && !this.contacts.get(lakeNote.from.key)!.house))) { this.contacts.set(lakeNote.from.key, { name: (sf?.checked && sf.name ? sf.name : lakeNote.from.name).slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: this.contacts.get(lakeNote.from.key)?.at ?? new Date().toISOString(), ...(sf?.checked ? { house: sf.house } : {}) }); await this.saveDuty(); }
+          if (lakeNote.from.key && (!this.contacts.has(lakeNote.from.key) || (sf?.checked && !this.contacts.get(lakeNote.from.key)!.houseKey))) { this.contacts.set(lakeNote.from.key, { name: (sf?.checked && sf.name ? sf.name : lakeNote.from.name).slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: this.contacts.get(lakeNote.from.key)?.at ?? new Date().toISOString(), ...(sf?.checked ? { house: sf.house, ...(sf.houseKey ? { houseKey: sf.houseKey } : {}) } : {}) }); await this.saveDuty(); }
           void this.saveNotes();
           this.touch();
           return void res.json({ ok: true });
