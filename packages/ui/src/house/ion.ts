@@ -86,13 +86,15 @@ export async function confirm(o: { header: string; button: string; sub?: string;
 }
 
 /** A line of words from the owner (a reason, say): nothing when it's cancelled or left empty. */
-export async function askLine(o: { header: string; sub?: string; button: string; placeholder?: string; max?: number }): Promise<string | undefined> {
+/** With `optional`, an empty line still goes ahead (as ''); cancelled is always undefined. */
+export async function askLine(o: { header: string; sub?: string; button: string; placeholder?: string; max?: number; optional?: boolean }): Promise<string | undefined> {
   const a = await alertController.create({ header: o.header, subHeader: o.sub, inputs: [{ name: 'line', type: 'text', placeholder: o.placeholder, attributes: { maxlength: o.max ?? 120 } }],
     buttons: [{ text: 'Cancel', role: 'cancel' }, { text: o.button, role: 'confirm' }] });
   await a.present();
   const r = await a.onDidDismiss();
-  const line = r.role === 'confirm' ? String((r.data as { values?: { line?: string } })?.values?.line ?? '').trim() : '';
-  return line || undefined;
+  if (r.role !== 'confirm') return undefined;
+  const line = String((r.data as { values?: { line?: string } })?.values?.line ?? '').trim();
+  return line || (o.optional ? '' : undefined);
 }
 
 /** One of a few answers, on a sheet from the bottom; nothing when it's cancelled. */

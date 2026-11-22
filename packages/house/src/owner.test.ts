@@ -955,6 +955,22 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('takes a line with a confirm, and either side\'s reply to a dispute (run 105: "the table is broken, and neither button says that")', async () => {
+    const told: Record<string, unknown>[] = [], now = Date.now();
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (_u: string, p: Record<string, unknown>) => { told.push(p); return { kind: 'ok' }; } } });
+    const g = (status: string, extra: Record<string, unknown> = {}) => ({ id: 'ag-0000aaaa', with: { url: 'https://priya.example/a2a', key: 'priya-key', name: 'Priya' }, role: 'asked', status, changed: { by: 'them', at: new Date(now).toISOString() }, ...extra });
+    h.desk.agenda = [{ id: 'a1', what: 'Return the folding table', when: 'today', due: new Date(now - 3600_000).toISOString(), by: 'Nova', at: new Date(now).toISOString(), agreement: g('done_asked', { asked: { by: 'them', at: new Date(now).toISOString() } }) } as never];
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a1', status: 'done', reason: 'done, but it came back broken' })).toEqual({ ok: true, status: 'done' });
+    expect(told.at(-1)).toMatchObject({ status: 'done', reason: 'done, but it came back broken' });
+    // A dispute: the other side replies with their line, and this owner with theirs; it stays disputed.
+    h.desk.agenda = [{ ...(h.desk.agenda[0] as object), id: 'a2', agreement: g('disputed', { id: 'ag-0000bbbb', reason: 'it was already wobbly' }) } as never];
+    expect(h.desk.agreementUpdate({ id: 'ag-0000bbbb', status: 'disputed', reason: 'it was fine when I lent it' }, 'priya-key')).toMatchObject({ status: 'disputed' });
+    expect((await h.desk.today(0)).lines.map((l: { text: string }) => l.text)).toContainEqual(expect.stringMatching(/Priya disputes: .*Their words: "it was fine when I lent it"/));
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a2', status: 'disputed' })).toHaveProperty('error'); // a reply needs a line
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a2', status: 'disputed', reason: 'it broke; I will bring it tomorrow 10am' })).toEqual({ ok: true, status: 'disputed' });
+    h.close();
+  });
+
   it('counts a done nobody answered as done, three days after the later of the mark and the end (round 134)', async () => {
     const told: Record<string, unknown>[] = [], day = 86_400_000, now = Date.now();
     const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (_u: string, p: Record<string, unknown>) => { told.push(p); return { kind: 'ok' }; } } });

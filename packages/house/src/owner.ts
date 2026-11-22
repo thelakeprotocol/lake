@@ -361,7 +361,7 @@ export function agreementMayMove(a: { start?: string; minutes?: number; due?: st
     if (to === 'agreed' || to === 'disputed') return undefined;
     if (to === 'not_kept') return over ? undefined : 'not kept is for after its time';
   }
-  if (g.status === 'disputed' && (to === 'done_asked' || to === 'cancelled')) return undefined;
+  if (g.status === 'disputed' && (to === 'done_asked' || to === 'cancelled' || to === 'disputed')) return undefined;
   return `it is ${g.status.replace('_', ' ')}: it can't become ${to.replace('_', ' ')}`;
 }
 /**
@@ -923,6 +923,7 @@ export class OwnerDesk {
       const g = a.agreement!, what = `${a.what}${a.when ? `, ${a.when}` : ''}`, said = g.reason ? ` Their words: "${g.reason}"` : '';
       const text = g.status === 'done_asked' ? `${g.with.name} says done: ${what}. Confirm it, or say it isn't` : g.status === 'done' && g.auto ? `${what}: counted as done, nobody answered in 3 days`
         : g.status === 'not_kept' ? `${g.with.name} says not kept: ${what}.${said}` : g.status === 'disputed' ? `${g.with.name} disputes: ${what}.${said}`
+        : g.status === 'done' && said ? `${g.with.name} confirmed done: ${what}.${said}`
         : `${g.with.name} ${({ agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'confirmed done', withdrawn: 'withdrew', proposed: 'proposed' } as Record<string, string>)[g.status]}: ${what}. Both agendas show it ${g.status}${g.status === 'cancelled' && said ? `.${said}` : ''}`;
       lines.push({ by: 'house', text, at: g.changed.at, to: '#inbox' });
     }
@@ -3041,6 +3042,7 @@ export class OwnerDesk {
         const g = a.agreement, asked = String(q.status ?? '') as AgreementStatus;
         // "Done" is this owner's say: it asks the other side to confirm, or confirms theirs (round 134).
         const status: AgreementStatus = asked === 'done' && (g.status === 'agreed' || g.status === 'disputed' || (g.status === 'done_asked' && g.asked?.by === 'you')) ? 'done_asked' : asked;
+        // A confirm may carry a line ("done, but it came back broken": run 105, George had only Confirm or Not done).
         const reason = typeof q.reason === 'string' && q.reason.trim() ? q.reason.trim().slice(0, 120) : undefined;
         const why = g.status === 'proposed' ? (g.role === 'proposed' && status === 'withdrawn' ? undefined : `it is proposed: it can't become ${status}`) : status === 'done_asked' && g.status === 'done_asked' ? 'you said it\'s done already: it waits for the other side' : agreementMayMove(a, status, 'you');
         // Said with the time it opens (run 105: "after its time" read as the start, and Mia tried ten times).
