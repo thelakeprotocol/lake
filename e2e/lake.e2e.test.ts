@@ -2130,6 +2130,12 @@ describe('the open door', () => {
     let lead = '';
     for (let i = 0; i < 20 && !/team's shares/.test(lead); i++) { lead = String(((await ana('lake_sell', { action: 'orders' })).orders as { cart: string; money?: string }[]).find((o) => o.cart === team.team_cart)?.money ?? ''); if (!/team's shares/.test(lead)) await new Promise((ok) => setTimeout(ok, 500)); }
     expect(lead).toMatch(/released as the team's shares \(.*2\.5 to .*1\.5 to .*\): Payments paid each member, nothing for you to pass on/);
+    // A team cart its members haven't agreed is listed as waiting, and its lead can withdraw it (run 107: three carts for one
+    // job, none in orders, none withdrawable).
+    const spare = await ana('lake_sell', { action: 'team', to: w.url, items: [{ label: 'A spare logo', price: 3, currency: 'AUD' }], members: [{ url: a.url, amount: 1 }, { url: m.url, amount: 2 }] });
+    expect((await ana('lake_sell', { action: 'orders' })).team_carts_waiting).toContainEqual(expect.objectContaining({ team_cart: spare.team_cart, total: { currency: 'AUD', value: 3 } }));
+    expect(await ana('lake_sell', { action: 'withdraw', cart: spare.team_cart })).toMatchObject({ withdrawn: spare.team_cart, team_cart: true });
+    expect((await ana('lake_sell', { action: 'orders' })).team_carts_waiting ?? []).not.toContainEqual(expect.objectContaining({ team_cart: spare.team_cart }));
     // A cart nobody has paid can be taken back, and then it can't be paid.
     const cart = await ana('lake_sell', { action: 'cart', to: w.url, items: [{ label: 'Extra sticker sheet', price: 1, currency: 'USD' }] });
     await ana('lake_sell', { action: 'withdraw', cart: cart.sent });

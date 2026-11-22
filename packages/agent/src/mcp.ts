@@ -1655,6 +1655,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           return json({ agreed: { cart: q.cart, share: `${q.currency} ${q.amount}` }, lead_said: reply, note: 'your share is paid to you when the buyer accepts the work; you get a receipt of your own. The lead delivers the whole cart: send your part to the lead (lake_ask a note with its text), not to the buyer' });
         }
         if (a.action === 'withdraw') {
+          // A team cart still waiting for its members: dropped here, and each member asked is told it's off.
+          const team = [...teams.values()].find((t) => t.id === a.cart || (!!a.cart && a.cart.length >= 6 && t.id.startsWith(a.cart)));
+          if (team) {
+            teams.delete(team.id);
+            const told = await Promise.all(team.shares.filter((x) => x.webId !== me.webId).map((x) => me.ask(x.url, { kind: 'note', text: `The team cart ${team.id} (${team.items.map((i) => i.label).join(', ')}) is withdrawn by its lead: nothing to agree to.` }).then(() => (x as { name?: string }).name ?? x.url).catch(() => null)));
+            return json({ withdrawn: team.id, team_cart: true, told: told.filter(Boolean), note: 'it never reached the buyer; open another with lake_sell team if you need one' });
+          }
           const x = findOrder(a.cart ?? '', 'seller');
           if (x.status !== 'carted') throw new Error(`cart ${x.cart} is ${x.status}: a paid cart is refunded, not withdrawn (lake_sell { action: "refund" })`);
           x.status = 'withdrawn';
@@ -1789,7 +1796,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           return json({ refunded: x.cart, ...r });
         }
         if (a.action === 'arbitrate') return json(await arbitrate(findOrder(a.cart ?? '', 'seller')));
-        return json({ orders: [...orders.values()].filter((x) => x.role === 'seller').map((x) => orderView(x, a.evidence)), menu });
+        // Team carts this agent opened that its members haven't all agreed yet: listed, so they can be found and withdrawn
+        // (run 107: three carts for one job, none of them in orders, none withdrawable).
+        const waiting = [...teams.values()].map((t) => ({ team_cart: t.id, to: t.buyer.name, total: { currency: t.items[0]?.amount.currency, value: t.items.reduce((n, i) => n + i.amount.value, 0) }, waiting_for: t.shares.filter((x) => !x.consent).map((x) => (x as { name?: string }).name ?? x.url), withdraw: `lake_sell { action: "withdraw", cart: "${t.id}" }` }));
+        return json({ orders: [...orders.values()].filter((x) => x.role === 'seller').map((x) => orderView(x, a.evidence)), ...(waiting.length ? { team_carts_waiting: waiting } : {}), menu });
       } catch (e) {
         return fail(e);
       }
