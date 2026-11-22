@@ -328,8 +328,42 @@ export interface Agreement {
   role: 'proposed' | 'asked';
   status: AgreementStatus;
   changed: { by: 'you' | 'them'; at: string };
+  /** The last move's own words (a cancel's, a not kept's, a dispute's): shown to both owners as unchecked; no rule reads them. */
+  reason?: string;
+  /** Who said done, while the other side hasn't confirmed it. */
+  asked?: { by: 'you' | 'them'; at: string };
+  /** Counted as done because nobody answered the done in time. */
+  auto?: true;
 }
-export type AgreementStatus = 'proposed' | 'agreed' | 'declined' | 'cancelled' | 'done' | 'withdrawn';
+/**
+ * One side's done waits for the other's confirmation (done_asked), or three days after the later of the mark and the
+ * agreement's end; after its end either side may say it wasn't kept; either may dispute it (runs 98, 101: a table marked
+ * done 22 s after it was agreed, and a no-show nobody could record). Grok's and Fable's design, round 134.
+ */
+export type AgreementStatus = 'proposed' | 'agreed' | 'declined' | 'cancelled' | 'done' | 'withdrawn' | 'done_asked' | 'not_kept' | 'disputed';
+const AUTO_DONE_MS = 3 * 86_400_000;
+/** When the thing itself is over: a time's start plus its length, or a promise's due date. */
+const agreementEnd = (a: { start?: string; minutes?: number; due?: string }) => (a.start ? Date.parse(a.start) + (a.minutes ?? 60) * 60_000 : a.due ? Date.parse(a.due) : 0);
+/** The moves an agreed agreement may make, the same on both houses; `by` is who moves it, seen from this house. */
+export function agreementMayMove(a: { start?: string; minutes?: number; due?: string; agreement?: Agreement }, to: AgreementStatus, by: 'you' | 'them', now = Date.now(), auto = false): string | undefined {
+  const g = a.agreement!, over = now >= agreementEnd(a);
+  if (g.status === 'agreed') {
+    if (to === 'cancelled') return over ? 'its time has passed: it was done, or not kept' : undefined;
+    if (to === 'done_asked' || to === 'disputed') return undefined;
+    if (to === 'not_kept') return over ? undefined : 'not kept is for after its time';
+  }
+  if (g.status === 'done_asked') {
+    if (to === 'done') {
+      if (g.asked && g.asked.by !== by) return undefined; // the other side confirms
+      if (auto && g.asked?.by === by && now >= Math.max(Date.parse(g.asked.at), agreementEnd(a)) + AUTO_DONE_MS - 60_000) return undefined;
+      return 'the other side confirms it done';
+    }
+    if (to === 'agreed' || to === 'disputed') return undefined;
+    if (to === 'not_kept') return over ? undefined : 'not kept is for after its time';
+  }
+  if (g.status === 'disputed' && (to === 'done_asked' || to === 'cancelled')) return undefined;
+  return `it is ${g.status.replace('_', ' ')}: it can't become ${to.replace('_', ' ')}`;
+}
 /**
  * A task: what the owner told one of their AIs to do about one conversation, in a few words of their own (SPEC §6.1). Their
  * signed tap is the go-ahead for that conversation only: that one AI may read it and send its sender a few messages through
@@ -641,11 +675,15 @@ export class OwnerDesk {
   }
   private agreementWords(a: AgendaItem) { return `${a.what.slice(0, 80)}${a.start ? `, ${this.whenWords(a.start)}` : a.due ? `, by ${this.whenWords(a.due)}` : ''}`; }
   /** Moves this house's copy and tells the other house, signed by this house. */
-  private async agreementMove(a: AgendaItem, status: AgreementStatus): Promise<{ ok: true } | { error: string }> {
+  private async agreementMove(a: AgendaItem, status: AgreementStatus, extra: { reason?: string; auto?: true } = {}): Promise<{ ok: true } | { error: string }> {
     const g = a.agreement!;
-    const sent = await this.o.panel?.replyAgent?.(g.with.url, { kind: 'agreement.update', id: g.id, status }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
+    const sent = await this.o.panel?.replyAgent?.(g.with.url, { kind: 'agreement.update', id: g.id, status, ...extra }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
     if (!sent || sent.kind === 'refused' || sent.kind === 'rejected') return { error: `${g.with.name}'s house couldn't be told, so nothing changed: try again in a moment` };
-    g.status = status; g.changed = { by: 'you', at: new Date().toISOString() };
+    const now = new Date().toISOString();
+    g.status = status; g.changed = { by: 'you', at: now };
+    if (extra.reason) g.reason = extra.reason; else delete g.reason;
+    if (status === 'done_asked') g.asked = { by: 'you', at: now }; else if (status !== 'done') delete g.asked;
+    if (extra.auto) g.auto = true;
     await this.saveAgenda();
     this.news({ about: `agreement.${status}`, agenda: a.id, what: a.what, with: g.with.name, note: `your human marked it ${status}; ${g.with.name}'s house was told` });
     this.touch();
@@ -677,15 +715,28 @@ export class OwnerDesk {
     const a = this.agenda.find((x) => x.agreement?.id === id);
     if (!a?.agreement || a.agreement.with.key !== key) return { kind: 'refused', problems: ['no agreement with your house by that id'] };
     const g = a.agreement;
-    const may = (g.status === 'proposed' && g.role === 'proposed' && (status === 'agreed' || status === 'declined')) || (g.status === 'agreed' && (status === 'cancelled' || status === 'done'));
-    if (!may) return { kind: 'refused', problems: [`it is ${g.status}: it can't become ${status} now`] };
-    g.status = status; g.changed = { by: 'them', at: new Date().toISOString() };
+    const auto = p.auto === true, reason = typeof p.reason === 'string' && p.reason.trim() ? p.reason.trim().slice(0, 120) : undefined;
+    const answer = g.status === 'proposed' && g.role === 'proposed' && (status === 'agreed' || status === 'declined');
+    const why = answer ? undefined : g.status === 'proposed' ? `it is proposed: it can't become ${status} now` : agreementMayMove(a, status, 'them', Date.now(), auto);
+    if (why) return { kind: 'refused', problems: [why] };
+    if ((status === 'not_kept' || status === 'disputed') && !reason) return { kind: 'refused', problems: [`${status.replace('_', ' ')} carries a reason`] };
+    const was = g.status, now = new Date().toISOString();
+    g.status = status; g.changed = { by: 'them', at: now };
+    if (reason) g.reason = reason; else delete g.reason;
+    if (status === 'done_asked') g.asked = { by: 'them', at: now }; else if (status !== 'done') delete g.asked;
+    if (auto) g.auto = true;
     void this.saveAgenda();
-    const words = { agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'marked done' }[status as 'agreed'] ?? status;
+    const words = was === 'done_asked' && status === 'agreed' ? 'says not yet' : status === 'done' && auto ? 'counted as done' : ({ agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'confirmed done', done_asked: 'says done', not_kept: 'says not kept', disputed: 'disputes' } as Record<string, string>)[status] ?? status;
     this.notifyOwner('agenda', `${g.with.name} ${words}: ${this.agreementWords(a)}.`);
     this.news({ about: `agreement.${status}`, agenda: a.id, what: a.what, with: g.with.name, note: `${g.with.name} ${words} it, from their own phone` });
     this.touch();
     return { kind: 'agreement.updated', id, status };
+  }
+  /** A done nobody confirmed: counted as done three days after the later of the mark and the agreement's end. */
+  async sweepAgreements(now = Date.now()) {
+    for (const a of this.agenda.filter((x) => x.agreement?.status === 'done_asked' && x.agreement.asked?.by === 'you')) {
+      if (!agreementMayMove(a, 'done', 'you', now, true)) await this.agreementMove(a, 'done', { auto: true }).catch(() => undefined);
+    }
   }
   /** A task as its owner's panel and its AI see it. */
   private taskView(t: Task) {
@@ -869,8 +920,11 @@ export class OwnerDesk {
     // An agreement the other side moved today: who, and to what (round 120: Sam's house had Mia's cancel in a second, and
     // his Today said nothing; he found it by looking at the agenda).
     for (const a of this.agenda.filter((x) => x.agreement?.changed.by === 'them' && after(x.agreement.changed.at))) {
-      const g = a.agreement!, verb = { agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'marked done', withdrawn: 'withdrew', proposed: 'proposed' }[g.status];
-      lines.push({ by: 'house', text: `${g.with.name} ${verb}: ${a.what}${a.when ? `, ${a.when}` : ''}. Both agendas show it ${g.status}`, at: g.changed.at, to: '#inbox' });
+      const g = a.agreement!, what = `${a.what}${a.when ? `, ${a.when}` : ''}`, said = g.reason ? ` Their words: "${g.reason}"` : '';
+      const text = g.status === 'done_asked' ? `${g.with.name} says done: ${what}. Confirm it, or say it isn't` : g.status === 'done' && g.auto ? `${what}: counted as done, nobody answered in 3 days`
+        : g.status === 'not_kept' ? `${g.with.name} says not kept: ${what}.${said}` : g.status === 'disputed' ? `${g.with.name} disputes: ${what}.${said}`
+        : `${g.with.name} ${({ agreed: 'agreed to', declined: 'said no to', cancelled: 'cancelled', done: 'confirmed done', withdrawn: 'withdrew', proposed: 'proposed' } as Record<string, string>)[g.status]}: ${what}. Both agendas show it ${g.status}${g.status === 'cancelled' && said ? `.${said}` : ''}`;
+      lines.push({ by: 'house', text, at: g.changed.at, to: '#inbox' });
     }
     const blocked = events.filter((e) => e.kind === 'attack.blocked');
     // What failed, in plain words, and that nothing was read; it opens Who has access, whose "blocked today" counts the same
@@ -1054,7 +1108,7 @@ export class OwnerDesk {
       check();
       setInterval(check, 60_000).unref();
     }
-    setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); }, 60_000).unref();
+    setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); void this.sweepAgreements(); }, 60_000).unref();
     this.dutyLog = await loadJson(join(this.o.dataDir, 'duty-log.json'), []);
     this.readLog = await loadJson(join(this.o.dataDir, 'read-log.json'), []);
     this.ownerReset = (await loadJson<{ at?: string }>(join(this.o.dataDir, 'owner-reset.json'), {})).at;
@@ -2977,13 +3031,18 @@ export class OwnerDesk {
       }
       // Cancel, mark done or withdraw an agreement both houses hold: the owner's tap, then the other house is told.
       if (p.kind === 'panel.agreement.set') {
-        const q = p as unknown as { id?: string; status?: string };
+        const q = p as unknown as { id?: string; status?: string; reason?: string };
         const a = this.agenda.find((x) => x.agreement && (x.id === q.id || x.agreement.id === q.id));
         if (!a?.agreement) return void res.status(404).json({ error: 'no agreement with that id' });
-        const g = a.agreement, status = String(q.status ?? '') as AgreementStatus;
-        const may = (g.status === 'agreed' && (status === 'cancelled' || status === 'done')) || (g.status === 'proposed' && g.role === 'proposed' && status === 'withdrawn');
-        if (!may) return void res.status(409).json({ error: `it is ${g.status}: it can't become ${status}` });
-        const r = await this.agreementMove(a, status);
+        const g = a.agreement, asked = String(q.status ?? '') as AgreementStatus;
+        // "Done" is this owner's say: it asks the other side to confirm, or confirms theirs (round 134).
+        const status: AgreementStatus = asked === 'done' && (g.status === 'agreed' || g.status === 'disputed' || (g.status === 'done_asked' && g.asked?.by === 'you')) ? 'done_asked' : asked;
+        const reason = typeof q.reason === 'string' && q.reason.trim() ? q.reason.trim().slice(0, 120) : undefined;
+        const why = g.status === 'proposed' ? (g.role === 'proposed' && status === 'withdrawn' ? undefined : `it is proposed: it can't become ${status}`) : status === 'done_asked' && g.status === 'done_asked' ? 'you said it\'s done already: it waits for the other side' : agreementMayMove(a, status, 'you');
+        if (why) return void res.status(409).json({ error: why });
+        if ((status === 'not_kept' || status === 'disputed') && !reason) return void res.status(400).json({ error: `reason: a line on why it's ${status === 'not_kept' ? 'not kept' : 'disputed'}, for the other side` });
+        if (reason && looksLikeInjection(reason)) return void res.status(400).json({ error: 'a reason says what happened, not instructions' });
+        const r = await this.agreementMove(a, status, reason ? { reason } : {});
         if ('error' in r) return void res.status(502).json(r);
         this.suggestions = this.suggestions.filter((x) => x.agreementAsk?.id !== a.id);
         await this.saveSuggestions();

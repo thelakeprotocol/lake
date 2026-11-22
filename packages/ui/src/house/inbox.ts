@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { call, key, must, state, useBump, useHouse } from './api';
 import { signEnvelope } from '../owner-crypto';
-import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
+import { Avatar, Btn, Child, Empty, Failed, Info, Page, Pill, Row, Section, Sheet, askLine, h, toast } from './ion';
 import { adviceOf, doorOf, dutyStrip, duration, grantFor, time, when, money$, needsDecision, waitingOn, ago, nice, plural, sameAsks, shortName, signDraft, signPledge, tableLine, taskCards, waitingLine, type AgendaItem, type CircleItem, type Connect, type DutyLog, type ListView, type DoorState, type Note, type Reads, type Request } from './logic';
 import { ReadsToggles } from './ai';
 import { WantRow, WelcomeCard, blockAsk, wantNeedsYou } from './chats';
@@ -143,18 +143,34 @@ function ConnectCard({ c }: { c: Connect }) {
 // An agreement both houses hold (round 113): its status as both phones show it, and the owner's own Cancel or Done.
 const agreementPill = (g: NonNullable<AgendaItem['agreement']>, due?: string): [string, 'mint' | 'amber' | 'muted' | 'red'] =>
   g.status === 'proposed' ? [`Waiting for ${g.with.name}`, 'amber'] : g.status === 'agreed' ? [due ? 'Owed' : 'Agreed', due ? 'amber' : 'mint']
-    : g.status === 'done' ? ['Done', 'mint'] : [`${{ declined: 'Declined', cancelled: 'Cancelled', withdrawn: 'Withdrawn' }[g.status]}${g.changed.by === 'them' ? ` by ${g.with.name}` : ''}`, g.status === 'cancelled' ? 'red' : 'muted'];
+    : g.status === 'done' ? [g.auto ? 'Done (nobody answered)' : 'Done', 'mint']
+    : g.status === 'done_asked' ? [g.asked?.by === 'you' ? `Done, waiting for ${g.with.name}` : `${g.with.name} says done`, 'amber']
+    : g.status === 'not_kept' ? [`Not kept, says ${g.changed.by === 'them' ? g.with.name : 'you'}`, 'red']
+    : g.status === 'disputed' ? ['Disputed', 'red']
+    : [`${{ declined: 'Declined', cancelled: 'Cancelled', withdrawn: 'Withdrawn' }[g.status]}${g.changed.by === 'them' ? ` by ${g.with.name}` : ''}`, g.status === 'cancelled' ? 'red' : 'muted'];
+/** When the thing itself is over: a time's start plus its length, or a promise's due date (the house's own rule). */
+const endOf = (a: AgendaItem) => (a.start ? Date.parse(a.start) + (a.minutes ?? 60) * 60_000 : a.due ? Date.parse(a.due) : 0);
 function AgreementRow({ a }: { a: AgendaItem }) {
   const g = a.agreement!, [pill, tone] = agreementPill(g, a.due), over = ['declined', 'cancelled', 'withdrawn'].includes(g.status);
+  const set = (status: string, reason?: string) => must({ kind: 'panel.agreement.set', id: a.id, status, ...(reason ? { reason } : {}) });
+  // A line of words for a not kept or a dispute: the other side sees it as yours, unchecked.
+  const withReason = (status: string, header: string) => async () => { const r = await askLine({ header, sub: `${g.with.name} sees this line as your words.`, button: 'Send', placeholder: 'What happened, in a few words' }); if (!r) return; await set(status, r); };
+  const btn = (key: string, label: string, run: () => Promise<unknown>, extra: Record<string, unknown> = {}) => h(Btn, { key, label, size: 'small', fill: 'clear', run, ...extra });
+  const ended = Date.now() >= endOf(a);
+  // The owner's own two buttons for each state, no more (round 134: done needs both sides; not kept and disputed carry a line).
+  const acts = g.status === 'agreed' ? [btn('d', 'Done', () => set('done'), { done: `${g.with.name} is asked to confirm it.` }),
+      ended ? btn('nk', 'Not kept', withReason('not_kept', `"${a.what}" wasn't kept?`), { color: 'danger' })
+        : btn('c', 'Cancel', async () => { const r = await askLine({ header: `Cancel "${a.what}"?`, sub: `${g.with.name}'s house is told. A reason is optional.`, button: 'Cancel it', placeholder: 'A reason, if you like' }); await set('cancelled', r); }, { color: 'danger' })]
+    : g.status === 'done_asked' && g.asked?.by === 'them' ? [btn('ok', 'Confirm', () => set('done'), { done: 'Done on both sides.' }), btn('no', 'Not done', withReason('disputed', `${g.with.name} says it's done. Not so?`), { color: 'danger' })]
+    : g.status === 'done_asked' ? [btn('back', 'Not after all', () => set('agreed'), { color: 'medium' })]
+    : g.status === 'disputed' ? [btn('da', 'Done after all', () => set('done'), { done: `${g.with.name} is asked to confirm it.` }), btn('drop', 'Drop it', () => set('cancelled'), { color: 'medium', ask: { header: `Drop "${a.what}"?`, sub: 'Both sides see it cancelled.', button: 'Drop it' } })]
+    : g.status === 'proposed' && g.role === 'proposed' ? [btn('w', 'Withdraw', () => set('withdrawn'), { color: 'medium' })] : [];
   return h('ion-item', { lines: 'full', class: `lake-row agreement-row ${g.status}` },
     h('div', { slot: 'start', class: `row-icon tint-${tone === 'red' ? 'amber' : tone === 'muted' ? 'muted' : tone}` }, h('ion-icon', { name: a.due ? 'hand-right-outline' : 'calendar-outline' })),
     h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what), h('p', {}, [whenOf(a), a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
-      g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null),
+      g.reason ? h('p', { class: 'muted-line' }, `${g.changed.by === 'them' ? g.with.name : 'You'}: “${g.reason}”`) : g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null),
     h(Pill, { text: pill, tone }),
-    g.status === 'agreed' ? h('div', { slot: 'end', class: 'agreement-acts' },
-      h(Btn, { key: 'd', label: 'Done', size: 'small', fill: 'clear', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'done' }), done: `Marked done. ${g.with.name} was told.` }),
-      h(Btn, { key: 'c', label: 'Cancel', size: 'small', fill: 'clear', color: 'danger', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'cancelled' }), ask: { header: `Cancel "${a.what}"?`, sub: `${g.with.name}'s house is told, and their copy shows it cancelled.`, button: 'Cancel it' }, done: `Cancelled. ${g.with.name} was told.` }))
-      : g.status === 'proposed' && g.role === 'proposed' ? h('div', { slot: 'end' }, h(Btn, { label: 'Withdraw', size: 'small', fill: 'clear', color: 'medium', run: () => must({ kind: 'panel.agreement.set', id: a.id, status: 'withdrawn' }) })) : null);
+    acts.length ? h('div', { slot: 'end', class: 'agreement-acts' }, ...acts) : null);
 }
 // In this phone's own time, from the start or due date when there is one (round 121: the house wrote them in UTC).
 const whenOf = (a: AgendaItem) => (a.start ? dayTime(a.start) : a.due ? `by ${dayTime(a.due)}` : a.when);

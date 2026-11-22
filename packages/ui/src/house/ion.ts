@@ -1,6 +1,6 @@
 import { h as ph, type ComponentChildren, type VNode } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { initialize, actionSheetController, toastController } from '@ionic/core/components';
+import { initialize, actionSheetController, alertController, toastController } from '@ionic/core/components';
 import { addIcons } from 'ionicons';
 import { add, alertCircleOutline, arrowDown, arrowDownOutline, arrowUndoOutline, arrowUp, arrowUpOutline, atOutline, callOutline, mailOutline, calendarOutline, chatbubbleOutline, chatbubbles, chatbubblesOutline, checkmark, checkmarkCircleOutline, checkmarkDoneOutline, chevronBack, chevronDown, chevronUp, close, closeCircle, closeCircleOutline, cloudOfflineOutline, copyOutline, createOutline, downloadOutline, eyeOffOutline, eyeOutline, fileTray, fileTrayOutline, fingerPrintOutline, folderOpenOutline, gitNetworkOutline, globeOutline, handLeftOutline, homeOutline, hourglassOutline, informationCircleOutline, keyOutline, laptopOutline, linkOutline, listOutline, lockClosedOutline, moonOutline, notificationsOffOutline, notificationsOutline, openOutline, people, peopleOutline, personAddOutline, personCircle, personCircleOutline, personOutline, phonePortraitOutline, pricetagsOutline, qrCodeOutline, search, searchOutline, shareOutline, shieldCheckmarkOutline, shieldOutline, sparkles, sparklesOutline, serverOutline, timeOutline, today, todayOutline, trashOutline, walletOutline, warningOutline } from 'ionicons/icons';
 import { defineCustomElement as app } from '@ionic/core/components/ion-app.js';
@@ -42,6 +42,7 @@ import { defineCustomElement as accordion } from '@ionic/core/components/ion-acc
 import { defineCustomElement as accordionGroup } from '@ionic/core/components/ion-accordion-group.js';
 import { defineCustomElement as text } from '@ionic/core/components/ion-text.js';
 import { defineCustomElement as checkbox } from '@ionic/core/components/ion-checkbox.js';
+import { defineCustomElement as alert } from '@ionic/core/components/ion-alert.js';
 import { useBump } from './api';
 import { backLabel } from './nav';
 
@@ -49,7 +50,7 @@ import { backLabel } from './nav';
 // drawn by Preact as plain custom elements, with the Lake's own look on top (theme.css). Animations off under automation,
 // so tests see the end state at once.
 initialize({ mode: 'ios', animated: !navigator.webdriver });
-for (const define of [app, header, toolbar, title, buttons, button, content, footer, tabBar, tabButton, icon, label, badge, list, listHeader, item, note, avatar, spinner, skeleton, refresher, refresherContent, toggle, segment, segmentButton, card, cardContent, chip, input, textarea, select, selectOption, modal, toastEl, actionSheet, accordion, accordionGroup, text, checkbox]) define();
+for (const define of [alert, app, header, toolbar, title, buttons, button, content, footer, tabBar, tabButton, icon, label, badge, list, listHeader, item, note, avatar, spinner, skeleton, refresher, refresherContent, toggle, segment, segmentButton, card, cardContent, chip, input, textarea, select, selectOption, modal, toastEl, actionSheet, accordion, accordionGroup, text, checkbox]) define();
 // Only the icons used here, by their kebab-case names (the whole set would weigh a megabyte).
 const icons = { add, alertCircleOutline, arrowDown, arrowDownOutline, arrowUndoOutline, arrowUp, arrowUpOutline, atOutline, callOutline, mailOutline, calendarOutline, chatbubbleOutline, chatbubbles, chatbubblesOutline, checkmark, checkmarkCircleOutline, checkmarkDoneOutline, chevronBack, chevronDown, chevronUp, close, closeCircle, closeCircleOutline, cloudOfflineOutline, copyOutline, createOutline, downloadOutline, eyeOffOutline, eyeOutline, fileTray, fileTrayOutline, fingerPrintOutline, folderOpenOutline, gitNetworkOutline, globeOutline, handLeftOutline, homeOutline, hourglassOutline, informationCircleOutline, keyOutline, laptopOutline, linkOutline, listOutline, lockClosedOutline, moonOutline, notificationsOffOutline, notificationsOutline, openOutline, people, peopleOutline, personAddOutline, personCircle, personCircleOutline, personOutline, phonePortraitOutline, pricetagsOutline, qrCodeOutline, search, searchOutline, shareOutline, shieldCheckmarkOutline, shieldOutline, sparkles, sparklesOutline, serverOutline, timeOutline, today, todayOutline, trashOutline, walletOutline, warningOutline };
 addIcons(Object.fromEntries(Object.entries(icons).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`), v])));
@@ -82,6 +83,16 @@ export async function confirm(o: { header: string; button: string; sub?: string;
   await s.present();
   const r = await s.onDidDismiss();
   return r.data === true;
+}
+
+/** A line of words from the owner (a reason, say): nothing when it's cancelled or left empty. */
+export async function askLine(o: { header: string; sub?: string; button: string; placeholder?: string; max?: number }): Promise<string | undefined> {
+  const a = await alertController.create({ header: o.header, subHeader: o.sub, inputs: [{ name: 'line', type: 'text', placeholder: o.placeholder, attributes: { maxlength: o.max ?? 120 } }],
+    buttons: [{ text: 'Cancel', role: 'cancel' }, { text: o.button, role: 'confirm' }] });
+  await a.present();
+  const r = await a.onDidDismiss();
+  const line = r.role === 'confirm' ? String((r.data as { values?: { line?: string } })?.values?.line ?? '').trim() : '';
+  return line || undefined;
 }
 
 /** One of a few answers, on a sheet from the bottom; nothing when it's cancelled. */

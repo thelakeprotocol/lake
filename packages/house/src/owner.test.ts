@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import express from 'express';
 import { describe, expect, it } from 'vitest';
 import { generateIdentity, issueCredential, signMessage, type JWK } from '@thelakeprotocol/core';
-import { agendaIcs, leftWindow, OwnerDesk, replyTo } from './owner.js';
+import { agendaIcs, agreementMayMove, leftWindow, OwnerDesk, replyTo } from './owner.js';
 
 // A sandbox house anyone can claim: the claim is a lease, and the house resets when it ends.
 async function leasedDesk(stored: JWK | null = null, dir?: string, told: Record<string, unknown>[] = []) {
@@ -897,6 +897,56 @@ describe('what an attacker tried (round 16)', () => {
     const h = await house({ panel: { activity: () => [blocked('bad-signature'), blocked('replayed'), blocked('bad-signature')], money: async () => ({}) } });
     const line = (await h.desk.today(0)).lines.find((l: { by: string; text: string }) => l.by === 'house' && l.text.startsWith('Turned away'));
     expect(line).toMatchObject({ text: 'Turned away 3 messages that didn\'t pass the house\'s checks (its signature didn\'t match the name on it; it was an old message sent again). Nothing was read or given out', to: '#access', tile: { big: '3', label: 'turned away' } });
+    h.close();
+  });
+
+  it('agreements close honestly: done waits for the other side, not kept only after its time, disputes carry a line (round 134)', async () => {
+    const day = 86_400_000, now = Date.now();
+    const item = (status: string, extra: Record<string, unknown> = {}, start = new Date(now + day).toISOString()) => ({ start, minutes: 60, agreement: { id: 'ag-0000abcd', with: { url: 'https://sam.example/a2a', key: 'sam-key', name: 'Sam' }, role: 'proposed', status, changed: { by: 'you', at: new Date(now).toISOString() }, ...extra } }) as never;
+    // Before its time: done can be asked, cancel is fine, not kept isn't yet.
+    expect(agreementMayMove(item('agreed'), 'done_asked', 'you')).toBeUndefined();
+    expect(agreementMayMove(item('agreed'), 'cancelled', 'them')).toBeUndefined();
+    expect(agreementMayMove(item('agreed'), 'not_kept', 'you')).toMatch(/after its time/);
+    // After it: no cancel, but not kept.
+    const past = new Date(now - day).toISOString();
+    expect(agreementMayMove(item('agreed', {}, past), 'cancelled', 'you')).toMatch(/passed/);
+    expect(agreementMayMove(item('agreed', {}, past), 'not_kept', 'them')).toBeUndefined();
+    // A done is confirmed by the other side, never by the one who said it, unless three days pass with no answer.
+    const asked = item('done_asked', { asked: { by: 'you', at: past } }, past);
+    expect(agreementMayMove(asked, 'done', 'you')).toMatch(/other side confirms/);
+    expect(agreementMayMove(asked, 'done', 'them')).toBeUndefined();
+    expect(agreementMayMove(asked, 'done', 'you', now, true)).toMatch(/other side confirms/); // one day: not yet
+    expect(agreementMayMove(asked, 'done', 'you', now + 3 * day, true)).toBeUndefined();
+    expect(agreementMayMove(item('disputed'), 'done_asked', 'them')).toBeUndefined();
+    expect(agreementMayMove(item('done'), 'cancelled', 'you')).toMatch(/it is done/);
+
+    // On a house: the owner's Done asks Sam to confirm; Sam's confirm closes it; Today says so.
+    const told: Record<string, unknown>[] = [];
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (_u: string, p: Record<string, unknown>) => { told.push(p); return { kind: 'ok' }; } } });
+    h.desk.agenda = [{ id: 'a1', what: 'Return the folding table', when: 'Sat', due: new Date(now - 3600_000).toISOString(), by: 'Nova', at: new Date(now).toISOString(), agreement: { id: 'ag-0000abcd', with: { url: 'https://sam.example/a2a', key: 'sam-key', name: 'Sam' }, role: 'asked', status: 'agreed', changed: { by: 'them', at: new Date(now - day).toISOString() } } } as never];
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a1', status: 'done' })).toEqual({ ok: true, status: 'done_asked' });
+    expect(told.at(-1)).toMatchObject({ kind: 'agreement.update', id: 'ag-0000abcd', status: 'done_asked' });
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a1', status: 'done' })).toMatchObject({ error: expect.stringContaining('waits for the other side') });
+    expect(h.desk.agreementUpdate({ id: 'ag-0000abcd', status: 'done' }, 'sam-key')).toMatchObject({ kind: 'agreement.updated', status: 'done' });
+    expect((await h.desk.today(0)).lines.map((l: { text: string }) => l.text)).toContainEqual(expect.stringMatching(/^Sam confirmed done: Return the folding table/));
+    // A second one: Sam says not kept, with a line; without one it's refused.
+    h.desk.agenda = [{ ...(h.desk.agenda[0] as object), id: 'a2', agreement: { id: 'ag-0000beef', with: { url: 'https://sam.example/a2a', key: 'sam-key', name: 'Sam' }, role: 'asked', status: 'agreed', changed: { by: 'them', at: new Date(now - day).toISOString() } } } as never];
+    expect(h.desk.agreementUpdate({ id: 'ag-0000beef', status: 'not_kept' }, 'sam-key')).toMatchObject({ kind: 'refused' });
+    expect(h.desk.agreementUpdate({ id: 'ag-0000beef', status: 'not_kept', reason: 'No table on Saturday' }, 'sam-key')).toMatchObject({ status: 'not_kept' });
+    expect((await h.desk.today(0)).lines.map((l: { text: string }) => l.text)).toContainEqual('Sam says not kept: Return the folding table, Sat. Their words: "No table on Saturday"');
+    expect(await h.owner({ kind: 'panel.agreement.set', id: 'a2', status: 'cancelled' })).toMatchObject({ error: expect.stringContaining('not kept') });
+    h.close();
+  });
+
+  it('counts a done nobody answered as done, three days after the later of the mark and the end (round 134)', async () => {
+    const told: Record<string, unknown>[] = [], day = 86_400_000, now = Date.now();
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (_u: string, p: Record<string, unknown>) => { told.push(p); return { kind: 'ok' }; } } });
+    h.desk.agenda = [{ id: 'a1', what: 'Water the plants', when: 'Tue', due: new Date(now - 5 * day).toISOString(), by: 'Nova', at: new Date(now).toISOString(), agreement: { id: 'ag-0000cafe', with: { url: 'https://george.example/a2a', key: 'george-key', name: 'George' }, role: 'proposed', status: 'done_asked', asked: { by: 'you', at: new Date(now - 2 * day).toISOString() }, changed: { by: 'you', at: new Date(now - 2 * day).toISOString() } } } as never];
+    await h.desk.sweepAgreements(now);
+    expect(h.desk.agenda[0]!.agreement!.status).toBe('done_asked'); // two days: not yet
+    await h.desk.sweepAgreements(now + 1.1 * day);
+    expect(h.desk.agenda[0]!.agreement).toMatchObject({ status: 'done', auto: true });
+    expect(told.at(-1)).toMatchObject({ kind: 'agreement.update', status: 'done', auto: true });
     h.close();
   });
 

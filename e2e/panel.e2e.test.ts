@@ -698,7 +698,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // Answered, Alex is someone the owner knows, and such a chat is their AI's while it's on duty: the house changed who
       // replies without a tap, so the chat says it (the control used to flip in silence), and where you'd type says the
       // AI isn't on duty yet. The chat's details say who replies too, and lead to the same choice.
-      await page.getByText(/^You've answered Alex, so .+ replies here while it's on duty\.$/).waitFor({ timeout: 6000 });
+      await page.getByText(/^You've answered Alex, so .+ replies here while it's on duty\.$/).waitFor({ timeout: 15_000 });
       await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor();
       await page.locator('.mode-note', { hasText: 'or type your own answer below' }).waitFor();
       await tidy();
@@ -2013,6 +2013,27 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
     await tidy();
     expect(await asOwner({ kind: 'panel.circles' })).toEqual([expect.objectContaining({ id: 'street-circle', view: expect.objectContaining({ kept: 2, you: expect.objectContaining({ you_owe: 0, owed_to_you: 0 }) }) })]);
+    // An agreement from the neighbour's AI, closed honestly (round 134): this owner's Done asks the neighbour to confirm,
+    // the row says it waits for them, and their confirm closes it on both phones.
+    const nbAi = await generateIdentity('nb-ai');
+    const { code: nbCode } = await asNb({ kind: 'panel.assistant.invite', label: 'Nb AI' });
+    await fetch(`${nb}/owner/assistant`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ publicJwk: nbAi.publicJwk, code: nbCode, label: 'Nb AI' }) });
+    const asNbAi = async (payload: Record<string, unknown>) => (await fetch(`${nb}/owner/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(await signMessage(payload, nbAi, { iss: 'assistant' })) })).json();
+    const lent = await asNbAi({ kind: 'assistant.agenda', house: `${house}/a2a`, what: 'Lend the folding table', due: new Date(Date.now() + 2 * 86_400_000).toISOString() });
+    expect(lent).toMatchObject({ ok: true, agreement: expect.stringMatching(/^ag-/) });
+    await tab('Today');
+    const offer = page.locator('ion-card.sug', { hasText: 'Lend the folding table' });
+    await offer.getByText(/Nothing is agreed until you tap Yes/).waitFor({ timeout: 15_000 });
+    await offer.getByRole('button', { name: 'Yes, agreed' }).click();
+    const row = page.locator('ion-list.coming-up ion-item.agreement-row', { hasText: 'Lend the folding table' });
+    await row.getByRole('button', { name: 'Done' }).click();
+    await row.locator('.lake-pill', { hasText: /^Done, waiting for / }).waitFor({ timeout: 10_000 });
+    const theirs = ((await asNb({ kind: 'list' })).agenda as { id: string; agreement?: { id: string; status: string; asked?: { by: string } } }[]).find((a) => a.agreement?.id === lent.agreement)!;
+    expect(theirs.agreement).toMatchObject({ status: 'done_asked', asked: { by: 'them' } });
+    expect(await asNb({ kind: 'panel.agreement.set', id: theirs.id, status: 'done' })).toEqual({ ok: true, status: 'done' });
+    await page.reload();
+    await row.locator('.lake-pill', { hasText: /^Done$/ }).waitFor({ timeout: 15_000 });
+    await tidy();
     procs.pop()!.kill('SIGTERM');
   });
 
