@@ -2125,6 +2125,11 @@ describe('the open door', () => {
       expect(got.message).toMatchObject({ amount: share, cart: team.team_cart });
       expect(await member('lake_verify', { evidence: got.message.receipt })).toMatchObject({ verified: true, pays_you: true });
     }
+    // The lead's own list says the rest went as the members' shares, Payments paying each (run 107: "released to you" read
+    // as the lead holding a member's share).
+    let lead = '';
+    for (let i = 0; i < 20 && !/team's shares/.test(lead); i++) { lead = String(((await ana('lake_sell', { action: 'orders' })).orders as { cart: string; money?: string }[]).find((o) => o.cart === team.team_cart)?.money ?? ''); if (!/team's shares/.test(lead)) await new Promise((ok) => setTimeout(ok, 500)); }
+    expect(lead).toMatch(/released as the team's shares \(.*2\.5 to .*1\.5 to .*\): Payments paid each member, nothing for you to pass on/);
     // A cart nobody has paid can be taken back, and then it can't be paid.
     const cart = await ana('lake_sell', { action: 'cart', to: w.url, items: [{ label: 'Extra sticker sheet', price: 1, currency: 'USD' }] });
     await ana('lake_sell', { action: 'withdraw', cart: cart.sent });

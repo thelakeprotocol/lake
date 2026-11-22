@@ -175,8 +175,14 @@ async function checkMoney(p: Record<string, unknown>, from: LakeProfile, me: str
     if (finished) {
       const cart = sub.cart ? `cart ${sub.cart.id}` : 'the cart';
       const why = finished.why ? ` (${finished.why})` : '';
-      return { verified: true, settled: sub.id === me, hold_settled: finished, amount: sub.amount?.value, unit: sub.amount?.currency ?? 'USD', signedBy: signer.ownerDomain, ...(sub.cart ? { cart: sub.cart } : {}),
-        note: finished.to === 'captured' ? (sub.id === me ? `released to you: the payment held for ${cart} is yours now${why}` : `the payment you held for ${cart} was released to the seller${why}`)
+      // A team's cart: released as the members' shares, each paid by Payments (run 107: the lead read "released to you" for a
+      // member's share, and both thought the money had gone to the wrong one).
+      const asShares = (sub as { paid_as_shares?: unknown }).paid_as_shares;
+      const shares = Array.isArray(asShares) ? (asShares as { member: string; amount: number }[]) : undefined;
+      const host = (w: string) => { try { return new URL(w).host; } catch { return w; } };
+      const team = shares?.length ? shares.map((x) => `${sub.amount?.currency ?? ''} ${x.amount} to ${host(x.member)}`).join(', ') : '';
+      return { verified: true, settled: sub.id === me, hold_settled: finished, amount: sub.amount?.value, unit: sub.amount?.currency ?? 'USD', signedBy: signer.ownerDomain, ...(sub.cart ? { cart: sub.cart } : {}), ...(shares ? { shares } : {}),
+        note: finished.to === 'captured' ? (sub.id === me ? (team ? `released as the team's shares: ${team}. Payments paid each member; nothing for you to pass on${why}` : `released to you: the payment held for ${cart} is yours now${why}`) : `the payment you held for ${cart} was released to the seller${why}`)
           : sub.id === me ? `voided: the payment held for ${cart} is back under your allowance${why}` : `voided: the payment held for you for ${cart} went back to the buyer${why}` };
     }
     // Verified says who signed it; settled says whether money moved. A transfer is the sender's own word, however it's named.
@@ -676,6 +682,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     said?: Record<string, unknown>;
     /** Refunded in part (the seller's offer to settle a dispute), in the cart's currency: the rest is still held. */
     partRefunded?: number;
+    /** A team's cart, released as its members' shares (Payments paid each): who got what. */
+    shares?: { member: string; amount: number }[];
     /** Each part refund counted once, by its hold and what it left held: the seller's own answer and the payments agent's receipt are the same refund. */
     partKeys?: string[];
     /** The buyer's time to answer a delivery, in hours (release_after_hours): a held payment's clock restarts at each one. */
@@ -719,6 +727,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     if (x.payment === 'voided') return seller ? 'voided: the held payment went back to the buyer' : 'voided: the held payment is back under your allowance';
     // Refunded after it was released: the seller paid the whole cart back.
     if (x.status === 'refunded') return 'paid, then refunded in full';
+    if (x.payment === 'released' && seller && x.shares?.length) return `paid: ${x.partRefunded ? `${x.total.currency} ${x.partRefunded} refunded to the buyer, ` : ''}the rest released as the team's shares (${x.shares.map((m) => `${x.total.currency} ${m.amount} to ${memberName(m.member)}`).join(', ')}): Payments paid each member, nothing for you to pass on`;
     if (x.payment === 'released' && x.partRefunded) return `paid: ${x.total.currency} ${x.partRefunded} refunded to the buyer, ${x.total.currency} ${Math.round((x.total.value - x.partRefunded) * 100) / 100} released to ${seller ? 'you' : 'the seller'}`;
     if (x.payment === 'released') return seller ? 'paid, and released to you' : 'paid, and released to the seller';
     return x.payment === 'paid' ? 'paid' : 'not paid yet';
@@ -726,6 +735,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   // Team carts this agent leads, waiting for its members' consents (run 77): sent to the buyer when all have said yes.
   type Team = { id: string; to: string; buyer: { name: string; webId: string }; items: { label: string; amount: { currency: string; value: number } }[]; minutes?: number; brief?: string; delivery?: DeliveryTerms; splitHash: string; shares: (Omit<CartShare, 'consent'> & { name: string; consent?: string })[] };
   const teams = new Map<string, Team>();
+  /** A team member's name, from a team this agent leads, else its address's host. */
+  const memberName = (webId: string) => (([...teams.values()].flatMap((t) => t.shares) as { webId: string; name?: string }[]).find((m) => m.webId === webId)?.name) ?? (() => { try { return new URL(webId).host; } catch { return webId; } })();
   /**
    * A menu stops answering orders by itself after this long with nothing done here: its AI has gone. An AI at work calls
    * every minute or so (its inbox waits up to 50 s); an AI app doesn't close its conversation when its chat ends (run 83:
@@ -867,6 +878,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     if (o && money?.verified && money.hold_settled && money.cart?.id === o.cart && (!o.hold || o.hold === money.hold_settled.hold)) {
       o.hold ??= money.hold_settled.hold;
       o.payment = money.hold_settled.to === 'captured' ? 'released' : 'voided';
+      if ((money as { shares?: Order['shares'] }).shares) o.shares = (money as { shares?: Order['shares'] }).shares;
       if (o.want && o.payment === 'released') o.wantState = 'arrived';
       if (o.payment === 'voided' && o.status !== 'accepted') o.status = 'refunded';
       // The receipt that says how it ended is the one a passport shows (the held one only said it was set aside).
