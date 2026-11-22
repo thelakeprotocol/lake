@@ -1036,8 +1036,9 @@ export class OwnerDesk {
     // Their share links too: they pointed at the last owner's wants (round 112).
     this.wantLinks.clear();
     await this.saveWantLinks();
-    this.muted.clear();
+    this.muted.clear(); this.mutedNames.clear();
     await saveWhole(join(this.o.dataDir, 'muted.json'), '[]');
+    await saveWhole(join(this.o.dataDir, 'muted-names.json'), '[]');
     // Who answers each chat, how far each was read and who was joined to whom name the last owner's people.
     this.chatModes = {}; this.chatSeen = {}; this.sameAs = {}; this.cleared = [];
     await this.saveChatModes(); await this.saveChatSeen(); await this.saveSameAs();
@@ -1086,6 +1087,7 @@ export class OwnerDesk {
     this.ownerJwk = await this.o.readOwnerKey();
     this.ownerSeen = this.ownerSeenSaved = Number(await readFile(join(this.o.dataDir, 'owner-seen'), 'utf8').catch(() => '')) || 0;
     for (const k of await loadJson(join(this.o.dataDir, 'muted.json'), []) as string[]) this.muted.add(k);
+    this.mutedNames = new Map(await loadJson(join(this.o.dataDir, 'muted-names.json'), []));
     for (const [k, n] of await loadJson(join(this.o.dataDir, 'standing-uses.json'), []) as [string, number][]) this.standingUses.set(k, n);
     this.agenda = await loadJson(join(this.o.dataDir, 'agenda.json'), []);
     this.phoneTz = (await readFile(join(this.o.dataDir, 'phone-tz'), 'utf8').catch(() => '')).trim();
@@ -1352,6 +1354,8 @@ export class OwnerDesk {
    * rule about marketing). Their notes and knocks are declined at the door.
    */
   readonly muted = new Set<string>();
+  /** Who each blocked key wrote as, so the owner's list says a name, not a key (round 136). */
+  private mutedNames = new Map<string, { name: string; at: string }>();
   async mute(key: string) {
     if (!key) return;
     this.muted.add(key);
@@ -3187,9 +3191,24 @@ export class OwnerDesk {
       if (p.kind === 'panel.note.mute') {
         const note = this.notes.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
         if (!note?.from.key) return void res.status(404).json({ error: 'no note at the door with that id' });
+        // Named as the row names them (run 104: "muted vic-sb-4.people.example" left George unsure what he had blocked).
+        const name = (note.from.as ?? note.from.name).replace(/ \(.*\)$/, '').slice(0, 80);
+        this.mutedNames.set(note.from.key, { name, at: new Date().toISOString() });
+        await saveWhole(join(this.o.dataDir, 'muted-names.json'), JSON.stringify([...this.mutedNames]));
         await this.mute(note.from.key);
         this.news({ about: 'sender.muted', domain: note.from.domain, note: 'your human won\'t hear from this sender again: its notes and knocks are declined at the door' });
-        return void res.json({ ok: true, muted: note.from.domain });
+        return void res.json({ ok: true, blocked: name, key: note.from.key });
+      }
+      // The owner's blocked senders, and unblocking one (run 104: a block put on the wrong sender couldn't be taken back).
+      if (p.kind === 'panel.blocked') return void res.json([...this.muted].map((k) => ({ key: k, name: this.mutedNames.get(k)?.name ?? 'someone', at: this.mutedNames.get(k)?.at })));
+      if (p.kind === 'panel.note.unmute') {
+        const key = String((p as unknown as { key?: string }).key ?? '');
+        if (!this.muted.has(key)) return void res.status(404).json({ error: 'nobody blocked with that key' });
+        this.muted.delete(key); this.mutedNames.delete(key);
+        await saveWhole(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted]));
+        await saveWhole(join(this.o.dataDir, 'muted-names.json'), JSON.stringify([...this.mutedNames]));
+        this.touch();
+        return void res.json({ ok: true, note: 'their next message reaches you again; what was turned away while blocked stays gone' });
       }
       if (p.kind === 'panel.note.reply') {
         const q = p as unknown as { id?: string; text?: string };

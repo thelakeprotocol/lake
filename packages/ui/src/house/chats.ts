@@ -43,6 +43,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
           more ? h('ion-button', { fill: 'clear', size: 'small', class: 'show-all', onClick: () => setAll(!all) }, all ? 'Show fewer' : `Show all ${fresh.length}`) : null,
           old.length ? h(Btn, { label: `Clear ${old.length} old ${old.length === 1 ? 'chat' : 'chats'} (quiet for a week)`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-old', run: () => clearChats(old, bump) })
             : more && all ? h(Btn, { label: `Clear all ${fresh.length}`, fill: 'clear', color: 'medium', size: 'small', cls: 'clear-new', run: () => clearChats(fresh, bump) }) : null) : null) : null,
+      h(Blocked, { key: 'blocked' }),
       known.length || fresh.length ? null
         : h(Empty, { key: 'empty', icon: 'people-outline', title: 'Nobody has written yet', text: door.data?.handle ? `People reach you by asking their AI to ping ${door.data.handle}.` : 'Pick a handle, and anyone\'s AI can reach you.', action: h('ion-button', { shape: 'round', fill: 'outline', onClick: () => push('#door') }, door.data?.handle ? 'Share your handle' : 'Pick your handle') }),
     ]);
@@ -236,7 +237,7 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
   if (c.trust === 'known') return null;
   const twin = c.trust === 'lookalike' ? c.twin : undefined, name = shortName(twin?.name ?? '');
   // It turns them away at the door and tells them so: what messaging apps call Block, so it says Block (13 Nov).
-  const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Block', fill: 'outline', color: 'medium', size: 'small', run: async () => { await must({ kind: 'panel.note.mute', id: latest.id }); void toast(`${c.name} blocked`); back('#chats'); }, ask: blockAsk(c.name) }) : null;
+  const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Block', fill: 'outline', color: 'medium', size: 'small', run: async () => { const r = await must<{ key?: string }>({ kind: 'panel.note.mute', id: latest.id }); blockedToast(c.name, r.key); back('#chats'); }, ask: blockAsk(c.name) }) : null;
   if (c.trust === 'lookalike') return h('div', { class: 'newstrip threat', role: 'note' },
     // What it is and what to do next (run 100: "the warning never tells me what to do next"); Grok's words, adapted.
     twin?.sameHouse === true ? h('p', {}, h('b', {}, `Says they're ${name}: a new key, from the same house as before.`), ' Most likely a new phone or AI app. Still check with them another way before you send an address, money or codes.')
@@ -281,11 +282,23 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
       namesakes.length ? h(Row, { icon: 'people-outline', tint: 'amber', label: `Also called ${c.name}`, sub: `${namesakes.length} other chat${namesakes.length === 1 ? '' : 's'}, through ${namesakes.map((x) => x.agent).join(', ')}: maybe not the same person` }) : null),
     c.canMode ? h(Section, {}, h(Row, { icon: 'chatbubbles-outline', label: 'Who replies', sub: who, onClick: change, cls: 'who-replies' })) : null,
     h(Section, {},
-      h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirm(blockAsk(c.name)))) return; try { await must({ kind: 'panel.note.mute', id: latest.id }); } catch (e) { void toast(`Not done: ${(e as Error).message}`, { color: 'danger', duration: 8000, buttons: [{ text: 'OK', handler: () => {} }] }); return; } close(); void toast(`${c.name} blocked`); back('#chats'); } }, h('ion-icon', { name: 'hand-left-outline', slot: 'start' }), h('ion-label', {}, 'Block')),
+      h('ion-item', { button: true, detail: false, onClick: async () => { if (!(await confirm(blockAsk(c.name)))) return; let r: { key?: string }; try { r = await must<{ key?: string }>({ kind: 'panel.note.mute', id: latest.id }); } catch (e) { void toast(`Not done: ${(e as Error).message}`, { color: 'danger', duration: 8000, buttons: [{ text: 'OK', handler: () => {} }] }); return; } close(); blockedToast(c.name, r.key); back('#chats'); } }, h('ion-icon', { name: 'hand-left-outline', slot: 'start' }), h('ion-label', {}, 'Block')),
       h('ion-item', { button: true, detail: false, class: 'danger', onClick: async () => { close(); await clearChats([c], bump, 'Chat cleared').catch((e: Error) => void toast(e.message, { color: 'danger' })); back('#chats'); } }, h('ion-icon', { name: 'trash-outline', slot: 'start', color: 'danger' }), h('ion-label', { color: 'danger' }, 'Clear chat'))),
     f.key ? h(Info, {}, h('p', {}, 'Its key: ', h('code', {}, f.key))) : null);
 }
-export const blockAsk = (name?: string) => ({ header: `Block ${name || 'this sender'}?`, sub: 'Your house turns their messages away and tells them it doesn\'t take them. You can\'t undo this yet.', button: 'Block' });
+export const blockAsk = (name?: string) => ({ header: `Block ${name || 'this sender'}?`, sub: 'Your house turns their messages away and tells them it doesn\'t take them. You can unblock them later, under People.', button: 'Block' });
+/** Blocked, with Undo for a moment (run 104: Mia blocked the real Priya's AI and couldn't take it back). */
+const blockedToast = (name: string, key?: string) => void toast(`${name} blocked`, key ? { buttons: [{ text: 'Undo', handler: () => { void call({ kind: 'panel.note.unmute', key }).then(() => toast(`${name} unblocked`)); } }] } : {});
+/** Who this owner has blocked, by the name they wrote as, each with Unblock. */
+function Blocked() {
+  const b = useHouse<{ key: string; name: string; at?: string }[]>({ kind: 'panel.blocked' });
+  const [open, setOpen] = useState(false);
+  if (!b.data?.length) return null;
+  return h('div', {}, h(Section, { cls: 'blocked-list' }, h(Row, { icon: 'hand-left-outline', tint: 'muted', label: `Blocked · ${b.data.length}`, sub: 'Their messages are turned away at your door', onClick: () => setOpen(true) })),
+    h(Sheet, { open, onClose: () => setOpen(false), title: 'Blocked' }, h(Section, {}, ...b.data.map((x) => h('ion-item', { key: x.key, lines: 'full', class: 'lake-row blocked-row' },
+      h('ion-label', {}, h('h3', {}, x.name), x.at ? h('p', {}, `Blocked ${when(x.at)}`) : null),
+      h('div', { slot: 'end' }, h(Btn, { label: 'Unblock', size: 'small', fill: 'clear', run: () => must({ kind: 'panel.note.unmute', key: x.key }), done: `${x.name} can reach you again.` })))))));
+}
 
 /** One want, full screen: what it says, then the offers, cheapest first; once bought, how it's going. */
 /** Someone who says they could help with a want for a person's help: which points, Say yes / Not this one, then who. */

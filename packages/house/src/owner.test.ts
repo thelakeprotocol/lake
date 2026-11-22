@@ -901,6 +901,19 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('names who was blocked, lists them, and unblocks (run 104: a block on the wrong sender, named by a domain, stuck)', async () => {
+    const h = await house();
+    const id = h.desk.addNote({ from: { ...from('priya'), as: 'Priya' }, text: 'BBQ Saturday?' })!;
+    const r = await h.owner({ kind: 'panel.note.mute', id });
+    expect(r).toMatchObject({ ok: true, blocked: 'Priya', key: from('priya').key });
+    expect(await h.owner({ kind: 'panel.blocked' })).toEqual([expect.objectContaining({ key: from('priya').key, name: 'Priya' })]);
+    expect(await h.owner({ kind: 'panel.note.unmute', key: from('priya').key })).toMatchObject({ ok: true });
+    expect(await h.owner({ kind: 'panel.blocked' })).toEqual([]);
+    expect(h.desk.muted.has(from('priya').key)).toBe(false);
+    expect(await h.owner({ kind: 'panel.note.unmute', key: 'nobody' })).toHaveProperty('error');
+    h.close();
+  });
+
   it('agreements close honestly: done waits for the other side, not kept only after its time, disputes carry a line (round 134)', async () => {
     const day = 86_400_000, now = Date.now();
     const item = (status: string, extra: Record<string, unknown> = {}, start = new Date(now + day).toISOString()) => ({ start, minutes: 60, agreement: { id: 'ag-0000abcd', with: { url: 'https://sam.example/a2a', key: 'sam-key', name: 'Sam' }, role: 'proposed', status, changed: { by: 'you', at: new Date(now).toISOString() }, ...extra } }) as never;
