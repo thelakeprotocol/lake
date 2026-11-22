@@ -20,7 +20,7 @@ export interface Badge {
 }
 
 /** A badge checked: who signed it (its domain, address and key thumbprint), what it says in a few words, and its type. */
-export interface CheckedBadge { by: string; issuer: string; issuerWebId: string; jkt: string; says: string; type: string; subject: Record<string, unknown> }
+export interface CheckedBadge { by: string; issuer: string; issuerWebId: string; /** The issuer's card name (a house's is "Mia (house)"). */ name?: string; jkt: string; says: string; type: string; subject: Record<string, unknown> }
 
 export const MAX_BADGES = 5;
 
@@ -59,7 +59,7 @@ export async function checkBadges(profile: LakeProfile, opts: { sandbox?: boolea
   const mine = await keyThumbprint(profile.publicJwk);
   const out = await Promise.all((profile.badges ?? []).slice(0, MAX_BADGES).map(async (b) => {
     try {
-      const issuer = await verifyLakeCard(await issuerCard(b.issuer));
+      const card = await issuerCard(b.issuer), issuer = await verifyLakeCard(card);
       if (!(await proveDomain(issuer, opts)).ok) return null;
       const vc = await verifyCredential(b.credential, issuer.publicJwk);
       const sub = vc.credentialSubject as Record<string, unknown> & { cnf?: { jkt?: string } };
@@ -68,7 +68,7 @@ export async function checkBadges(profile: LakeProfile, opts: { sandbox?: boolea
       const status = await checkCredentialStatus(vc as never).catch(() => ({ checked: true as const, revoked: true }));
       if (status.checked && status.revoked) return null;
       const type = vc.type.find((t) => t !== 'VerifiableCredential') ?? 'VerifiableCredential';
-      return { by: issuer.ownerDomain, issuer: b.issuer, issuerWebId: issuer.webId, jkt: await keyThumbprint(issuer.publicJwk), type, says: describe(type, sub), subject: sub };
+      return { by: issuer.ownerDomain, issuer: b.issuer, issuerWebId: issuer.webId, ...(typeof card.name === 'string' ? { name: card.name.slice(0, 80) } : {}), jkt: await keyThumbprint(issuer.publicJwk), type, says: describe(type, sub), subject: sub };
     } catch {
       return null;
     }
@@ -101,10 +101,11 @@ export function ownWordClaims(card: { name: string; description?: string; menu?:
 export interface SpeaksFor { house: string; url: string; vouch: Badge }
 
 /** Whether a sender's claim to speak for a house checks: the house's own word, for the sender's key, unrevoked. */
-export async function checkSpeaksFor(sender: LakeProfile, claim: unknown, opts: { sandbox?: boolean } = {}): Promise<{ house: string; checked: boolean; why?: string }> {
+export async function checkSpeaksFor(sender: LakeProfile, claim: unknown, opts: { sandbox?: boolean } = {}): Promise<{ house: string; checked: boolean; name?: string; why?: string }> {
   const c = claim as Partial<SpeaksFor> | undefined;
   const house = String(c?.house ?? '');
   if (!house || !c?.vouch?.credential || !c.vouch.issuer) return { house, checked: false, why: 'a claim with no word from the house: just words' };
-  const ok = (await checkBadges({ ...sender, badges: [c.vouch] }, opts)).some((b) => b.type === 'LakeAssistantKey' && b.issuerWebId === house);
-  return ok ? { house, checked: true } : { house, checked: false, why: 'the word it carries doesn\'t check: not from that house, for this agent, or taken back' };
+  const ok = (await checkBadges({ ...sender, badges: [c.vouch] }, opts)).find((b) => b.type === 'LakeAssistantKey' && b.issuerWebId === house);
+  // The house's own card name, so a reader can say whose AI it is ("Mia's house vouches for it": run 106).
+  return ok ? { house, checked: true, ...(ok.name ? { name: ok.name.replace(/ \(house\)$/, '') } : {}) } : { house, checked: false, why: 'the word it carries doesn\'t check: not from that house, for this agent, or taken back' };
 }

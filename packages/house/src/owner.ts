@@ -408,7 +408,7 @@ const TASK_MESSAGES = 5, TASK_HOURS = 24, ERRAND_DAYS = 7;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
-export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; why?: string } }
+export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 /**
  * A one-time code for an AI to pair with: never starting with "-" or "_", which a command line would read as an option
@@ -1333,10 +1333,12 @@ export class OwnerDesk {
     // A stranger or a lookalike is marked as the chat row marks them (round 117, an attacker among households: a note from
     // "Vic" read on the phone like a neighbour's).
     if (payload.about === 'note') {
-      const f = payload.from as { as?: string; name?: string; web?: boolean } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean } | undefined;
+      const f = payload.from as { as?: string; name?: string; web?: boolean; speaks_for?: { checked?: boolean; name?: string } } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean } | undefined;
+      // A house vouches for the AI, by its card's name: say whose AI it is (run 106).
+      const vouched = f?.speaks_for?.checked && f.speaks_for.name ? f.speaks_for.name : '';
       const name = f?.as ?? (f?.name && !f.web ? f.name.replace(/ \(.*\)$/, '') : '');
       this.notifyOwner('note', k?.lookalike ? `Someone saying they're ${name || 'someone you know'}, with a different key, left you a note. Careful.`
-        : name ? `${name}${k && !k.yes ? ' (first contact, not checked)' : ''} left you a note${f?.as && !f.web ? ', via their AI' : ''}.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`);
+        : vouched ? `${vouched}'s AI left you a note${name && name !== vouched ? ` (it says it's ${name})` : ''}.` : name ? `${name}${k && !k.yes ? ' (first contact, not checked)' : ''} left you a note${f?.as && !f.web ? ', via their AI' : ''}.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`);
     }
     if (!this.o.tell) return;
     // Requests carry fields and prices, a study answered is what the house did with the records, offers, purchases and
