@@ -250,11 +250,11 @@ export async function joinLake(o: LakeAgentOptions): Promise<LakeAgent> {
       // A federated node lists its peers' agents too: two Lakes each run a payments agent, an arbiter, a log… Its own Lake's
       // come first, so a lookup by skill gets the one this agent's Lake runs; a peer's says which Lake it is from.
       return found.sort((a, b) => Number(!!a.via) - Number(!!b.via)).map(({ card, active, until, via, unreachable_since, vouched, own_words, same_name_as, asleep }) => {
-        const p = card.capabilities?.extensions?.[0]?.params as { role: string; webId: string; ownerDomain: string; tags: string[]; menu?: MenuItem[] };
+        const p = card.capabilities?.extensions?.[0]?.params as { role: string; webId: string; ownerDomain: string; tags: string[]; menu?: MenuItem[]; handle?: string };
         // Your own card turns up in searches too; say so, or an agent ends up messaging itself.
         // Its own line ("Small home bakery, pickup Saturdays"), past the words every agent's card starts with: found by words, and now shown (14 Nov).
         const about = (card.description ?? '').replace(/^An agent acting for [^.]*\.\s*/, '').trim().slice(0, 200);
-        return { name: card.name, role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(about ? { about } : {}), ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(unreachable_since ? { unreachable_since } : {}), ...(vouched?.length ? { vouched } : {}), ...(own_words?.length ? { own_words } : {}), ...(same_name_as?.length ? { same_name_as } : {}), ...(asleep ? { asleep } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
+        return { name: card.name, ...(p.handle ? { handle: `@${p.handle}` } : {}), role: p.role, domain: p.ownerDomain, webId: p.webId, tags: p.tags, url: card.supportedInterfaces[0]!.url, ...(about ? { about } : {}), ...(p.menu?.length ? { menu: p.menu } : {}), ...(active ? { last_active: ago(active) } : {}), ...(until ? { here_until: until } : {}), ...(via ? { lake: via } : {}), ...(unreachable_since ? { unreachable_since } : {}), ...(vouched?.length ? { vouched } : {}), ...(own_words?.length ? { own_words } : {}), ...(same_name_as?.length ? { same_name_as } : {}), ...(asleep ? { asleep } : {}), ...(p.ownerDomain === visitor.domain ? { you: true } : {}) };
       });
     },
     sent,

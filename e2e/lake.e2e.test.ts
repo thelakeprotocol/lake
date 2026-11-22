@@ -490,6 +490,8 @@ describe('the owner', () => {
     await c.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { authorization: `Bearer ${tok.access_token}` } } }));
     const tool = async (name: string, args: Record<string, unknown> = {}) => { const r = await c.callTool({ name, arguments: args }); const t = (r.content as { text: string }[])[0]!.text; return r.isError ? { error: t } : JSON.parse(t); };
     expect(await tool('lake_ping', { who: 'nobody-here', about: 'hi' })).toMatchObject({ error: expect.stringMatching(/nobody goes by "nobody-here"/) });
+    // A search names the handle, so @sam is told apart from a lookalike (run 104).
+    expect(await tool('lake_search', { role: 'house' })).toContainEqual(expect.objectContaining({ name: 'Sam (house)', handle: '@sam' }));
     const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? From the Claude Code class.', from: 'Alex' });
     expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they'll see it on their phone/) });
     // Until Sam answers, Alex's inbox says it is waiting on Sam, and how to see where it stands (round 2, 11 Nov).

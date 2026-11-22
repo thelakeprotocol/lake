@@ -46,7 +46,8 @@ describe('sandbox leases', () => {
     const old = { ...(await generateIdentity('phone')).publicJwk, claimedAt: Date.now() - 25 * 3_600_000 } as JWK;
     const d = await leasedDesk(old);
     // The release runs on its own: waited for, not timed (a fixed 50 ms failed under a full suite on a busy machine).
-    for (let i = 0; i < 40 && d.stored() !== null; i++) await new Promise((r) => setTimeout(r, 50));
+    // Both: the key is cleared a moment before the release is counted (22 Nov: checked in between, once).
+    for (let i = 0; i < 40 && (d.stored() !== null || d.released() !== 1); i++) await new Promise((r) => setTimeout(r, 50));
     expect(d.stored()).toBeNull();
     expect(d.released()).toBe(1);
     expect(await (await fetch(`${d.base}/status`)).json()).toMatchObject({ claimed: false });
