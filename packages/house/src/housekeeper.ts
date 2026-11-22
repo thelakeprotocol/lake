@@ -299,7 +299,7 @@ export class Housekeeper {
     if ((v.payload.kind as string) === 'agreement' || (v.payload.kind as string) === 'agreement.update') {
       if (v.profile.role !== 'house') return this.reply({ kind: 'rejected', code: 'malformed', why: 'an agreement is between two houses: this one takes it only from a house' } as never);
       const p = v.payload as unknown as Record<string, unknown>, url = (data as LakeData).card.supportedInterfaces?.[0]?.url ?? '';
-      if ((v.payload.kind as string) === 'agreement') return this.reply(this.o.desk.agreementIn(p, { url, key: jkt, name: cleanName((data as LakeData).card.name).replace(/ \(house\)$/, '') }) as never);
+      if ((v.payload.kind as string) === 'agreement') return this.reply(this.o.desk.agreementIn(p, { url, key: jkt, name: cleanName((data as LakeData).card.name).replace(/ \(house\)$/, '') }, v.profile.webId) as never);
       return this.reply(this.o.desk.agreementUpdate(p, jkt) as never);
     }
     if ((v.payload.kind as string) === 'note.reply') {

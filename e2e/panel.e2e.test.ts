@@ -775,7 +775,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       await tab('People');
       const row = page.locator('.people-new .chatrow', { hasText: 'still on for Thursday' });
       // Alex's new key writes from another address than the Alex this house knows: careful, and why (run 100).
-      await row.locator('.row-via.careful', { hasText: /Says they're Alex(, with a different key|, from a different house: careful)/ }).waitFor({ timeout: 8000 });
+      await row.locator('.row-via.careful', { hasText: /Says they're Alex(, with a different key|: not the Alex you know)/ }).waitFor({ timeout: 8000 });
       await tidy();
       await row.click();
       // Said plainly in the chat, with the one tap that files it with Alex (asked first: it makes their AI answer it too).

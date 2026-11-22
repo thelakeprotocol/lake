@@ -50,7 +50,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
 }
 
 /** A lookalike's line in the list: calm when the new key writes from the same house, careful when not. */
-const twinLine = (name: string, sameHouse?: boolean) => sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}, from a different house: careful` : `Says they're ${name}, with a different key`;
+const twinLine = (name: string, sameHouse?: boolean) => sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}: not the ${name} you know` : `Says they're ${name}, with a different key`;
 
 function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
   const ai = c.lastBy === 'ai' ? shortName(c.notes.at(-1)?.answered?.by ?? '') || 'Your AI' : '';
