@@ -1202,8 +1202,11 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
     }
     const signed = t.signers.some((x) => x.webId === from);
     if (p.kind === 'tally.count') {
-      // Names only after the trigger, and only to those who signed or opened it.
-      const show = t.state === 'triggered' && (signed || profile.ownerDomain === t.opener);
+      // Names only after the trigger, and only to its opener and those who signed before it filled: anyone can sign a listed
+      // pledge, and a late signer took no going-first risk (run 114: a stranger signed 37 s after it filled and got all five
+      // households' addresses). Grok and Fable agreed, round 157.
+      const early = t.signers.some((x) => x.webId === from && (!x.at || Date.parse(x.at) <= (t.triggeredAt ?? 0)));
+      const show = t.state === 'triggered' && (early || profile.ownerDomain === t.opener);
       return { kind: 'tally.count', ...view(t), ...(show ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
     }
     if (p.kind === 'tally.withdraw') {
@@ -1250,7 +1253,9 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         m.counted.push(hold);
       }
       if (!counted) t.signers.push({ webId: from, domain: profile.ownerDomain, url: card.supportedInterfaces?.[0]?.url ?? '', at: new Date().toISOString(), ...(person ? { person } : {}), ...(hold ? { hold } : {}) });
+      let flipped = false;
       if (t.state === 'open' && t.signers.length >= t.threshold) {
+        flipped = true;
         t.state = 'triggered';
         t.triggeredAt = Date.now();
         const signers = t.signers.map(({ domain, url }) => ({ domain, url }));
@@ -1260,7 +1265,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       report(t);
       // The reply names the signer and is signed by the tally: the signer's proof, to show anyone (lake_verify checks it),
       // so "I've signed" never has to be taken on trust (run 16).
-      return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), signer: { webId: from, domain: profile.ownerDomain }, proof: 'this signed reply is your proof that you signed: forward it as it is', ...(t.state === 'triggered' ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
+      return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), signer: { webId: from, domain: profile.ownerDomain }, proof: 'this signed reply is your proof that you signed: forward it as it is', ...(flipped ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
     }
     return { kind: 'refused', problems: ['send tally.open, tally.sign, tally.withdraw or tally.count'] };
   }, [], true, (p) => (p.kind === 'tally.sign' || p.kind === 'tally.withdraw') && (typeof p.pass === 'string' || typeof p.secret === 'string'));

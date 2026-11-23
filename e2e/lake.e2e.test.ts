@@ -1702,8 +1702,16 @@ describe('the open door', () => {
     expect(listing.filled.find((x: { id: string }) => x.id === 'e2e-strike').opened_by).toMatchObject({ name: expect.any(String), url: expect.stringMatching(/^http/), house: false });
     // Late is still welcome until the deadline (run 16 turned a late signer away), and the tally's signed reply names the
     // signer: proof it can show anyone.
-    const late = await ask(tally, await visitor('late.example'), { kind: 'tally.sign', id: 'e2e-strike' });
+    const lateV = await visitor('late.example');
+    const late = await ask(tally, lateV, { kind: 'tally.sign', id: 'e2e-strike' });
     expect(late.reply).toMatchObject({ kind: 'tally.triggered', count: 3, signer: { domain: 'late.example' } });
+    // A late signer gets the count, not who signed: anyone can sign a listed pledge (run 114: a stranger harvested five
+    // households' addresses). Those who signed before it filled still see each other.
+    expect(late.reply.signers).toBeUndefined();
+    const lateLook = await ask(tally, lateV, { kind: 'tally.count', id: 'e2e-strike' });
+    expect(lateLook.reply).toMatchObject({ kind: 'tally.count', count: 3 });
+    expect(lateLook.reply.signers).toBeUndefined();
+    expect((await t(other, { kind: 'tally.count', id: 'e2e-strike' })).signers).toHaveLength(3);
     // Nothing public says who signed: no visit reports from the tally, no message events to it.
     const feed = JSON.stringify((await (await fetch(`${node}/state`)).json()).recent);
     expect(feed).not.toMatch(/tally\.sign|tally\.signed|tally\.triggered/);
