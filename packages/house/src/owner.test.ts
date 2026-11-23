@@ -973,6 +973,15 @@ describe('what an attacker tried (round 16)', () => {
     expect((await h.desk.today(0)).lines.map((l: { text: string }) => l.text)).toContainEqual(expect.stringMatching(/Priya disputes: .*Their words: "it was fine when I lent it"/));
     expect(await h.owner({ kind: 'panel.agreement.set', id: 'a2', status: 'disputed' })).toHaveProperty('error'); // a reply needs a line
     expect(await h.owner({ kind: 'panel.agreement.set', id: 'a2', status: 'disputed', reason: 'it broke; I will bring it tomorrow 10am' })).toEqual({ ok: true, status: 'disputed' });
+    // Every line is kept, in order, and a long one whole (run 109: the record kept only the last, cut at 120 characters).
+    const long = 'So it broke while you had it. Fine, a new one by Saturday 3pm, similar size, and I will count it done only when its in my hands.';
+    expect(h.desk.agreementUpdate({ id: 'ag-0000bbbb', status: 'disputed', reason: long }, 'priya-key')).toMatchObject({ status: 'disputed' });
+    const g2 = h.desk.agenda[0]!.agreement!;
+    expect(g2.reason).toBe(long);
+    expect(g2.lines!.map((l) => [l.by, l.text])).toEqual([['them', 'it was fine when I lent it'], ['you', 'it broke; I will bring it tomorrow 10am'], ['them', long]]);
+    // A done's words are quoted on Today too (run 109: "Sam says done" left out "the back brake is shot").
+    expect(h.desk.agreementUpdate({ id: 'ag-0000bbbb', status: 'done_asked', reason: 'brought a new one, the old one is beyond repair' }, 'priya-key')).toMatchObject({ status: 'done_asked' });
+    expect((await h.desk.today(0)).lines.map((l: { text: string }) => l.text)).toContainEqual(expect.stringMatching(/Priya says done: .*Their words: "brought a new one, the old one is beyond repair"\. Confirm it/));
     h.close();
   });
 

@@ -659,5 +659,8 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .reading-line ion-spinner { width: 20px; height: 20px; flex: none; }
 /* An agreement both houses hold (round 113): one that ended reads crossed out. */
 .agreement-row h3.struck { text-decoration: line-through; opacity: .7; }
-.agreement-acts { display: flex; gap: 2px; }
+.agreement-acts { display: flex; flex-wrap: wrap; gap: 2px; margin: 2px 0 0 -10px; }
 .quiet-danger { margin-left: 0; --padding-start: 0; --padding-end: 0; }
+/* An agreement's earlier lines, one tap away (round 146). */
+.agreement-thread { font: inherit; font-size: 13.5px; background: none; border: 0; padding: 2px 0 4px; color: var(--lake-mint); cursor: pointer; }
+.agreement-line { margin: 4px 0; }

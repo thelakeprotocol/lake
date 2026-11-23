@@ -2031,6 +2031,19 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await row.locator('.lake-pill', { hasText: /^Done, waiting for / }).waitFor({ timeout: 10_000 });
     const theirs = ((await asNb({ kind: 'list' })).agenda as { id: string; agreement?: { id: string; status: string; asked?: { by: string } } }[]).find((a) => a.agreement?.id === lent.agreement)!;
     expect(theirs.agreement).toMatchObject({ status: 'done_asked', asked: { by: 'them' } });
+    // The neighbour disputes, this owner replies from the row, and every line stays on it, the earlier ones a tap away (run 109:
+    // four replies, and the record kept only the last, cut at 120 characters).
+    expect(await asNb({ kind: 'panel.agreement.set', id: theirs.id, status: 'disputed', reason: 'one leg came back loose' })).toEqual({ ok: true, status: 'disputed' });
+    await page.reload();
+    await row.getByRole('button', { name: 'Reply' }).click();
+    const reply = 'It was loose when you lent it, but I will tighten it on Saturday morning and bring it round to yours before the BBQ starts.';
+    await page.locator('ion-alert input').fill(reply);
+    await page.locator('ion-alert').getByRole('button', { name: 'Send' }).click();
+    await row.getByText(`You: “${reply}”`).waitFor({ timeout: 10_000 });
+    await row.getByRole('button', { name: '1 earlier line' }).click();
+    await row.getByText(/“one leg came back loose”/).waitFor();
+    await row.getByRole('button', { name: 'Done after all' }).click();
+    await row.locator('.lake-pill', { hasText: /^Done, waiting for / }).waitFor({ timeout: 10_000 });
     expect(await asNb({ kind: 'panel.agreement.set', id: theirs.id, status: 'done' })).toEqual({ ok: true, status: 'done' });
     await page.reload();
     await row.locator('.lake-pill', { hasText: /^Done$/ }).waitFor({ timeout: 15_000 });

@@ -152,6 +152,8 @@ const agreementPill = (g: NonNullable<AgendaItem['agreement']>, due?: string): [
 const endOf = (a: AgendaItem) => (a.start ? Date.parse(a.start) + (a.minutes ?? 60) * 60_000 : a.due ? Date.parse(a.due) : 0);
 function AgreementRow({ a }: { a: AgendaItem }) {
   const g = a.agreement!, [pill, tone] = agreementPill(g, a.due), over = ['declined', 'cancelled', 'withdrawn'].includes(g.status);
+  // Earlier lines one tap away; the latest is always shown (run 109: four dispute replies, and the record kept only the last).
+  const [thread, setThread] = useState(false), earlier = (g.lines ?? []).slice(0, -1), who = (by: string) => (by === 'them' ? g.with.name : 'You');
   const set = (status: string, reason?: string) => must({ kind: 'panel.agreement.set', id: a.id, status, ...(reason ? { reason } : {}) });
   // A line of words for a not kept or a dispute: the other side sees it as yours, unchecked.
   const withReason = (status: string, header: string) => async () => { const r = await askLine({ header, sub: `${g.with.name} sees this line as your words.`, button: 'Send', placeholder: 'What happened, in a few words' }); if (!r) return; await set(status, r); };
@@ -169,9 +171,13 @@ function AgreementRow({ a }: { a: AgendaItem }) {
   return h('ion-item', { lines: 'full', class: `lake-row agreement-row ${g.status}` },
     h('div', { slot: 'start', class: `row-icon tint-${tone === 'red' ? 'amber' : tone === 'muted' ? 'muted' : tone}` }, h('ion-icon', { name: a.due ? 'hand-right-outline' : 'calendar-outline' })),
     h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what), h('p', {}, [whenOf(a), a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
-      g.reason ? h('p', { class: 'muted-line' }, `${g.changed.by === 'them' ? g.with.name : 'You'}: “${g.reason}”`) : g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null),
-    h(Pill, { text: pill, tone }),
-    acts.length ? h('div', { slot: 'end', class: 'agreement-acts' }, ...acts) : null);
+      thread ? earlier.map((l, i) => h('p', { key: `l${i}`, class: 'muted-line agreement-line' }, `${who(l.by)}, ${time(l.at)}: “${l.text}”`)) : null,
+      g.reason ? h('p', { class: 'muted-line' }, `${g.changed.by === 'them' ? g.with.name : 'You'}: “${g.reason}”`) : null,
+      earlier.length && !thread ? h('button', { class: 'link-btn agreement-thread', onClick: (e: Event) => { e.stopPropagation(); setThread(true); } }, `${plural(earlier.length, 'earlier line')}`) : null,
+      g.reason ? null : g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null,
+      // Under the words, where they can wrap (round 146: three buttons beside a disputed row left its words no width at phone size).
+      acts.length ? h('div', { class: 'agreement-acts' }, ...acts) : null),
+    h(Pill, { text: pill, tone }));
 }
 // In this phone's own time, from the start or due date when there is one (round 121: the house wrote them in UTC).
 const whenOf = (a: AgendaItem) => (a.start ? dayTime(a.start) : a.due ? `by ${dayTime(a.due)}` : a.when);
