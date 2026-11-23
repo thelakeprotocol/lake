@@ -27,7 +27,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const bump = useBump();
   const list = useHouse<ListView>({ kind: 'list' });
   const door = useHouse<DoorState>({ kind: 'panel.door' });
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useState(false), [writing, setWriting] = useState(false);
   const data = list.data;
   if (data) seen.at = { ...(data.seen ?? {}), ...seen.at };
   const { known, fresh } = peopleOf(data ? chatsOf(data.notes ?? [], data.assistants ?? []) : []);
@@ -35,6 +35,9 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const more = fresh.length > FEW;
   return h(Page, { title: 'People', big: true, status, footer: tabbar },
     !data ? h(Failed, { error: list.error }) : [
+      // Writing first, one quiet row (run 113: an owner could only reply or ask their AI; ChatGPT, round 153: at the top of People).
+      h(Section, { key: 'write', cls: 'people-write' }, h(Row, { icon: 'create-outline', label: 'Write to someone', sub: 'By their handle, from your house', onClick: () => setWriting(true), cls: 'write-first' })),
+      h(WriteSheet, { key: 'ws', open: writing, onClose: () => setWriting(false) }),
       // Two chats under one name are told apart by the AI each wrote through (21 Nov: People listed "Alex" three times).
       known.length ? h(Section, { title: 'People you know', key: 'known', cls: 'chat-list people-known' }, ...known.map((c) => h(ChatRow, { key: c.key, c, twin: known.filter((x) => x.name === c.name).length > 1 }))) : null,
       fresh.length ? h(Section, { title: `New people · ${fresh.length}`, key: 'new', cls: 'chat-list people-new' },
@@ -51,6 +54,26 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
 
 /** A lookalike's line in the list: calm when the new key writes from the same house, careful when not. */
 const twinLine = (name: string, sameHouse?: boolean) => sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}: not the ${name} you know` : `Says they're ${name}, with a different key`;
+
+/** A note to someone by their handle, sent by this house with its own key; the chat opens with it. */
+function WriteSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [to, setTo] = useState(''), [text, setText] = useState(''), [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await must({ kind: 'panel.note.write', to: to.trim(), text: text.trim() }) as { chat: string; to: string };
+      setTo(''); setText(''); onClose();
+      void toast(`Sent to ${r.to}, from your house.`, { duration: 4000 });
+      push(`#chat=${encodeURIComponent(r.chat)}`);
+    } catch (e) { void toast((e as Error).message, { duration: 6000 }); } finally { setBusy(false); }
+  };
+  return h(Sheet, { open, onClose, title: 'Write to someone', half: true },
+    h('div', { class: 'write-sheet' },
+      h('ion-input', { value: to, placeholder: '@their-handle', 'aria-label': 'Their handle', class: 'tell-input write-to', autocapitalize: 'off', onionInput: (e: CustomEvent) => setTo(String(e.detail.value ?? '')) }),
+      h('ion-textarea', { value: text, autoGrow: true, rows: 3, maxlength: 1000, placeholder: 'Your message', 'aria-label': 'Your message', class: 'tell-input write-text', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
+      h('p', { class: 'muted-line' }, 'It goes from your house, signed as you. Their phone shows who it\'s from.'),
+      h(Btn, { label: 'Send', expand: 'block', disabled: busy || !to.trim() || !text.trim(), run: send })));
+}
 
 function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
   const ai = c.lastBy === 'ai' ? shortName(c.notes.at(-1)?.answered?.by ?? '') || 'Your AI' : '';
@@ -162,7 +185,7 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
   const bubbles = c.notes.flatMap((n) => {
     const d = day(n.at), divider = d !== lastDay ? ((lastDay = d), h('div', { key: `d-${n.id}`, class: 'daydiv' }, d)) : null;
     return [divider,
-      h('div', { key: n.id, class: `bubble them${focusNote() === n.id ? ' lit' : ''}` }, h('p', {}, n.text), h('time', {}, time(n.at))),
+      n.started ? null : h('div', { key: n.id, class: `bubble them${focusNote() === n.id ? ' lit' : ''}` }, h('p', {}, n.text), h('time', {}, time(n.at))),
       // What your AI said here and you took back stays, struck through: they did read it.
       n.retracted ? h('div', { key: `${n.id}-r`, class: 'bubble ai undone' }, h('span', { class: 'who' }, h('ion-icon', { name: 'sparkles' }), ` ${shortName(n.retracted.by)}, your AI`), h('p', {}, n.retracted.text),
         h('div', { class: 'bubble-foot' }, h('span', { class: 'took-back' }, 'Taken back'), h('time', {}, time(n.retracted.at)))) : null,

@@ -1373,6 +1373,13 @@ function panelFor(x: {
     async invite() {
       return x.o.invite ? x.o.invite() : { error: 'this house is run by its owner, not hosted: point people at the docs to run their own (lake.doneinfifty.com/docs/join)' };
     },
+    async resolveHandle(h) {
+      for (const n of x.nodes) {
+        const r = await fetch(`${n.replace(/\/$/, '')}/handles/${encodeURIComponent(h)}`, { signal: AbortSignal.timeout(5000) }).then((y) => (y.ok ? y.json() as Promise<{ url?: string }> : null)).catch(() => null);
+        if (r?.url) return r.url;
+      }
+      return undefined;
+    },
     async replyAgent(url, payload) {
       return (await send(url, payload)).payload as Record<string, any>;
     },

@@ -666,3 +666,7 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 /* An agreement's earlier lines, one tap away (round 146). */
 .agreement-thread { font: inherit; font-size: 13.5px; background: none; border: 0; padding: 2px 0 4px; color: var(--lake-mint); cursor: pointer; }
 .agreement-line { margin: 4px 0; }
+/* Writing first (round 154): the sheet's two boxes and its one line. */
+.write-sheet { padding: 4px 16px 16px; }
+.write-sheet .write-text { margin-bottom: 4px; }
+.write-sheet ion-input, .write-sheet ion-textarea { --padding-start: 12px; --padding-end: 12px; }

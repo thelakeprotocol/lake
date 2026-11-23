@@ -2048,6 +2048,18 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(await asNb({ kind: 'panel.agreement.set', id: theirs.id, status: 'done' })).toEqual({ ok: true, status: 'done' });
     await page.reload();
     await row.locator('.lake-pill', { hasText: /^Done$/ }).waitFor({ timeout: 15_000 });
+    // Writing first, from People (run 113): the owner writes to the neighbour's house, the chat opens with it, and the note
+    // reaches the neighbour from this house.
+    await tab('People');
+    if (process.env.PANEL_SHOTS) await page.screenshot({ path: `${process.env.PANEL_SHOTS}/people.png`, fullPage: true });
+    await page.locator('ion-item.write-first').click();
+    await page.locator('.write-sheet .write-to input').fill(`${nb}/a2a`);
+    await page.locator('.write-sheet .write-text textarea').fill('Shall I bring the chairs over at 3?');
+    if (process.env.PANEL_SHOTS) await page.screenshot({ path: `${process.env.PANEL_SHOTS}/write-sheet.png` });
+    await page.locator('.write-sheet').getByRole('button', { name: 'Send' }).click();
+    await page.locator('.bubble.me', { hasText: 'Shall I bring the chairs over at 3?' }).waitFor({ timeout: 15_000 });
+    expect(((await asNb({ kind: 'list' })).notes as { text: string; from: { house?: boolean } }[]).find((n) => n.text === 'Shall I bring the chairs over at 3?')).toMatchObject({ from: { house: true } });
+    await tab('Today');
     await tidy();
     procs.pop()!.kill('SIGTERM');
   });

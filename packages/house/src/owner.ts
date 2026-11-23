@@ -146,6 +146,8 @@ export interface PanelProvider {
   invite?(): Promise<{ link: string; left: number } | { error: string }>;
   /** A signed message from this house to another agent (the owner's answer to a note its AI left). */
   replyAgent?(url: string, payload: Record<string, unknown>): Promise<Record<string, any>>;
+  /** A house's address on this house's Lake, from its handle ("sam-ascot-4k2p"); undefined when nobody goes by it. */
+  resolveHandle?(handle: string): Promise<string | undefined>;
   /** Checks a signed message one of the owner's AIs received and passes on (card, domain, signature, as of when it arrived): who sent it, and its words. */
   verifySigned?(signed: unknown, arrived: number): Promise<{ from: { name: string; domain: string; webId: string; url?: string; key: string; checked: boolean }; text: string } | { error: string }>;
   /** What the owner's record says for one coded field (its first value), for a count answered from it. */
@@ -620,6 +622,9 @@ export class OwnerDesk {
   /** Keys the owner's assistants have sent signed messages to: who counts as known for the duty's novelty rule. */
   /** Keys this owner's side wrote to or answered: the name they saw, and the vouching house when one checked (run 108). */
   private contacts = new Map<string, { name: string; webId: string; at: string; house?: string; houseKey?: string }>();
+  /** When this owner last started a conversation (an hour of them), and with whom: writing first is limited. */
+  private writes: number[] = [];
+  private wroteTo = new Map<string, number>();
   suggestions: Suggestion[] = [];
   /** What the owner told an AI to do, newest first: the open ones, and the last few that ended (for the card that says how). */
   tasks: Task[] = [];
@@ -1835,7 +1840,7 @@ export class OwnerDesk {
   }
 
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
-  notes: { id: string; from: NoteSender; text: string; /** About one of the owner's offerings (SPEC §6.9): its id. */ offering?: string; /** The sender said no answer is expected (a notice). */ noReply?: true; /** A reply to one of the owner's wants, through a link they shared (SPEC §6.8): that want's id. */ want?: string; /** Set aside by the AI on duty as needing no answer (triage): the owner sees the line under Handled for you, with Undo. */ handled?: { by: string; at: string; line: string; entry: string }; /** Given back to the owner by an Undo: the AI on duty leaves it alone. */ kept?: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
+  notes: { id: string; from: NoteSender; text: string; /** A conversation this owner started from their phone (panel.note.write): no words of theirs yet, the owner's in answered. */ started?: true; /** About one of the owner's offerings (SPEC §6.9): its id. */ offering?: string; /** The sender said no answer is expected (a notice). */ noReply?: true; /** A reply to one of the owner's wants, through a link they shared (SPEC §6.8): that want's id. */ want?: string; /** Set aside by the AI on duty as needing no answer (triage): the owner sees the line under Handled for you, with Undo. */ handled?: { by: string; at: string; line: string; entry: string }; /** Given back to the owner by an Undo: the AI on duty leaves it alone. */ kept?: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
   addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string }; /** The sender expects no answer (a notice): nobody waits on it. */ noReply?: true; want?: string; offering?: string }): string | null {
     this.touch();
@@ -3282,6 +3287,37 @@ export class OwnerDesk {
         await saveWhole(join(this.o.dataDir, 'muted-names.json'), JSON.stringify([...this.mutedNames]));
         this.touch();
         return void res.json({ ok: true, note: 'their next message reaches you again; what was turned away while blocked stays gone' });
+      }
+      // Writing first, from the phone, to a house by its handle (run 113: an owner could only reply, or ask their AI; ChatGPT and
+      // Fable, round 153: "Write to someone" on People). Sent by this house with its own key, as a note; the chat starts here.
+      if (p.kind === 'panel.note.write') {
+        const q = p as unknown as { to?: string; text?: string };
+        const text = String(q.text ?? '').trim().slice(0, 1000);
+        if (!text) return void res.status(400).json({ error: 'text: what you want to say, up to 1000 characters' });
+        if (looksLikeInjection(text)) return void res.status(400).json({ error: 'a note says what you want to say, not instructions for an AI' });
+        const raw = String(q.to ?? '').trim().replace(/^@/, '').toLowerCase();
+        const url = /^https?:\/\//.test(raw) ? `${raw.replace(/\/$/, '').replace(/\/a2a$/, '')}/a2a` : /^[a-z0-9-]{3,60}$/.test(raw) ? await this.o.panel?.resolveHandle?.(raw) : undefined;
+        if (!url) return void res.status(404).json({ error: `nobody goes by "${raw.slice(0, 60)}" on this Lake: check the handle` });
+        const now = Date.now();
+        this.writes = this.writes.filter((t) => now - t < 3_600_000);
+        if (this.writes.length >= 10) return void res.status(429).json({ error: 'ten new conversations an hour from one house: try again later' });
+        let to: Agreement['with'];
+        try { to = await this.houseAt(url); } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
+        // A second note to someone who hasn't answered waits a while: writing first isn't for chasing.
+        const last = this.wroteTo.get(to.key);
+        if (last && now - last < 600_000 && !this.notes.some((n) => n.from.key === to.key && !n.started && Date.parse(n.at) > last)) return void res.status(429).json({ error: `${to.name} hasn't answered yet: give them a while before writing again` });
+        const sent = await this.o.panel?.replyAgent?.(to.url, { kind: 'note', text, purpose: 'contact' }).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
+        if (!sent || sent.kind === 'unreached') return void res.status(502).json({ error: `${to.name}'s house can't be reached right now` });
+        if (sent.kind === 'refused' || sent.kind === 'rejected' || sent.decision === 'decline') return void res.status(502).json({ error: `${to.name}'s house didn't take it${sent.why ?? sent.reason ? `: ${String(sent.why ?? sent.reason).slice(0, 200)}` : ''}` });
+        this.writes.push(now);
+        this.wroteTo.set(to.key, now);
+        const at = new Date(now).toISOString();
+        this.notes.push({ id: randomBytes(6).toString('hex'), started: true, from: { name: to.name, domain: new URL(to.url).host, webId: '', url: to.url, key: to.key, checked: false, house: true }, text: '', at, answered: { text, by: 'you', own: true, at } });
+        // Someone this owner wrote to is someone they know: their answer isn't a stranger's.
+        if (!this.contacts.has(to.key)) { this.contacts.set(to.key, { name: to.name, webId: '', at, houseKey: to.key }); await this.saveDuty(); }
+        void this.saveNotes();
+        this.touch();
+        return void res.json({ ok: true, chat: to.key, to: to.name });
       }
       if (p.kind === 'panel.note.reply') {
         const q = p as unknown as { id?: string; text?: string };
