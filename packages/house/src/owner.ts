@@ -413,7 +413,7 @@ const TASK_MESSAGES = 5, TASK_HOURS = 24, ERRAND_DAYS = 7;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
-export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string; why?: string } }
+export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; /** Its door's handle, from its verified card (run 113: priya- and pryia- looked the same on two phones). */ handle?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 /**
  * A one-time code for an AI to pair with: never starting with "-" or "_", which a command line would read as an option
@@ -699,7 +699,7 @@ export class OwnerDesk {
     return { ok: true };
   }
   /** Another house asks this owner to agree to something: a card with their own Yes or No. */
-  agreementIn(p: Record<string, unknown>, from: Agreement['with'], webId?: string): Record<string, unknown> {
+  agreementIn(p: Record<string, unknown>, from: Agreement['with'], webId?: string, handle?: string): Record<string, unknown> {
     const id = String(p.id ?? ''), what = String(p.what ?? '').trim().slice(0, 200);
     const start = p.start ? new Date(String(p.start)) : undefined, due = p.due ? new Date(String(p.due)) : undefined;
     if (!/^ag-[0-9a-f]{8}$/.test(id) || !what || (!start && !due) || (start && Number.isNaN(start.getTime())) || (due && Number.isNaN(due.getTime()))) return { kind: 'refused', problems: ['agreement: { id: ag-<8 hex>, what, start or due }'] };
@@ -710,7 +710,7 @@ export class OwnerDesk {
     // A house named like someone the owner knows, from another house (run 108: Vic, renamed "Priya Nair", reached George as
     // "Priya Nair's house proposes… You haven't dealt with Priya Nair before").
     const twin = this.twinOf({ key: from.key, name: from.name, url: from.url, house: true, ...(webId ? { webId } : {}) });
-    const careful = twin && !twin.sameHouse ? ` Careful: this is not the ${twin.name.replace(/ \(.*\)$/, '')} you know. Check with them another way before you agree.` : '';
+    const careful = twin && !twin.sameHouse ? ` Careful: this is not the ${twin.name.replace(/ \(.*\)$/, '')} you know${handle ? ` (it writes as @${handle.slice(0, 60)})` : ''}. Check with them another way before you agree.` : '';
     const sug: Suggestion = { id: randomBytes(6).toString('hex'), from: `${from.name}'s house`, text: `${from.name}'s house proposes: ${what.replace(/[.\s]+$/, '')}${start ? `, ${this.whenWords(start.toISOString())}` : `, by ${this.whenWords(due!.toISOString())}`}. Nothing is agreed until you tap Yes.${careful || (this.knownBy(from.key) ? '' : ` You haven't dealt with ${from.name} before.`)}`, agreementIn: { id, what, ...(start ? { start: start.toISOString() } : {}), ...(minutes ? { minutes } : {}), ...(due ? { due: due.toISOString() } : {}), ...(typeof p.where === 'string' && p.where ? { where: p.where.slice(0, 120) } : {}), from }, at: new Date().toISOString() };
     this.suggestions = [sug, ...this.suggestions];
     this.trimSuggestions();

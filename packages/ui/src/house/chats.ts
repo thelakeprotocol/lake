@@ -58,11 +58,12 @@ function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
     h('div', { slot: 'start' }, h(Avatar, { name: c.name, ring: c.trust === 'lookalike' ? 'lookalike' : undefined })),
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
-      c.trust === 'lookalike' ? h('div', { class: `row-via${c.twin?.sameHouse ? '' : ' careful'}` }, twinLine(shortName(c.twin?.name ?? c.name), c.twin?.sameHouse)) : null,
+      // With its handle, the one thing a lookalike can't copy (run 113: priya- and pryia- looked the same).
+      c.trust === 'lookalike' ? h('div', { class: `row-via${c.twin?.sameHouse ? '' : ' careful'}` }, twinLine(shortName(c.twin?.name ?? c.name), c.twin?.sameHouse), c.handle ? ` · @${c.handle}` : '') : null,
       c.toAi ? h('div', { class: 'row-via to-ai' }, h('ion-icon', { name: 'sparkles-outline' }), c.via) : null,
       twin && !c.toAi && c.trust !== 'lookalike' && c.agent ? h('div', { class: 'row-via' }, `Through ${shortName(c.agent)}`) : null,
       // What a new sender is, before it's opened (round 84: "Visitor from early.example: a person, a bot, spam?").
-      !c.toAi && c.trust === 'new' ? h('div', { class: 'row-via' }, c.via) : null,
+      !c.toAi && c.trust === 'new' ? h('div', { class: 'row-via' }, c.via, c.handle ? ` · @${c.handle}` : '') : null,
       h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : ai ? `${ai}: ` : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));
 }
 

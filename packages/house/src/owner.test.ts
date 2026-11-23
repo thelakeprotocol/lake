@@ -1037,8 +1037,8 @@ describe('what an attacker tried (round 16)', () => {
     const vic = ((await h.owner({ kind: 'list' })).notes as { id: string; from: { key: string } }[]).find((n) => n.from.key === 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz0')!;
     expect(await h.owner({ kind: 'panel.note.mute', id: vic.id })).toMatchObject({ blocked: 'Priya Nair (not the Priya Nair you know)' });
     // A proposal from a house renamed "Priya Nair" says so too, instead of "You haven't dealt with Priya Nair before" (round 144).
-    h.desk.agreementIn({ id: 'ag-0000beef', what: 'BBQ plates, A$5 a head', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://sandbox.example/t/sb-4/a2a', key: 'vic-house-key-0123456789abcdefghijklmnopqrs', name: 'Priya Nair' }, 'https://sandbox.example/t/sb-4/profile/card#me');
-    expect(h.desk.suggestions[0]!.text).toMatch(/Nothing is agreed until you tap Yes\. Careful: this is not the Priya Nair you know\. Check with them another way before you agree\.$/);
+    h.desk.agreementIn({ id: 'ag-0000beef', what: 'BBQ plates, A$5 a head', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://sandbox.example/t/sb-4/a2a', key: 'vic-house-key-0123456789abcdefghijklmnopqrs', name: 'Priya Nair' }, 'https://sandbox.example/t/sb-4/profile/card#me', 'pryia-ascot-7p0k');
+    expect(h.desk.suggestions[0]!.text).toMatch(/Nothing is agreed until you tap Yes\. Careful: this is not the Priya Nair you know \(it writes as @pryia-ascot-7p0k\)\. Check with them another way before you agree\.$/);
     // And from Priya's own house, the plain proposal.
     h.desk.agreementIn({ id: 'ag-0000cafe', what: 'Table back by Saturday', due: new Date(Date.now() + 86_400_000).toISOString() }, { url: 'https://sandbox.example/t/sb-2/a2a', key: P2K, name: 'Priya Nair' }, H2);
     expect(h.desk.suggestions[0]!.text).not.toMatch(/Careful/);

@@ -299,7 +299,7 @@ export class Housekeeper {
     if ((v.payload.kind as string) === 'agreement' || (v.payload.kind as string) === 'agreement.update') {
       if (v.profile.role !== 'house') return this.reply({ kind: 'rejected', code: 'malformed', why: 'an agreement is between two houses: this one takes it only from a house' } as never);
       const p = v.payload as unknown as Record<string, unknown>, url = (data as LakeData).card.supportedInterfaces?.[0]?.url ?? '';
-      if ((v.payload.kind as string) === 'agreement') return this.reply(this.o.desk.agreementIn(p, { url, key: jkt, name: cleanName((data as LakeData).card.name).replace(/ \(house\)$/, '') }, v.profile.webId) as never);
+      if ((v.payload.kind as string) === 'agreement') return this.reply(this.o.desk.agreementIn(p, { url, key: jkt, name: cleanName((data as LakeData).card.name).replace(/ \(house\)$/, '') }, v.profile.webId, v.profile.handle) as never);
       return this.reply(this.o.desk.agreementUpdate(p, jkt) as never);
     }
     if ((v.payload.kind as string) === 'note.reply') {
@@ -677,7 +677,7 @@ export class Housekeeper {
     const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
     // The person the AI writes for, as they name themselves ("Alex"): shown as their words, never checked.
     const as = typeof p.as === 'string' ? p.as.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) : '';
-    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(url ? { url } : {}), ...(from.role === 'house' ? { house: true as const } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
+    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(from.handle ? { handle: from.handle.slice(0, 60) } : {}), ...(url ? { url } : {}), ...(from.role === 'house' ? { house: true as const } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).
