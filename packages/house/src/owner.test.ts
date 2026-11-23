@@ -998,13 +998,21 @@ describe('what an attacker tried (round 16)', () => {
   });
 
   it('puts a pledge that counts people to the owner with that said, so the card can offer the stamp (run 104)', async () => {
-    const h = await house({ panel: { activity: () => [], money: async () => ({}), pledgeTerms: async () => ({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', threshold: 4, state: 'open', people_only: true, deadline: new Date(Date.now() + 86_400_000).toISOString() }), signPledge: async () => ({ kind: 'tally.signed', count: 2 }) } });
+    const terms: Record<string, unknown> = { id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', threshold: 4, state: 'open', people_only: true, deadline: new Date(Date.now() + 86_400_000).toISOString() };
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), pledgeTerms: async () => ({ ...terms }), signPledge: async () => ({ kind: 'tally.signed', count: 2 }) } });
     h.desk.addNote({ from: from('priya'), text: 'Will you sign?', pledge: { tally: 'https://tally.example/a2a', id: 'street-bbq' } });
     for (let i = 0; i < 20 && !h.desk.suggestions.some((x) => x.pledge); i++) await settle();
     expect(h.desk.suggestions.find((x) => x.pledge)?.pledge).toMatchObject({ id: 'street-bbq', text: 'BBQ Saturday, only if 4 households commit', peopleOnly: true });
     // Signed from the card: it says so, with the count then (run 106: it kept inviting 22 minutes later).
     await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'street-bbq' });
     expect(h.desk.suggestions.find((x) => x.pledge)?.pledge).toMatchObject({ threshold: 4, signed: { count: 2 } });
+    // Where it stands now, from the tally, not the count at signing (run 112: "2 of 4" for 24 minutes); then that it's on.
+    Object.assign(terms, { count: 3 });
+    await h.desk.sweepPledges();
+    expect(h.desk.suggestions.find((x) => x.pledge)?.pledge?.signed).toMatchObject({ count: 3 });
+    Object.assign(terms, { count: 4, state: 'triggered' });
+    await h.desk.sweepPledges();
+    expect(h.desk.suggestions.find((x) => x.pledge)?.pledge?.signed).toMatchObject({ count: 4, filled: true });
     h.close();
   });
 

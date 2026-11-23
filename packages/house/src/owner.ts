@@ -234,7 +234,7 @@ export interface RemovedAi { kid: string; jwk: JWK; label: string; addedAt: stri
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** It counts people once each: signing needs a person stamp (run 104). */ peopleOnly?: true; /** How many it needs. */ threshold?: number; /** This owner signed it: how many had then, and whether it filled (run 106: the card said "invites you to sign" 22 min after). */ signed?: { at: string; count?: number; filled?: true }; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** It counts people once each: signing needs a person stamp (run 104). */ peopleOnly?: true; /** How many it needs. */ threshold?: number; /** This owner signed it: how many had then, and whether it filled (run 106: the card said "invites you to sign" 22 min after). */ signed?: { at: string; count?: number; filled?: true; lapsed?: true }; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Someone (not the owner's AI) invited the owner to sign this pledge, in a note: who, and whether the owner's side knows them. */
@@ -746,6 +746,22 @@ export class OwnerDesk {
     return { kind: 'agreement.updated', id, status };
   }
   /** A done nobody confirmed: counted as done three days after the later of the mark and the agreement's end. */
+  /**
+   * A pledge this owner signed, still filling: its count from the tally, so the card says where it stands now (run 112: "2 of 4"
+   * from the moment of signing stayed for 24 minutes; the organiser's AI nudged people who had signed). Its deadline ends it.
+   */
+  async sweepPledges() {
+    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.filled && !y.pledge.signed.lapsed).slice(0, 10)) {
+      const t = await this.o.panel?.pledgeTerms?.(x.pledge!.tally, x.pledge!.id).catch(() => undefined);
+      if (typeof t?.count !== 'number') continue;
+      const was = x.pledge!.signed!;
+      if (t.count !== was.count || t.state === 'triggered' || t.state === 'lapsed') {
+        x.pledge!.signed = { ...was, count: t.count, ...(t.state === 'triggered' ? { filled: true as const } : {}), ...(t.state === 'lapsed' ? { lapsed: true as const } : {}) };
+        void this.saveSuggestions();
+        this.touch();
+      }
+    }
+  }
   async sweepAgreements(now = Date.now()) {
     for (const a of this.agenda.filter((x) => x.agreement?.status === 'done_asked' && x.agreement.asked?.by === 'you')) {
       if (!agreementMayMove(a, 'done', 'you', now, true)) await this.agreementMove(a, 'done', { auto: true }).catch(() => undefined);
@@ -1128,7 +1144,7 @@ export class OwnerDesk {
       check();
       setInterval(check, 60_000).unref();
     }
-    setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); void this.sweepAgreements(); }, 60_000).unref();
+    setInterval(() => { this.sweepErrands(); this.sweepHeld(); this.sweepTasks(); void this.sweepAgreements(); void this.sweepPledges(); }, 60_000).unref();
     this.dutyLog = await loadJson(join(this.o.dataDir, 'duty-log.json'), []);
     this.readLog = await loadJson(join(this.o.dataDir, 'read-log.json'), []);
     this.ownerReset = (await loadJson<{ at?: string }>(join(this.o.dataDir, 'owner-reset.json'), {})).at;
