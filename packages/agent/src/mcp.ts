@@ -438,6 +438,16 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         : 'Leave your human a note instead (lake_house_suggest), and tell whoever is waiting that your human will answer.';
       if (gate && 'refused' in gate) return { content: [{ type: 'text' as const, text: `On duty you can't do this: ${gate.refused}. ${dutyNext(gate.refused)}` }], isError: true };
       const out = (await cb0(...args)) as { isError?: boolean; content?: { text?: string }[] };
+      // Something sent that waits on someone's answer: off duty, this AI won't see it until its human talks to it again (run
+      // 112: four AIs promised "I'll keep watching for replies" and none could; the rule in the instructions wasn't enough).
+      const a0 = (args[0] ?? {}) as { action?: string; message?: { kind?: string } };
+      const awaits = name === 'lake_ping' || name === 'lake_house_suggest' || (name === 'lake_ask' && (a0.message?.kind ?? 'note') === 'note') || (name === 'lake_want' && (a0.action === 'post' || a0.action === 'offer'));
+      if (!out?.isError && !onDuty && awaits && out.content?.[0]?.text?.startsWith('{')) {
+        try {
+          const o = JSON.parse(out.content[0].text) as Record<string, unknown>;
+          if (!o.error && o.kind !== 'refused' && o.kind !== 'rejected') out.content[0].text = JSON.stringify({ ...o, after_this: 'An answer goes to your human\'s phone first, and to lake_inbox: you see it only when your human talks to you again. Don\'t promise to watch for it or pass it on; say their phone will show it, and they can ask you to look.' }, null, 2);
+        } catch { /* not JSON: left as it is */ }
+      }
       if (!out?.isError) {
         if (gate && 'log' in gate) await dutyDone(gate.log, out).catch(() => {});
         if (house) reportContact(name, (args[0] ?? {}) as Record<string, unknown>);

@@ -493,6 +493,8 @@ describe('the owner', () => {
     // A search names the handle, so @sam is told apart from a lookalike (run 104).
     expect(await tool('lake_search', { role: 'house' })).toContainEqual(expect.objectContaining({ name: 'Sam (house)', handle: '@sam' }));
     const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? From the Claude Code class.', from: 'Alex' });
+    // Off duty it won't see the answer by itself, and is told not to promise it will (run 112: four AIs promised to watch).
+    expect(pinged.after_this).toMatch(/^An answer goes to your human's phone first, .*Don't promise to watch for it/);
     expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they'll see it on their phone/) });
     // Until Sam answers, Alex's inbox says it is waiting on Sam, and how to see where it stands (round 2, 11 Nov).
     const before = await tool('lake_inbox', { wait_seconds: 0 });
