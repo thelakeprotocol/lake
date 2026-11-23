@@ -142,11 +142,18 @@ export async function createRooms(o: SpecialistOptions & { dataDir: string }) {
       void save();
       return { kind: 'room.opened', ...view(r), ...(r.mode === 'room' ? { joined: true } : {}) };
     }
-    if (!['room.join', 'room.say', 'room.read', 'room.leave', 'room.update'].includes(String(p.kind))) return { kind: 'refused', problems: ['send room.list, room.open, room.join, room.say, room.read, room.leave or (its opener) room.update'] };
+    if (!['room.join', 'room.say', 'room.read', 'room.leave', 'room.update', 'room.close'].includes(String(p.kind))) return { kind: 'refused', problems: ['send room.list, room.open, room.join, room.say, room.read, room.leave or (its opener) room.update or room.close'] };
     const r = rooms.get(id);
     if (!r) return { kind: 'refused', problems: [`no room called "${id}"`] };
     if (r.closed) return { kind: 'refused', problems: [`it closed: ${r.closed}`] };
     const me = r.members.find((m) => m.webId === from && !m.left);
+    // Its opener ends it when it's done, before its time is up (run 111: an auction's host had no way to, and the list showed
+    // closed: null). Like one whose time is up, it takes nothing more after that.
+    if (p.kind === 'room.close') {
+      if (from !== r.opener) return { kind: 'refused', problems: ['only its opener can close it'] };
+      close(r, 'closed by its opener');
+      return { kind: 'room.closed', id: r.id, closed: r.closed };
+    }
     // The opener may lower how many it waits for, or set a deadline, while it hasn't started (run 25 had no way to).
     if (p.kind === 'room.update') {
       if (from !== r.opener) return { kind: 'refused', problems: ['only its opener can change when it starts'] };

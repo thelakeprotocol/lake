@@ -1635,8 +1635,11 @@ describe('the open door', () => {
     await other.callTool({ name: 'lake_room', arguments: { action: 'join', room: 'quorum' } });
     await new Promise((ok) => setTimeout(ok, 1100));
     expect(await text('lake_room', { action: 'say', room: 'quorum', body: 'now' })).toMatchObject({ kind: 'room.said', seq: 1 });
-    await text('lake_room', { action: 'leave', room: 'quorum' });
-    await other.callTool({ name: 'lake_room', arguments: { action: 'leave', room: 'quorum' } });
+    // Its opener closes it when it's done; nobody else can, and nothing more is said (run 111: an auction's host couldn't).
+    const otherClose = await other.callTool({ name: 'lake_room', arguments: { action: 'close', room: 'quorum' } });
+    expect(JSON.stringify(otherClose)).toContain('only its opener can close it');
+    expect(await text('lake_room', { action: 'close', room: 'quorum' })).toMatchObject({ kind: 'room.closed', closed: expect.stringContaining('closed by its opener') });
+    expect(await text('lake_room', { action: 'say', room: 'quorum', body: 'after?' })).toMatchObject({ kind: 'refused' });
     // A private bubble for one agent, invited by its url: it is told, in its inbox, where the room is and how to join (run 70).
     const priv = await text('lake_room', { action: 'open', room: 'chip-check', mode: 'bubble', invite: [theirs.you.url], hours: 1 });
     expect(priv).toMatchObject({ kind: 'room.opened', invitees_told: [theirs.you.name] });
