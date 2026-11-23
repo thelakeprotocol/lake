@@ -2099,6 +2099,8 @@ describe('the open door', () => {
     expect(await ana('lake_sell', { action: 'team', to: w.url, items, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 3 }] }, false)).toMatch(/add up/);
     const team = await ana('lake_sell', { action: 'team', to: w.url, items, delivery: { within_hours: 2, review_hours: 1 }, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 2.5 }, { url: s.url, amount: 1.5 }] });
     expect(team).toMatchObject({ team_cart: expect.any(String), asked: [m.name, s.name] });
+    // Members who are here aren't flagged; quiet ones would be (run 110: carts waited on partners from earlier runs).
+    expect(team.members_quiet).toBeUndefined();
     // The opener is told it is in already, who still agrees, and that it delivers the whole cart (round 114).
     expect(team.next).toMatch(/you are in already/);
     expect(team.next).toMatch(/You deliver the whole cart/);

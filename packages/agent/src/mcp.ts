@@ -1644,7 +1644,19 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           mine.consent = await me.consentToShare({ cart: id, splitHash: hash, amount: mine.amount, currency });
           teams.set(id, t);
           const asked = await Promise.all(shares.filter((x) => x !== mine).map((x) => me.ask(x.url, { kind: 'trade.split.ask', cart: id, split_hash: hash, amount: x.amount, currency, total, for: t.items.map((i) => i.label).join(', '), buyer: t.buyer.name, team: shares.map((y) => ({ name: y.name, amount: y.amount })) }).then(() => x.name, (e: Error) => `${x.name} (not reached: ${e.message})`)));
-          return json({ team_cart: id, total: { currency, value: total }, asked, next: `you are in already (you opened it); still to agree: ${asked.length ? asked.join(', ') : 'nobody'}, each with lake_sell { action: "consent", cart }. When the last does, the cart goes to the buyer by itself, and you hear of it in lake_inbox. You deliver the whole cart, your members' parts included: ask them to send you theirs by note` });
+          // Members who haven't been on the Lake for a while, from the node's own list (run 110: two team carts waited 11 minutes
+          // on partners left from earlier runs, and the lead was told only "still to agree").
+          const seen = (await fetch(`${o.node.split(',')[0]!.trim().replace(/\/$/, '')}/cards?idle=1`).then((r) => r.json()).catch(() => [])) as { card: AgentCard; active?: string; asleep?: boolean }[];
+          const quiet = shares.filter((x) => x !== mine).flatMap((x) => {
+            const e = seen.find((c) => c.card.supportedInterfaces?.[0]?.url === x.url), at = e?.active ? Date.parse(e.active) : NaN;
+            const mins = Number.isNaN(at) ? undefined : Math.round((Date.now() - at) / 60_000);
+            // Not on the node's list says nothing either way (it may list only some): only a listed member asleep or idle is flagged.
+            if (!e || (!e.asleep && (mins === undefined || mins < 30))) return [];
+            const since = mins === undefined ? 'asleep' : mins < 120 ? `last active ${mins} minutes ago` : mins < 2880 ? `last active ${Math.round(mins / 60)} hours ago` : `last active ${Math.round(mins / 1440)} days ago`;
+            return [{ name: (x as { name?: string }).name ?? x.url, since: `${since}${e.asleep && mins !== undefined ? ', asleep' : ''}` }];
+          });
+          const warn = quiet.length ? ` Careful: ${quiet.map((q) => `${q.name} is ${q.since}`).join('; ')}: it may not agree soon. If it doesn't, withdraw this cart (lake_sell { action: "withdraw", cart: "${id}" }) and pick a partner who is here.` : '';
+          return json({ team_cart: id, total: { currency, value: total }, asked, ...(quiet.length ? { members_quiet: quiet } : {}), next: `you are in already (you opened it); still to agree: ${asked.length ? asked.join(', ') : 'nobody'}, each with lake_sell { action: "consent", cart }. When the last does, the cart goes to the buyer by itself, and you hear of it in lake_inbox. You deliver the whole cart, your members' parts included: ask them to send you theirs by note.${warn}` });
         }
         if (a.action === 'consent') {
           const ask = [...received].reverse().find((x) => x.message.kind === 'trade.split.ask' && x.message.cart === a.cart);
@@ -2877,7 +2889,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         tags: z.array(z.string().max(32)).max(8).optional().describe('start: what it is about (kids-clothes, brisbane): matching agents are invited'),
         times: z.number().int().min(1).max(12).default(2).describe('start: how many times a year each member may be called on, and may call'),
         sisters: z.boolean().default(true).describe('start: take calls that sister circles (on any Lake) can\'t meet, and pass on the ones nobody in this circle can take'),
-        at_least: z.number().int().min(3).max(100000).default(10).describe('start: how many must join before it forms'),
+        // Said up front (run 110: two agents tried a circle of 2 and got only "Number must be greater than or equal to 3").
+        at_least: z.number().int().min(3).max(100000).default(10).describe('start: how many must join before it forms, 3 or more: a circle is a group. Between two agents, a held cart (lake_sell cart) keeps a promise with money'),
         days: z.number().min(1).max(30).default(14).describe('start: how long it takes new members'),
         about: z.string().optional().describe('find: only circles that mention this'),
         circle: z.string().optional().describe('propose: the id of one of your human\'s circles (from mine)'),
