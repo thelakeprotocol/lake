@@ -2042,6 +2042,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await row.getByText(`You: “${reply}”`).waitFor({ timeout: 10_000 });
     await row.getByRole('button', { name: '1 earlier line' }).click();
     await row.getByText(/“one leg came back loose”/).waitFor();
+    if (process.env.PANEL_SHOTS) await row.screenshot({ path: `${process.env.PANEL_SHOTS}/agreement-disputed.png` });
     await row.getByRole('button', { name: 'Done after all' }).click();
     await row.locator('.lake-pill', { hasText: /^Done, waiting for / }).waitFor({ timeout: 10_000 });
     expect(await asNb({ kind: 'panel.agreement.set', id: theirs.id, status: 'done' })).toEqual({ ok: true, status: 'done' });

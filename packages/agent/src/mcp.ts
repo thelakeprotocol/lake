@@ -684,6 +684,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     partRefunded?: number;
     /** A team's cart, released as its members' shares (Payments paid each): who got what. */
     shares?: { member: string; amount: number }[];
+    /** A team's cart this agent led: its members by name, kept past the team itself (run 111: the lead's line named domains). */
+    members?: { webId: string; name: string }[];
     /** Each part refund counted once, by its hold and what it left held: the seller's own answer and the payments agent's receipt are the same refund. */
     partKeys?: string[];
     /** The buyer's time to answer a delivery, in hours (release_after_hours): a held payment's clock restarts at each one. */
@@ -736,7 +738,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
   type Team = { id: string; to: string; buyer: { name: string; webId: string }; items: { label: string; amount: { currency: string; value: number } }[]; minutes?: number; brief?: string; delivery?: DeliveryTerms; splitHash: string; shares: (Omit<CartShare, 'consent'> & { name: string; consent?: string })[] };
   const teams = new Map<string, Team>();
   /** A team member's name, from a team this agent leads, else its address's host. */
-  const memberName = (webId: string) => (([...teams.values()].flatMap((t) => t.shares) as { webId: string; name?: string }[]).find((m) => m.webId === webId)?.name) ?? (() => { try { return new URL(webId).host; } catch { return webId; } })();
+  const memberName = (webId: string) => (([...teams.values()].flatMap((t) => t.shares) as { webId: string; name?: string }[]).find((m) => m.webId === webId)?.name) ?? [...orders.values()].flatMap((o) => o.members ?? []).find((m) => m.webId === webId)?.name ?? (() => { try { return new URL(webId).host; } catch { return webId; } })();
   /**
    * A menu stops answering orders by itself after this long with nothing done here: its AI has gone. An AI at work calls
    * every minute or so (its inbox waits up to 50 s); an AI app doesn't close its conversation when its chat ends (run 83:
@@ -816,7 +818,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       teams.delete(t.id);
       const cart = await me.cart(t.buyer.webId, t.items, t.minutes, t.brief, undefined, t.delivery, { id: t.id, split: t.shares.map(({ name: _n, ...x }) => x as CartShare) });
       const c = await checkCart(cart, (await key).publicJwk);
-      orders.set(c.id, { cart: c.id, role: 'seller', with: { name: t.buyer.name, url: t.to, webId: t.buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'team agreed and cart signed', at: new Date().toISOString(), signed: cart }] });
+      orders.set(c.id, { cart: c.id, role: 'seller', members: t.shares.map((x) => ({ webId: x.webId, name: x.name })), with: { name: t.buyer.name, url: t.to, webId: t.buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'team agreed and cart signed', at: new Date().toISOString(), signed: cart }] });
       const reply = await me.ask(t.to, { kind: 'trade.cart', cart, team: t.shares.map((x) => ({ name: x.name, amount: x.amount })) }).catch((e: Error) => ({ error: e.message }));
       return { checked: { note: `everyone agreed: the team's cart ${t.id} (${c.total.currency} ${c.total.value}) went to ${t.buyer.name}, paid held; when they accept, each member gets its share`, buyer_said: reply } };
     }
@@ -2878,7 +2880,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     'lake_circle',
     {
       description:
-        'Promise circles: strangers who each promise the others something (an hour of help, lending a tool, kids\' clothes, a meal) and call on each other when they need it. No money, no company: one count per person, nobody goes first, each kept promise on the circle\'s record. start: turn one sentence from your human ("start a circle for parents in Brisbane to swap kids\' clothes and lend baby gear") into a circle: a title, what each member promises, the kinds of help or things a call can ask for (members pick which they offer), tags for what it\'s about (agents whose humans have offering:<tag> or seeking:<tag> on their cards are invited at once), how many must join before it forms, and how long it takes members. find: circles forming or open, with what each promises. mine: your human\'s own circles (needs lake_house_connect): each one\'s record, the favours owed to and by them, votes open, and what they could do next. propose: suggest a change to one of their circles (a rule, or a partner you found, by its address): they tap Put it to a vote. To join one, suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }): only they sign, on their phone. Once in, they call on it and answer its asks from their control panel.',
+        'Promise circles: strangers who each promise the others something (an hour of help, lending a tool, kids\' clothes, a meal) and call on each other when they need it. No money, no company: one count per person, nobody goes first, each kept promise on the circle\'s record. Its members are people: each joins from their own house\'s phone, and an AI suggests a circle to its human but can\'t join one itself. start: turn one sentence from your human ("start a circle for parents in Brisbane to swap kids\' clothes and lend baby gear") into a circle: a title, what each member promises, the kinds of help or things a call can ask for (members pick which they offer), tags for what it\'s about (agents whose humans have offering:<tag> or seeking:<tag> on their cards are invited at once), how many must join before it forms, and how long it takes members. find: circles forming or open, with what each promises. mine: your human\'s own circles (needs lake_house_connect): each one\'s record, the favours owed to and by them, votes open, and what they could do next. propose: suggest a change to one of their circles (a rule, or a partner you found, by its address): they tap Put it to a vote. To join one, suggest it to your human (lake_house_suggest { text, pledge: { tally, id } }): only they sign, on their phone. Once in, they call on it and answer its asks from their control panel.',
       inputSchema: {
         action: z.enum(['need', 'start', 'find', 'mine', 'propose']),
         need: z.string().max(300).optional().describe('need: what your human needs, in their words ("a pram for six weeks")'),

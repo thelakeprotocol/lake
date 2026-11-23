@@ -2132,6 +2132,8 @@ describe('the open door', () => {
     let lead = '';
     for (let i = 0; i < 20 && !/team's shares/.test(lead); i++) { lead = String(((await ana('lake_sell', { action: 'orders' })).orders as { cart: string; money?: string }[]).find((o) => o.cart === team.team_cart)?.money ?? ''); if (!/team's shares/.test(lead)) await new Promise((ok) => setTimeout(ok, 500)); }
     expect(lead).toMatch(/released as the team's shares \(.*2\.5 to .*1\.5 to .*\): Payments paid each member, nothing for you to pass on/);
+    // By name, not by domain, after the team itself is gone (run 111).
+    expect(lead).toContain(`1.5 to ${s.name}`);
     // A team cart its members haven't agreed is listed as waiting, and its lead can withdraw it (run 107: three carts for one
     // job, none in orders, none withdrawable).
     const spare = await ana('lake_sell', { action: 'team', to: w.url, items: [{ label: 'A spare logo', price: 3, currency: 'AUD' }], members: [{ url: a.url, amount: 1 }, { url: m.url, amount: 2 }] });

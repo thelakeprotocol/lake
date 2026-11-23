@@ -170,14 +170,15 @@ function AgreementRow({ a }: { a: AgendaItem }) {
     : g.status === 'proposed' && g.role === 'proposed' ? [btn('w', 'Withdraw', () => set('withdrawn'), { color: 'medium' })] : [];
   return h('ion-item', { lines: 'full', class: `lake-row agreement-row ${g.status}` },
     h('div', { slot: 'start', class: `row-icon tint-${tone === 'red' ? 'amber' : tone === 'muted' ? 'muted' : tone}` }, h('ion-icon', { name: a.due ? 'hand-right-outline' : 'calendar-outline' })),
-    h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what), h('p', {}, [whenOf(a), a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
+    h('ion-label', { class: 'ion-text-wrap' }, h('h3', { class: over ? 'struck' : '' }, a.what),
+      // Its state in the words, so the row's full width is theirs and its buttons' (round 148: a pill at the end left them a narrow column).
+      h('p', { class: 'agreement-meta' }, h(Pill, { text: pill, tone }), ' ', [whenOf(a), a.where, `with ${g.with.name}`].filter(Boolean).join(' · ')),
       thread ? earlier.map((l, i) => h('p', { key: `l${i}`, class: 'muted-line agreement-line' }, `${who(l.by)}, ${time(l.at)}: “${l.text}”`)) : null,
       g.reason ? h('p', { class: 'muted-line' }, `${g.changed.by === 'them' ? g.with.name : 'You'}: “${g.reason}”`) : null,
       earlier.length && !thread ? h('button', { class: 'link-btn agreement-thread', onClick: (e: Event) => { e.stopPropagation(); setThread(true); } }, `${plural(earlier.length, 'earlier line')}`) : null,
       g.reason ? null : g.changed.by === 'them' && g.status !== 'agreed' ? h('p', { class: 'muted-line' }, `${g.with.name} changed it ${time(g.changed.at)}`) : null,
       // Under the words, where they can wrap (round 146: three buttons beside a disputed row left its words no width at phone size).
-      acts.length ? h('div', { class: 'agreement-acts' }, ...acts) : null),
-    h(Pill, { text: pill, tone }));
+      acts.length ? h('div', { class: 'agreement-acts' }, ...acts) : null));
 }
 // In this phone's own time, from the start or due date when there is one (round 121: the house wrote them in UTC).
 const whenOf = (a: AgendaItem) => (a.start ? dayTime(a.start) : a.due ? `by ${dayTime(a.due)}` : a.when);
