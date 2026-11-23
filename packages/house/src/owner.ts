@@ -756,11 +756,15 @@ export class OwnerDesk {
    * from the moment of signing stayed for 24 minutes; the organiser's AI nudged people who had signed). Its deadline ends it.
    */
   async sweepPledges() {
-    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.filled && !y.pledge.signed.lapsed).slice(0, 10)) {
+    // Filled ones too, for a day: late signers still count, and every signer's card should say the same (run 114: 4 on two phones, 5 on three).
+    const now = Date.now();
+    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.lapsed && (!y.pledge.signed.filled || now - Date.parse(y.pledge.signed.at) < 86_400_000)).slice(0, 10)) {
       const t = await this.o.panel?.pledgeTerms?.(x.pledge!.tally, x.pledge!.id).catch(() => undefined);
       if (typeof t?.count !== 'number') continue;
       const was = x.pledge!.signed!;
-      if (t.count !== was.count || t.state === 'triggered' || t.state === 'lapsed') {
+      // How many it needs, from the tally, where the card was made without it (run 114: "5 of ?").
+      if (!x.pledge!.threshold && typeof t.threshold === 'number') { x.pledge!.threshold = t.threshold; void this.saveSuggestions(); this.touch(); }
+      if (t.count !== was.count || (t.state === 'triggered' && !was.filled) || t.state === 'lapsed') {
         x.pledge!.signed = { ...was, count: t.count, ...(t.state === 'triggered' ? { filled: true as const } : {}), ...(t.state === 'lapsed' ? { lapsed: true as const } : {}) };
         void this.saveSuggestions();
         this.touch();
@@ -1440,7 +1444,7 @@ export class OwnerDesk {
     const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase();
     // The name it shows (the name it gives, or its card's), against the names this owner's side knows.
     const shown = [from.as, from.name, from.speaks_for?.checked ? from.speaks_for.name : undefined].map(base).filter(Boolean);
-    const twin = [...this.contacts].find(([k, c]) => k !== from.key && ((!!from.webId && c.webId === from.webId) || (!!c.name && shown.includes(base(c.name)))));
+    const twin = this.known().find(([k, c]) => k !== from.key && ((!!from.webId && c.webId === from.webId) || (!!c.name && shown.includes(base(c.name)))));
     if (!twin) return undefined;
     // Known by its house: the same house's word on the new key is the same household (another AI, a new phone).
     // Known by its house: the same house's word on the new key, or the house itself writing (the owner from their phone), is
@@ -1458,17 +1462,28 @@ export class OwnerDesk {
     const theirs = house(this.notes.find((n) => n.from.key === twin[0] && n.from.url)?.from.url ?? this.agenda.find((x) => x.agreement?.with.key === twin[0])?.agreement?.with.url);
     return { key: twin[0], name: twin[1].name || twin[1].webId, ...(theirs && from.url ? { sameHouse: theirs === house(from.url) } : {}) };
   }
+  /**
+   * Everyone this owner's side knows: those it wrote to or answered, and the houses it has an agreement with (run 114: Mia knew
+   * the real Sam only through the bike agreement her AI made, so Dale renamed "Sam Okafor" got no warning).
+   */
+  private known(): [string, { name: string; webId: string; house?: string; houseKey?: string }][] {
+    const partners = this.agenda.filter((x) => x.agreement?.with.key && !this.contacts.has(x.agreement.with.key))
+      .map((x) => [x.agreement!.with.key, { name: x.agreement!.with.name, webId: '', houseKey: x.agreement!.with.key }] as [string, { name: string; webId: string; houseKey: string }]);
+    return [...this.contacts, ...partners];
+  }
   knownBy(key?: string): string | undefined {
     if (!key) return undefined;
     const c = this.contacts.get(key);
     if (c) return `your human's side has written to ${c.name || 'it'} before`;
+    const deal = this.agenda.find((x) => x.agreement?.with.key === key);
+    if (deal) return `your human has an agreement with ${deal.agreement!.with.name}`;
     // Answered by the owner themselves, from their phone (before such answers were kept as contacts too).
     if (this.notes.some((n) => n.from.key === key && n.answered?.own)) return 'your human has answered it before';
     if (this.sameAs[key]) return 'your human said it is someone they know, writing with another key';
     // An AI its house vouches for, when the owner's side knows that house (run 109: Sam's real AI, vouched for by the house
     // Mia had agreed the bike with, was flagged "new key", and she refused his real ask).
     // And that house itself, writing with its own key. Keys, not webIds: where domains aren't proved a webId is only a claim.
-    const sf = this.notes.find((n) => n.from.key === key && n.from.speaks_for?.checked)?.from.speaks_for, houses = [...this.contacts];
+    const sf = this.notes.find((n) => n.from.key === key && n.from.speaks_for?.checked)?.from.speaks_for, houses = this.known();
     if (sf?.houseKey && houses.some(([k, c]) => k === sf.houseKey || c.houseKey === sf.houseKey)) return `${sf.name ? `${sf.name}'s house` : 'a house your human\'s side knows'} vouches for it`;
     if (houses.some(([, c]) => c.houseKey === key)) return 'it is the house of someone your human\'s side knows';
     const st = (this.o.panel?.standing?.() ?? []).find((x) => x.jkt === key);

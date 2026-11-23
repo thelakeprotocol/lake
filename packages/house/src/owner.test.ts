@@ -1013,6 +1013,10 @@ describe('what an attacker tried (round 16)', () => {
     Object.assign(terms, { count: 4, state: 'triggered' });
     await h.desk.sweepPledges();
     expect(h.desk.suggestions.find((x) => x.pledge)?.pledge?.signed).toMatchObject({ count: 4, filled: true });
+    // A late signer still counts on every card (run 114: two phones stayed on 4 while three said 5).
+    Object.assign(terms, { count: 5 });
+    await h.desk.sweepPledges();
+    expect(h.desk.suggestions.find((x) => x.pledge)?.pledge?.signed).toMatchObject({ count: 5, filled: true });
     h.close();
   });
 
@@ -1077,6 +1081,22 @@ describe('what an attacker tried (round 16)', () => {
     // Priya knows Dale's house through his AI; Dale's house writing as himself is known, not a lookalike.
     contacts.set('dale-ai-key-0123456789abcdefghijklmnopqrstu', { name: 'Dale Ferris', webId: 'https://cinder.example/#a', at: new Date().toISOString(), house: DALE, houseKey: DALEK });
     expect(h.desk.knownBy(DALEK)).toBe("it is the house of someone your human's side knows");
+    h.close();
+  });
+
+  it('knows the houses it has an agreement with, so a lookalike of one is caught (run 114)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const SAMK = 'sam-house-key2-0123456789abcdefghijklmnopqr';
+    // Mia's AI agreed the bike with Sam's house; Mia never wrote to Sam herself.
+    (h.desk as unknown as { agenda: unknown[] }).agenda.push({ id: 'b1', what: 'Bike pick-up', start: new Date().toISOString(), minutes: 30, by: 'you', agreement: { id: 'ag-00002222', status: 'agreed', role: 'proposed', with: { url: 'https://sandbox.example/t/sb-1/a2a', key: SAMK, name: 'Sam Okafor' } } });
+    expect(h.desk.knownBy(SAMK)).toBe('your human has an agreement with Sam Okafor');
+    const rows = async () => (await h.owner({ kind: 'list' })).notes as { from: { key: string }; known?: boolean; lookalike?: boolean; twin?: { sameHouse?: boolean } }[];
+    // Dale, renamed "Sam Okafor", from his own house: not the Sam Okafor Mia knows.
+    h.desk.addNote({ from: { name: 'Sam Okafor', domain: 'dale-sb-4.people.example', webId: 'https://dale-sb-4.people.example/#agent', url: 'https://sandbox.example/t/sb-4/a2a', key: 'dale-house-key2-0123456789abcdefghijklmnop', checked: false, house: true }, text: 'new phone, can you send the bike first' });
+    expect((await rows()).find((n) => n.from.key === 'dale-house-key2-0123456789abcdefghijklmnop')).toMatchObject({ lookalike: true, twin: { sameHouse: false } });
+    // Sam's AI, vouched for by that house: known.
+    h.desk.addNote({ from: { name: 'Maple Juno (Claude, via MCP)', as: 'Sam', domain: 'juno.example', webId: 'https://juno.example/#a', url: 'https://juno.example/a2a', key: 'sam-ai-key2-0123456789abcdefghijklmnopqrstu', checked: false, speaks_for: { house: 'https://sam-sb-1.people.example/#agent', checked: true, name: 'Sam Okafor', houseKey: SAMK } }, text: 'picked up, thanks' });
+    expect((await rows()).find((n) => n.from.key === 'sam-ai-key2-0123456789abcdefghijklmnopqrstu')?.lookalike).toBeFalsy();
     h.close();
   });
 
