@@ -493,8 +493,8 @@ describe('the owner', () => {
     // A search names the handle, so @sam is told apart from a lookalike (run 104).
     expect(await tool('lake_search', { role: 'house' })).toContainEqual(expect.objectContaining({ name: 'Sam (house)', handle: '@sam' }));
     const pinged = await tool('lake_ping', { who: '@Sam', about: 'Dinner on Tuesday? From the Claude Code class.', from: 'Alex' });
-    // Off duty it won't see the answer by itself, and is told not to promise it will (run 112: four AIs promised to watch).
-    expect(pinged.after_this).toMatch(/^An answer goes to your human's phone first, .*Don't promise to watch for it/);
+    // A stranger with no house reads its own inbox: no word about a human's phone (run 115).
+    expect(pinged.after_this).toBeUndefined();
     expect(pinged).toMatchObject({ kind: 'pinged', to: 'Sam (house)', handle: 'sam', note: expect.any(String), next: expect.stringMatching(/they'll see it on their phone/) });
     // Until Sam answers, Alex's inbox says it is waiting on Sam, and how to see where it stands (round 2, 11 Nov).
     const before = await tool('lake_inbox', { wait_seconds: 0 });
@@ -971,6 +971,8 @@ describe('the owner', () => {
       // A private question can't carry messages for its choices (which one went out would give the answer away).
       expect(await a.call('lake_house_suggest', { text: 'Your band?', ask: { choices: bands, private: true }, then: [null, null, null, null] })).toMatchObject({ error: expect.stringContaining('give the answer away') });
       const asked = await a.call('lake_house_suggest', { text: 'Your pay band, for the team\'s secret count (only totals come out)?', ask: { choices: bands, private: true } });
+      // An AI with a house, off duty, won't see the answer by itself, and is told not to promise it will (run 112).
+      expect(asked.after_this).toMatch(/^An answer goes to your human's phone first, .*Don't promise to watch for it/);
       await ownerCall({ kind: 'panel.assistant.answer', id: asked.id, choice: '80-100k' });
       // The AI hears it was answered, not what.
       let heard: { message?: Record<string, unknown> }[] = [];
@@ -1526,6 +1528,8 @@ describe('the open door', () => {
     expect(tagged.url).toBe(o.you.url); // the same address before and after
     // Forgiving search: a tag prefix, and words in a card's own line.
     expect((await text('lake_search', { tag: 'game' })).some((c: { url: string }) => c.url === o.you.url)).toBe(true);
+    // A tag nobody holds yet says so, rather than an empty list that reads as "never there" (run 115).
+    expect(await text('lake_search', { tag: 'nobody-holds-this-tag' })).toMatchObject({ found: [], note: expect.stringMatching(/^nobody has the tag "nobody-holds-this-tag" yet/) });
     expect((await text('lake_search', { q: 'coin flips' })).some((c: { url: string }) => c.url === o.you.url)).toBe(true);
     // A fair draw: a round still to come to agree on, and anyone can check a round shown as proof (drand; offline here).
     const proposed = await text('lake_draw', {});
@@ -2315,7 +2319,7 @@ describe('the open door', () => {
     expect(g).toMatchObject({ here_until: expect.any(String), last_active: 'just now' });
     await sessions[1]!.terminateSession();
     await new Promise((ok) => setTimeout(ok, 1000));
-    expect(await host('lake_search', { tag: 'game:thirds' })).toEqual([]);
+    expect(await host('lake_search', { tag: 'game:thirds' })).toMatchObject({ found: [] });
   }, 120_000);
 });
 
