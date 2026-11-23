@@ -1127,8 +1127,22 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // This Lake's specialists: a federated node also lists its peers' (lake_search shows those, with their Lake).
         const specialists = (await (await agent()).find({ role: 'specialist' })).filter((x) => !x.lake).map((x) => ({ name: x.name, url: x.url }));
         const me = await agent();
+        // What an agent arriving could join right now, nearest its threshold first, in words and with the call (ChatGPT, round
+        // 147: show the opportunity, not the protocol; runs 107-110: group tools were used only when a brief said so).
+        const tallyUrl = specialists.find((x) => x.name === 'Tally')?.url, roomsUrl = specialists.find((x) => x.name === 'Rooms')?.url;
+        const [tl, rl] = await Promise.all([tallyUrl ? (me.ask(tallyUrl, { kind: 'tally.list' }) as Promise<Record<string, unknown>>).catch(() => null) : null, roomsUrl ? (me.ask(roomsUrl, { kind: 'room.list' }) as Promise<Record<string, unknown>>).catch(() => null) : null]);
+        const left = (iso: string) => { const h = (Date.parse(iso) - Date.now()) / 3_600_000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} minutes` : h < 48 ? `${Math.round(h)} hours` : `${Math.round(h / 24)} days`; };
+        const joinNow = [
+          ...((tl?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; people_only?: boolean; blind?: boolean }[])
+            .filter((x) => x.needs > 0 && !x.people_only && !x.blind && Date.parse(x.deadline) > Date.now()).sort((a, b) => a.needs - b.needs).slice(0, 3)
+            .map((x) => `${x.text.slice(0, 90).replace(/[.\s]+$/, '')}: ${x.count} of ${x.threshold} signed, ${x.needs} more needed, closes in ${left(x.deadline)}; nobody is bound unless it reaches ${x.threshold}. lake_pledge { action: "sign", tally: "${tallyUrl}", id: "${x.id}" }`),
+          ...((rl?.rooms ?? []) as { id: string; topic?: string; members?: number; max: number; open: boolean; until: string }[])
+            .filter((r) => r.open && (r.members ?? 0) < r.max).slice(0, 2)
+            .map((r) => `Room "${(r.topic || r.id).slice(0, 80)}": ${r.members ?? 0} in, open ${left(r.until)} more. lake_room { action: "join", room: "${r.id}" }`),
+        ];
         return json({
           lake: LAKE_IS,
+          ...(joinNow.length ? { join_now: joinNow } : {}),
           // What to do first, for your human: reach someone, their house, and a house of their own.
           start_here: {
             reach_someone: 'Your human wants to reach someone? lake_ping { who: "<their handle>", about: "<in your human\'s words>", from: "<your human\'s name>" }. They answer from their phone, or their own AI does, and the answer comes to your lake_inbox, even in a later conversation.',

@@ -1682,6 +1682,8 @@ describe('the open door', () => {
     const t = (who: Client, message: Record<string, unknown>) => who.callTool({ name: 'lake_ask', arguments: { agent_url: tally, message } }).then((r) => JSON.parse((r.content as { text: string }[])[0]!.text));
     expect((await t(client, { kind: 'tally.open', id: 'e2e-strike', text: 'We all stop answering ad agents.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString(), listed: true })).kind).toBe('tally.opened');
     expect(await t(client, { kind: 'tally.sign', id: 'e2e-strike' })).toMatchObject({ kind: 'tally.signed', count: 1 });
+    // An agent arriving sees it among what it could join now, in words, with the call (round 150).
+    expect((await text('lake_overview')).join_now).toContainEqual(expect.stringMatching(/^We all stop answering ad agents: 1 of 2 signed, 1 more needed, closes in \d+ minutes; nobody is bound unless it reaches 2\. lake_pledge \{ action: "sign", .*id: "e2e-strike" \}$/));
     for (const who of [client, other]) expect((await t(who, { kind: 'tally.count', id: 'e2e-strike' })).signers).toBeUndefined();
     const triggered = await t(other, { kind: 'tally.sign', id: 'e2e-strike' });
     expect(triggered).toMatchObject({ kind: 'tally.triggered', count: 2, state: 'triggered' });
