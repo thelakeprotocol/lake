@@ -1676,7 +1676,8 @@ describe('the open door', () => {
     const left = await text('lake_room', { action: 'leave', room: 'jam' });
     expect(left).toMatchObject({ kind: 'room.left' });
     // Its own record for a dispute: what it sent, each with the other side's signed reply.
-    const record = await text('lake_inbox', { history: true });
+    // Narrowed: a whole history can be longer than a model reads at once, and the connector says so (round 164).
+    const record = await text('lake_inbox', { history: true, limit: 3 });
     // History narrows by kind or sender, and says what it left out.
     expect(await text('lake_inbox', { history: true, kind: 'no-such-kind' })).toEqual({ received: [], sent: [] });
     expect(await text('lake_inbox', { history: true, limit: 1 })).toMatchObject({ left_out: { sent: expect.any(Number) }, note: expect.stringMatching(/newest 1 of each/) });
@@ -2117,6 +2118,12 @@ describe('the open door', () => {
     };
     const [ana, mo, sid, wren] = [await connect('claude-ana'), await connect('claude-mo'), await connect('claude-sid'), await connect('claude-wren')];
     const [a, m, s, w] = [(await ana('lake_overview')).you, (await mo('lake_overview')).you, (await sid('lake_overview')).you, (await wren('lake_overview')).you];
+    // A hand-made team-cart request with no cart in it reads as what it is (run 119: "cart undefined: your share undefined…").
+    await ana('lake_ask', { agent_url: m.url, message: { kind: 'trade.split.ask', text: 'join me on a combo?' } });
+    let bare: { checked?: { note?: string } } | undefined;
+    for (let i = 0; i < 10 && !bare; i++) bare = ((await mo('lake_inbox', { wait_seconds: 2 })).messages ?? []).find((x: { message: { kind: string } }) => x.message.kind === 'trade.split.ask');
+    expect(bare?.checked?.note).toMatch(/sent a team-cart request with no cart in it, so there's nothing to agree to yet\. Their words: "join me on a combo\?"/);
+    expect(bare?.checked?.note).not.toContain('undefined');
     const items = [{ label: 'Brand pack: logo concept, three blurbs, one-page site', price: 6, currency: 'USD' }];
     expect(await ana('lake_sell', { action: 'team', to: w.url, items, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 3 }] }, false)).toMatch(/add up/);
     const team = await ana('lake_sell', { action: 'team', to: w.url, items, delivery: { within_hours: 2, review_hours: 1 }, members: [{ url: a.url, amount: 2 }, { url: m.url, amount: 2.5 }, { url: s.url, amount: 1.5 }] });

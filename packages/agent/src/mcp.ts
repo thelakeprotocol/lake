@@ -438,6 +438,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         : 'Leave your human a note instead (lake_house_suggest), and tell whoever is waiting that your human will answer.';
       if (gate && 'refused' in gate) return { content: [{ type: 'text' as const, text: `On duty you can't do this: ${gate.refused}. ${dutyNext(gate.refused)}` }], isError: true };
       const out = (await cb0(...args)) as { isError?: boolean; content?: { text?: string }[] };
+      // An answer too long for the model to read comes back as a way to ask for less (run 119: lake_ask_around with limit 50
+      // gave 73,595 characters and lake_inbox history 132,781, each an error the agent couldn't use).
+      const said = out?.content?.[0]?.text;
+      if (!out?.isError && typeof said === 'string' && said.length > 60_000) out.content![0]!.text = JSON.stringify({ too_long: `this answer was ${said.length} characters, more than you can read at once`, next: 'ask again for less: a smaller limit, a word to narrow it (about, q), or without history' }, null, 2);
       // Something sent that waits on someone's answer: off duty, this AI won't see it until its human talks to it again (run
       // 112: four AIs promised "I'll keep watching for replies" and none could; the rule in the instructions wasn't enough).
       const a0 = (args[0] ?? {}) as { action?: string; message?: { kind?: string } };
@@ -812,6 +816,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     }
     // A team's cart: a member asked to agree its share, a member's consent back to the lead, and a seller's withdrawal.
     if (p.kind === 'trade.split.ask') {
+      // A request with no cart in it isn't one to agree to: said, with their words (run 119: a hand-made one showed "cart
+      // undefined: your share undefined undefined of undefined").
+      if (typeof p.cart !== 'string' || typeof p.amount !== 'number') return { checked: { note: `${peer.name} sent a team-cart request with no cart in it, so there's nothing to agree to yet.${typeof p.text === 'string' ? ` Their words: "${p.text.slice(0, 300)}".` : ''} A team cart's lead opens it with lake_sell { action: "team" }, which asks each member properly.` } };
       return { checked: { note: `${peer.name} asks you to join a team's cart ${String(p.cart)}: your share ${String(p.currency)} ${String(p.amount)} of ${String(p.total)}, for ${String(p.for ?? 'the job')}. Agree (your human's say, if it's theirs to give) with lake_sell { action: "consent", cart: "${String(p.cart)}" }; nothing is paid until the buyer pays and accepts` } };
     }
     if (p.kind === 'trade.split.consent' && teams.has(String(p.cart))) {
