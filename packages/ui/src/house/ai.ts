@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, houseBase, must, useHouse, useRedraw } from './api';
 import { Avatar, Btn, Child, CopyBtn, Empty, Failed, Page, Pill, Row, Section, Sheet, h, toast } from './ion';
-import { CURRENCIES, DUTY_CLI, DUTY_KINDS, ROLES, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, roleOfDuty, dutyNow, rolesOf, triedLine, PROVIDER_LINE, shortName, signDraft, time, waitingLine, watching, type Assistant, type RemovedAi, type DutyLog, type ListView, type Reads, type Role } from './logic';
+import { CURRENCIES, DUTY_CLI, appOf, DUTY_KINDS, ROLES, dayTime, dutyLine, dutyLive, dutyMay, lastHere, money$, readsLine, receiptWords, roleOfDuty, dutyNow, rolesOf, triedLine, PROVIDER_LINE, shortName, signDraft, time, waitingLine, watching, type Assistant, type RemovedAi, type DutyLog, type ListView, type Reads, type Role } from './logic';
 import { back, push } from './nav';
 
 // My AI: your own AI with a key to your house. Your AIs first, then AI on duty, then what it did while you were away.
@@ -28,7 +28,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const ais = v.data.assistants;
   return h(Page, { title: 'My AI', big: true, status, footer: tabbar },
     ais.length ? h(Section, { title: 'Your AIs' },
-      ...ais.map((a) => h(Row, { key: a.kid, start: h('div', { slot: 'start' }, h(Avatar, { name: shortName(a.label), size: 40 })), label: shortName(a.label), sub: [rolesOf(a, live).map((r) => ROLES[r].name).join(', ') || readsLine(a.reads), (() => { const d = live.find((x) => x.kid === a.kid); return d ? dutyNow(d) : a.waiting ? 'Not reading' : lastHere(a.seenAt).text; })(), a.waiting ? `${a.waiting.count} waiting` : ''].filter(Boolean).join(' · '), onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`), cls: 'ai-row' })),
+      ...ais.map((a) => h(Row, { key: a.kid, start: h('div', { slot: 'start' }, h(Avatar, { name: shortName(a.label), size: 40 })), label: shortName(a.label), sub: [appOf(a.label) ? `Your ${appOf(a.label)}` : '', rolesOf(a, live).map((r) => ROLES[r].name).join(', ') || readsLine(a.reads), (() => { const d = live.find((x) => x.kid === a.kid); return d ? dutyNow(d) : a.waiting ? 'Not reading' : lastHere(a.seenAt).text; })(), a.waiting ? `${a.waiting.count} waiting` : ''].filter(Boolean).join(' · '), onClick: () => push(`#aikey=${encodeURIComponent(a.kid)}`), cls: 'ai-row' })),
       h(Row, { icon: 'add', label: 'Connect another AI', onClick: () => setConnect(true), detail: false }))
       : h('ion-card', { class: 'lake-card hero-card' }, h('ion-card-content', {},
         h('div', { class: 'hero-icon' }, h('ion-icon', { name: 'sparkles' })),

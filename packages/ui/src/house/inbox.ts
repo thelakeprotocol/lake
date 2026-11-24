@@ -151,7 +151,7 @@ export function ConnectCard({ c }: { c: Connect }) {
     h('div', { class: 'connect-number' }, c.number),
     h(ReadsToggles, { value: reads, onChange: setReads }),
     h('div', { class: 'card-actions' },
-      h(Btn, { label: 'Connect', run: async () => { const r = await must<{ name?: string }>({ kind: 'panel.connect.answer', id: c.id, yes: true, reads }); connectedNote = `Connected${r.name ? `: ${shortName(r.name)}` : ''}. Go back to ${c.app}.`; } }),
+      h(Btn, { label: 'Connect', run: async () => { const r = await must<{ name?: string }>({ kind: 'panel.connect.answer', id: c.id, yes: true, reads }); connectedNote = `Connected.${r.name ? ` On the Lake your ${c.app} is called ${shortName(r.name)}.` : ''} Go back to ${c.app}.`; } }),
       h(Btn, { label: 'No', fill: 'outline', color: 'medium', run: async () => { await call({ kind: 'panel.connect.answer', id: c.id, yes: false }); connectedNote = 'Turned down.'; } }))));
 }
 

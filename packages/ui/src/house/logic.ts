@@ -64,6 +64,9 @@ export const duration = (iso: string) => {
 };
 export const who = (id: string) => { try { return new URL(id).hostname; } catch { return id.replace(/^agent:/, '') || 'someone'; } };
 export const shortName = (label: string) => label.replace(/\s*\(.*\)$/, '');
+/** The app an AI came from, from its label ("Night Lumen (Claude, via MCP)" → "Claude"): its Lake name alone read as a stranger's
+ *  (run 121: Mia didn't know "Night Lumen" was her own Claude). */
+export const appOf = (label: string) => /\(([^,()]+)(?:,[^()]*)?\)$/.exec(label)?.[1]?.trim();
 export const CURRENCIES = ['USD', 'AUD', 'EUR', 'GBP', 'CAD', 'NZD'];
 export const money$ = (amount: number, currency = 'USD') => (currency === 'USD' ? `$${amount}` : currency === 'AUD' ? `A$${amount}` : `${currency} ${amount}`);
 export const money = (m: { currency: string; value: number }) => `${m.currency === 'AUD' ? 'A$' : m.currency === 'USD' ? '$' : `${m.currency} `}${m.value.toFixed(2)}`;

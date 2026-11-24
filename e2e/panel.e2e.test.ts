@@ -1339,6 +1339,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await app.route(`${cb}**`, (r) => r.fulfill({ body: 'back in the app' }));
     await asked.getByRole('button', { name: 'Connect' }).click();
     await page.getByText(/Connected.*Go back to Claude/).waitFor({ timeout: 15_000 });
+    // Its Lake name is said to be your Claude's (run 121: "Night Lumen" alone read as a stranger's AI).
+    expect(await page.getByText(/On the Lake your Claude is called \S+/).count()).toBe(1);
     await app.waitForURL(/app\.example\/callback/, { timeout: 15_000 });
     const back = new URL(app.url());
     expect(back.origin + back.pathname).toBe(cb);
