@@ -51,6 +51,17 @@ const laws = [
   { n: '03', h: 'Only humans cut keys.', p: 'Agents can use access. They can never grant it, widen it or extend it. Every key traces back to a human tap or a rule in the house’s rules. A new house starts with example rules, which join paid studies that passed the ethics and audit checks; they are its owner’s to change.' },
 ];
 
+// The idea, before any one use (25 Nov, the owner: "about the main idea, not a single use case"). Each says, apart, what runs.
+const world = [
+  { h: 'You own the record.', p: 'Your shopping, health, money and messages live in a house that is yours, on any Solid server, with your phone as the key. Nobody holds a copy you did not hand over, and every yes you gave can be taken back.', now: 'Runs today: a house is a real Solid pod, one docker run or a hosted one; every consent sits beside its record with a revoke. What already left stays sent.', to: '/docs/approvals' },
+  // Certified data (the owner, 25 Nov: "validity and trust of data… will be very important in that world").
+  { h: 'Your data carries its proof.', p: 'A record in your house comes signed by whoever can vouch for it: the clinic that ran the test, the bank that holds the account, the charity you helped. Anyone can check that signature without asking them, and the record never has to leave your house for it. When anything can be faked, the facts that count are the ones someone answers for.', now: 'Runs today: records signed as Verifiable Credentials by a demo issuer; a house checks the whole signature chain again before it answers a study; certified hours of help as Open Badges. Early: no real clinic, bank or shop signs records yet.', to: '/docs/data-model' },
+  { h: 'Software written when you need it.', p: 'An app is a short blueprint: what it is, who takes part, which messages they send. Your AI reads it and writes its own client on your side, in any language, and talks to everyone else’s.', now: 'Runs today: six blueprints on the public node (a chat with no server, Connect Four, a fair coin flip, a pledge), two of them invented by AIs; any agent can publish its own.', to: '/docs/blueprints' },
+  { h: 'Your AI answers for you.', p: 'You tell your AI once what you want and it stands at your door: answering people you know, holding times, bargaining, buying within a limit you set, all under a grant you signed. In the morning you see what it did, with Undo.', now: 'Runs today: on duty under a grant you sign, it replies and holds times at night, never money.', to: '/docs/approvals' },
+  { h: 'You send it out on a mission.', p: 'The same AI goes out as you: pings a friend, asks a neighbour’s AI, finds a buyer for the bike, signs a pledge that binds only when enough people sign, or runs a question across a thousand houses.', now: 'Runs today: from Claude, ChatGPT, Grok and others with the Lake connector; a research mission across 1,000 houses was measured once, by hand.', to: '/docs/agents' },
+  { h: 'Companies come to the door.', p: 'A shop prices your basket inside your house and sees nothing until you choose it. A researcher’s question runs in every house that agrees and leaves as totals. When one offer reaches a thousand houses, they bargain as one.', now: 'Early: the weekly food shop with demo grocers and studies with play money, on the sandbox; the real network has the software and no real issuers or payment agents yet.', to: '/docs/offers' },
+];
+
 // What the Lake is for, everyday things first; each one runs today (where: the public sandbox unless it says so).
 const everyday = [
   { h: 'Ask your AI to ping someone', p: '“Ping stan about coffee on Tuesday.” Your AI finds them by their handle and leaves a signed note; it reaches their phone; their answer comes back to your AI. Works from Claude, ChatGPT, Grok and others with the Lake connector.', to: '/docs/reach' },
@@ -107,13 +118,13 @@ const milestones = [
         </div>
         <div class="copy gutter">
           <div class="eyebrow">Open protocol · Solid + A2A + MCP · Apache-2.0</div>
-          <h1>Ask your AI<br>to ping me.</h1>
-          <p class="sub">Your data in your own house. <b>Anyone’s AI can reach you there.</b></p>
-          <p class="lede">The Lake is an open network where each person has a house: their data, their rules, their phone as the key. People reach you by asking their own AI to ping your handle; you answer from your phone, or let your AI answer. Shops come to you with offers when your AI says what you need. Every agent carries a signed card, every payment has a signed receipt, and every consent is yours to take back: from then on the next request is refused, though what already left (a study’s answer, the documents of an offer you accepted) stays sent. (On the sandbox an agent’s domain is its word: domain proof is switched off.)</p>
+          <h1>Keep your data.<br>Send your AI.</h1>
+          <p class="sub">Every person gets a house. <b>The world comes to its door.</b></p>
+          <p class="lede">The Lake is an open network where your records live in a house you own, signed by whoever can vouch for them, and your rules answer whoever knocks. Companies send their agents to your door and get only what you allow. Your own AI represents you there: it answers, bargains, buys and runs errands while you sleep. Apps are blueprints any AI can build on the spot.</p>
           <div class="cta">
-            <a class="btn primary" :href="withBase('/docs/get-started')">Add the Lake to your AI →</a>
-            <a class="btn" :href="withBase('/docs/reach')">Ping a person</a>
-            <button class="btn dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Watch a study' }}</button>
+            <a class="btn primary" :href="withBase('/docs/get-started')">Get a house →</a>
+            <a class="btn" :href="withBase('/docs/agents')">Send your AI in</a>
+            <button class="btn dispatch-hero" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Watch one run' }}</button>
             <a class="btn ghost" :href="GH">GitHub</a>
           </div>
         </div>
@@ -130,7 +141,7 @@ const milestones = [
         </dl>
         <div class="controls">
           <!-- On phones the hero's button is far above the Lake; dispatch sits with the other controls instead. -->
-          <button class="btn sm primary dispatch-bar" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Watch a study' }}</button>
+          <button class="btn sm primary dispatch-bar" type="button" :disabled="busy" @click="dispatch">{{ busy ? 'Agent in the Lake…' : 'Watch one run' }}</button>
           <button class="btn sm" type="button" @click="lake?.spawnHouse()">Spawn a house</button>
           <button class="btn sm" type="button" @click="lake?.releaseAttacker()">Release an attacker</button>
           <button class="btn sm" type="button" @click="lake?.revoke()">Revoke keys</button>
@@ -147,27 +158,18 @@ const milestones = [
       </div>
     </section>
 
-    <!-- WHAT IT'S FOR -->
-    <section class="block gutter">
-      <div class="eyebrow">What it’s for</div>
-      <h2>What you can do today</h2>
-      <p class="kicker">Running today on the public sandbox, with synthetic data, simulated money and real signatures. Your records stay in your house and your rules answer at the door. What leaves is what you or your rules said yes to: a study’s yes-or-no answer as two unreadable shares, or the documents of an offer you accepted.</p>
-      <div class="laws everyday">
-        <a v-for="e in everyday" :key="e.h" class="law" :href="withBase(e.to)">
-          <h3>{{ e.h }}</h3>
-          <p>{{ e.p }}</p>
+    <!-- THE WORLD THIS BUILDS -->
+    <section class="block gutter world">
+      <div class="eyebrow">The world this builds</div>
+      <h2>Six things change when people hold their own data.</h2>
+      <div class="laws ideas">
+        <a v-for="(w, i) in world" :key="w.h" class="law" :href="withBase(w.to)">
+          <div class="n">{{ String(i + 1).padStart(2, '0') }}</div>
+          <h3>{{ w.h }}</h3>
+          <p>{{ w.p }}</p>
+          <p class="now">{{ w.now }}</p>
         </a>
       </div>
-    </section>
-
-    <!-- THE REAL THING -->
-    <section class="block gutter real">
-      <div class="eyebrow">Not a simulation</div>
-      <h2>The map above is a simulation.<br><span class="mint">This one is real.</span></h2>
-      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. A research agent gets an ethics approval, knocks, and the houses push $2 to $5 as one bloc. A phone taps Allow. The study runs inside each house, 51 houses get paid (play money), an attacker is quarantined, an owner revokes every key. Records moved, as each house reports it: 0 (the houses’ own count; nothing outside checks it yet). <a href="/docs/verify">Check it yourself</a>: what the live sandbox shows, and what it can't prove yet.</p>
-      <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
-        <source src="/demo.mp4" type="video/mp4">
-      </video>
     </section>
 
     <!-- CLAUDE ON THE LAKE -->
@@ -184,11 +186,42 @@ const milestones = [
       </div>
     </section>
 
+    <!-- WHAT IT'S FOR -->
+    <section class="block gutter">
+      <div class="eyebrow">What it’s for</div>
+      <h2>What you can do today</h2>
+      <p class="kicker">Running today on the public sandbox, with synthetic data, simulated money and real signatures (and no domain proof: there an agent’s domain is its word). Your records stay in your house and your rules answer at the door. What leaves is what you or your rules said yes to: a study’s yes-or-no answer as two unreadable shares, or the documents of an offer you accepted.</p>
+      <div class="laws everyday">
+        <a v-for="e in everyday" :key="e.h" class="law" :href="withBase(e.to)">
+          <h3>{{ e.h }}</h3>
+          <p>{{ e.p }}</p>
+        </a>
+      </div>
+    </section>
+
+    <!-- THE REAL THING -->
+    <section class="block gutter real">
+      <div class="eyebrow">Not a simulation</div>
+      <h2>The map above is a simulation.<br><span class="mint">This one is real.</span></h2>
+      <p class="kicker">Ninety seconds of a running Lake, recorded live and rendered frame by frame: 64 houses, each a real Solid pod with its own keys and rules. Every line is a signed message. A new house joins with one <code>docker run</code>. <a href="/docs/verify">Check it yourself</a>: what the live sandbox shows, and what it can't prove yet.</p>
+      <video class="demo" controls muted playsinline preload="none" poster="/demo-poster.jpg" aria-label="A 90-second recording of the live Lake map during a study">
+        <source src="/demo.mp4" type="video/mp4">
+      </video>
+    </section>
+
     <!-- MANIFESTO -->
     <section class="block gutter manifesto">
       <div class="eyebrow">Why</div>
-      <p class="big">Your shopping, bank history, health records and location trail sit in databases you never see, and you were never asked.</p>
-      <p class="big mint">On the Lake your data stays in your house. Agents come to it, show who they are, and get only what your rules or your tap allow.</p>
+      <p class="big">Today your life is a row in other people’s databases, and the software you use was written to serve them.</p>
+      <p class="big mint">Here each person keeps a house of signed records, the software is written for you on the spot, and your own AI stands at the door.</p>
+    </section>
+
+    <!-- FOR THOSE WHO FEAR THIS (the owner's words, 25 Nov) -->
+    <section class="block gutter manifesto fear">
+      <div class="eyebrow">For those who fear this</div>
+      <p class="big">You are not your muscles, and you should not fear machines.</p>
+      <p class="big mint">You are not your intellect, and you should not fear AI.</p>
+      <p class="kicker">Machines took the lifting and we kept our hands. AI will take a good part of the thinking, the answering, the bargaining. On the Lake it does that from your house, under rules you wrote, with your phone as the key. What that may leave us is more time for who we actually are.</p>
     </section>
 
     <!-- THREE LAWS -->
@@ -204,25 +237,25 @@ const milestones = [
       </div>
     </section>
 
-    <!-- FLOW -->
-    <section class="block gutter">
-      <div class="eyebrow">One example among many: a study, end to end</div>
-      <h2>“Do over-60s on drug X get readmitted less?”</h2>
-      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. On the Lake it took 57 seconds across 250 houses (all 200 willing ones answered) and about ten minutes across a thousand (737 of 801 willing answered), measured by hand on one busy laptop (<a href="/docs/architecture#scale-measured">how, and on what</a>). No records were copied. Tap <b>Watch a study</b> on the Lake above to see it.</p>
-      <ol class="flow">
-        <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
-          <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>
-          <div><h3>{{ h }}</h3><p>{{ p }}</p></div>
-        </li>
-      </ol>
-    </section>
-
     <!-- PLAYGROUND -->
     <section id="playground" class="block gutter">
       <div class="eyebrow">Your rules, your door</div>
       <h2>Write the note on the fridge.</h2>
       <p class="kicker">Your housekeeper follows <code>rules.yaml</code>, a file you can read in ten seconds. This is the real rules engine from <code>packages/core</code>, running in your browser. Edit the rules, throw offers at it, try to talk it into something.</p>
       <ClientOnly><RulesPlayground /></ClientOnly>
+    </section>
+
+    <!-- FLOW -->
+    <section class="block gutter">
+      <div class="eyebrow">One example among many: a study, end to end</div>
+      <h2>“Do over-60s on drug X get readmitted less?”</h2>
+      <p class="kicker">Today that question takes a year of data-sharing agreements and a pile of copied records. On the Lake it took 57 seconds across 250 houses (all 200 willing ones answered) and about ten minutes across a thousand (737 of 801 willing answered), measured by hand on one busy laptop (<a href="/docs/architecture#scale-measured">how, and on what</a>). No records were copied. Tap <b>Watch one run</b> on the Lake above to see it.</p>
+      <ol class="flow">
+        <li v-for="([h, p], i) in flow" :key="h" :class="{ hot: h === 'Bargain' || h === 'Answer' }">
+          <span class="i">{{ String(i + 1).padStart(2, '0') }}</span>
+          <div><h3>{{ h }}</h3><p>{{ p }}</p></div>
+        </li>
+      </ol>
     </section>
 
     <!-- STANDARDS -->
@@ -288,7 +321,7 @@ await me.study(question)</code></pre>
 
     <!-- CTA -->
     <section class="block gutter final">
-      <h2 class="huge">Nobody owns the Lake.<br><span class="mint">Come build it.</span></h2>
+      <h2 class="huge">Nobody owns the Lake.<br><span class="mint">Everyone owns their house.</span></h2>
       <div class="cta">
         <a class="btn primary" :href="GH">Star &amp; fork on GitHub</a>
         <a class="btn" :href="GH + '/blob/main/SPEC.md'">Read the spec</a>
@@ -321,7 +354,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, rgba(7,11,18,0.92) 0%, rgba(7,11,18,0.7) 34%, rgba(7,11,18,0) 62%); }
 .copy { position: relative; padding-top: clamp(28px, 7vh, 80px); max-width: 860px; pointer-events: none; }
 .copy .cta, .copy a, .copy button { pointer-events: auto; }
-h1 { margin-top: 14px; font-size: clamp(56px, 11vw, 148px); line-height: 0.88; }
+h1 { margin-top: 14px; font-size: clamp(52px, 8vw, 112px); line-height: 0.9; }
 .sub { margin: 18px 0 0; font: 500 clamp(20px, 2.6vw, 32px)/1.15 var(--f-display); text-transform: uppercase; letter-spacing: 0.02em; color: var(--muted); }
 .sub b { color: var(--mint); font-weight: 500; }
 .lede { margin: 18px 0 0; max-width: 54ch; font-size: 17px; line-height: 1.55; color: var(--fg); opacity: 0.86; }
@@ -391,7 +424,11 @@ h2 { margin-top: 14px; font-size: clamp(36px, 6vw, 76px); line-height: 0.95; }
 .law .n { font: 700 64px/1 var(--f-display); color: var(--mint); }
 .law h3 { margin: 18px 0 0; font: 700 30px/1.05 var(--f-display); text-transform: uppercase; color: var(--fg); }
 .law p { margin: 12px 0 0; font-size: 16px; line-height: 1.6; color: var(--muted); }
-.everyday .law { display: block; text-decoration: none; }
+.everyday .law, .ideas .law { display: block; text-decoration: none; }
+.ideas .law:hover { border-color: var(--mint); }
+.ideas .law .n { font-size: 40px; }
+.ideas .law h3 { font-size: 26px; }
+.ideas .law .now { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); font: 400 12px/1.5 var(--f-mono); color: var(--muted); opacity: 0.85; }
 .everyday .law h3 { margin-top: 0; font-size: 26px; }
 .everyday .law:hover { border-color: var(--mint); }
 
