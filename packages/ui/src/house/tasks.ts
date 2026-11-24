@@ -143,7 +143,8 @@ export function TaskCard({ t, v }: { t: TaskV; v: ListView }) {
   const again = h('ion-button', { key: 'again', shape: 'round', size: 'small', class: 'lake-btn', onClick: () => setTell(true) }, t.state === 'cant' ? `Tell ${ai} again` : `Tell ${ai} what to do`);
   const handedOver = inChat.at(-1)?.mode === 'ai';
   if (t.errand) {
-    const [eActs, eQuiet]: [Child[], Child[]] = open ? [[], [h(Btn, { key: 'stop', label: 'Take it back', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: () => must({ kind: 'panel.task.stop', id: t.id }) })]] : [[okBtn(true)], []];
+    // Open, one quiet Close: the answers may be in while its AI isn't looking (run 116: two people couldn't clear an answered errand).
+    const [eActs, eQuiet]: [Child[], Child[]] = open ? [[], [h(Btn, { key: 'close', label: 'Close', size: 'small', fill: 'clear', color: 'medium', cls: 'foot-end', run: ok() })]] : [[okBtn(true)], []];
     return h('ion-card', { class: `lake-card task-card errand ${t.state}` }, h('ion-card-content', {},
       h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'sparkles-outline' }), `You asked ${ai}`, pill),
       h('p', { class: 'task-words' }, `“${t.text}”`),

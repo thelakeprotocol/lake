@@ -3145,7 +3145,10 @@ export class OwnerDesk {
       }
       if (p.kind === 'panel.task.ok') {
         const t = this.tasks.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
-        if (!t || t.state === 'open') return void res.status(t ? 409 : 404).json({ error: t ? 'that task is still open: take it back first' : 'no task with that id' });
+        if (!t) return void res.status(404).json({ error: 'no task with that id' });
+        // An errand still open closes in one tap: its answers came in while its AI wasn't looking (run 116: "that task is still
+        // open: take it back first", twice, and "Waiting on George and Sam" after both had answered).
+        if (t.state === 'open') this.endTask(t, 'done', { why: 'Your human closed it from their phone: it is done, send nothing more under it.' });
         t.ok = true;
         // The AI's note it was given on is dealt with too.
         if (t.suggestion && (t.state === 'done' || (p as unknown as { clear?: boolean }).clear)) { this.suggestions = this.suggestions.filter((x) => x.id !== t.suggestion); await this.saveSuggestions(); }

@@ -1038,6 +1038,15 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('closes an open errand in one tap, and tells its AI it is over (run 116)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const tasks = (h.desk as unknown as { tasks: { id: string; state: string; ok?: boolean; ended?: { why?: string } }[] }).tasks;
+    tasks.push({ id: 't-open', state: 'open', by: 'ai-1', note: '', text: 'Ask George and Sam about Saturday', at: new Date().toISOString() } as never);
+    expect(await h.owner({ kind: 'panel.task.ok', id: 't-open' })).toEqual({ ok: true });
+    expect(tasks[0]).toMatchObject({ state: 'done', ok: true, ended: { why: expect.stringContaining('closed it from their phone') } });
+    h.close();
+  });
+
   it('writes first from the phone only to a house it can find, with words, not instructions (run 113)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}), resolveHandle: async (x: string) => (x === 'sam-ascot-4k2p' ? 'https://unreachable.invalid/t/sb-1/a2a' : undefined) } });
     expect(await h.owner({ kind: 'panel.note.write', to: '@sam-ascot-4k2p', text: '' })).toMatchObject({ error: expect.stringContaining('text') });
@@ -1347,7 +1356,6 @@ describe('what an attacker tried (round 16)', () => {
     expect(kept.answered).toMatchObject({ text: 'Still no (0)', before: [{ text: 'Still no (3)', task: set.task.id }, { text: 'Still no (2)' }, { text: 'Still no (1)' }] });
     expect((await a.call({ kind: 'assistant.tasks' })).tasks[0].conversation.map((c: { answered?: { text: string }[] }) => (c.answered ?? []).map((x) => x.text))).toEqual([['Thanks, but no.'], ['Still no (3)', 'Still no (2)', 'Still no (1)', 'Still no (0)']]);
     // Its report ends it; nothing more goes out under it, and the owner's OK clears the card.
-    expect(await h.owner({ kind: 'panel.task.ok', id: set.task.id })).toMatchObject({ error: expect.stringContaining('still open') });
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'maybe', text: 'x' })).toHaveProperty('error');
     expect(await b.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'x' })).toHaveProperty('error');
     expect(await a.call({ kind: 'assistant.task.done', id: set.task.id, outcome: 'done', text: 'Told Sam no thanks; they offered 70 and I declined.' })).toMatchObject({ ok: true });
