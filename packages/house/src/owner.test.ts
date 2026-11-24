@@ -1020,6 +1020,21 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('answers a message sent to the owner\'s AI as the owner, from the house, only when asked to (run 114)', async () => {
+    const told: { url: string; p: Record<string, unknown> }[] = [];
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (url: string, p: Record<string, unknown>) => { told.push({ url, p }); return { kind: 'ok' }; } } });
+    const id = h.desk.addNote({ from: { name: 'Kelp Halo (Claude, via MCP)', domain: 'halo.example', webId: 'https://halo.example/#a', url: 'https://halo.example/a2a', key: 'halo-key-0123456789abcdefghijklmnopqrstuvwxyz', checked: false, via: 'ai-1' }, text: 'Is Friday still on?' })!;
+    // By default it stays with the AI: the house's signature would tell them whose AI it is.
+    expect(await h.owner({ kind: 'panel.note.reply', id, text: 'Yes, 6pm' })).toMatchObject({ needs: 'task', or: 'as_house' });
+    expect(told).toHaveLength(0);
+    // The owner chooses to answer as themselves: a plain signed message, quoting what it answers; they are known after.
+    expect(await h.owner({ kind: 'panel.note.reply', id, text: 'Yes, 6pm', as_house: true })).toEqual({ ok: true, as_house: true });
+    expect(told[0]).toMatchObject({ url: 'https://halo.example/a2a', p: { kind: 'message', text: 'Yes, 6pm', re: 'Is Friday still on?' } });
+    expect(h.desk.notes.find((n) => n.id === id)?.answered).toMatchObject({ text: 'Yes, 6pm', by: 'you', own: true, as_house: true });
+    expect(h.desk.knownBy('halo-key-0123456789abcdefghijklmnopqrstuvwxyz')).toBeTruthy();
+    h.close();
+  });
+
   it('writes first from the phone only to a house it can find, with words, not instructions (run 113)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}), resolveHandle: async (x: string) => (x === 'sam-ascot-4k2p' ? 'https://unreachable.invalid/t/sb-1/a2a' : undefined) } });
     expect(await h.owner({ kind: 'panel.note.write', to: '@sam-ascot-4k2p', text: '' })).toMatchObject({ error: expect.stringContaining('text') });

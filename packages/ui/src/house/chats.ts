@@ -171,8 +171,12 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
   const send = async (again?: string) => {
     const t = (again ?? draft).trim(); if (!t) return;
     // Shown at once, sending; then the house's answer redraws it as sent, or it stays, not sent, with Retry.
+    // Written to your AI: answering here tells them it's yours, so it's asked once, unless they already know your house
+    // (run 114: a Tell to the AI took 65-89 s each time).
+    const linked = c.trust === 'known' || c.notes.some((n) => n.answered?.as_house);
+    if (c.toAi && !linked && !(await confirm({ header: 'Answer as yourself?', sub: `${c.name} will see it comes from your house, so they'll know ${ai} is yours.`, button: 'Send as me', destructive: false }))) return;
     setSending(t); setFailed(null); if (!again) setDraft('');
-    try { await must({ kind: 'panel.note.reply', id: latest.id, text: t }); sent.current = true; } catch (e) { setFailed({ text: t, why: e instanceof TypeError ? 'your house can\'t be reached right now' : (e as Error).message.replace(/\.$/, '') }); }
+    try { await must({ kind: 'panel.note.reply', id: latest.id, text: t, ...(c.toAi ? { as_house: true } : {}) }); sent.current = true; } catch (e) { setFailed({ text: t, why: e instanceof TypeError ? 'your house can\'t be reached right now' : (e as Error).message.replace(/\.$/, '') }); }
     setSending(null); bump();
   };
   // What your AI sent on duty can be taken back from its bubble while the night's log has it: the house names the entry.
@@ -228,10 +232,10 @@ function ChatView({ c, all, held, ais, task }: { c: Chat; all: Chat[]; held: Not
       : c.canMode && shown === 'ai' && !c.web && !onDuty ? h('p', { class: 'mode-note' }, `${ai} isn't on duty, so it won't answer here yet: set that up in My AI, or type your own answer below.`) : null,
     // They wrote to your AI and don't know your house: an answer from here would tell them where it is, so there is
     // nothing to type into. What's said to them is said by that AI, on your word.
-    c.toAi ? h('div', { class: 'composer-row via-row' },
-      h('p', { class: 'mode-note via-note' }, `${c.name} wrote to ${ai}, not to your house, so answers go from ${ai}.`),
-      theirs && !task ? h('ion-button', { shape: 'round', class: 'lake-btn via-tell', onClick: () => setTell(true) }, h('ion-icon', { name: 'sparkles-outline', slot: 'start' }), `Tell ${ai === 'My AI' ? 'my AI' : ai} what to do`) : null)
-    : h('div', { class: 'composer-row' },
+    c.toAi ? h('div', { class: 'via-row' },
+      h('p', { class: 'mode-note via-note' }, `${c.name} wrote to ${ai}. Answer as yourself below, or tell ${ai} what to say.`),
+      theirs && !task ? h('ion-button', { shape: 'round', size: 'small', fill: 'outline', class: 'lake-btn via-tell', onClick: () => setTell(true) }, h('ion-icon', { name: 'sparkles-outline', slot: 'start' }), `Tell ${ai === 'My AI' ? 'my AI' : ai}`) : null) : null,
+    h('div', { class: 'composer-row' },
       h('ion-textarea', { value: draft, autoGrow: true, rows: 1, placeholder: c.forwarded ? 'Passed on by your AI' : 'Message', 'aria-label': 'Message', disabled: !!c.forwarded, class: 'composer-input', onionInput: (e: CustomEvent) => setDraft(String(e.detail.value ?? '')) }),
       h('ion-button', { shape: 'round', class: 'send-btn', disabled: !draft.trim() || !!sending, onClick: () => void send(), 'aria-label': 'Send' }, h('ion-icon', { name: 'arrow-up', slot: 'icon-only' }))));
   return h(Page, { title: c.name, titleNode, back: () => back('#chats'), cls: `chat-page${who ? ' has-mode' : ''}`, footer: composer, end: who },

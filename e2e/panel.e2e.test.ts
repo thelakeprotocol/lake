@@ -1084,19 +1084,27 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     const row = page.locator('ion-item.chatrow', { hasText: 'Kim' });
     await row.locator('.row-via.to-ai', { hasText: 'Wrote to Nova' }).waitFor({ timeout: 6000 });
     await tidy();
-    // The chat: who they wrote to, and nothing to type into (an answer from the house would tell them where it is).
+    // The chat: who they wrote to; an answer typed here goes from the house only once the owner says so (round 158).
     await row.click();
     await page.locator('.bubble.them', { hasText: 'lend me a ladder' }).waitFor({ timeout: 6000 });
     await page.locator('.via-strip', { hasText: 'Wrote to Nova, at its own address.' }).getByText('They don\'t know where your house is.').waitFor();
     await page.locator('.chatwho small', { hasText: 'Wrote to Nova' }).waitFor();
-    expect(await page.getByLabel('Message').count()).toBe(0);
-    await page.locator('.via-note', { hasText: 'Kim wrote to Nova, not to your house, so answers go from Nova.' }).waitFor();
+    await page.locator('.via-note', { hasText: 'Kim wrote to Nova. Answer as yourself below, or tell Nova what to say.' }).waitFor();
+    if (process.env.PANEL_SHOTS) await page.screenshot({ path: `${process.env.PANEL_SHOTS}/via-chat.png` });
+    // Typing an answer asks first: it would tell Kim which house Nova is; Cancel sends nothing.
+    await page.locator('.composer .composer-input textarea').fill('Sure, Sunday');
+    await page.locator('.composer .send-btn').click();
+    const asked = page.locator('ion-action-sheet', { hasText: 'Answer as yourself?' });
+    await asked.getByText('Kim will see it comes from your house, so they\'ll know Nova is yours.').waitFor();
+    await asked.getByRole('button', { name: 'Cancel' }).click();
+    expect(await page.locator('.bubble.me', { hasText: 'Sure, Sunday' }).count()).toBe(0);
+    await page.locator('.composer .composer-input textarea').fill('');
     await page.locator('.replymode', { hasText: 'Ask me first' }).waitFor();
     await tidy();
     // No task yet: the AI may not answer them through the house.
     expect(await asAssistant({ kind: 'assistant.reply', note: filed.note, text: 'Sure!' })).toHaveProperty('error');
-    // One button where the message box would be: a few words for the AI they wrote to.
-    await page.locator('.via-row').getByRole('button', { name: 'Tell Nova what to do' }).click();
+    // Or a few words for the AI they wrote to.
+    await page.locator('.via-row').getByRole('button', { name: 'Tell Nova', exact: true }).click();
     await sheet().locator('.tell-about', { hasText: 'About Kim\'s message to Nova' }).getByText('lend me a ladder').waitFor();
     await sheet().getByText(/^Nova can read this chat and send Kim up to 5 messages from its own address, until this time tomorrow\. Your house counts them, and they don't learn where it is\. This doesn't let it spend money or change your rules\./).waitFor();
     await sheet().getByLabel('Your instruction').fill('Yes, Sunday after ten is fine');
@@ -1104,7 +1112,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await sheet().getByRole('button', { name: 'Send to Nova' }).click();
     const strip = page.locator('.mode-note.task-note');
     await strip.getByText(/Nova is on it: “Yes, Sunday after ten is fine”/).waitFor({ timeout: 6000 });
-    expect(await page.locator('.via-row').getByRole('button', { name: 'Tell Nova what to do' }).count()).toBe(0);
+    expect(await page.locator('.via-row').getByRole('button', { name: 'Tell Nova', exact: true }).count()).toBe(0);
     // The AI's side: the task says they wrote to it, and an answer is the AI's own to send. The house gives it a place
     // and where to send; until the AI says it landed, the chat shows it on its way.
     const mine = await asAssistant({ kind: 'assistant.tasks' }) as { tasks: { id: string; wrote_to?: string; your_humans_words: string }[] };
