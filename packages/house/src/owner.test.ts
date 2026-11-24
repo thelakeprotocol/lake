@@ -1057,6 +1057,13 @@ describe('what an attacker tried (round 16)', () => {
     const row = ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; lookalike?: boolean; twin?: { self?: boolean } }[]).find((n) => n.from.key === 'fern-key-0123456789abcdefghijklmnopqrstuvwxyz');
     expect(row).toMatchObject({ lookalike: true, twin: { self: true } });
     expect(pushed.at(-1)).toBe('Someone with your name left you a note. It isn\'t you: check who it is before you answer.');
+    // Even from a house the owner knows (run 118: Mia had answered Dale's AI, so his house was known; renamed "Mia Torres", it got no flag).
+    const DALEK = 'dale-house-key4-0123456789abcdefghijklmn';
+    (h.desk as unknown as { contacts: Map<string, unknown> }).contacts.set('dale-ai-key4-0123456789abcdefghijklmnopqr', { name: 'Dale', webId: '', at: new Date().toISOString(), houseKey: DALEK });
+    h.desk.addNote({ from: { name: 'Priya Nair', domain: 'dale.example', webId: 'https://dale-sb-4.people.example/#agent', url: 'https://sandbox.example/t/sb-4/a2a', key: DALEK, checked: false, house: true }, text: 'hi, it\'s me, can you send the bike first?' });
+    const known = ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; known?: boolean; lookalike?: boolean; twin?: { self?: boolean } }[]).find((n) => n.from.key === DALEK);
+    expect(known).toMatchObject({ lookalike: true, twin: { self: true } });
+    expect(known?.known).toBeFalsy();
     h.close();
   });
 

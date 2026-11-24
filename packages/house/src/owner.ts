@@ -1438,6 +1438,13 @@ export class OwnerDesk {
     if (twin?.self) return `gives your human's own name (${twin.name}) but is someone else: treat it as a stranger`;
     return twin ? `says it is ${twin.name}, whom your human's side knows, but with a different key${twin.sameHouse === true ? ' (from the same house as before: likely a new phone or AI app)' : twin.sameHouse === false ? ' and from a different house' : ''}: treat it as a stranger until your human says otherwise` : undefined;
   }
+  /**
+   * Known, for a note: as knownBy, unless it gives the owner's own name (run 118: Dale's house, known because Mia had answered his
+   * AI, renamed itself "Mia Torres" and wrote to her with no flag). A known sender using your name is still not you.
+   */
+  private knownNote(from: OwnerDesk['notes'][number]['from']): string | undefined {
+    return this.twinOf(from)?.self ? undefined : this.knownBy(from.key);
+  }
   /** Whom a lookalike says it is: that contact's key and name (the key is for the owner's "This is Alex", never for an AI). */
   private twinOf(from: { key?: string; webId?: string; name?: string; as?: string; url?: string; house?: true; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string } }): { key: string; name: string; sameHouse?: boolean; self?: true } | undefined {
     // Only a key thumbprint can be compared: notes kept from before (1 Nov) hold a key id, and the real sender isn't a twin.
@@ -1875,7 +1882,7 @@ export class OwnerDesk {
     this.notes = [note, ...this.notes];
     this.evictNotes();
     void this.saveNotes();
-    const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from);
+    const known = this.knownNote(n.from), twin = known ? undefined : this.lookalike(n.from);
     // An invitation to sign: a card with the tally's own terms and a Sign button, from this sender, for the owner's tap.
     if (n.pledge) void this.invite(note.id, n.from, n.pledge, !!known);
     const mine = this.modeOf(n.from) === 'me';
@@ -3966,7 +3973,7 @@ export class OwnerDesk {
       offerings: (this.o.panel?.offeringsList?.() ?? []).filter((r) => !r.closed && Date.parse(r.offering.availabilityEnds) > Date.now()).map((r) => ({ ...r.offering, asked: this.notes.filter((n) => n.offering === r.offering.id).length })),
       wants: (this.o.panel?.wantsList?.() ?? []).filter((r) => !r.closed || Date.parse(r.closed) > Date.now() - 86_400_000).map((r) => ({ want: r.want, ...(r.limit ? { limit: r.limit } : {}), closed: r.closed, bought: r.bought, at: r.at, by: r.by, matches: (r.matches ?? []).filter((m) => m.state !== 'no').map(({ matcher, ...m }) => (m.state === 'revealed' ? { ...m, matcher: { name: matcher.name } } : m)), replies: this.notes.filter((n) => n.want === r.want.id).length, repliesWaiting: this.notes.filter((n) => n.want === r.want.id && !this.settled(n)).length, shared: [...this.wantLinks.values()].some((l) => l.want === r.want.id && !l.closed && l.left > 0 && Date.parse(l.until) > Date.now()), offers: r.offers.map(({ cart, receipt, ...o }) => ({ ...o, cart: cart.contents.id, ...payBy(o, cart) })) })),
       seen: forAssistant ? undefined : this.chatSeen,
-      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownBy(n.from.key), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && !n.from.via && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from), ...(!a && this.settled(n) ? { settled: true } : {}) }; }),
+      notes: this.notes.map((n) => { const w = this.webNotes.get(n.id), root = this.webNotes.get(w?.thread ?? n.id); const a = root?.answers?.filter((x) => x.by !== 'sender' && x.at >= n.at).at(-1); const known = this.knownNote(n.from), twin = known ? undefined : this.lookalike(n.from); const noted = n.from.key && !forAssistant ? this.firstContacts.get(n.from.key)?.noted : undefined; return { ...n, ...(a ? { answered: a } : {}), ...(root?.reply_to && !forAssistant ? { reply_to: root.reply_to } : {}), known: !!known, ...(known ? { known_why: known } : twin ? { known_why: twin, lookalike: true, ...(forAssistant ? {} : { twin: this.twinOf(n.from) }) } : {}), ...(n.from.key && !n.from.via && this.sameAs[n.from.key] ? { person: this.personOf(n.from.key) } : {}), ...(noted ? { door_note: noted } : {}), mode: this.modeOf(n.from), ...(!a && this.settled(n) ? { settled: true } : {}) }; }),
       agenda: this.agenda,
       keys: [...this.grants.values()].filter((g) => !g.revoked && Date.parse(g.until) > Date.now()).map(({ jws: _, ...g }) => g),
     };

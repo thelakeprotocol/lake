@@ -1102,6 +1102,13 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const t = jkt && viaKeys.has(jkt) ? ((await houseCall({ kind: 'assistant.tasks', key: jkt }).catch(() => null)) as { file?: boolean } | null) : null;
           if (t?.file) filed = !!(await fileSigned(m.signed, new Date().toISOString(), m.card.supportedInterfaces?.[0]?.url).catch(() => null));
         }
+        // An answer to what this AI asked for its human goes to that human's phone as well, reading or not (run 118: Mia's honest
+        // answer about the bike's faults reached only Sam's AI, which had told him "Her answer will show on your phone").
+        const answers = m.payload.kind === 'note.reply' || (m.payload.kind === 'message' && typeof m.payload.re === 'string');
+        if (!passed.held && !filed && house && words && !fromHouse && answers && known && !onDuty) {
+          filed = !!(await fileSigned(m.signed, new Date().toISOString()).catch(() => null));
+          if (filed) passed = { passed_on: 'your answer reached this assistant, and its human sees it on their phone too' };
+        }
         // Not the house's own news: it's already the owner's (1 Nov: every note at the door came back a second time, "from" the house).
         if (!passed.held && !filed && house && words && !fromHouse && Date.now() - Math.max(lastRead, lastActive) > QUIET_MS) {
           // As signed, so their house can check it and their human can say what to answer; a house that can't check it
