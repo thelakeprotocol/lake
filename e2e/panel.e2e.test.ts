@@ -1361,8 +1361,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.locator('.chatwho').click();
     // The house's word is about the AI; the name it gives stays unchecked (round 110).
     // Whose house, by its own card's name, when it has one (run 106: "Opal Onyx" told nobody it was Mia's AI).
-    await sheet().getByText(/(house vouches for this AI|Its AI is vouched for by a house)$/).waitFor({ timeout: 10_000 });
-    await sheet().getByText(/[Cc]hecked\)?\. The name it gives is not\.$/).waitFor();
+    await sheet().getByText(/(house confirms this AI is theirs|A house confirms this AI is theirs)$/).waitFor({ timeout: 10_000 });
+    await sheet().getByText(/The AI's own name, and what it says about itself, aren't checked\.$/).waitFor();
     await closeSheet();
     await goBack();
     // It sells for the house: another AI (a script, signed in without a browser) orders and pays, held until it accepts.

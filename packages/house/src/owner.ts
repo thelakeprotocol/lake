@@ -1368,13 +1368,13 @@ export class OwnerDesk {
     // A stranger or a lookalike is marked as the chat row marks them (round 117, an attacker among households: a note from
     // "Vic" read on the phone like a neighbour's).
     if (payload.about === 'note') {
-      const f = payload.from as { as?: string; name?: string; web?: boolean; speaks_for?: { checked?: boolean; name?: string } } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean; same_house?: boolean } | undefined;
+      const f = payload.from as { as?: string; name?: string; web?: boolean; house?: boolean; speaks_for?: { checked?: boolean; name?: string } } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean; same_house?: boolean } | undefined;
       // A house vouches for the AI, by its card's name: say whose AI it is (run 106).
       const vouched = f?.speaks_for?.checked && f.speaks_for.name ? f.speaks_for.name : '';
       const name = f?.as ?? (f?.name && !f.web ? f.name.replace(/ \(.*\)$/, '') : '');
       // Plain words (Grok, round 144: "a different house" reads as app jargon; say who it isn't, and what to do).
       this.notifyOwner('note', k?.lookalike ? (k.same_house ? `${name || 'Someone you know'} wrote from a new phone or AI app (the same house as before).` : `Someone saying they're ${name || 'someone you know'} (not the one you know) left you a note. Check with them another way before you answer.`)
-        : vouched ? `${vouched}'s AI left you a note${name && name !== vouched ? ` (it says it's ${name})` : ''}.` : name ? `${name}${k && !k.yes ? ' (first contact, not checked)' : ''} left you a note${f?.as && !f.web ? ', via their AI' : ''}.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`);
+        : vouched ? `${vouched}'s AI left you a note${name && name !== vouched ? ` (it says it's ${name})` : ''}.` : name ? `${name}${k && !k.yes ? (f?.house ? ' (a first message, from their house)' : ' (first contact, not checked)') : ''} left you a note${f?.as && !f.web ? ', via their AI' : ''}.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`);
     }
     if (!this.o.tell) return;
     // Requests carry fields and prices, a study answered is what the house did with the records, offers, purchases and

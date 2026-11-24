@@ -240,6 +240,9 @@ describe('AI on duty: what the owner\'s AI may do while they\'re away', () => {
     desk.notifyOwner = (_tag: string, body: string) => { pushed.push(body); };
     desk.addNote({ from: { name: 'Fern Rook (Claude, via MCP)', as: 'Vic', domain: 'vic.example', webId: 'https://vic.example/#a', key: 'vic-key-0123456789abcdefghijklmnopqrstuvwxyz', checked: false }, text: 'hiya' });
     expect(pushed.at(-1)).toBe('Vic (first contact, not checked) left you a note, via their AI.');
+    // A neighbour's first message from their own house says so, not "not checked" (run 116: "the phone did NOT tell me it was really her").
+    desk.addNote({ from: { name: 'Priya Nair', domain: 'sandbox.example', webId: 'https://priya-sb-2.people.example/#agent', url: 'https://sandbox.example/t/sb-2/a2a', key: 'priya-house3-key-0123456789abcdefghijklmn', checked: false, house: true }, text: 'Can you water my plants Tuesday?' });
+    expect(pushed.at(-1)).toBe('Priya Nair (a first message, from their house) left you a note.');
     // A house vouches for the AI, by its card's name: whose AI it is (run 106).
     desk.addNote({ from: { name: 'Opal Onyx (Claude, via MCP)', domain: 'opal.example', webId: 'https://opal.example/#a', key: 'opal-key-0123456789abcdefghijklmnopqrstuvwxyz', checked: false, speaks_for: { house: 'https://h.example/t/sb-0/profile/card#me', checked: true, name: 'Mia Torres' } }, text: 'Salad and drinks on Saturday' });
     expect(pushed.at(-1)).toBe('Mia Torres\'s AI left you a note (it says it\'s Opal Onyx).');
