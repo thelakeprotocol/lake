@@ -1038,6 +1038,16 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('takes five notes an hour from a stranger and more from someone the owner knows (run 117)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const sender = (who: string) => ({ name: who, domain: `${who}.example`, webId: `https://${who}.example/#a`, url: `https://${who}.example/a2a`, key: `${who}-key-0123456789abcdefghijklmnopqrstuvwxyz`.slice(0, 43), checked: false });
+    for (let i = 0; i < 5; i++) expect(h.desk.addNote({ from: sender('stranger'), text: `hi ${i}` })).toBeTruthy();
+    expect(h.desk.addNote({ from: sender('stranger'), text: 'hi again' })).toBeNull();
+    (h.desk as unknown as { contacts: Map<string, unknown> }).contacts.set(sender('george').key, { name: 'George', webId: sender('george').webId, at: new Date().toISOString() });
+    for (let i = 0; i < 8; i++) expect(h.desk.addNote({ from: sender('george'), text: `about Saturday ${i}` })).toBeTruthy();
+    h.close();
+  });
+
   it('flags a note that gives the owner\'s own name (run 117)', async () => {
     const pushed: string[] = [];
     const h = await house({ panel: { activity: () => [], money: async () => ({}), door: () => ({ open: true, name: 'Priya Nair', handle: 'priya-ascot-ongs', address: '', a2a: '' }) } });

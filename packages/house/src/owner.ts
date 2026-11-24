@@ -1867,7 +1867,10 @@ export class OwnerDesk {
     // The same words again from the same sender are the same note (run 45 got one twice).
     const again = this.notes.find((x) => x.from.webId === n.from.webId && x.from.via === n.from.via && x.text === n.text);
     if (again) return again.id;
-    if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= 5) return null;
+    // Five an hour from a stranger; a conversation with someone the owner knows runs longer (run 117: George's real reply to
+    // Priya, his 7th note in 18 minutes, was refused while the attacker's notes weren't).
+    const cap = this.knownBy(n.from.key) ? 30 : 5;
+    if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= cap) return null;
     const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
     this.notes = [note, ...this.notes];
     this.evictNotes();
