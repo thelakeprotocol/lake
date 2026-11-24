@@ -2877,7 +2877,17 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const slot = `${a.tally}|${a.id}`;
         if (a.action === 'count') return json(await me.ask(a.tally, { kind: 'tally.count', id: a.id }));
         if (a.action === 'open') {
-          if (!a.text || !a.threshold || !a.deadline || (!a.contribution && !a.quorum && !a.circle)) throw new Error('open: text, threshold, deadline, and contribution { amount, currency }, quorum { options, at_least, closes } or circle { promise, times }');
+          if (!a.text || !a.threshold || !a.deadline) throw new Error('open: text, threshold and deadline (and, if it holds money, contribution { amount, currency }; or quorum { options, at_least, closes }; or circle { promise, times })');
+          // The opener's own human gets its sign card on their phone, so "tap Sign" is true (run 120: Priya's AI said it and no
+          // card ever came).
+          const toMyHuman = async (r: Record<string, unknown>) => (house && r.kind === 'tally.opened' ? !!(await houseCall({ kind: 'assistant.suggest', text: `Your AI opened this pledge for you: "${a.text!.slice(0, 200)}". Sign it to count your household.`, pledge: { tally: a.tally, id: a.id } }).catch(() => null)) : false);
+          // A plain pledge, no money: one per household when this AI has a house, anyone otherwise (run 120: open demanded a
+          // contribution or a quorum, and the AI went round it with a raw tally.open).
+          if (!a.contribution && !a.quorum && !a.circle) {
+            const r = await me.ask(a.tally, { kind: 'tally.open', id: a.id, text: a.text, threshold: a.threshold, deadline: a.deadline, listed: a.listed, ...(house ? { people_only: true } : {}) }) as Record<string, unknown>;
+            const carded = await toMyHuman(r);
+            return json({ ...r, ...(carded ? { on_your_humans_phone: 'its sign card is on your human\'s phone now: they tap Sign there' } : {}) });
+          }
           if (a.quorum || a.circle) {
             // Nobody goes first: a secret count of everyone's own threshold, then a blind pledge that reveals all at once.
             const r = await me.ask(a.tally, { kind: 'tally.open', id: a.id, text: a.text, threshold: a.threshold, deadline: a.deadline, people_only: true, blind: true, unveil: true, listed: a.listed, ...(a.quorum ? { quorum: a.quorum } : {}), ...(a.circle ? { circle: a.circle } : {}) });

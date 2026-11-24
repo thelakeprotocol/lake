@@ -1736,6 +1736,10 @@ describe('the open door', () => {
     expect((await t(client, { kind: 'tally.count', id: 'e2e-blind' })).signers).toBeUndefined();
     const filled = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'sign', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);
     expect(filled).toMatchObject({ kind: 'tally.triggered', count: 2 });
+    // A plain pledge, no money, opens through lake_pledge too (run 120: it demanded a contribution, and the AI went round it).
+    const plain = await text('lake_pledge', { action: 'open', tally, id: 'e2e-plain', text: 'A plain pledge for the e2e.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString() });
+    expect(plain).toMatchObject({ kind: 'tally.opened', id: 'e2e-plain' });
+    expect(plain.people_only).toBeUndefined();
     expect(await text('lake_pledge', { action: 'reveal', tally, id: 'e2e-blind' })).toMatchObject({ kind: 'tally.revealed', signers: [{ domain: o.you.domain }], unrevealed: 1 });
     expect((await t(client, { kind: 'tally.count', id: 'e2e-blind' }))).toMatchObject({ revealed: 1, bound: false });
     const both = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'reveal', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);

@@ -1035,6 +1035,10 @@ describe('what an attacker tried (round 16)', () => {
     expect(told[0]).toMatchObject({ url: 'https://halo.example/a2a', p: { kind: 'message', text: 'Yes, 6pm', re: 'Is Friday still on?' } });
     expect(h.desk.notes.find((n) => n.id === id)?.answered).toMatchObject({ text: 'Yes, 6pm', by: 'you', own: true, as_house: true });
     expect(h.desk.knownBy('halo-key-0123456789abcdefghijklmnopqrstuvwxyz')).toBeTruthy();
+    // A neighbour's house that wrote to the AI gets a note, which a house takes (run 120: a message was refused).
+    const fromHouse = h.desk.addNote({ from: { name: 'George Hale', domain: 'sandbox.example', webId: 'https://george-sb-3.people.example/#agent', url: 'https://sandbox.example/t/sb-3/a2a', key: 'george-house-key-0123456789abcdefghijklmn', checked: false, house: true, via: 'ai-1' }, text: 'Sorry, I fly out Tuesday.' })!;
+    expect(await h.owner({ kind: 'panel.note.reply', id: fromHouse, text: 'No problem, safe trip', as_house: true })).toEqual({ ok: true, as_house: true });
+    expect(told.at(-1)).toMatchObject({ url: 'https://sandbox.example/t/sb-3/a2a', p: { kind: 'note', text: 'No problem, safe trip' } });
     h.close();
   });
 

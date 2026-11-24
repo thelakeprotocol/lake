@@ -3365,7 +3365,10 @@ export class OwnerDesk {
           // Answered as themselves, from the house (run 114: Mia and Priya waited 65-89 s per message for their AI to act on a Tell).
           // The owner's choice to link this AI to their house: a plain signed message, since they never saw the house's note id.
           if (lakeNote.from.via) {
-            const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'message', text, re: lakeNote.text.slice(0, 200) }).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
+            // To a neighbour's house, a note (a house takes notes, not messages: run 120, "their AI didn't take it: expected an
+            // offer… a note…"); to an AI, a message quoting what it answers.
+            const out = lakeNote.from.house ? { kind: 'note', text, purpose: 'contact' } : { kind: 'message', text, re: lakeNote.text.slice(0, 200) };
+            const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, out).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
             if (!sent || sent.kind === 'unreached') return void res.status(502).json({ error: 'their AI can\'t be reached right now' });
             if (sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their AI didn't take it${sent.problems ?? sent.why ? `: ${[sent.problems ?? sent.why].flat().map(String).join('; ').slice(0, 300)}` : ''}` });
             lakeNote.answered = { text, by: 'you', own: true, as_house: true, at: new Date().toISOString() };
