@@ -12,6 +12,7 @@ import { knownWaiting, type ListView } from './house/logic';
 import { back, goTab, parse, UNDER, type Tab } from './house/nav';
 import { ChatPage, ChatsTab, WantPage } from './house/chats';
 import { InboxTab, decisions } from './house/inbox';
+import { HomeTab } from './house/home';
 import { AiKeyPage, AiTab } from './house/ai';
 import { DoorPage, MyDataPage, NotifyPage, PhonePage, SeenPage, YouTab } from './house/you';
 import { AboutPage, AccessPage, AddressPage, CirclesPage, DataPage, FreePage, KeyPage, MoneyPage, MovePage, OffersPage, RulesPage } from './house/pages';
@@ -22,10 +23,11 @@ import { ConnectAI, NoKey, Pair, connecting } from './house/pair';
 // what was handled), People (one row per person, and a chat with each), My AI, You (five rows, each saying how it stands:
 // your door, rules, your data, money, this phone).
 
+// Three tabs (25 Nov: "it should be very simple"): Home, People, You. Everything from the old Today sits under Home (#inbox),
+// your AI under You (#ai).
 const TABS: { tab: Tab; label: string; icon: string }[] = [
-  { tab: 'inbox', label: 'Today', icon: 'lake' },
+  { tab: 'new', label: 'Home', icon: 'lake' },
   { tab: 'chats', label: 'People', icon: 'people' },
-  { tab: 'ai', label: 'My AI', icon: 'sparkles' },
   { tab: 'you', label: 'You', icon: 'person-circle' },
 ];
 const YOU: Record<string, (p: { backTo: () => void }) => unknown> = { door: DoorPage, notify: NotifyPage, free: FreePage, address: AddressPage, rules: RulesPage, access: AccessPage, offers: OffersPage, money: MoneyPage, data: DataPage, circles: CirclesPage, key: KeyPage, move: MovePage, about: AboutPage, mydata: MyDataPage, phone: PhonePage, seen: SeenPage };
@@ -79,10 +81,11 @@ function App() {
   }, [version]);
   // One badge, on Today (Fable's design, 12 Nov): what needs the owner, people they know waiting for an answer, and an AI
   // of theirs that isn't reading while people wait for it.
-  const counts: Record<Tab, number> = { chats: 0, inbox: decisions(list) + knownWaiting(list) + (list?.assistants ?? []).filter((a) => a.waiting).length, ai: 0, you: 0 };
-  const tabbar = h('ion-tab-bar', { id: 'tabbar', class: 'lake-tabbar', selectedTab: route.tab },
-    ...TABS.map((t) => h('ion-tab-button', { key: t.tab, tab: t.tab, selected: route.tab === t.tab, onClick: () => { if (route.tab === t.tab && !route.page) document.querySelector('ion-content')?.scrollToTop(300); else goTab(t.tab); } },
-      h('ion-icon', { name: route.tab === t.tab ? t.icon : `${t.icon}-outline` }), h('ion-label', {}, t.label),
+  const counts: Record<Tab, number> = { inbox: 0, chats: 0, new: decisions(list) + knownWaiting(list) + (list?.assistants ?? []).filter((a) => a.waiting).length, ai: 0, you: 0 };
+  const on: Tab = route.tab === 'inbox' ? 'new' : route.tab === 'ai' ? 'you' : route.tab;
+  const tabbar = h('ion-tab-bar', { id: 'tabbar', class: 'lake-tabbar', selectedTab: on },
+    ...TABS.map((t) => h('ion-tab-button', { key: t.tab, tab: t.tab, selected: on === t.tab, onClick: () => { if (route.tab === t.tab && !route.page) document.querySelector('ion-content')?.scrollToTop(300); else goTab(t.tab); } },
+      h('ion-icon', { name: on === t.tab ? t.icon : `${t.icon}-outline` }), h('ion-label', {}, t.label),
       counts[t.tab] ? h('ion-badge', { color: 'primary' }, counts[t.tab] > 99 ? '99+' : String(counts[t.tab])) : null)));
   const status = ok && live === true ? null : h('span', { class: `status-chip${ok ? '' : ' down'}`, role: 'status' }, h('span', { class: 'status-dot' }), ok ? 'Reconnecting' : 'Offline');
   const backTo = (t: Tab) => () => back(`#${t}`);
@@ -92,7 +95,7 @@ function App() {
   else if (route.page === 'want') view = h(WantPage, { key: k, arg: route.arg ?? '' });
   else if (route.page === 'aikey') view = h(AiKeyPage, { key: k, arg: route.arg ?? '' });
   else if (route.page && YOU[route.page]) view = h(YOU[route.page], { key: k, backTo: () => back(`#${UNDER[route.page!] ?? 'you'}`) });
-  else view = h({ chats: ChatsTab, inbox: InboxTab, ai: AiTab, you: YouTab }[route.tab], { key: k, tabbar, status });
+  else view = h({ chats: ChatsTab, inbox: InboxTab, ai: AiTab, you: YouTab, new: HomeTab }[route.tab], { key: k, tabbar, status });
   return h(Version.Provider, { value: { version, bump } }, view);
 }
 

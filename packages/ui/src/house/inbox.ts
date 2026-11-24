@@ -13,6 +13,10 @@ import { AskBox, TaskCard, TellButton } from './tasks';
 
 /** What the last sign-in answer did, kept past the refetch that takes the request away. */
 let connectedNote = '';
+/** What an AI app's sign-in just came to, shown once wherever the owner is (Home or Today). */
+export function ConnectedNote() {
+  return connectedNote ? h('ion-card', { class: 'lake-card ok-card', key: 'cn' }, h('ion-card-content', {}, h('p', {}, connectedNote), h('ion-button', { size: 'small', fill: 'clear', onClick: () => { connectedNote = ''; } }, 'OK'))) : null;
+}
 
 type TodayLine = { by: 'rules' | 'ai' | 'house' | 'shops' | 'money'; text: string; at: string; to: string; undo?: string; person?: { key: string; name: string }; tile?: { big: string; label: string; detail?: string } };
 const BY: Record<TodayLine['by'], { label: string; icon: string; tint: string }> = {
@@ -95,7 +99,7 @@ export function InboxTab({ tabbar, status }: { tabbar: Child; status: Child }) {
 }
 
 /** A data request your rules left to you: what it wants, what your rules suggest, the suggested answer first. */
-function RequestCard({ all }: { all: Request[] }) {
+export function RequestCard({ all, compact }: { all: Request[]; compact?: boolean }) {
   const r = all[0]!, n = all.length, times = all.reduce((t, x) => t + (x.asked ?? 1), 0);
   const risky = !!r.warnings?.length;
   const a = adviceOf(r.recommendation);
@@ -108,6 +112,17 @@ function RequestCard({ all }: { all: Request[] }) {
   const allowBtn = h(Btn, { key: 'a', label: n > 1 ? `Allow all ${n}` : 'Allow', fill: suggest === 'deny' ? 'outline' : 'solid', color: suggest === 'deny' ? 'medium' : 'primary', run: allow, ...(risky ? { ask: { header: `Let ${r.visitor.domain} use your ${r.fields.map(nice).join(', ')}?`, sub: 'Your rules advise against it.', button: 'Allow anyway' } } : {}) });
   const denyBtn = h(Btn, { key: 'd', label: n > 1 ? `Deny all ${n}` : 'Deny', fill: suggest === 'deny' ? 'solid' : 'outline', color: suggest === 'deny' ? 'primary' : 'medium', run: deny });
   const pays = r.price ? money$(r.price.amount, r.price.currency) : `$${r.priceUsd}`;
+  // Compact, on Home: who, what in one line, which way your rules lean, the two taps; the rest a tap away (25 Nov: "it should be
+  // very simple").
+  const [open, setOpen] = useState(false);
+  if (compact && !open) return h('ion-card', { class: `lake-card req compact${risky ? ' risky' : ''}` }, h('ion-card-content', {},
+    h('div', { class: 'req-who' }, h(Avatar, { name: r.visitor.domain, size: 36 }),
+      h('div', { class: 'req-who-text' }, h('h3', {}, r.visitor.domain), h('p', {}, r.question ? `Asks a yes/no question, for ${r.purpose}` : `Wants your ${r.fields.map(nice).join(', ')}`)),
+      h('span', { class: 'req-pay' }, pays)),
+    r.question ? h('p', { class: 'req-q compact-q' }, `“${r.question}”`) : null,
+    h('p', { class: 'req-lean' }, r.counts?.length ? 'Only a yes or no leaves your house. ' : '', suggest === 'allow' ? 'Your rules lean yes.' : suggest === 'deny' ? 'Your rules lean no.' : 'Your call.'),
+    h('div', { class: 'decide' }, ...(suggest === 'deny' ? [allowBtn, denyBtn] : [denyBtn, allowBtn])),
+    h('button', { type: 'button', class: 'link-btn terms-link', onClick: () => setOpen(true) }, 'Details', h('ion-icon', { name: 'chevron-down' }))));
   return h('ion-card', { class: `lake-card req${risky ? ' risky' : ''}` }, h('ion-card-content', {},
     h('div', { class: 'req-who' }, h(Avatar, { name: r.visitor.domain, size: 42 }),
       h('div', { class: 'req-who-text' }, h('h3', {}, r.visitor.domain), h('p', {}, `Wants your data · for ${r.purpose}${times > 1 ? ` · asked ${times}×` : ''}`)),
@@ -127,7 +142,7 @@ function RequestCard({ all }: { all: Request[] }) {
 }
 
 /** An AI app signing in through this house, from its own sign-in page: approved here, where the key is. */
-function ConnectCard({ c }: { c: Connect }) {
+export function ConnectCard({ c }: { c: Connect }) {
   const [reads, setReads] = useState<Reads[]>([]);
   return h('ion-card', { class: 'lake-card warn-card' }, h('ion-card-content', {},
     h('div', { class: 'card-kicker' }, h('ion-icon', { name: 'link-outline' }), 'Wants to connect'),

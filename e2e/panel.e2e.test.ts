@@ -54,10 +54,14 @@ async function tidy() {
 }
 // Four tabs, Today first (it opens there). You has five rows that each say how they stand, and every other page sits
 // one tap under one of them (12 Nov: the redesign, then Fable's design; 13 Nov: fourteen rows became five).
-const TABS = ['Today', 'People', 'My AI', 'You'];
+// Three tabs (25 Nov); Today and My AI are screens under Home and You, opened by their address.
+const TABS = ['Home', 'People', 'You'];
+const UNDER_TAB: Record<string, string> = { Today: '#inbox', 'My AI': '#ai' };
 const UNDER: Record<string, string> = { 'When you can meet': 'Your door', 'Who has access': 'My data', 'What your house holds': 'My data', 'Download everything': 'My data', 'Seen from outside': 'My data', 'Offers for you': 'Money', 'Delivery address': 'Money', 'Your promise circles': 'Money', Notifications: 'This phone', 'New or lost phone': 'This phone', 'About this house': 'This phone' };
 const tab = async (name: string, p: Page = page) => {
-  if (TABS.includes(name)) {
+  if (UNDER_TAB[name]) {
+    await p.evaluate((h) => { location.hash = h; }, UNDER_TAB[name]!);
+  } else if (TABS.includes(name)) {
     // On a page opened from a tab (a chat, a setting), the tab bar isn't there: Back first.
     if (!(await p.locator('ion-tab-bar').count())) await p.evaluate(() => { location.hash = '#you'; });
     await p.locator('ion-tab-button', { hasText: name }).click();
@@ -70,7 +74,7 @@ const tab = async (name: string, p: Page = page) => {
 /** Yes on the sheet that asks before something that can't be undone. */
 const confirmSheet = async (name: string, p: Page = page) => { await p.locator('ion-action-sheet').getByRole('button', { name, exact: true }).click(); await p.locator('ion-action-sheet').waitFor({ state: 'detached', timeout: 5000 }); };
 const goBack = async (p: Page = page) => p.getByRole('button', { name: /^Back/ }).first().click();
-const onTab = (name: string, p: Page = page) => p.locator('ion-tab-button.tab-selected', { hasText: name }).waitFor({ timeout: 15_000 });
+const onTab = (name: string, p: Page = page) => p.locator('ion-tab-button.tab-selected', { hasText: ({ Today: 'Home', 'My AI': 'You' } as Record<string, string>)[name] ?? name }).waitFor({ timeout: 15_000 });
 const sheet = () => page.locator('ion-modal.lake-sheet');
 const closeSheet = async () => { await sheet().getByRole('button', { name: 'Close' }).click(); await page.waitForTimeout(300); };
 // Who replies in the open chat: the control at its top, then one of the two in its sheet.
@@ -245,7 +249,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await page.getByRole('button', { name: 'Use this phone' }).waitFor();
     expect(await page.locator('.welcome h1').textContent()).toMatch(/House|A house on the Lake/);
     await page.getByRole('button', { name: 'Use this phone' }).click();
-    // Four tabs, and Today asks for the one setting that makes the house reachable.
+    // Three tabs, and Home asks for the one setting that makes the house reachable.
     await page.locator('ion-tab-button').first().waitFor();
     expect(await page.locator('ion-tab-button ion-label').allTextContents()).toEqual(TABS);
     await onTab('Today');
@@ -818,7 +822,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await card.getByText(/3 messages waiting since .*open your AI app/).waitFor({ timeout: 5000 });
     await tidy();
     // My AI's row says so too; the one badge, on Today, counts it.
-    const badge = async () => { const b = page.locator('ion-tab-button', { hasText: 'Today' }).locator('ion-badge'); return (await b.count()) ? Number(await b.textContent()) : 0; };
+    const badge = async () => { const b = page.locator('ion-tab-button', { hasText: 'Home' }).locator('ion-badge'); return (await b.count()) ? Number(await b.textContent()) : 0; };
     const withIt = await badge();
     expect(withIt).toBeGreaterThan(0);
     await tab('My AI');
@@ -867,7 +871,7 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       expect(await asAssistant({ kind: 'assistant.suggest', text: 'Someone new, Sam, wrote to you about a bike for sale. I haven\'t replied: answering is up to you.', note: left.note, advice: 'your_call' })).toMatchObject({ ok: true });
       await tab('Today');
       const sug = page.locator('ion-card.sug', { hasText: 'Someone new, Sam' });
-      const badge = async () => { const b = page.locator('ion-tab-button', { hasText: 'Today' }).locator('ion-badge'); return (await b.count()) ? Number(await b.textContent()) : 0; };
+      const badge = async () => { const b = page.locator('ion-tab-button', { hasText: 'Home' }).locator('ion-badge'); return (await b.count()) ? Number(await b.textContent()) : 0; };
       await sug.waitFor({ timeout: 5000 });
       const before = await badge();
       // One button on the AI's note: whom it's about and what they wrote, a few words, what the AI may do with them.
@@ -1213,14 +1217,16 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tidy();
   });
 
-  it('You is five rows that each say how they stand, and every page under them opens with a way back, without an error or a page wider than the phone', async () => {
+  it('You is your AI and five rows that each say how they stand, and every page under them opens with a way back, without an error or a page wider than the phone', async () => {
     await tab('You');
     await page.locator('.you-row.door', { hasText: 'panelowner · open' }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.rules', { hasText: /otherwise|No rules/ }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.mydata', { hasText: /can use your data/ }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.money', { hasText: /spent|held|earned|Nothing yet/ }).waitFor({ timeout: 10_000 });
     await page.locator('.you-row.phone', { hasText: /recovery code|Notifications off|can read it/ }).waitFor({ timeout: 10_000 });
-    expect(await page.locator('ion-item.you-row').count()).toBe(5);
+    // Your AI first (the My AI tab folded in, 25 Nov), then the five.
+    await page.locator('.you-row.ai', { hasText: /^Your AI/ }).waitFor();
+    expect(await page.locator('ion-item.you-row').count()).toBe(6);
     await tidy();
     const fine = async (backTo: string) => {
       await page.waitForTimeout(600);

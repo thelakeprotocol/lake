@@ -672,3 +672,14 @@ ion-card.lake-card ion-card-content .task-words { font-size: 17px; font-weight: 
 .write-sheet { padding: 4px 16px 16px; }
 .write-sheet .write-text { margin-bottom: 4px; }
 .write-sheet ion-input, .write-sheet ion-textarea { --padding-start: 12px; --padding-end: 12px; }
+/* The one-screen home (25 Nov): your AI as a chip, one handled sentence, the ask box above the tabs. */
+.ai-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; margin-right: 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--lake-muted) 35%, transparent); background: var(--lake-surface-2); color: var(--lake-text); font: inherit; font-size: 14px; font-weight: 600; }
+.ai-chip .ai-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lake-muted); }
+.ai-chip.here .ai-dot { background: var(--lake-mint); }
+.ai-chip.none { color: var(--lake-mint); }
+.handled-line { display: block; width: calc(100% - 32px); margin: 4px 16px 6px; padding: 0; text-align: left; background: none; border: 0; font: inherit; font-size: 15px; line-height: 1.45; color: var(--lake-muted); }
+.home-foot .home-ask { padding: 8px 12px 4px; background: var(--lake-bg); }
+
+.req.compact .compact-q { font-size: 16px; margin: 10px 0 4px; }
+.req.compact .req-lean { color: var(--lake-muted); font-size: 14px; margin: 4px 0 10px; }
+.handled-line .see-all { color: var(--lake-mint); white-space: nowrap; }

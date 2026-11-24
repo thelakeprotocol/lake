@@ -75,7 +75,7 @@ function WriteSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
       h(Btn, { label: 'Send', expand: 'block', disabled: busy || !to.trim() || !text.trim(), run: send })));
 }
 
-function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
+export function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
   const ai = c.lastBy === 'ai' ? shortName(c.notes.at(-1)?.answered?.by ?? '') || 'Your AI' : '';
   return h('ion-item', { button: true, detail: false, lines: 'full', class: `chatrow${c.unread ? ' unread' : ''}`, onClick: () => push(`#chat=${encodeURIComponent(c.key)}`) },
     h('div', { slot: 'start' }, h(Avatar, { name: c.name, ring: c.trust === 'lookalike' ? 'lookalike' : undefined })),

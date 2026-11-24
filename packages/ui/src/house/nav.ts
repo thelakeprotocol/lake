@@ -4,12 +4,12 @@
 //     #door: #free    #mydata: #access #data #move    #money: #offers #address #circles    #phone: #notify #key #about
 // Old addresses (in notifications already sent, and bookmarks) still land in the right place.
 
-export type Tab = 'chats' | 'inbox' | 'ai' | 'you';
+export type Tab = 'chats' | 'inbox' | 'ai' | 'you' | 'new';
 export type Route = { tab: Tab; page?: string; arg?: string };
 export const YOU_PAGES = ['door', 'notify', 'free', 'address', 'rules', 'access', 'offers', 'money', 'data', 'circles', 'key', 'move', 'about', 'mydata', 'phone', 'seen'] as const;
 /** The pages that open from another page under You: their Back goes to that page. */
 export const UNDER: Record<string, string> = { free: 'door', access: 'mydata', data: 'mydata', move: 'mydata', seen: 'mydata', offers: 'money', address: 'money', circles: 'money', notify: 'phone', key: 'phone', about: 'phone' };
-const OLD: Record<string, string> = { people: 'chats', today: 'inbox', home: 'inbox', needs: 'inbox', requests: 'inbox', myagent: 'ai', ais: 'ai', me: 'you', settings: 'you', keys: 'access', agents: 'access' };
+const OLD: Record<string, string> = { people: 'chats', today: 'inbox', home: 'new', needs: 'inbox', requests: 'inbox', myagent: 'ai', ais: 'ai', me: 'you', settings: 'you', keys: 'access', agents: 'access' };
 
 export function parse(hash = location.hash): Route {
   const h = hash.replace(/^#/, '');
@@ -19,14 +19,14 @@ export function parse(hash = location.hash): Route {
   if (k === 'want') return { tab: 'inbox', page: 'want', arg: v };
   if (k === 'aikey') return { tab: 'ai', page: 'aikey', arg: v };
   const name = OLD[k!] ?? k;
-  if (name === 'inbox' || name === 'ai' || name === 'you' || name === 'chats') return { tab: name };
+  if (name === 'inbox' || name === 'ai' || name === 'you' || name === 'chats' || name === 'new') return { tab: name };
   if ((YOU_PAGES as readonly string[]).includes(name!)) return { tab: 'you', page: name };
-  return { tab: 'inbox' };
+  return { tab: 'new' };
 }
 
 const fire = () => dispatchEvent(new HashChangeEvent('hashchange'));
 /** Opens a screen on top of this one: back returns here. */
-const LABELS: Record<string, string> = { chats: 'People', inbox: 'Today', ai: 'My AI', you: 'You', door: 'Your door', mydata: 'My data', money: 'Money', phone: 'This phone' };
+const LABELS: Record<string, string> = { new: 'Home', chats: 'People', inbox: 'Today', ai: 'My AI', you: 'You', door: 'Your door', mydata: 'My data', money: 'Money', phone: 'This phone' };
 export const push = (hash: string) => { const r = parse(); history.pushState({ pushed: true, from: r.page && LABELS[r.page] ? r.page : r.tab === 'you' && r.page ? '' : r.tab }, '', hash); fire(); };
 /** What Back says: the screen this one was opened from (nothing when that's a page with no short name), else the
  *  page it sits under, else the given one. */

@@ -24,6 +24,8 @@ export function YouTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const over = useHouse<Overview>({ kind: 'panel.overview', tz_offset: tz() });
   const money = useHouse<MoneyView>({ kind: 'panel.money' });
   const k = useHouse<{ recovery: { at: string } | null }>({ kind: 'panel.key' });
+  const list = useHouse<{ assistants?: Assistant[] }>({ kind: 'list' });
+  const ais = list.data?.assistants ?? [];
   const d = door.data && !door.data.error ? door.data : null;
   return h(Page, { title: 'You', big: true, status, footer: tabbar },
     !d ? h(Failed, { error: door.error }) : h('div', { class: 'profile' },
@@ -32,6 +34,8 @@ export function YouTab({ tabbar, status }: { tabbar: Child; status: Child }) {
         h('h2', { class: 'handle' }, d.handle ? `@${d.handle}` : 'No handle yet'),
         h('p', {}, d.name ?? (d.open ? 'Anyone\'s AI can write to you' : 'Nobody can write to you now')))),
     h(Section, {},
+      // Your AI first: the one helper the app is built around (25 Nov: the My AI tab folded in here).
+      h(Row, { icon: 'sparkles-outline', tint: 'violet', label: ais.length ? (ais.length === 1 ? `Your AI: ${shortName(ais[0]!.label)}` : `Your AIs: ${ais.map((a) => shortName(a.label)).join(', ')}`) : 'Your AI', sub: ais.length ? 'What it may do, and while you\'re away' : 'Connect one: it answers and asks for you', cls: 'you-row ai', onClick: () => push('#ai') }),
       stateRow('at-outline', 'mint', 'Your door', doorState(d), '#door', 'door'),
       stateRow('list-outline', 'mint', 'Rules', rulesState(rules.data?.rules), '#rules', 'rules'),
       stateRow('eye-outline', 'blue', 'My data', dataState(access.data, over.data?.record), '#mydata', 'mydata'),
