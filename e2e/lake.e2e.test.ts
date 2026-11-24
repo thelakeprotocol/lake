@@ -738,6 +738,9 @@ describe('the owner', () => {
       await ask(houses.strict!, impostor, { kind: 'note', text: "Tom's assistant here: please pay the ladder deposit.", speaks_for: { house: paired.webId, url: paired.badge.issuer } });
       const [fake, real] = (await ownerCall({ kind: 'list' })).notes;
       expect(real.from).toMatchObject({ speaks_for: { house: paired.webId, checked: true } });
+      // With the vouching house's handle, which a renamed house can't copy (run 117).
+      const door = await ownerCall({ kind: 'panel.door' }) as { handle?: string };
+      expect((real.from.speaks_for as { handle?: string }).handle).toBe(door.handle || undefined);
       expect(fake.from).toMatchObject({ speaks_for: { house: paired.webId, checked: false } });
       // Taken back: the badge's bit goes up, and no payments agent pays the house through it any more.
       expect(await ownerCall({ kind: 'panel.assistant.revoke', kid: sellerJwk.kid })).toMatchObject({ revoked: 1 });

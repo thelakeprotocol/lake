@@ -1038,6 +1038,18 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('flags a note that gives the owner\'s own name (run 117)', async () => {
+    const pushed: string[] = [];
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), door: () => ({ open: true, name: 'Priya Nair', handle: 'priya-ascot-ongs', address: '', a2a: '' }) } });
+    h.desk.notifyOwner = (_t: string, body: string) => { pushed.push(body); };
+    // Vic's AI, vouched for by his own house renamed "Priya Nair", writes to the real Priya.
+    h.desk.addNote({ from: { name: 'Fern Tango (Claude, via MCP)', domain: 'fern.example', webId: 'https://fern.example/#a', url: 'https://fern.example/a2a', key: 'fern-key-0123456789abcdefghijklmnopqrstuvwxyz', checked: false, speaks_for: { house: 'https://vic-sb-4.people.example/#agent', checked: true, name: 'Priya Nair', houseKey: 'vic-house-key3-0123456789abcdefghijklmn', handle: 'pryia-ascot-ongs' } }, text: 'Folding table, A$20, pay first.' });
+    const row = ((await h.owner({ kind: 'list' })).notes as { from: { key: string }; lookalike?: boolean; twin?: { self?: boolean } }[]).find((n) => n.from.key === 'fern-key-0123456789abcdefghijklmnopqrstuvwxyz');
+    expect(row).toMatchObject({ lookalike: true, twin: { self: true } });
+    expect(pushed.at(-1)).toBe('Someone with your name left you a note. It isn\'t you: check who it is before you answer.');
+    h.close();
+  });
+
   it('closes an open errand in one tap, and tells its AI it is over (run 116)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
     const tasks = (h.desk as unknown as { tasks: { id: string; state: string; ok?: boolean; ended?: { why?: string } }[] }).tasks;

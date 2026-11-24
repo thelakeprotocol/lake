@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
-  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, cartReceiptPath, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, pledgeReceiptPath, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
+  accessGrantDraft, offerPrice, CONSENT_REQUESTED, consentRecord, offerNotes, packId, statusEntry, statusListCredential, agreementDigest, agreementFor, allFields, readAccessGrant, cardUrlFor, lakeProfile, cartReceiptPath, cellCount, checkSpeaksFor, noteDecision, offerableFields, proveDomain, verifyLakeCard, sendLake, shardAnswer, isPurpose, nearMiss, offerWarnings, guardedFields, identifyingFields, PURPOSES, auditStudy, fieldSpec, rng, seedFrom, looksLikeInjection, cellOf, checkAttachment, digestSRI, pledgeReceiptPath, evaluate, issueCredential, makeEvent, ReplayGuard, signAgreement, signMessage,
   studyFields, studyId, predicateLines, keyThumbprint, verifyAgreementSignature, verifyCredential, verifyLakeData,
   type AgentCard, type Attachment, type Identity, type JWK, type LakeData, type LakeEvent, type LakePack, type LakeProfile, type Offer, type Rules, type SignedAgreement, type Study,
 } from '@thelakeprotocol/core';
@@ -102,6 +102,19 @@ export class Housekeeper {
   readonly replay = new ReplayGuard();
   /** When each visitor was last turned down for each purpose (house manners: one ask per purpose a day). */
   private declinedAt = new Map<string, number>();
+  /** Handles as the Lake lists them (its node's /handles), for a few minutes: what a card claims is checked against this. */
+  private handles = new Map<string, { url?: string; at: number }>();
+  private async handleUrl(h: string): Promise<string | undefined> {
+    const k = h.toLowerCase(), hit = this.handles.get(k);
+    if (hit && Date.now() - hit.at < 300_000) return hit.url;
+    let url: string | undefined;
+    for (const n of this.o.nodes ?? []) {
+      const r = await fetch(`${n.replace(/\/$/, '')}/handles/${encodeURIComponent(k)}`, { signal: AbortSignal.timeout(5000) }).then((x) => (x.ok ? x.json() as Promise<{ url?: string }> : null)).catch(() => null);
+      if (r?.url) { url = r.url; break; }
+    }
+    this.handles.set(k, { url, at: Date.now() });
+    return url;
+  }
   /** What each visitor asked for, and for what, in the last hour (house manners: one data, not a label per try). */
   private asked = new Map<string, { purpose: string; fields: string[]; at: number }[]>();
   /** Per pack: the last check, and when the whole chain was last verified. */
@@ -674,10 +687,22 @@ export class Housekeeper {
     // sat in Tom's panel looking like anyone's).
     // A sender that says which house it speaks for: checked against that house's own word (run 42: a neighbour's real
     // assistant and an impostor looked the same).
-    const speaks = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
+    const speaks0 = p.speaks_for ? await checkSpeaksFor(from, p.speaks_for, { sandbox: this.o.sandbox }) : undefined;
+    // A handle is shown only where the Lake's own list agrees: a card can claim any handle (round 161, Fable: a hand-run house
+    // could carry a neighbour's), so a sender's must point at its own address, a vouching house's at that house.
+    const handleOk = async (h: string | undefined, isIt: (url: string) => Promise<boolean> | boolean) => (h && (await this.handleUrl(h).then((u) => (u ? isIt(u) : false)).catch(() => false)) ? h : undefined);
+    const fromHandle = await handleOk(from.handle, (u) => u.replace(/\/$/, '') === String(card.supportedInterfaces?.[0]?.url ?? '').replace(/\/$/, ''));
+    const speaks = speaks0?.handle ? { ...speaks0, handle: await handleOk(speaks0.handle, async (u) => lakeProfile((await (await fetch(cardUrlFor(u), { signal: AbortSignal.timeout(5000) })).json()) as AgentCard)?.webId === speaks0.house) } : speaks0;
+    if (speaks && !speaks.handle) delete (speaks as { handle?: string }).handle;
+    // An AI whose house the owner blocked is blocked too: a block is of the household, not one key (run 117: Vic's AI's notes
+    // reached Mia and George after both had blocked his house).
+    if (speaks?.checked && speaks.houseKey && this.o.desk.muted.has(speaks.houseKey)) {
+      this.o.emit(makeEvent('decision', this.actor, `agent:${from.ownerDomain}`, { decision: 'decline', reason: 'an AI of a muted house' }));
+      return this.reply({ kind: 'decision', offerId: '', decision: 'decline', reason: "declined: this house doesn't take messages from this sender", holds: [], notes: [] });
+    }
     // The person the AI writes for, as they name themselves ("Alex"): shown as their words, never checked.
     const as = typeof p.as === 'string' ? p.as.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) : '';
-    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(from.handle ? { handle: from.handle.slice(0, 60) } : {}), ...(url ? { url } : {}), ...(from.role === 'house' ? { house: true as const } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
+    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(fromHandle ? { handle: fromHandle.slice(0, 60) } : {}), ...(url ? { url } : {}), ...(from.role === 'house' ? { house: true as const } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).

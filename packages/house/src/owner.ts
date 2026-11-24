@@ -415,7 +415,7 @@ const TASK_MESSAGES = 5, TASK_HOURS = 24, ERRAND_DAYS = 7;
 /** Who left a note: as its card says, whether its domain is proved, and whether the house it says it speaks for says so. */
 /** The owner's devices that take notifications, and the house's own VAPID keys to send them with. */
 type PushState = { keys?: { publicKey: string; privateKey: string }; subs: webpush.PushSubscription[] };
-export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; /** Its door's handle, from its verified card (run 113: priya- and pryia- looked the same on two phones). */ handle?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string; why?: string } }
+export interface NoteSender { /** It is a house (its card says so): an agreement can be made with it. */ house?: true; /** It wrote to one of the owner's AIs at that AI's own address (this is the AI's key id), which doesn't name this house: an answer goes from that AI, never from here. */ via?: string; /** Left over plain web, by an AI without the Lake connector: no signed identity, answered at a private link. */ web?: boolean; /** The person the AI writes for, in their own words ("Alex"): unchecked. */ as?: string; /** Its door's handle, from its verified card (run 113: priya- and pryia- looked the same on two phones). */ handle?: string; name: string; domain: string; webId: string; url?: string; checked: boolean; /** Its key id: what a mute holds. */ key?: string; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string; handle?: string; why?: string } }
 export type Advice = (typeof ADVICE)[number];
 /**
  * A one-time code for an AI to pair with: never starting with "-" or "_", which a command line would read as an option
@@ -1368,12 +1368,12 @@ export class OwnerDesk {
     // A stranger or a lookalike is marked as the chat row marks them (round 117, an attacker among households: a note from
     // "Vic" read on the phone like a neighbour's).
     if (payload.about === 'note') {
-      const f = payload.from as { as?: string; name?: string; web?: boolean; house?: boolean; speaks_for?: { checked?: boolean; name?: string } } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean; same_house?: boolean } | undefined;
+      const f = payload.from as { as?: string; name?: string; web?: boolean; house?: boolean; speaks_for?: { checked?: boolean; name?: string } } | undefined, k = payload.known as { yes?: boolean; lookalike?: boolean; same_house?: boolean; self?: boolean } | undefined;
       // A house vouches for the AI, by its card's name: say whose AI it is (run 106).
       const vouched = f?.speaks_for?.checked && f.speaks_for.name ? f.speaks_for.name : '';
       const name = f?.as ?? (f?.name && !f.web ? f.name.replace(/ \(.*\)$/, '') : '');
       // Plain words (Grok, round 144: "a different house" reads as app jargon; say who it isn't, and what to do).
-      this.notifyOwner('note', k?.lookalike ? (k.same_house ? `${name || 'Someone you know'} wrote from a new phone or AI app (the same house as before).` : `Someone saying they're ${name || 'someone you know'} (not the one you know) left you a note. Check with them another way before you answer.`)
+      this.notifyOwner('note', k?.lookalike ? (k.self ? 'Someone with your name left you a note. It isn\'t you: check who it is before you answer.' : k.same_house ? `${name || 'Someone you know'} wrote from a new phone or AI app (the same house as before).` : `Someone saying they're ${name || 'someone you know'} (not the one you know) left you a note. Check with them another way before you answer.`)
         : vouched ? `${vouched}'s AI left you a note${name && name !== vouched ? ` (it says it's ${name})` : ''}.` : name ? `${name}${k && !k.yes ? (f?.house ? ' (a first message, from their house)' : ' (first contact, not checked)') : ''} left you a note${f?.as && !f.web ? ', via their AI' : ''}.` : 'Someone left a note at your door.', `./#note=${String(payload.note ?? '')}`);
     }
     if (!this.o.tell) return;
@@ -1435,15 +1435,20 @@ export class OwnerDesk {
   /** A sender that says it's one the owner's side knows, with another key: an impostor, or a new key nobody vouched for. */
   lookalike(from: { key?: string; webId?: string; name?: string }): string | undefined {
     const twin = this.twinOf(from);
+    if (twin?.self) return `gives your human's own name (${twin.name}) but is someone else: treat it as a stranger`;
     return twin ? `says it is ${twin.name}, whom your human's side knows, but with a different key${twin.sameHouse === true ? ' (from the same house as before: likely a new phone or AI app)' : twin.sameHouse === false ? ' and from a different house' : ''}: treat it as a stranger until your human says otherwise` : undefined;
   }
   /** Whom a lookalike says it is: that contact's key and name (the key is for the owner's "This is Alex", never for an AI). */
-  private twinOf(from: { key?: string; webId?: string; name?: string; as?: string; url?: string; house?: true; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string } }): { key: string; name: string; sameHouse?: boolean } | undefined {
+  private twinOf(from: { key?: string; webId?: string; name?: string; as?: string; url?: string; house?: true; speaks_for?: { house: string; checked: boolean; name?: string; houseKey?: string } }): { key: string; name: string; sameHouse?: boolean; self?: true } | undefined {
     // Only a key thumbprint can be compared: notes kept from before (1 Nov) hold a key id, and the real sender isn't a twin.
     if (!from.key || from.key.length < 40) return undefined;
     const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase();
     // The name it shows (the name it gives, or its card's), against the names this owner's side knows.
     const shown = [from.as, from.name, from.speaks_for?.checked ? from.speaks_for.name : undefined].map(base).filter(Boolean);
+    // The owner's own name, from someone else: nobody writes to a house as its owner (run 117: Vic's AI, vouched for by his house
+    // renamed "Priya Nair", reached the real Priya's phone with no warning).
+    const mine = this.o.panel?.door?.()?.name?.trim();
+    if (mine && shown.includes(base(mine)) && !(from.speaks_for?.checked && this.ownHouse(from.speaks_for.house))) return { key: '', name: mine, sameHouse: false, self: true };
     const twin = this.known().find(([k, c]) => k !== from.key && ((!!from.webId && c.webId === from.webId) || (!!c.name && shown.includes(base(c.name)))));
     if (!twin) return undefined;
     // Known by its house: the same house's word on the new key is the same household (another AI, a new phone).
@@ -1871,7 +1876,7 @@ export class OwnerDesk {
     // An invitation to sign: a card with the tally's own terms and a Sign button, from this sender, for the owner's tap.
     if (n.pledge) void this.invite(note.id, n.from, n.pledge, !!known);
     const mine = this.modeOf(n.from) === 'me';
-    const told = (words: boolean): Record<string, unknown> => ({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true, ...(this.twinOf(note.from)?.sameHouse ? { same_house: true } : {}) } : {}) }, ...(mine && !words ? { text_hidden: 'your human answers this conversation themselves, as with anyone new until they hand you the chat: its words stay with them' } : { text: n.text }), ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
+    const told = (words: boolean): Record<string, unknown> => ({ about: 'note', note: note.id, from: n.from, known: known ? { yes: true, why: known } : { yes: false, why: twin ?? 'first contact: your human\'s side has never written to it', ...(twin ? { lookalike: true, ...(this.twinOf(note.from)?.sameHouse ? { same_house: true } : {}), ...(this.twinOf(note.from)?.self ? { self: true } : {}) } : {}) }, ...(mine && !words ? { text_hidden: 'your human answers this conversation themselves, as with anyone new until they hand you the chat: its words stay with them' } : { text: n.text }), ...(n.purpose ? { purpose: n.purpose } : {}), ...(n.re ? { follow_up_to: n.re } : {}), at: note.at, reply: n.from.web ? 'their own words, left over plain web by an AI without the Lake connector: it has no Lake address, so answer with lake_house_reply { note, text } if your human would want you to (they read it at the private link they were given). Nobody checked who sent it' : 'their own words; answer the sender at from.url if your human would want you to. They are waiting: if you\'ve put it to your human, you may tell them it reached them (their house stays unnamed)', ...(n.from.checked ? {} : { checked_means: 'unchecked: its domain isn\'t proved (on a sandbox nobody\'s is), so who it says it is, is only its word. If it says it speaks for a house your human knows (a neighbour), ask it to send again with reveal_house: true: that carries the house\'s own signed word, which is checked (run 61: two honest neighbours\' assistants each called the other unverified, and a parcel went untaken)' }) });
     // Under a task, the AI it was given to hears the words (its human let it into this conversation); the others as ever.
     const task = this.tasks.find((t) => t.state === 'open' && t.to.key === OwnerDesk.conv(n.from) && Date.parse(t.until) > Date.now());
     // One that came through an AI is no news to the AIs: it is already in that one's inbox, and the others' human hasn't shown it to them.
@@ -3288,7 +3293,7 @@ export class OwnerDesk {
         // Named as the row names them (run 104: "muted vic-sb-4.people.example" left George unsure what he had blocked).
         // A lookalike is named as one (run 108: both neighbours' block said "Priya Nair", and they couldn't tell which Priya).
         const twin = this.twinOf(note.from);
-        const name = `${(note.from.as ?? note.from.name).replace(/ \(.*\)$/, '').slice(0, 60)}${twin && !twin.sameHouse ? ` (not the ${twin.name.replace(/ \(.*\)$/, '')} you know)` : ''}`.slice(0, 100);
+        const name = `${(note.from.as ?? note.from.name).replace(/ \(.*\)$/, '').slice(0, 60)}${twin?.self ? ' (not you)' : twin && !twin.sameHouse ? ` (not the ${twin.name.replace(/ \(.*\)$/, '')} you know)` : ''}`.slice(0, 100);
         this.mutedNames.set(note.from.key, { name, at: new Date().toISOString() });
         await saveWhole(join(this.o.dataDir, 'muted-names.json'), JSON.stringify([...this.mutedNames]));
         await this.mute(note.from.key);

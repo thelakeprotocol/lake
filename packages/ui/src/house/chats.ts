@@ -53,7 +53,7 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
 }
 
 /** A lookalike's line in the list: calm when the new key writes from the same house, careful when not. */
-const twinLine = (name: string, sameHouse?: boolean) => sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}: not the ${name} you know` : `Says they're ${name}, with a different key`;
+const twinLine = (name: string, sameHouse?: boolean, self?: boolean) => self ? 'Has your name, but isn\'t you' : sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}: not the ${name} you know` : `Says they're ${name}, with a different key`;
 
 /** A note to someone by their handle, sent by this house with its own key; the chat opens with it. */
 function WriteSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -82,7 +82,7 @@ function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
     h('ion-label', {},
       h('div', { class: 'row-top' }, h('h3', {}, c.name), h('span', { class: 'row-time' }, when(c.at))),
       // With its handle, the one thing a lookalike can't copy (run 113: priya- and pryia- looked the same).
-      c.trust === 'lookalike' ? h('div', { class: `row-via${c.twin?.sameHouse ? '' : ' careful'}` }, twinLine(shortName(c.twin?.name ?? c.name), c.twin?.sameHouse), c.handle ? ` · @${c.handle}` : '') : null,
+      c.trust === 'lookalike' ? h('div', { class: `row-via${c.twin?.sameHouse ? '' : ' careful'}` }, twinLine(shortName(c.twin?.name ?? c.name), c.twin?.sameHouse, c.twin?.self), c.handle ? ` · @${c.handle}` : '') : null,
       c.toAi ? h('div', { class: 'row-via to-ai' }, h('ion-icon', { name: 'sparkles-outline' }), c.via) : null,
       twin && !c.toAi && c.trust !== 'lookalike' && c.agent ? h('div', { class: 'row-via' }, `Through ${shortName(c.agent)}`) : null,
       // What a new sender is, before it's opened (round 84: "Visitor from early.example: a person, a bot, spam?").
@@ -268,11 +268,12 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
   const mute = latest.from.key ? h(Btn, { key: 'mute', label: 'Block', fill: 'outline', color: 'medium', size: 'small', run: async () => { const r = await must<{ key?: string }>({ kind: 'panel.note.mute', id: latest.id }); blockedToast(c.name, r.key); back('#chats'); }, ask: blockAsk(c.name) }) : null;
   if (c.trust === 'lookalike') return h('div', { class: 'newstrip threat', role: 'note' },
     // What it is and what to do next (run 100: "the warning never tells me what to do next"); Grok's words, adapted.
-    twin?.sameHouse === true ? h('p', {}, h('b', {}, `Says they're ${name}: a new key, from the same house as before.`), ' Most likely a new phone or AI app. Still check with them another way before you send an address, money or codes.')
+    twin?.self ? h('p', {}, h('b', {}, 'Has your name, but isn\'t you.'), ' A neighbour may share it; so may someone pretending. Check who it is before you send an address, money or codes.')
+      : twin?.sameHouse === true ? h('p', {}, h('b', {}, `Says they're ${name}: a new key, from the same house as before.`), ' Most likely a new phone or AI app. Still check with them another way before you send an address, money or codes.')
       : twin?.sameHouse === false ? h('p', {}, h('b', {}, `Says they're ${name}, but writes from a different house.`), ` Don't send an address, money or codes here. Check with ${name} another way first.`)
       : h('p', {}, h('b', {}, `Says they're ${name || c.name}, with a different key.`), ' A new phone or AI app does that; so does someone pretending. Check with them another way before you send an address, money or codes.'),
     h('div', { class: 'newstrip-acts' },
-      twin && latest.from.key ? h(Btn, { key: 'same', label: `This is ${name}`, fill: 'outline', size: 'small', cls: 'same-person',
+      twin && !twin.self && latest.from.key ? h(Btn, { key: 'same', label: `This is ${name}`, fill: 'outline', size: 'small', cls: 'same-person',
         run: async () => { await must({ kind: 'panel.person.same', key: latest.from.key, as: twin.key }); void toast(`Filed with ${name}`); bump(); },
         ask: { header: `File this with ${name}?`, sub: `These messages join ${name}'s chat, and your AI answers them as it answers ${name}. Do it only if you're sure, for example they told you in person.`, button: `This is ${name}`, destructive: false } }) : null,
       mute));
@@ -305,7 +306,7 @@ function ChatInfo({ c, all, who, change, latest, close }: { c: Chat; all: Chat[]
       c.name !== c.agent && !c.web ? h(Row, { icon: 'person-outline', tint: 'amber', label: `"${c.name}"`, sub: 'The name its AI gives. Not checked.' }) : null,
       c.replyTo ? h(Row, { icon: c.replyTo.kind === 'email' ? 'mail-outline' : 'call-outline', tint: 'muted', label: c.replyTo.value, sub: 'Where they asked to be answered. Not checked; your AI doesn\'t get it.', cls: 'reach-row', below: h(ReachLinks, { r: c.replyTo, plain: true }) }) : null,
       // The house's word is about the AI, never the name it gives (round 110: "Priya" sat over a real house's check).
-      f.speaks_for ? h(Row, { icon: 'home-outline', label: f.speaks_for.checked ? (f.speaks_for.name ? `${f.speaks_for.name}'s house confirms this AI is theirs` : 'A house confirms this AI is theirs') : 'Says it speaks for a house', sub: `${f.speaks_for.name ? '' : `${f.speaks_for.house} `}${f.speaks_for.checked ? 'The AI\'s own name, and what it says about itself, aren\'t checked.' : '(not checked)'}` }) : null,
+      f.speaks_for ? h(Row, { icon: 'home-outline', label: f.speaks_for.checked ? (f.speaks_for.name ? `${f.speaks_for.name}'s house${f.speaks_for.handle ? ` (@${f.speaks_for.handle})` : ''} confirms this AI is theirs` : 'A house confirms this AI is theirs') : 'Says it speaks for a house', sub: `${f.speaks_for.name ? '' : `${f.speaks_for.house} `}${f.speaks_for.checked ? 'The AI\'s own name, and what it says about itself, aren\'t checked.' : '(not checked)'}` }) : null,
       h(Row, { icon: c.trust === 'known' ? 'checkmark-circle-outline' : 'sparkles-outline', tint: c.trust === 'known' ? 'mint' : 'amber', label: c.trust === 'known' ? 'Known' : c.trust === 'lookalike' ? 'Careful' : 'New', sub: c.trust === 'known' ? (c.why ?? 'You\'ve answered before') : c.trust === 'lookalike' ? (c.why ?? 'A name like someone you know') : 'Becomes known once you answer' }),
       c.keys.length > 1 ? h(Row, { icon: 'link-outline', label: `Writes with ${c.keys.length} keys`, sub: 'You said they\'re the same person', cls: 'joined',
         below: h(Btn, { label: 'Separate them', size: 'small', fill: 'outline', color: 'medium', run: async () => { for (const k of c.keys) if (k !== c.key) await must({ kind: 'panel.person.same', key: k, as: '' }); close(); bump(); }, done: 'Separated' }) }) : null,
