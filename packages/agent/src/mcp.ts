@@ -24,6 +24,15 @@ const WEIGHTY = /eyJ[\w-]{10,}\.[\w-]{10,}\.|"(jws|credential|envelope|signature
 const OFFER_PACKS = packs().filter((p) => p.intent).map((p) => p.title);
 
 /** What the Lake is, in facts an agent can check here: the same line opens lake_overview. */
+/** How long until an ISO time, in words. */
+const timeLeft = (iso: string) => { const h = (Date.parse(iso) - Date.now()) / 3_600_000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} minutes` : h < 48 ? `${Math.round(h)} hours` : `${Math.round(h / 24)} days`; };
+/** Whole words, and the promise in them (run 115: cut at 90 characters, "nobod: 2 of 4" hid what a signer would promise). */
+const clipWords = (t: string, n: number) => { const c = t.replace(/\s+/g, ' ').trim(); return (c.length <= n ? c : `${c.slice(0, n).replace(/\s+\S*$/, '')}…`).replace(/[.\s]+$/, ''); };
+type ListedPledge = { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; people_only?: boolean; blind?: boolean };
+/** Open pledges an agent can sign, nearest their threshold first. */
+const signable = (ps: ListedPledge[]) => ps.filter((x) => x.needs > 0 && !x.people_only && !x.blind && Date.parse(x.deadline) > Date.now()).sort((a, b) => a.needs - b.needs);
+/** One pledge as a line an agent can act on: what it says, where it stands, that nobody is bound until it fills, and the call. */
+const pledgeLine = (x: ListedPledge, tally: string) => `${clipWords(x.text, 200)}: ${x.count} of ${x.threshold} signed, ${x.needs} more needed, closes in ${timeLeft(x.deadline)}; nobody is bound unless it reaches ${x.threshold}. lake_pledge { action: "sign", tally: "${tally}", id: "${x.id}" }`;
 const LAKE_IS = `Each person's data stays in their own house, and their own rules answer every request at its door. Companies' agents come to the data instead of taking it: they price offers inside a house that only its owner sees, and run studies that pay houses while no record leaves. Any AI can reach a person here by the handle on their door ("ping stan"), and they answer from their phone. Each agent has a signed identity; payments can be held until delivery; pledges bind only once enough sign. This is a sandbox: synthetic data, play money, real signatures.`;
 
 /**
@@ -1156,16 +1165,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // 147: show the opportunity, not the protocol; runs 107-110: group tools were used only when a brief said so).
         const tallyUrl = specialists.find((x) => x.name === 'Tally')?.url, roomsUrl = specialists.find((x) => x.name === 'Rooms')?.url;
         const [tl, rl] = await Promise.all([tallyUrl ? (me.ask(tallyUrl, { kind: 'tally.list' }) as Promise<Record<string, unknown>>).catch(() => null) : null, roomsUrl ? (me.ask(roomsUrl, { kind: 'room.list' }) as Promise<Record<string, unknown>>).catch(() => null) : null]);
-        const left = (iso: string) => { const h = (Date.parse(iso) - Date.now()) / 3_600_000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} minutes` : h < 48 ? `${Math.round(h)} hours` : `${Math.round(h / 24)} days`; };
-        // Whole words, and the promise in them (run 115: cut at 90 characters, "nobod: 2 of 4" hid what a signer would promise).
-        const clipWords = (t: string, n: number) => { const c = t.replace(/\s+/g, ' ').trim(); return (c.length <= n ? c : `${c.slice(0, n).replace(/\s+\S*$/, '')}…`).replace(/[.\s]+$/, ''); };
         const joinNow = [
-          ...((tl?.pledges ?? []) as { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; people_only?: boolean; blind?: boolean }[])
-            .filter((x) => x.needs > 0 && !x.people_only && !x.blind && Date.parse(x.deadline) > Date.now()).sort((a, b) => a.needs - b.needs).slice(0, 3)
-            .map((x) => `${clipWords(x.text, 200)}: ${x.count} of ${x.threshold} signed, ${x.needs} more needed, closes in ${left(x.deadline)}; nobody is bound unless it reaches ${x.threshold}. lake_pledge { action: "sign", tally: "${tallyUrl}", id: "${x.id}" }`),
+          ...signable((tl?.pledges ?? []) as ListedPledge[]).slice(0, 3).map((x) => pledgeLine(x, tallyUrl!)),
           ...((rl?.rooms ?? []) as { id: string; topic?: string; members?: number; max: number; open: boolean; until: string }[])
             .filter((r) => r.open && (r.members ?? 0) < r.max).slice(0, 2)
-            .map((r) => `Room "${clipWords(r.topic || r.id, 120)}": ${r.members ?? 0} in, open ${left(r.until)} more. lake_room { action: "join", room: "${r.id}" }`),
+            .map((r) => `Room "${clipWords(r.topic || r.id, 120)}": ${r.members ?? 0} in, open ${timeLeft(r.until)} more. lake_room { action: "join", room: "${r.id}" }`),
         ];
         return json({
           lake: LAKE_IS,
@@ -2099,6 +2103,14 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const record = await recordOf(c.webId);
           return record ? { ...c, record } : c;
         }));
+        // Open pledges whose words match what was searched, where the agent is already looking (Grok, round 164; run 119: listed
+        // only on arrival, the pledge reached nobody, and the one signer found it through a search).
+        const STOP = new Set(['the', 'and', 'for', 'with', 'who', 'any', 'can', 'near', 'help', 'need', 'want', 'from', 'this', 'that']);
+        const words = [...((q.q ?? '').toLowerCase().match(/[a-z0-9]{3,}/g) ?? []), ...(q.tag ? [q.tag.slice(q.tag.indexOf(':') + 1).toLowerCase()] : [])].filter((w) => w.length >= 3 && !STOP.has(w));
+        const tallyAt = words.length ? (await me.find({ role: 'specialist' }).catch(() => [])).find((x) => x.name === 'Tally' && !x.lake)?.url : undefined;
+        const listed = tallyAt ? ((await me.ask(tallyAt, { kind: 'tally.list' }).catch(() => null)) as { pledges?: ListedPledge[] } | null)?.pledges ?? [] : [];
+        const pledges = tallyAt ? signable(listed).filter((x) => words.some((w) => x.text.toLowerCase().includes(w))).slice(0, 3).map((x) => pledgeLine(x, tallyAt)) : [];
+        const join = pledges.length ? { pledges_you_could_join: pledges } : {};
         // Nobody yet: say what keeps looking (13 Nov: an AI asked to find a ladder got [] and nothing to do next).
         const thing = standing ? q.tag!.slice(q.tag!.indexOf(':') + 1) : q.q?.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
         if (!withRecord.length && thing && (standing || q.q)) {
@@ -2106,15 +2118,15 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // lake_set_tags replaces the whole list: the suggestion keeps the tags this agent already has (14 Nov: following
           // it would have wiped an offering:bike).
           const keep = JSON.stringify([...tags.filter((t) => t !== want), want].slice(-8));
-          return json({ found: [], next: `${standing?.[1] === 'seeking' ? `Nobody is looking for "${thing}"` : `Nobody offers "${thing}"`} now. Leave it standing: lake_set_tags { tags: ${keep} } keeps looking (${standing ? '' : `selling one? offering:${thing} in place of seeking:${thing}; `}it replaces your whole list, so keep the tags you have), and whoever turns up later can write to you: it waits in your lake_inbox (and reaches your human's phone only while this connector is still awake for you).` });
+          return json({ found: [], ...join, next: `${standing?.[1] === 'seeking' ? `Nobody is looking for "${thing}"` : `Nobody offers "${thing}"`} now. Leave it standing: lake_set_tags { tags: ${keep} } keeps looking (${standing ? '' : `selling one? offering:${thing} in place of seeking:${thing}; `}it replaces your whole list, so keep the tags you have), and whoever turns up later can write to you: it waits in your lake_inbox (and reaches your human's phone only while this connector is still awake for you).` });
         }
         // A tag nobody holds yet: said so, since others may set it any minute (run 115: three agents searched for a tag before its
         // agent had started, and decided it "never showed up").
-        if (!withRecord.length && q.tag && !standing) return json({ found: [], note: `nobody has the tag "${q.tag.slice(0, 40)}" yet. Agents set their tags when they start, so search again in a minute; lake_set_tags { tags: [...] } adds your own.` });
+        if (!withRecord.length && q.tag && !standing) return json({ found: [], ...join, note: `nobody has the tag "${q.tag.slice(0, 40)}" yet. Agents set their tags when they start, so search again in a minute; lake_set_tags { tags: [...] } adds your own.` });
         // No filter (or a key it doesn't take, which arrives as none): said, and the first 25, not the whole directory
         // (round 79, an AI at the connector: { query } gave 40 cards, 21,000 characters, and nothing said why).
         if (!q.skill && !q.tag && !q.role && !q.q?.trim()) return json({ found: withRecord.slice(0, 25), note: `no filter given: ${withRecord.length} here${withRecord.length > 25 ? ', the first 25 shown' : ''}. lake_search takes q (words), tag, skill or role: narrow it with one of those` });
-        return json(withRecord);
+        return json(pledges.length ? [...withRecord, join] : withRecord);
       } catch (e) {
         return fail(e);
       }

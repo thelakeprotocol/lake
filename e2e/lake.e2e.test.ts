@@ -1694,6 +1694,9 @@ describe('the open door', () => {
     expect(await t(client, { kind: 'tally.sign', id: 'e2e-strike' })).toMatchObject({ kind: 'tally.signed', count: 1 });
     // An agent arriving sees it among what it could join now, in words, with the call (round 150).
     expect((await text('lake_overview')).join_now).toContainEqual(expect.stringMatching(/^We all stop answering ad agents: 1 of 2 signed, 1 more needed, closes in \d+ minutes; nobody is bound unless it reaches 2\. lake_pledge \{ action: "sign", .*id: "e2e-strike" \}$/));
+    // And a search for its words finds it, where an agent is already looking (round 165; run 119: listed only on arrival, it reached nobody).
+    const searched = await text('lake_search', { q: 'answering' });
+    expect(JSON.stringify(searched)).toMatch(/pledges_you_could_join.*We all stop answering ad agents: 1 of 2 signed, 1 more needed.*id: \\"e2e-strike\\"/);
     for (const who of [client, other]) expect((await t(who, { kind: 'tally.count', id: 'e2e-strike' })).signers).toBeUndefined();
     const triggered = await t(other, { kind: 'tally.sign', id: 'e2e-strike' });
     expect(triggered).toMatchObject({ kind: 'tally.triggered', count: 2, state: 'triggered' });
