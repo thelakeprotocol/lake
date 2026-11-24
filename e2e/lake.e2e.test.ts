@@ -511,6 +511,8 @@ describe('the owner', () => {
     expect(((await ownerCall({ kind: 'list' })).notes as { id: string; answered?: { text: string } }[]).find((x) => x.id === note.id)?.answered).toMatchObject({ text: 'Yes! 7pm at mine?' });
     const inbox = await tool('lake_inbox', { wait_seconds: 5 });
     expect(JSON.stringify(inbox)).toContain('Yes! 7pm at mine?');
+    // When Sam's house signed it, beside when it reached the AI (run 119: messages read as timed at the reader's next look).
+    expect(inbox.messages.find((m: { message: { kind: string } }) => m.message.kind === 'note.reply')).toMatchObject({ sent_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) });
     expect(inbox.messages.find((m: { message: { kind: string } }) => m.message.kind === 'note.reply')).toMatchObject({ message: { kind: 'note.reply', note: pinged.note, text: 'Yes! 7pm at mine?' } });
     expect(inbox.waiting_on).toBeUndefined();
     await c.close();

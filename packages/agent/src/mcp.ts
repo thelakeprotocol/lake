@@ -657,7 +657,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     const fromUrl = m.card.supportedInterfaces?.[0]?.url;
     // News from your own human's house is told apart by its address, never by what the message says about itself.
     const yours = !!house && !!fromUrl && fromUrl.replace(/\/a2a$/, '').replace(/\/$/, '') === house;
-    const item = { id: nextId++, at: new Date().toISOString(), from: { name: m.card.name, domain: m.from.ownerDomain, url: fromUrl, seq: fromSeq, ...(yours ? { your_house: true } : {}) }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
+    // When the sender signed it, beside when it reached this agent (run 119: an agent asleep saw every message timed at its next
+    // read, "inbox timestamps looked earlier than my sends… probably clock skew").
+    const iat = [(m.signed as { envelope?: { payload?: { iat?: unknown } } } | undefined)?.envelope?.payload?.iat, m.payload.iat].find((x): x is number => typeof x === 'number');
+    const item = { id: nextId++, at: new Date().toISOString(), ...(iat ? { sent_at: new Date(iat * 1000).toISOString() } : {}), from: { name: m.card.name, domain: m.from.ownerDomain, url: fromUrl, seq: fromSeq, ...(yours ? { your_house: true } : {}) }, message: m.payload, ...(checked ? { checked } : {}), signed: m.signed };
     received.push(item);
     if (received.length > 150) received.shift();
     if (quietly) return;
