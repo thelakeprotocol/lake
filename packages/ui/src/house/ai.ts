@@ -20,7 +20,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const [setup, setSetup] = useState(false);
   const [setupWhere, setSetupWhere] = useState<'house' | 'computer' | undefined>(undefined);
   const [preset, setPreset] = useState<'messages' | 'away'>('away');
-  const [keySheet, setKeySheet] = useState(false);
+  const [keySheet, setKeySheet] = useState(false), [runSheet, setRunSheet] = useState(false);
   const runner = useHouse<Runner>({ kind: 'panel.duty.runner' });
   if (!v.data) return h(Page, { title: 'My AI', big: true, status, footer: tabbar }, h(Failed, { error: v.error }));
   const live = (duty.data?.duties ?? []).filter(dutyLive);
@@ -40,33 +40,36 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
       ...v.data.removed.slice(0, 5).map((r) => h(Row, { key: r.kid, cls: 'removed-ai', icon: 'remove-circle-outline', tint: 'muted', label: shortName(r.label), sub: `Removed ${dayTime(r.removedAt)} · ${triedLine(r)}`, onClick: () => push(`#aikey=${encodeURIComponent(r.kid)}`) }))) : null,
     // Roles you hire an AI into (the day-1 plan, round 90): Messages and Away run on their own (in your house or on your
     // computer); Shopping is an AI you chat with, spending up to what you sign. Each row says who holds it, or Hire.
-    h(Section, { title: 'Roles', cls: 'roles' },
+    // What your AI may do while you're away, in plain verbs (25 Nov: "Roles" and "Set up" were one concept too many).
+    h(Section, { title: ais.length === 1 ? `While you're away, ${shortName(ais[0]!.label)} may…` : 'While you\'re away, your AI may…', cls: 'roles' },
       // Every AI that holds a role has its row, by the role it was hired into (round 106: a second runner's Replies didn't
       // show, and the row said to stop Away before hiring it); a role nobody holds offers Hire.
       ...(['messages', 'away'] as const).flatMap((role) => {
         const held = live.filter((x) => roleOfDuty(x) === role);
         return held.length ? held.map((d) => h('ion-item', { key: `${role}-${d.kid}`, lines: 'full', class: `lake-row duty-row role-${role}` },
           h('div', { slot: 'start', class: `row-icon tint-${d.state.on ? 'mint' : 'amber'}` }, h('ion-icon', { name: role === 'away' ? 'moon-outline' : 'chatbubbles-outline' })),
-          h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, ROLES[role].name, ' ', h(Pill, { text: d.state.on ? 'On now' : d.off?.night ? 'Paused tonight' : 'Off hours', tone: d.state.on ? 'mint' : 'amber' })),
+          h('ion-label', { class: 'ion-text-wrap' }, h('h3', {}, ROLES[role].may, ' ', h(Pill, { text: d.state.on ? 'On now' : d.off?.night ? 'Paused tonight' : 'Off hours', tone: d.state.on ? 'mint' : 'amber' })),
             h('p', {}, `${shortName(d.label)} · ${d.hours ? `${d.hours.from}–${d.hours.to}` : 'While you\'re away'} · ${d.state.on ? d.state.used : d.summary.handled} of ${d.cap} today · until ${new Date(d.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}`),
             d.runner ? h('p', {}, watching(d.runner)) : null, !d.state.on && !/off hours/.test(d.state.why) ? h('p', { class: 'warn-text' }, d.state.why) : null),
           h('div', { slot: 'end' }, h(Btn, { label: 'Stop', size: 'small', fill: 'outline', color: 'danger', run: () => call({ kind: 'panel.duty.off', kid: d.kid }), ask: { header: `Stop ${shortName(d.label)}'s ${ROLES[role].name}?`, sub: 'It stops now. You can hire it again any time.', button: 'Stop' } }))))
-          : [h(Row, { key: role, icon: role === 'away' ? 'moon-outline' : 'chatbubbles-outline', tint: 'violet', label: ROLES[role].name, sub: ROLES[role].line, cls: `role-${role}`, note: 'Set up', onClick: () => { setPreset(role); setSetup(true); } })];
+          : [h(Row, { key: role, icon: role === 'away' ? 'moon-outline' : 'chatbubbles-outline', tint: 'violet', label: ROLES[role].may, sub: 'Off · never money', cls: `role-${role}`, note: 'Set up', onClick: () => { setPreset(role); setSetup(true); } })];
       }),
       // Every AI with a spending allowance (round 106: two had one, the row named one).
       ...(() => {
         const shoppers = ais.filter((a) => rolesOf(a, live).includes('shopping'));
         const can = ais.filter((a) => a.canHaveAllowance && !onDuty.has(a.kid));
-        return shoppers.length ? shoppers.map((s) => h(Row, { key: `shopping-${s.kid}`, icon: 'wallet-outline', tint: 'mint', label: ROLES.shopping.name, sub: `${shortName(s.label)} · up to ${money$(s.allowance!.amount, s.allowance!.currency)} · until ${new Date(s.allowance!.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}`, cls: 'role-shopping', onClick: () => push(`#aikey=${encodeURIComponent(s.kid)}`) }))
-          : [h(Row, { key: 'shopping', icon: 'wallet-outline', tint: 'violet', label: ROLES.shopping.name, sub: can.length ? ROLES.shopping.line : `${ROLES.shopping.line} Connect an AI you chat with first.`, cls: 'role-shopping', note: 'Set up', onClick: () => (can.length ? push(`#aikey=${encodeURIComponent(can[0]!.kid)}`) : setConnect(true)) })];
+        return shoppers.length ? shoppers.map((s) => h(Row, { key: `shopping-${s.kid}`, icon: 'wallet-outline', tint: 'mint', label: ROLES.shopping.may, sub: `${shortName(s.label)} · up to ${money$(s.allowance!.amount, s.allowance!.currency)} · until ${new Date(s.allowance!.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}`, cls: 'role-shopping', onClick: () => push(`#aikey=${encodeURIComponent(s.kid)}`) }))
+          : [h(Row, { key: 'shopping', icon: 'wallet-outline', tint: 'violet', label: ROLES.shopping.may, sub: can.length ? 'Off' : 'Connect an AI you chat with first', cls: 'role-shopping', note: 'Set up', onClick: () => (can.length ? push(`#aikey=${encodeURIComponent(can[0]!.kid)}`) : setConnect(true)) })];
       })()),
     // Two ways to run it, said plainly (13 Nov: "what about just log in with your Claude subscription?"). A subscription
     // signs in only to Claude's own apps, so it runs your AI on your computer, in Claude Code; a house runs it with a key.
-    runner.data ? h(Section, { title: 'Where your AI runs' },
-      h(Row, { icon: 'laptop-outline', tint: 'violet', label: 'On your computer', sub: 'Uses Claude Code, on your Claude plan, while your computer is on.', onClick: () => { setSetupWhere('computer'); setSetup(true); } }),
+    // Where it runs, as one plain row; the two ways sit behind it (25 Nov: one concept fewer on the page).
+    runner.data ? h(Section, { key: 'keep', cls: 'keep-on' }, h(Row, { icon: 'time-outline', tint: 'violet', label: ais.length === 1 ? `Keep ${shortName(ais[0]!.label)} on all the time` : 'Keep your AI on all the time', sub: runner.data.running ? 'On: it runs in your house, day and night' : 'Off: it works while you chat with it', cls: 'keep-row', onClick: () => setRunSheet(true) })) : null,
+    runner.data ? h(Sheet, { key: 'runs', open: runSheet, onClose: () => setRunSheet(false), title: 'Keep it on all the time' }, h(Section, {},
+      h(Row, { icon: 'laptop-outline', tint: 'violet', label: 'On your computer', sub: 'Uses Claude Code, on your Claude plan, while your computer is on.', onClick: () => { setRunSheet(false); setSetupWhere('computer'); setSetup(true); } }),
       runner.data.model?.whose === 'yours'
         ? h(Row, { icon: 'key-outline', tint: 'violet', label: 'Your own Claude key', sub: `${runner.data.model.model ?? 'Claude'}${runner.data.running ? ' · running in your house' : ''}`, note: h(Btn, { label: 'Remove', size: 'small', fill: 'clear', color: 'danger', run: () => must({ kind: 'panel.model.clear' }), ask: { header: 'Remove your Claude key from your house?', sub: runner.data.running ? 'Your AI on duty stops unless your house offers one.' : undefined, button: 'Remove' } }) })
-        : h(Row, { icon: 'key-outline', tint: 'violet', label: runner.data.model ? 'Always on: your house offers one' : 'Always on, in your house', sub: runner.data.model ? `Awake whenever your house is${runner.data.running ? ' (running now)' : ''}. Or use your own Claude API key.` : 'Runs any time, with your own Claude API key.', onClick: () => setKeySheet(true) })) : null,
+        : h(Row, { icon: 'key-outline', tint: 'violet', label: runner.data.model ? 'Always on: your house offers one' : 'Always on, in your house', sub: runner.data.model ? `Awake whenever your house is${runner.data.running ? ' (running now)' : ''}. Or use your own Claude API key.` : 'Runs any time, with your own Claude API key.', onClick: () => { setRunSheet(false); setKeySheet(true); } }))) : null,
     h(Night, { log: duty.data }),
     h(Sheet, { open: connect, onClose: () => setConnect(false), title: 'Give your AI a key' }, h(ConnectSheet, { houseUrl: houseBase(), ais })),
     h(Sheet, { open: keySheet, onClose: () => setKeySheet(false), title: 'Your own Claude key' }, h(KeySheet, { done: () => setKeySheet(false) })),

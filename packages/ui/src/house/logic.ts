@@ -227,11 +227,12 @@ export const DUTY_KINDS: [string, string][] = [['reply', 'Reply to people you kn
  */
 export const DUTY_CLI = { version: '0.3.1', live: false, menu: false };
 export type Role = 'messages' | 'shopping' | 'away';
-export const ROLES: Record<Role, { name: string; line: string }> = {
-  // "Replies", not "Messages": each AI's row already says "Messages only" for what it may read.
-  messages: { name: 'Replies', line: 'Answers people you know while you\'re out. Never money.' },
-  shopping: { name: 'Shopping', line: 'Finds what you\'re looking for and pays, up to what you allow.' },
-  away: { name: 'Away', line: 'At night: replies, and holds times for you to confirm. Never money.' },
+export const ROLES: Record<Role, { name: string; line: string; may: string }> = {
+  // "Replies", not "Messages": each AI's row already says "Messages only" for what it may read. `may` is the plain verb the
+  // AI page leads with (25 Nov: "While you're away, Atlas may…").
+  messages: { name: 'Replies', line: 'Answers people you know while you\'re out. Never money.', may: 'Answer people you know' },
+  shopping: { name: 'Shopping', line: 'Finds what you\'re looking for and pays, up to what you allow.', may: 'Spend on what you asked for, up to a limit' },
+  away: { name: 'Away', line: 'At night: replies, and holds times for you to confirm. Never money.', may: 'At night, answer and hold times for you to confirm' },
 };
 /**
  * The role an AI on duty was hired into: as the owner chose it, or, for a grant from before that was kept, by its hours
