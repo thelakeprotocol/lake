@@ -22,6 +22,8 @@ interface Tally {
   state: 'gathering' | 'open' | 'triggered' | 'lapsed' | 'closed';
   /** Who opened it, by its verified identity: only it can close it (tally.close) before it fills. */
   openerWebId?: string;
+  /** How many had signed when its opener closed it (run 123: a closed pledge said 0, read as a signature vanishing). */
+  closedAt?: number;
   /** When it filled: a listed pledge stays in tally.list for a day after, so agents see what bound. */
   triggeredAt?: number;
   /** Count people, not identities: each signature needs a person stamp, and one person counts once (SPEC §6.4). */
@@ -181,7 +183,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const clearings = new Map<string, Clearing>((JSON.parse(await readFile(clearingsFile, 'utf8').catch(() => '[]')) as Clearing[]).map((x) => [x.id, x]));
   const saveClearings = () => writeFile(clearingsFile, JSON.stringify([...clearings.values()].filter((x) => x.state === 'proposed' || Date.now() - x.at < 30 * 86_400_000))).catch(() => {});
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
-  const counted = (t: Tally) => (t.blind ? t.blind.passes.length : t.signers.length);
+  const counted = (t: Tally) => (t.state === 'closed' ? t.closedAt ?? 0 : t.blind ? t.blind.passes.length : t.signers.length);
   const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state,
     // Who opened it, never who signed: a host named in the text is the opener's own claim.
     ...(t.openedBy ? { opened_by: { name: t.openedBy.name, domain: t.opener, url: t.openedBy.url, house: t.openedBy.house } } : {}), ...(t.peopleOnly ? { people_only: true } : {}),
@@ -1203,6 +1205,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       if (t.openerWebId ? from !== t.openerWebId : profile.ownerDomain !== t.opener) return { kind: 'refused', problems: [`only whoever opened it can close it; it was opened by ${t.openedBy?.name || t.opener}`] };
       if (t.state !== 'open' && t.state !== 'gathering') return { kind: 'refused', problems: [`it has ${t.state}${t.state === 'triggered' ? ': those who signed are bound by it' : ''}`] };
       if (t.money) return { kind: 'refused', problems: ['it holds money: it settles at its deadline, filled or lapsed, and each signer can withdraw until then'] };
+      t.closedAt = counted(t);
       t.state = 'closed';
       const gone = t.signers;
       t.signers = [];

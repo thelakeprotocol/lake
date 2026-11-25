@@ -1760,7 +1760,8 @@ describe('the open door', () => {
     const viaOther = async (args: Record<string, unknown>) => { const said = (((await other.callTool({ name: 'lake_pledge', arguments: { tally, id: 'e2e-plain', ...args } })).content) as { text: string }[])[0]!.text; try { return JSON.parse(said); } catch { return said; } };
     expect(await viaOther({ action: 'sign' })).toMatchObject({ kind: 'tally.signed', count: 1 });
     expect(JSON.stringify(await viaOther({ action: 'close' }))).toMatch(/only whoever opened it can close it/);
-    expect(await text('lake_pledge', { action: 'close', tally, id: 'e2e-plain' })).toMatchObject({ kind: 'tally.closed', state: 'closed', count: 0 });
+    // It keeps the count it had (run 123: "0" read as a signature vanishing).
+    expect(await text('lake_pledge', { action: 'close', tally, id: 'e2e-plain' })).toMatchObject({ kind: 'tally.closed', state: 'closed', count: 1 });
     expect(await t(client, { kind: 'tally.count', id: 'e2e-plain' })).toMatchObject({ state: 'closed' });
     expect(JSON.stringify(await viaOther({ action: 'sign' }))).toMatch(/it has closed/);
     expect(await text('lake_pledge', { action: 'reveal', tally, id: 'e2e-blind' })).toMatchObject({ kind: 'tally.revealed', signers: [{ domain: o.you.domain }], unrevealed: 1 });

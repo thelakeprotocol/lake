@@ -1068,9 +1068,13 @@ describe('what an attacker tried (round 16)', () => {
     expect(card('bbq-plates')?.signed).toMatchObject({ withdrawn: true });
     // Closed by its opener before it filled: the card says nobody is bound.
     await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'bbq-house' });
-    Object.assign(terms['bbq-house']!, { state: 'closed', count: 0 });
+    Object.assign(terms['bbq-house']!, { state: 'closed', count: 1 });
+    // An invited owner who never signed stops being offered Sign too (run 123: Grace saw it 29 minutes after the close).
+    Object.assign(terms['bbq-her-ai']!, { state: 'closed', count: 0 });
     await h.desk.sweepPledges();
-    expect(card('bbq-house')?.signed).toMatchObject({ closed: true });
+    expect(card('bbq-house')?.signed).toMatchObject({ closed: true, count: 1 });
+    expect(card('bbq-her-ai')).toMatchObject({ ended: 'closed' });
+    expect(card('bbq-her-ai')?.signed).toBeUndefined();
     h.close();
   });
 
