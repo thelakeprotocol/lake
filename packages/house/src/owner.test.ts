@@ -1056,8 +1056,11 @@ describe('what an attacker tried (round 16)', () => {
     // Opened by Priya's own house, or by an AI her house vouches for that sent the invite itself: nothing to say.
     await invite('bbq-house', from('dee'));
     expect(card('bbq-house')?.mentions).toBeUndefined();
-    await invite('bbq-her-ai', { ...from('fern'), speaks_for: { house: `${priya}/#me`, checked: true, houseKey: 'priya-house-key-0123456789abcdefghijklmnop' } });
+    await invite('bbq-her-ai', { ...from('fern'), speaks_for: { house: `${priya}/#me`, checked: true, name: 'Priya Nair', houseKey: 'priya-house-key-0123456789abcdefghijklmnop' } });
     expect(card('bbq-her-ai')?.mentions).toBeUndefined();
+    // Her AI opened it and invites itself: the card says whose AI it is, by her house's word (run 122).
+    expect(card('bbq-her-ai')?.openedBy).toMatchObject({ vouched: 'Priya Nair' });
+    expect(card('bbq-plates')?.openedBy?.vouched).toBeUndefined();
     // Withdrawn from the card: it says so, and the sweep leaves it (run 121b: "you signed · 0 of 3 so far").
     await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'bbq-plates' });
     await h.owner({ kind: 'panel.pledge.withdraw', tally: 'https://tally.example/a2a', id: 'bbq-plates' });

@@ -9,6 +9,8 @@ import { back, push } from './nav';
 
 /** The code you hand your AI, kept so a tab change doesn't lose it while you copy it. */
 let invite: { msg: string; until: number; made: number } | null = null;
+// The AI that just used the code, said once with its Lake name (run 122: Tom never learned his AI was "Ivory Cinder").
+let paired: Assistant | null = null;
 let dutyCode: { code: string; cmd: string; until: number; made: number } | null = null;
 
 type Runner = { can: boolean; model: { provider: string; model?: string; whose: 'yours' | 'house' } | null; running: boolean; since?: string };
@@ -92,7 +94,12 @@ function ConnectSheet({ houseUrl, ais }: { houseUrl: string; ais: Assistant[] })
   const redraw = useRedraw();
   const [reads, setReads] = useState<Reads[]>([]);
   useEffect(() => { const t = setInterval(redraw, 30_000); return () => clearInterval(t); }, []);
-  if (invite && (invite.until < Date.now() || ais.some((a) => Date.parse(a.addedAt) >= invite!.made - 1000))) invite = null;
+  const fresh = invite ? ais.find((a) => Date.parse(a.addedAt) >= invite!.made - 1000) : undefined;
+  if (fresh) paired = fresh;
+  if (invite && (invite.until < Date.now() || fresh)) invite = null;
+  if (paired) return h('div', { class: 'sheet-body paired-note' },
+    h('p', {}, `Connected. On the Lake your ${appOf(paired.label) ?? 'AI'} is called ${shortName(paired.label)}. Go back to ${appOf(paired.label) ?? 'it'}.`),
+    h('ion-button', { expand: 'block', fill: 'clear', onClick: () => { paired = null; redraw(); } }, 'OK'));
   if (!invite) return h('div', { class: 'sheet-body' },
     h('p', {}, 'Your AI needs the Lake connector. You get a message with a one-time code to paste into it.'),
     h(ReadsToggles, { value: reads, onChange: setReads }),

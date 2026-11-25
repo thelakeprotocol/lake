@@ -369,6 +369,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // No reload: the house says something changed, and the app shows it; the code has done its job and goes.
     await page.locator('ion-item.ai-row', { hasText: 'Nova' }).getByText(/Here now/).waitFor({ timeout: 5000 });
     await box.waitFor({ state: 'detached', timeout: 3000 });
+    // In its place, once: what the AI is called on the Lake (run 122: Tom never learned his AI was "Ivory Cinder").
+    await sheet().getByText('Connected. On the Lake your Claude is called Nova. Go back to Claude.').waitFor({ timeout: 3000 });
+    await sheet().getByRole('button', { name: 'OK' }).click();
+    await sheet().getByRole('button', { name: 'Make the code' }).waitFor({ timeout: 3000 });
     await closeSheet();
     await tidy();
     // The house refuses it the owner's records until the owner says otherwise, on the AI's own page.

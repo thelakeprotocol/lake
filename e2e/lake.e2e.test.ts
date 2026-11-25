@@ -946,6 +946,15 @@ describe('the owner', () => {
       expect(await ownerCall({ kind: 'panel.availability.set', availability: { tz: 'UTC', free: ['mon-fri 09:00-17:00'], meetings: 30 } })).toEqual({ ok: true });
       const { code } = await ownerCall({ kind: 'panel.assistant.invite', label: 'free-busy test' });
       expect(await a.call('lake_house_connect', { code, house_url: houses.strict })).toMatchObject({ paired: true });
+      // Holding a key, its pings carry its house's word by default, no `from` needed (run 122: Tom's AI gave none and read as a
+      // stranger); reveal_house: false leaves it off.
+      expect(await ownerCall({ kind: 'panel.door.set', open: true, name: 'Sam', handle: 'sam' })).toEqual({ ok: true });
+      for (let i = 0; i < 20 && (await fetch(`${node}/handles/sam`)).status !== 200; i++) await new Promise((ok) => setTimeout(ok, 300));
+      expect(await a.call('lake_ping', { who: 'sam', about: 'e2e: endorsed by default' })).toMatchObject({ kind: 'pinged' });
+      expect(await a.call('lake_ping', { who: 'sam', about: 'e2e: on purpose without', reveal_house: false })).toMatchObject({ kind: 'pinged' });
+      const pinged = (await ownerCall({ kind: 'list' })).notes as { text: string; from: { speaks_for?: { checked: boolean } } }[];
+      expect(pinged.find((n) => n.text === 'e2e: endorsed by default')?.from.speaks_for).toMatchObject({ checked: true });
+      expect(pinged.find((n) => n.text === 'e2e: on purpose without')?.from.speaks_for).toBeUndefined();
       const day = new Date(); day.setUTCDate(day.getUTCDate() + ((8 - day.getUTCDay()) % 7 || 7)); // next Monday
       const monday10 = `${day.toISOString().slice(0, 10)}T10:00:00Z`;
       const opened = await a.call('lake_count', { action: 'open', id: 'fb:e2e-monday', options: ['free', 'busy'], minutes: 10 });
