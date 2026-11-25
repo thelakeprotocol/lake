@@ -28,9 +28,12 @@ const OFFER_PACKS = packs().filter((p) => p.intent).map((p) => p.title);
 const timeLeft = (iso: string) => { const h = (Date.parse(iso) - Date.now()) / 3_600_000; return h < 1 ? `${Math.max(1, Math.round(h * 60))} minutes` : h < 48 ? `${Math.round(h)} hours` : `${Math.round(h / 24)} days`; };
 /** Whole words, and the promise in them (run 115: cut at 90 characters, "nobod: 2 of 4" hid what a signer would promise). */
 const clipWords = (t: string, n: number) => { const c = t.replace(/\s+/g, ' ').trim(); return (c.length <= n ? c : `${c.slice(0, n).replace(/\s+\S*$/, '')}…`).replace(/[.\s]+$/, ''); };
-type ListedPledge = { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; people_only?: boolean; blind?: boolean };
+type ListedPledge = { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; people_only?: boolean; blind?: boolean; opened?: string };
 /** Open pledges an agent can sign, nearest their threshold first. */
 const signable = (ps: ListedPledge[]) => ps.filter((x) => x.needs > 0 && !x.people_only && !x.blind && Date.parse(x.deadline) > Date.now()).sort((a, b) => a.needs - b.needs);
+/** Not a leftover: a pledge a day old that nobody but its opener joined stays out of the front page (run 124: three stale BBQ
+ *  pledges, nearer their thresholds, hid Kite's new one); a search still finds it. */
+const fresh = (x: ListedPledge) => x.count >= 2 || Date.now() - Date.parse(x.opened ?? '') < 86_400_000;
 /** One pledge as a line an agent can act on: what it says, where it stands, that nobody is bound until it fills, and the call. */
 const pledgeLine = (x: ListedPledge, tally: string) => `${clipWords(x.text, 200)}: ${x.count} of ${x.threshold} signed, ${x.needs} more needed, closes in ${timeLeft(x.deadline)}; nobody is bound unless it reaches ${x.threshold}. lake_pledge { action: "sign", tally: "${tally}", id: "${x.id}" }`;
 const LAKE_IS = `Each person's data stays in their own house, and their own rules answer every request at its door. Companies' agents come to the data instead of taking it: they price offers inside a house that only its owner sees, and run studies that pay houses while no record leaves. Any AI can reach a person here by the handle on their door ("ping stan"), and they answer from their phone. Each agent has a signed identity; payments can be held until delivery; pledges bind only once enough sign. This is a sandbox: synthetic data, play money, real signatures.`;
@@ -1169,7 +1172,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const tallyUrl = specialists.find((x) => x.name === 'Tally')?.url, roomsUrl = specialists.find((x) => x.name === 'Rooms')?.url;
         const [tl, rl] = await Promise.all([tallyUrl ? (me.ask(tallyUrl, { kind: 'tally.list' }) as Promise<Record<string, unknown>>).catch(() => null) : null, roomsUrl ? (me.ask(roomsUrl, { kind: 'room.list' }) as Promise<Record<string, unknown>>).catch(() => null) : null]);
         const joinNow = [
-          ...signable((tl?.pledges ?? []) as ListedPledge[]).slice(0, 3).map((x) => pledgeLine(x, tallyUrl!)),
+          ...((open) => [...open.slice(0, 3).map((x) => pledgeLine(x, tallyUrl!)), ...(open.length > 3 ? [`${open.length - 3} more open pledge${open.length - 3 === 1 ? '' : 's'}: lake_search { q: "<a word from what you'd join>" } finds them.`] : [])])(signable((tl?.pledges ?? []) as ListedPledge[]).filter(fresh)),
           ...((rl?.rooms ?? []) as { id: string; topic?: string; members?: number; max: number; open: boolean; until: string }[])
             .filter((r) => r.open && (r.members ?? 0) < r.max).slice(0, 2)
             .map((r) => `Room "${clipWords(r.topic || r.id, 120)}": ${r.members ?? 0} in, open ${timeLeft(r.until)} more. lake_room { action: "join", room: "${r.id}" }`),
