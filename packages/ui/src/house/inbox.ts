@@ -332,7 +332,9 @@ function PersonStamp() {
   const p = o.data?.person;
   if (!p || p.stamped) return null;
   return h('div', { class: 'private-line person-stamp' }, h('ion-icon', { name: 'finger-print-outline' }),
-    p.checker ? [' It counts each person once: get your person stamp first. ', h(Btn, { key: 'st', label: 'Get my person stamp', size: 'small', fill: 'outline', run: async () => must({ kind: 'panel.person.request', consent: await signEnvelope({ kind: 'personhood.consent', house: state.webId }, key, state.webId || 'owner') }), done: 'Stamped: you can sign it now.' })]
+    // What the stamp is, before anyone presses Sign (run 125: all five were refused at Sign and called it "not explained";
+    // ChatGPT's words, round 180).
+    p.checker ? [' It counts each person once. Signing needs a quick check on this phone that you\'re one real person; nobody learns who you are. ', h(Btn, { key: 'st', label: 'Get my person stamp', size: 'small', fill: 'outline', run: async () => must({ kind: 'panel.person.request', consent: await signEnvelope({ kind: 'personhood.consent', house: state.webId }, key, state.webId || 'owner') }), done: 'Stamped: you count as one real person for pledges like this, and nobody learns who you are. You can sign it now.' })]
       : ' It counts each person once, and this house has no person checker set, so it can\'t be signed from here.');
 }
 

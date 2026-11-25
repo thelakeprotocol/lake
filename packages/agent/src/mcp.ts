@@ -1482,10 +1482,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
 
   server.registerTool(
     'lake_house_reply',
-    { description: 'Answer a note at your human\'s door through their house. Two cases. A note left over plain web, by someone whose AI has no Lake connector (house.news note with from.web: true): it has no Lake address, so its sender reads your answer at the private link it was given. And any conversation your human gave you a task about (house.news about "task"; lake_house { view: "tasks" } has their words and the conversation): their house sends your answer to that note\'s sender, marked as from their AI, a few messages a task, even to someone new; when they wrote to you at your own address (the task says wrote_to), the answer goes from you, their house counts it, and it can\'t name their house. Answer only what your human would want said; their house stays unnamed. Other notes: reply to the sender\'s address with lake_ask.', inputSchema: { note: z.string().describe('The note\'s id (house.news, or lake_house { view: "requests" } notes)'), text: z.string().max(1000), final: z.boolean().default(true).describe('false for a holding reply ("it reached them; they decide"): the sender is told an answer is still to come and to look again') } },
+    { description: 'Answer a note at your human\'s door through their house. Two cases. A note left over plain web, by someone whose AI has no Lake connector (house.news note with from.web: true): it has no Lake address, so its sender reads your answer at the private link it was given. And any conversation your human gave you a task about (house.news about "task"; lake_house { view: "tasks" } has their words and the conversation): their house sends your answer to that note\'s sender, marked as from their AI, a few messages a task, even to someone new; when they wrote to you at your own address (the task says wrote_to), the answer goes from you, their house counts it, and its words don\'t name your human\'s house or address (its signed word that you are their AI is fine). Answer only what your human would want said. Other notes: reply to the sender\'s address with lake_ask.', inputSchema: { note: z.string().describe('The note\'s id (house.news, or lake_house { view: "requests" } notes)'), text: z.string().max(1000), final: z.boolean().default(true).describe('false for a holding reply ("it reached them; they decide"): the sender is told an answer is still to come and to look again') } },
     async (a) => {
       try {
-        const r = (await houseCall({ kind: 'assistant.reply', note: a.note, text: a.text, final: a.final })) as { send?: { url: string; key: string; re?: string }; place?: string };
+        const r = (await houseCall({ kind: 'assistant.reply', note: a.note, text: a.text, final: a.final })) as { send?: { url: string; key: string; re?: string; house?: boolean }; place?: string };
         if (!r.send || !r.place) return json(r);
         // They wrote to this agent's own address, which doesn't name its human's house: the house counted the answer and
         // said where it goes; it goes from here, as this agent, to the key that signed their message, and the house hears
@@ -1497,7 +1497,10 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           cardOf.delete(r.send.url);
           const w = await whoIs(r.send.url);
           if (w.key !== r.send.key) throw new Error('the address their message came from now shows another key: tell your human (outcome "back")');
-          const got = await (await agent()).ask(r.send.url, { kind: 'message', text: a.text, ...(r.send.re ? { re: r.send.re } : {}) }, { task: true });
+          // A house takes a note; a message to it is malformed. A note filed before the house said so is retried as a note once.
+          const me = await agent(), asNote = { kind: 'note', text: a.text, purpose: 'contact' };
+          let got = await me.ask(r.send.url, r.send.house ? asNote : { kind: 'message', text: a.text, ...(r.send.re ? { re: r.send.re } : {}) }, { task: true });
+          if (!r.send.house && got.kind === 'rejected' && got.code === 'malformed') got = await me.ask(r.send.url, asNote, { task: true });
           if (got.kind === 'rejected' || got.kind === 'declined') throw new Error(`they didn't take it: ${String(got.why ?? got.kind)}`);
         } catch (e) {
           why = (e as Error).message || 'it didn\'t reach them';

@@ -2615,7 +2615,8 @@ export class OwnerDesk {
               const place = randomBytes(6).toString('hex');
               task.did.push({ text, at, note: about.id, place, pending: true });
               await this.saveTasks();
-              return void res.json({ ok: true, send: { url: about.from.url, key: about.from.key, re: about.text.slice(0, 200) }, place });
+              // To a house, a note: a house takes notes, not messages (run 125: all five such replies were refused as malformed).
+              return void res.json({ ok: true, send: { url: about.from.url, key: about.from.key, re: about.text.slice(0, 200), ...(about.from.house ? { house: true } : {}) }, place });
             }
             if (about.from.web) {
               const r = this.answerWebNote(about.id, text, assistant.label, q.final !== false);
@@ -2675,7 +2676,7 @@ export class OwnerDesk {
           return void res.json({
             tasks: open.map((t) => ({
               id: t.id, your_humans_words: t.text, with: t.to.name, ...(t.errand ? { kind: 'errand', note_for_you: 'about nobody\'s chat: do it with your own tools; asked someone and waiting for their answer? lake_house_suggest { task, outcome: "waiting", text: who and about what } keeps it open; when it\'s settled, lake_house_suggest { task, outcome, text }' } : {}), left: t.left, until: t.until, given: t.at,
-              ...(t.to.via ? { wrote_to: 'you, at your own address: lake_house_reply sends your answer from you (your human\'s house only counts it), and it must not name your human\'s house or say where they live on the Lake' } : {}),
+              ...(t.to.via ? { wrote_to: 'you, at your own address: lake_house_reply sends your answer from you (your human\'s house only counts it), and it must not write your human\'s house\'s name or address into the words (the house\'s own signed word that you are its AI is fine)' } : {}),
               // The conversation, oldest first: their notes and what was answered, yours included.
               conversation: this.notes.filter((n) => OwnerDesk.conv(n.from) === t.to.key).sort((a, b) => a.at.localeCompare(b.at)).map((n, i, all) => { const said = this.answersTo(n, all[i + 1]?.at); return { note: n.id, they_wrote: n.text, at: n.at, ...(said.length ? { answered: said } : {}) }; }),
               you_sent: t.did,

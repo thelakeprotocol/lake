@@ -1722,6 +1722,9 @@ describe('what an attacker tried (round 16)', () => {
     const old = h.desk.addNote({ from: { ...bill, key: 'bill-old-key-0123456789abcdefghijklmnop', via: a.id.publicJwk.kid! }, text: 'Is the trolley free Sunday?' })!;
     expect(await h.owner({ kind: 'panel.note.reply', id: old, text: 'Yes, come by at 10', as_house: true })).toEqual({ ok: true, as_house: true });
     expect(sent.slice(-2).map((m) => m.kind)).toEqual(['message', 'note']);
+    // The AI answering it on a task is told it's a house, so its connector sends a note (run 125: all five such were refused).
+    expect(await h.owner({ kind: 'panel.task.set', note: f.note, text: 'Say yes, Saturday works' })).toMatchObject({ ok: true });
+    expect(await a.call({ kind: 'assistant.reply', note: f.note, text: 'Saturday works' })).toMatchObject({ ok: true, send: { house: true } });
     h.close();
   });
 
