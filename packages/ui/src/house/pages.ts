@@ -146,7 +146,7 @@ function RuleEditor({ r, i, all, fields, purposes, redraw, close }: { r: Rule; i
 
 // ---- who has access ----
 export function AccessPage({ backTo }: P) {
-  const a = useHouse<{ now: number; askedToday: number; blockedToday: number; agents: AccessRow[] }>({ kind: 'panel.access', tz_offset: new Date().getTimezoneOffset() });
+  const a = useHouse<{ now: number; askedToday: number; blockedToday: number; blockedWhy?: string[]; agents: AccessRow[] }>({ kind: 'panel.access', tz_offset: new Date().getTimezoneOffset() });
   // Your own AIs that may read records or money are access too (17 Nov, Fable as a privacy-minded owner: this page said
   // "0 have a yes" while an AI read every record).
   const v = useHouse<ListView>({ kind: 'list' });
@@ -154,7 +154,7 @@ export function AccessPage({ backTo }: P) {
   const [filter, setFilter] = useState<'now' | 'asked' | 'all'>('now');
   const [openRow, setOpenRow] = useState<string | null>(null);
   if (!a.data) return page('Who has access', backTo, h(Failed, { error: a.error }));
-  const { now, askedToday, blockedToday, agents } = a.data;
+  const { now, askedToday, blockedToday, blockedWhy, agents } = a.data;
   const junk = agents.filter((r) => !r.domain && !r.yeses.length && !r.asked && r.blocked);
   const shown = agents.filter((r) => !junk.includes(r)).filter((r) => (filter === 'now' ? r.canSee : filter === 'asked' ? !!r.lastAsked : true));
   const why = (c: Consent) => (c.how.live ? 'you tapped Allow' : c.how.rule ? `your rule ${c.how.rule}` : 'your rules');
@@ -184,6 +184,8 @@ export function AccessPage({ backTo }: P) {
           ...r.asks.slice(0, 8).map((q, k) => h('div', { key: `q${k}`, class: 'more-line muted' }, `${time(q.at)} · your house ${said(q.decision)}${q.reason ? `: ${q.reason}` : ''}`)),
           r.webId ? h('p', { class: 'mono small' }, r.webId) : null) : null];
     }).flat()) : h(Empty, { icon: 'eye-off-outline', title: filter === 'now' ? 'Nobody has a yes from you now' : filter === 'asked' ? 'Nobody has asked lately' : 'Nobody has come yet' }),
+    // Why today's were turned away, here rather than on Today (run 122).
+    blockedToday && blockedWhy?.length ? h('p', { class: 'muted-line pad blocked-why' }, `Turned away today because ${blockedWhy.join('; ')}. Nothing was read or given out.`) : null,
     junk.length ? h('p', { class: 'muted-line pad' }, `${junk.length} unproven key${junk.length === 1 ? '' : 's'} tried something and ${junk.length === 1 ? 'was' : 'were'} blocked.`) : null);
 }
 

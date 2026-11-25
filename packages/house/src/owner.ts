@@ -10,7 +10,7 @@ import type { HouseRunner } from './duty-runner.js';
 import {
   allowanceDraft, looksLikeInjection, cartTerms, type CartMandate, dutyDraft, postalAddress, postalAddressProblems, type PostalAddress, pledgeDraft, purchaseDraft, type Want, fieldSpec, DUTY_KINDS, type DutyKind, availabilityProblems, identifyingFields, consentRecord, freeSlots, parseRules, digestSRI, isCurrency, makeEvent, PURPOSES, readAccessGrant, ReplayGuard, statusEntry, STATUS_LIST_LENGTH, verifyCredential, verifyMessage,
   type AgentCard, type Availability, type JWK, type LakeEvent, type Signed, type Study,
-  type Offering, cardUrlFor, verifyLakeCard, keyThumbprint, BLOCKED_WHY,
+  type Offering, cardUrlFor, verifyLakeCard, keyThumbprint,
 } from '@thelakeprotocol/core';
 import { callsHome } from './net.js';
 
@@ -972,8 +972,9 @@ export class OwnerDesk {
     const blocked = events.filter((e) => e.kind === 'attack.blocked');
     // What failed, in plain words, and that nothing was read; it opens Who has access, whose "blocked today" counts the same
     // (round 118: three people in a simulation asked what "weren't what they claimed" meant).
-    const whys = [...new Set(blocked.map((e) => BLOCKED_WHY[String(e.data?.why)] ?? 'it didn\'t pass a check'))];
-    if (blocked.length) lines.push({ by: 'house', text: `Turned away ${plural(blocked.length, 'message')} that didn't pass the house's checks (${whys.slice(0, 3).join('; ')}${whys.length > 3 ? '; …' : ''}). Nothing was read or given out`, at: blocked[0]!.at, to: '#access', tile: { big: String(blocked.length), label: 'turned away', detail: 'nothing was read' } });
+    // Calm, and the reasons one tap away on Who has access (run 122: three neighbours read "claimed to come from someone else" as
+    // about each other; Grok's words, less "unknown senders", which a replay from a known key would make untrue).
+    if (blocked.length) lines.push({ by: 'house', text: `Your house turned away ${plural(blocked.length, 'message')} that failed its checks. Nothing reached you or was shared`, at: blocked[0]!.at, to: '#access', tile: { big: String(blocked.length), label: 'turned away', detail: 'nothing was read' } });
     // The AI on duty: each thing it did, newest first, with Undo where the house can undo it.
     for (const e of this.dutyLog.filter((x) => after(x.at) && !x.refused).reverse().slice(0, 5)) {
       const who = e.to?.name?.replace(/ \((.+), via MCP\)$/, ' ($1)') ?? 'someone';

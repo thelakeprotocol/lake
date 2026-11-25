@@ -9,6 +9,7 @@ import {
   allFields, forPeople, type Want, cartHash, cartTerms, type CartMandate, countContext, readConsentRecord, withdrawConsent, type ConsentSummary, fetchPasses, ownerKeyCredential, assistantKeyCredential, pledgeReceiptPath, cartReceiptPath, signPaymentMandate, cardUrlFor, verifyLakeCard, issueCredential, keyThumbprint, revealBlind, signBlind, withdrawBlind, type BlindSignature, lakeProfile, presentSdJwtVc, readSdJwtVc, PURPOSES, buildCard, describe, exportIdentity, fieldSpec, generateIdentity, identifyingFields, importIdentity, LakeLinks, makeEvent, packId, parseRules, sendLake, signCard, signMessage, verifyLakeData,
   type AgentCard, type PostalAddress, type Identity, type LakeData, type LakeEvent, type LakePack, type Rules,
   deliverWithRetries,
+  BLOCKED_WHY,
 } from '@thelakeprotocol/core';
 import type express from 'express';
 import { Housekeeper } from './housekeeper.js';
@@ -1133,6 +1134,8 @@ function panelFor(x: {
         now: all.filter((r) => r.canSee).length,
         askedToday: mine().filter((a) => a.kind === 'knock' && Date.parse(a.at) >= midnight).length,
         blockedToday: mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).length,
+        // Why, in plain words, here rather than on Today's line (run 122: the reasons read as being about the neighbours).
+        blockedWhy: [...new Set(mine().filter((a) => a.kind === 'attack.blocked' && Date.parse(a.at) >= midnight).map((a) => BLOCKED_WHY[String(a.data?.why)] ?? 'it didn\'t pass a check'))].slice(0, 6),
         // What the page shows: every live yes (Take it back needs them all), the newest 15 of the rest, the newest 8 asks
         // (18 Nov: the whole history ran to 950 KB a look, and over a poor connection the page sat loading for a minute).
         agents: all.map((r) => ({ ...r, yeses: ((others) => r.yeses.filter((c) => c.status === 'active' || others.n++ < 15))({ n: 0 }), yesCount: r.yeses.length, asks: (r.asks ?? []).slice(0, 8) })),

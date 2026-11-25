@@ -902,8 +902,9 @@ describe('what an attacker tried (round 16)', () => {
     const at = new Date().toISOString();
     const blocked = (why: string) => ({ at, kind: 'attack.blocked', subject: 'evil.example', data: { why, claimed: 'evil.example' } });
     const h = await house({ panel: { activity: () => [blocked('bad-signature'), blocked('replayed'), blocked('bad-signature')], money: async () => ({}) } });
-    const line = (await h.desk.today(0)).lines.find((l: { by: string; text: string }) => l.by === 'house' && l.text.startsWith('Turned away'));
-    expect(line).toMatchObject({ text: 'Turned away 3 messages that didn\'t pass the house\'s checks (its signature didn\'t match the name on it; it was an old message sent again). Nothing was read or given out', to: '#access', tile: { big: '3', label: 'turned away' } });
+    const line = (await h.desk.today(0)).lines.find((l: { by: string; text: string }) => l.by === 'house' && l.text.startsWith('Your house turned away'));
+    // Calm, with the reasons on Who has access (run 122: they read as being about the neighbours).
+    expect(line).toMatchObject({ text: 'Your house turned away 3 messages that failed its checks. Nothing reached you or was shared', to: '#access', tile: { big: '3', label: 'turned away' } });
     h.close();
   });
 
@@ -1234,7 +1235,7 @@ describe('what an attacker tried (round 16)', () => {
     const at = new Date().toISOString();
     const all = Array.from({ length: 150 }, () => ({ at, kind: 'attack.blocked', subject: 'x', data: { why: 'forged-card' } }));
     const h = await house({ panel: { activity: (_since: unknown, limit = 100) => all.slice(0, limit), money: async () => ({}) } });
-    const line = (await h.desk.today(0)).lines.find((l: { text: string }) => l.text.startsWith('Turned away'));
+    const line = (await h.desk.today(0)).lines.find((l: { text: string }) => l.text.startsWith('Your house turned away'));
     expect(line?.tile?.big).toBe('150');
     h.close();
   });
