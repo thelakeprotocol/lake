@@ -1763,6 +1763,10 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     await tab('My AI');
     // Roles on My AI (round 90): Away is hired from its row, its preset in a sheet.
     await page.locator('.roles ion-item.role-away', { hasText: 'Set up' }).click();
+    // One tap turns it on, its preset said in one sentence (25 Nov: "very simple"); the full setup is one more tap.
+    await sheet().getByText(/At night, from 22:00 to 7:00, your house will answer people you know and hold times/).waitFor({ timeout: 10_000 });
+    await sheet().getByRole('button', { name: 'Sign and turn on' }).waitFor();
+    await sheet().getByRole('button', { name: 'Change the details' }).click();
     const card = sheet();
     // This house offers a model, so it can run the AI itself: one tap. This test runs it elsewhere, to pair its own stand-in.
     await card.locator('ion-segment-button', { hasText: 'In my house' }).waitFor({ timeout: 10_000 });
@@ -1932,6 +1936,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     // Stopped: Away is free to hire again, and Messages has the day preset.
     await page.locator('.roles ion-item.role-away', { hasText: 'Set up' }).waitFor({ timeout: 10_000 });
     await page.locator('.roles ion-item.role-messages', { hasText: 'Set up' }).click();
+    await sheet().getByText(/answer people you know for you, from 8:00 to 18:00, up to 10 a day, for 30 days/).waitFor({ timeout: 10_000 });
+    await sheet().getByRole('button', { name: 'Change the details' }).click();
     await sheet().getByRole('button', { name: 'Sign and hire' }).waitFor({ timeout: 10_000 });
     expect(await sheet().getByLabel('On duty from').inputValue().catch(async () => sheet().getByLabel('On duty from').evaluate((e) => (e as HTMLInputElement & { value: string }).value))).toBe('08:00');
     await closeSheet();

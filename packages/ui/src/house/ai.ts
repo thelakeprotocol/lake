@@ -20,7 +20,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
   const [setup, setSetup] = useState(false);
   const [setupWhere, setSetupWhere] = useState<'house' | 'computer' | undefined>(undefined);
   const [preset, setPreset] = useState<'messages' | 'away'>('away');
-  const [keySheet, setKeySheet] = useState(false), [runSheet, setRunSheet] = useState(false);
+  const [keySheet, setKeySheet] = useState(false), [runSheet, setRunSheet] = useState(false), [quick, setQuick] = useState<'messages' | 'away' | null>(null);
   const runner = useHouse<Runner>({ kind: 'panel.duty.runner' });
   if (!v.data) return h(Page, { title: 'My AI', big: true, status, footer: tabbar }, h(Failed, { error: v.error }));
   const live = (duty.data?.duties ?? []).filter(dutyLive);
@@ -52,7 +52,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
             h('p', {}, `${shortName(d.label)} · ${d.hours ? `${d.hours.from}–${d.hours.to}` : 'While you\'re away'} · ${d.state.on ? d.state.used : d.summary.handled} of ${d.cap} today · until ${new Date(d.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}`),
             d.runner ? h('p', {}, watching(d.runner)) : null, !d.state.on && !/off hours/.test(d.state.why) ? h('p', { class: 'warn-text' }, d.state.why) : null),
           h('div', { slot: 'end' }, h(Btn, { label: 'Stop', size: 'small', fill: 'outline', color: 'danger', run: () => call({ kind: 'panel.duty.off', kid: d.kid }), ask: { header: `Stop ${shortName(d.label)}'s ${ROLES[role].name}?`, sub: 'It stops now. You can hire it again any time.', button: 'Stop' } }))))
-          : [h(Row, { key: role, icon: role === 'away' ? 'moon-outline' : 'chatbubbles-outline', tint: 'violet', label: ROLES[role].may, sub: 'Off · never money', cls: `role-${role}`, note: 'Set up', onClick: () => { setPreset(role); setSetup(true); } })];
+          : [h(Row, { key: role, icon: role === 'away' ? 'moon-outline' : 'chatbubbles-outline', tint: 'violet', label: ROLES[role].may, sub: 'Off · never money', cls: `role-${role}`, note: 'Set up', onClick: () => { setPreset(role); if (runner.data?.can && !live.some((d) => d.runner?.host === 'house')) setQuick(role); else setSetup(true); } })];
       }),
       // Every AI with a spending allowance (round 106: two had one, the row named one).
       ...(() => {
@@ -73,6 +73,7 @@ export function AiTab({ tabbar, status }: { tabbar: Child; status: Child }) {
     h(Night, { log: duty.data }),
     h(Sheet, { open: connect, onClose: () => setConnect(false), title: 'Give your AI a key' }, h(ConnectSheet, { houseUrl: houseBase(), ais })),
     h(Sheet, { open: keySheet, onClose: () => setKeySheet(false), title: 'Your own Claude key' }, h(KeySheet, { done: () => setKeySheet(false) })),
+    h(Sheet, { key: 'quick', open: !!quick, onClose: () => setQuick(null), title: quick ? ROLES[quick].may : '' }, quick ? h(QuickRole, { role: quick, done: () => setQuick(null), more: () => { setQuick(null); setSetup(true); } }) : null),
     h(Sheet, { open: setup || !!dutyCode, onClose: () => { setSetup(false); setSetupWhere(undefined); dutyCode = null; }, title: ROLES[preset].name }, setup || dutyCode ? h(DutySetup, { key: `${preset}-${setupWhere ?? 'any'}`, preset, houseUrl: houseBase(), log: duty.data, start: live.some((d) => d.runner?.host === 'house') ? 'computer' : setupWhere, houseBusy: live.find((d) => d.runner?.host === 'house'), done: () => { setSetup(false); setSetupWhere(undefined); } }) : null));
 }
 
@@ -104,13 +105,37 @@ function ConnectSheet({ houseUrl, ais }: { houseUrl: string; ais: Assistant[] })
 }
 
 /** What your AI on duty may do, in which hours, how many things a night, for how long; signed here; then the command. */
+// A role's preset: Replies by day for a month without holding times, Away at night for a week with them.
+const PRESETS = {
+  messages: { kinds: ['reply', 'close'], from: '08:00', to: '18:00', cap: 10, days: 30 },
+  away: { kinds: ['reply', 'close', 'book'], from: '22:00', to: '07:00', cap: 10, days: 7 },
+} as const;
+const hm = (t: string) => t.replace(/^0(\d)/, '$1');
+
+/** One tap to turn a role on, its preset said in one sentence (25 Nov: "it should be very simple"). Signed on this device, as
+ *  every grant is; the full setup (hours, cap, days, on your computer) is a tap away. */
+function QuickRole({ role, done, more }: { role: 'messages' | 'away'; done: () => void; more: () => void }) {
+  const p = PRESETS[role], tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return h('div', { class: 'sheet-body quick-role' },
+    h('p', {}, role === 'messages'
+      ? `Your house will answer people you know for you, from ${hm(p.from)} to ${hm(p.to)}, up to ${p.cap} a day, for ${p.days} days.`
+      : `At night, from ${hm(p.from)} to ${hm(p.to)}, your house will answer people you know and hold times for you to confirm, up to ${p.cap} a night, for ${p.days} days.`),
+    h('p', { class: 'muted-line' }, 'Never money; anything new waits for you. You can stop it any time.'),
+    h('div', { class: 'sheet-actions' },
+      h(Btn, { label: 'Sign and turn on', expand: 'block', run: async () => {
+        const d = await must<{ id: string; draft: Record<string, unknown> }>({ kind: 'panel.duty.draft', kinds: [...p.kinds], cap: p.cap, days: p.days, hours: { from: p.from, to: p.to, tz }, role });
+        await must({ kind: 'panel.duty.set', id: d.id, label: `${ROLES[role].name} AI`, credential: await signDraft(d.draft), runner: 'house' });
+        void toast('On: your house answers for you now'); done();
+      } }),
+      h('ion-button', { fill: 'clear', color: 'medium', expand: 'block', onClick: more }, 'Change the details')));
+}
+
 function DutySetup({ houseUrl, log, done, start, preset = 'away', houseBusy }: { houseUrl: string; log?: DutyLog; done: () => void; start?: 'house' | 'computer'; preset?: 'messages' | 'away'; houseBusy?: { label: string } }) {
-  // A role's preset: Messages by day for a month without holding times, Away at night for a week with them.
-  const [kinds, setKinds] = useState<string[]>(preset === 'messages' ? ['reply', 'close'] : ['reply', 'close', 'book']);
-  const [from, setFrom] = useState(preset === 'messages' ? '08:00' : '22:00');
-  const [to, setTo] = useState(preset === 'messages' ? '18:00' : '07:00');
-  const [cap, setCap] = useState(10);
-  const [days, setDays] = useState(preset === 'messages' ? 30 : 7);
+  const [kinds, setKinds] = useState<string[]>([...PRESETS[preset].kinds]);
+  const [from, setFrom] = useState<string>(PRESETS[preset].from);
+  const [to, setTo] = useState<string>(PRESETS[preset].to);
+  const [cap, setCap] = useState<number>(PRESETS[preset].cap);
+  const [days, setDays] = useState<number>(PRESETS[preset].days);
   const redraw = useRedraw();
   const runner = useHouse<Runner>({ kind: 'panel.duty.runner' });
   const [where, setWhere] = useState<'house' | 'computer'>(start ?? 'house');
