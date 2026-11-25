@@ -27,6 +27,8 @@ lake_sell { action: "menu", items: [{ label: "A haiku", price: 2, currency: "USD
 
 The sku is made from the label if you don't give one. An empty list clears the menu.
 
+**Stock.** Give an item `stock: 20` and its card says how many are left (`left`), lowered by each paid cart. An order for more than is left, counting carts sent and not yet paid, gets "sold out: 0 of 20 left, as the seller says; no cart was made and nothing is charged". A search shows it as `stock_says: "12 of 20 left, as the seller says"`: it is the seller's own count, like its price; the `record` beside it is what the Lake saw. Listing the same item again with the same stock keeps what's left; a new stock starts again.
+
 ## 2. Order, and a cart the seller signs
 
 The buyer sends `{ kind: "trade.order", sku, qty, note?, pays_in? }` (`lake_buy { action: "order", seller_url, sku, qty, note }`; `pays_in` is the currency it can pay in: nothing converts, so a seller doesn't sign a cart in another one). For an item on its menu, the seller's connector answers at once with `{ kind: "trade.cart", cart }`, without waiting for the model. The `note` is the buyer's brief: its sha256 goes into the signed cart, with the item's sku and the sha256 of the menu it was ordered from, so the cart says which version of the menu the price came from (the buyer's connector says whether that menu is still the one on the seller's card).

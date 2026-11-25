@@ -21,7 +21,7 @@ import type { Identity } from './crypto.js';
  * takes (pinned by key, as for payments agents): the organisation that redeems the deed, the tally that passes the favour.
  */
 export interface MenuPrice { value: number; assetCode: string; assetScale: number; accept: CartParty[] }
-export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; /** Up to three other ways to pay for it. */ prices?: MenuPrice[]; unit?: string; /** The seller says yes to each order first (a booking): no cart is signed until it does. */ confirm?: boolean; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
+export interface MenuItem { sku: string; label: string; price: { currency: string; value: number }; /** How many the seller has, and how many are left (its own word, like the price; run 124: "20 serves, sold out at 20" couldn't be said). */ stock?: number; left?: number; /** Up to three other ways to pay for it. */ prices?: MenuPrice[]; unit?: string; /** The seller says yes to each order first (a booking): no cart is signed until it does. */ confirm?: boolean; /** What the seller promises about each delivery of it, signed into every cart for it. */ delivery?: DeliveryTerms }
 
 /** W3C Payment Request API, as AP2 uses it (only what a Lake cart needs). */
 export interface PaymentCurrencyAmount { currency: string; value: number }
@@ -214,7 +214,8 @@ export const SETTLED_HOW = ['accepted', 'review_expired', 'ruling', 'seller_void
 export type SettledHow = (typeof SETTLED_HOW)[number];
 
 /** A menu's digest, as a cart names it: hex sha256 over the canonical JSON (JCS) of the menu as on the card. */
-export const menuHash = (menu: MenuItem[]) => createHash('sha256').update(canonicalize(menu)).digest('hex');
+// Without `left`: a sale changes how many are left, not which menu a cart was ordered from.
+export const menuHash = (menu: MenuItem[]) => createHash('sha256').update(canonicalize(menu.map(({ left: _left, ...m }) => m))).digest('hex');
 
 /** Checks a menu an agent wants on its card: what's wrong with it, if anything. */
 /** A cart's non-money units, each with the parties whose word it was paid counts: well formed, or left out. */
@@ -234,6 +235,8 @@ export function menuProblems(menu: unknown): string[] {
     if (typeof m?.label !== 'string' || !m.label.trim() || m.label.length > 120) problems.push(`menu[${i}].label: what it is, 1 to 120 characters`);
     if (!/^[A-Z]{3}$/.test(String(m?.price?.currency)) || !(Number(m?.price?.value) >= 0.01) || Math.abs(Number(m?.price?.value) * 100 - Math.round(Number(m?.price?.value) * 100)) > 1e-6) problems.push(`menu[${i}].price: { currency: "USD", value: at least 0.01, in whole cents }`);
     if (m?.unit !== undefined && (typeof m.unit !== 'string' || m.unit.length > 30)) problems.push(`menu[${i}].unit: a short word, like "poem" or "hour"`);
+    if (m?.stock !== undefined && !(Number.isInteger(m.stock) && m.stock >= 1 && m.stock <= 10_000)) problems.push(`menu[${i}].stock: how many you have, a whole number from 1 to 10000`);
+    if (m?.left !== undefined && (m.stock === undefined || !(Number.isInteger(m.left) && m.left >= 0 && m.left <= m.stock))) problems.push(`menu[${i}].left: how many are left, from 0 to its stock`);
     // Other ways to pay (SPEC §6.7): a whole number of a unit that isn't money, and who says it was paid.
     if (m?.prices !== undefined && (!Array.isArray(m.prices) || m.prices.length > 3 || m.prices.some((x) => !/^[A-Z]{3}$/.test(String(x?.assetCode)) || x.assetScale !== 0 || !Number.isInteger(x.value) || x.value < 1 || x.value > 100 || !Array.isArray(x.accept) || !x.accept.length || partyProblems(x.accept, 'accept').length > 0))) problems.push(`menu[${i}].prices: up to 3 of { value (whole), assetCode (e.g. HUR), assetScale: 0, accept: [the agent whose word it was paid counts] }`);
     problems.push(...deliveryProblems(m?.delivery).map((x) => `menu[${i}].${x}`));

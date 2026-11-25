@@ -1525,6 +1525,15 @@ describe('the open door', () => {
     await theirText('lake_sell', { action: 'menu', items: [tutoring, { sku: 'jam', label: 'Apricot jam, 250 g', price: 4.5, currency: 'AUD' }] });
     const jam = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'jam' });
     expect(await text('lake_buy', { action: 'pay', cart: jam.cart })).toMatchObject({ paid: 4.5, unit: 'AUD' });
+    // Stock, the seller's own count (run 124: "20 serves, sold out at 20" couldn't be said): one loaf, one cart for it held
+    // unpaid, and the next order is sold out with no cart; a search says how many are left, as the seller says.
+    await theirText('lake_sell', { action: 'menu', items: [tutoring, { sku: 'jam', label: 'Apricot jam, 250 g', price: 4.5, currency: 'AUD' }, { sku: 'last-loaf', label: 'Sourdough loaf', price: 3, currency: 'AUD', stock: 1 }] });
+    expect(await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'last-loaf' })).toMatchObject({ cart: expect.any(String) });
+    const soldOut = await text('lake_buy', { action: 'order', seller_url: theirs.you.url, sku: 'last-loaf' });
+    expect(soldOut.cart).toBeUndefined();
+    expect(soldOut.note).toMatch(/^sold out: 0 of 1 left, as the seller says \(1 held in unpaid carts\); no cart was made and nothing is charged\. No cart is coming/);
+    const seller = ((await text('lake_search', { q: 'sourdough' })) as { url: string; menu?: { sku: string; stock_says?: string }[] }[]).find((c) => c.url === theirs.you.url);
+    expect(seller?.menu?.find((x) => x.sku === 'last-loaf')?.stock_says).toBe('1 of 1 left, as the seller says');
     // The order waits in the seller's inbox for its yes (read here, so later checks of that inbox start clean).
     const waiting = (await theirText('lake_inbox', { wait_seconds: 2 })).messages as { id: number; message?: { kind?: string; sku?: string } }[];
     const order = waiting.find((m) => m.message?.kind === 'trade.order' && m.message.sku === 'tutoring')!;

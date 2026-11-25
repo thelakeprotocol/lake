@@ -125,3 +125,17 @@ describe('trade: AP2 carts the seller signs', () => {
     await expect(signCart({ seller, sellerWebId: 'a', sellerName: 'a', buyerWebId: 'b', items: [{ label: 'x', amount: { currency: 'USD', value: 1 } }], payments: [{ url: 'ftp://x', webId: 'w', jkt: 'short' }] })).rejects.toThrow(/payments: each/);
   });
 });
+
+describe('menu stock (run 124)', () => {
+  const item = { sku: 'serve', label: 'Dumplings, one serve', price: { currency: 'AUD', value: 7 } };
+  it('takes a whole stock and a left from 0 to it, never a left alone', () => {
+    expect(menuProblems([{ ...item, stock: 20, left: 12 }])).toEqual([]);
+    expect(menuProblems([{ ...item, stock: 0 }])).toEqual([expect.stringContaining('menu[0].stock')]);
+    expect(menuProblems([{ ...item, stock: 20, left: 21 }])).toEqual([expect.stringContaining('menu[0].left')]);
+    expect(menuProblems([{ ...item, left: 3 }])).toEqual([expect.stringContaining('menu[0].left')]);
+  });
+  it('hashes a menu without what\'s left, so a sale doesn\'t change which menu a cart came from', () => {
+    expect(menuHash([{ ...item, stock: 20, left: 12 }])).toBe(menuHash([{ ...item, stock: 20, left: 20 }]));
+    expect(menuHash([item])).not.toBe(menuHash([{ ...item, stock: 20 }]));
+  });
+});

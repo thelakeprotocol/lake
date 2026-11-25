@@ -701,6 +701,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     /** A cart that came unasked from an agent this one never wrote to: paid only when its human asked for it. */
     unsolicited?: boolean;
     status: 'carted' | 'paid' | 'delivered' | 'accepted' | 'disputed' | 'refunded' | 'withdrawn';
+    /** From the menu: which item and how many, so a paid cart takes them from its stock. */
+    sku?: string; qty?: number;
     total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string;
     mandate: CartMandate; sellerCard: AgentCard;
     evidence: { step: string; at: string; signed: unknown }[];
@@ -788,6 +790,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       // Away (run 31: "take the menu down so no cart gets auto-signed for me while I'm gone"): past the here_until it set
       // and not back since, or nothing done here for five minutes. The order waits in the inbox; nothing is signed.
       const now = Date.now();
+      const out = soldOut(item, qty);
+      if (out) return { reply: { kind: 'received', digest: createHash('sha256').update(canonicalize(m.payload)).digest('hex'), sold_out: out, left: item.left ?? item.stock }, checked: { note: `an order for "${item.label}" (${qty}) you couldn't fill from your stock: ${out}` } };
       const onDutyHere = !!onDuty?.kinds.includes('deliver') && now - dutyLook.at < 3 * dutyLook.every * 1000;
       if (onDutyHere) {
         const tonight = [...orders.values()].filter((o) => o.role === 'seller' && o.evidence[0]?.step === 'ordered' && now - Date.parse(o.evidence[0].at) < 12 * 3_600_000 && o.status !== 'withdrawn');
@@ -814,7 +818,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
         const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: alt.assetCode, value: alt.value * qty } }], undefined, note, item.sku, undefined, undefined, { [alt.assetCode]: { accept: alt.accept } });
         const c = await checkCart(cart, (await key).publicJwk);
-        orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+        orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, sku: item.sku, qty, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
         return { reply: { kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${c.id}" }` }, checked: { note: `from your menu, paid in ${alt.assetCode}: you sent cart ${c.id} (${c.total.currency} ${c.total.value}); it counts as paid when ${alt.accept.map((x) => x.url).join(' or ')} signs that it was; deliver then` } };
       }
       // The buyer says which currency it can pay in; nothing converts, so a menu price in another one would sign a cart
@@ -826,7 +830,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
       const cart = await me.cart(m.from.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note, item.sku);
       const c = await checkCart(cart, (await key).publicJwk);
-      orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+      orders.set(c.id, { cart: c.id, role: 'seller', with: peer, buyerCard: m.card, sku: item.sku, qty, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: new Date().toISOString(), signed: m.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
       return { reply: { kind: 'trade.cart', cart, pay: `lake_buy { action: "pay", cart: "${c.id}" }` }, checked: { note: `from your menu: you sent cart ${c.id} (${c.total.currency} ${c.total.value}) automatically; deliver once it's paid (lake_sell { action: "deliver" })` } };
     }
     // A team's cart: a member asked to agree its share, a member's consent back to the lead, and a seller's withdrawal.
@@ -925,7 +929,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     if (money && o?.role === 'seller') {
       if (money.verified && (money.settled || money.held) && money.cart?.id === o.cart && Math.round((money.amount ?? 0) * 100) === Math.round(o.total.value * 100) && money.unit === o.total.currency) {
         if (money.held) { o.hold = money.held.id; o.holdUntil = money.held.until; o.payment = 'held'; } else o.payment ??= 'paid';
-        if (o.status === 'carted') o.status = 'paid';
+        if (o.status === 'carted') {
+          o.status = 'paid';
+          // Its stock goes down by what was paid for, on the signed card (the seller's own count, as its price is its own word).
+          const it = o.sku ? menu.find((y) => y.sku === o.sku) : undefined;
+          if (it?.stock !== undefined) { it.left = Math.max(0, (it.left ?? it.stock) - (o.qty ?? 1)); await me.setMenu(menu).catch(() => {}); }
+        }
         const att = p.receipt as { credential?: string; card?: AgentCard } | undefined;
         if (att?.credential && att.card) o.receipt = { credential: att.credential, card: att.card };
         o.evidence.push({ step: money.held ? 'paid (held)' : 'paid', at: new Date().toISOString(), signed: m.signed });
@@ -1001,6 +1010,11 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     return null;
   };
   let menu: MenuItem[] = x.saved?.menu ?? [];
+  // Stock on relisting: the same sku with the same stock keeps what's left; a new stock starts again (run 124).
+  const stockOf = (sku: string, stock: number) => { const was = menu.find((y) => y.sku === sku); return { stock, left: was?.stock === stock && was.left !== undefined ? was.left : stock }; };
+  // How many of an item unpaid carts still hold: they count against what's left until they're paid or run out.
+  const heldFor = (sku: string, now = Date.now()) => [...orders.values()].filter((o) => o.role === 'seller' && o.sku === sku && o.status === 'carted' && Date.parse(o.expires) > now).reduce((n, o) => n + (o.qty ?? 1), 0);
+  const soldOut = (item: MenuItem, qty: number) => { if (item.stock === undefined) return ''; const left = item.left ?? item.stock, held = heldFor(item.sku); return qty > left - held ? `sold out: ${Math.max(0, left - held)} of ${item.stock} left, as the seller says${held ? ` (${held} held in unpaid carts)` : ''}; no cart was made and nothing is charged` : ''; };
   const join = async () => {
     who ??= x.identity?.(server.server.getClientVersion()) ?? { name: o.name, domain: o.domain };
     const a = await joinLake({
@@ -1646,7 +1660,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         order: z.number().int().optional().describe('cart / decline: the lake_inbox id of an order from your menu: its cart has the menu\'s price and delivery terms and the buyer\'s note, as if signed at once; decline tells the buyer no'),
         reason: z.string().max(300).optional().describe('decline: a word to the buyer on why'),
         members: z.array(z.object({ url: z.string(), amount: z.number() })).min(2).max(5).optional().describe('team: each member\'s A2A address (yours too) and its share; the shares add up to the total'),
-        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), prices: z.array(z.object({ asset: z.string().regex(/^[A-Z]{3}$/).describe('HUR: certified hours of community service (deeds); FAV: favours'), value: z.number().int().min(1).max(100).default(1), accept_url: z.string().describe('the A2A address of the agent whose word that it was paid you take: the organisation that certifies the deeds') })).max(3).optional().describe('menu: other ways to pay for it, besides money ("an hour of my time for an hour volunteered at Open Hands")'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
+        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), stock: z.number().int().min(1).max(10_000).optional().describe('menu: how many you have; each paid cart takes from it, and an order for more than is left gets "sold out", no cart'), prices: z.array(z.object({ asset: z.string().regex(/^[A-Z]{3}$/).describe('HUR: certified hours of community service (deeds); FAV: favours'), value: z.number().int().min(1).max(100).default(1), accept_url: z.string().describe('the A2A address of the agent whose word that it was paid you take: the organisation that certifies the deeds') })).max(3).optional().describe('menu: other ways to pay for it, besides money ("an hour of my time for an hour volunteered at Open Hands")'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
         delivery: DELIVERY.optional().describe('cart: what you promise about the delivery, signed into the cart (an order from your menu gets the item\'s)'),
         to: z.string().optional().describe('cart: the buyer\'s A2A endpoint'),
         minutes: z.number().min(1).max(1440).default(30).describe('cart: how long the price holds'),
@@ -1665,7 +1679,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // Other ways to pay (SPEC §6.7): each names, pinned by key from its own card, whose word that it was paid counts.
           const alts = new Map<number, MenuPrice[]>();
           for (const [i, x] of (a.items ?? []).entries()) if (x.prices?.length) alts.set(i, await Promise.all(x.prices.map(async (q) => ({ value: q.value, assetCode: q.asset, assetScale: 0, accept: [await cartParty((await (await fetch(cardUrlFor(q.accept_url))).json()) as AgentCard)] }))));
-          const items = (a.items ?? []).map((x, i) => ({ ...(alts.get(i) ? { prices: alts.get(i) } : {}), sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}) }));
+          const items = (a.items ?? []).map((x, i) => ({ ...(alts.get(i) ? { prices: alts.get(i) } : {}), sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}), ...(x.stock ? stockOf(x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), x.stock) : {}) }));
           await me.setMenu(items);
           menu = items;
           // Said as it is (14 Nov: "a signed cart back at once" for items that wait for a yes, and for an AI gone quiet).
@@ -1757,10 +1771,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const buyer = lakeProfile(buyerCard);
           if (!buyer) throw new Error(`no Lake agent at ${got.from.url}`);
           const qty = Number.isInteger(p.qty) && (p.qty as number) >= 1 && (p.qty as number) <= 100 ? (p.qty as number) : 1;
+          const out = soldOut(item, qty);
+          if (out) throw new Error(out);
           const note = typeof p.note === 'string' && p.note.trim() ? p.note.trim().slice(0, 500) : undefined;
           const cart = await me.cart(buyer.webId, [{ label: `${qty} × ${item.label}`, amount: { currency: item.price.currency, value: Math.round(item.price.value * qty * 100) / 100 } }], undefined, note, item.sku);
           const c = await checkCart(cart, (await key).publicJwk);
-          orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? got.from.name), url: got.from.url, webId: buyer.webId }, buyerCard, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: got.at, signed: got.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
+          orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? got.from.name), url: got.from.url, webId: buyer.webId }, buyerCard, sku: item.sku, qty, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'ordered', at: got.at, signed: got.signed }, { step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
           const reply = await me.ask(got.from.url, { kind: 'trade.cart', cart });
           return json({ sent: c.id, total: c.total, expires: c.expires, from_your_menu: item.sku, their_reply: reply });
         }
@@ -1914,7 +1930,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const playIn = Object.keys(o.playMoney ?? (o.allowanceUsd ? { USD: o.allowanceUsd } : {}));
           const paysIn = (house ? ((await houseCall({ kind: 'assistant.allowance' }).catch(() => null)) as { currency?: string } | null)?.currency : undefined) ?? (playIn.length === 1 ? playIn[0] : undefined);
           const reply = await me.ask(a.seller_url, { kind: 'trade.order', sku: a.sku, qty: a.qty, ...(a.note ? { note: a.note } : {}), ...(paysIn ? { pays_in: paysIn } : {}) });
-          if (reply.kind !== 'trade.cart') return json({ reply, note: 'no cart yet: the seller may answer with one in your inbox' });
+          // Sold out says so, and that no cart will come (run 124: "no cart yet" for a seller that had none left).
+          if (reply.kind !== 'trade.cart') return json({ reply, note: typeof reply.sold_out === 'string' ? `${reply.sold_out}. No cart is coming for this order.` : 'no cart yet: the seller may answer with one in your inbox' });
           const sellerCard = (await (await fetch(cardUrlFor(a.seller_url))).json()) as AgentCard;
           const seller = await verifyLakeCard(sellerCard);
           const c = await checkCart(reply.cart as CartMandate, seller.publicJwk);
@@ -2105,9 +2122,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         const withRecord = await Promise.all(found.map(async (c, i) => {
           if (i < 30 && (await unowned(c))) return { ...c, owner: 'none: nobody has claimed this house, so a note or a knock reaches no one' };
           if (c.asleep) return { ...c, asleep: 'its AI isn\'t here now: a message wakes the agent and waits for it, and its human may be told; the answer may take a while' };
-          if (!c.menu || !logs.length || i >= 10) return c;
+          // How many are left, said as whose word it is (run 124: "20 serves, sold out at 20" couldn't be checked); the record
+          // below is what the Lake saw.
+          const stocked = c.menu?.some((x) => x.stock !== undefined) ? { ...c, menu: c.menu!.map((x) => (x.stock !== undefined ? { ...x, stock_says: `${x.left ?? x.stock} of ${x.stock} left, as the seller says` } : x)) } : c;
+          if (!c.menu || !logs.length || i >= 10) return stocked;
           const record = await recordOf(c.webId);
-          return record ? { ...c, record } : c;
+          return record ? { ...stocked, record } : stocked;
         }));
         // Open pledges whose words match what was searched, where the agent is already looking (Grok, round 164; run 119: listed
         // only on arrival, the pledge reached nobody, and the one signer found it through a search).
