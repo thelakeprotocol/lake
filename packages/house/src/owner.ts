@@ -755,10 +755,16 @@ export class OwnerDesk {
    * A pledge this owner signed, still filling: its count from the tally, so the card says where it stands now (run 112: "2 of 4"
    * from the moment of signing stayed for 24 minutes; the organiser's AI nudged people who had signed). Its deadline ends it.
    */
+  /** When each unsigned pledge card was last checked with its tally. */
+  private pledgeLooked = new Map<string, number>();
   async sweepPledges() {
     // Unsigned ones too, for a week: a pledge its opener closed, or that lapsed, stops offering Sign (run 123: Grace saw a live
     // Sign 29 minutes after the close, "could have had me paying").
-    for (const x of this.suggestions.filter((y) => y.pledge && !y.pledge.signed && !y.pledge.ended && Date.now() - Date.parse(y.at) < 7 * 86_400_000).slice(0, 10)) {
+    // Each card every five minutes at most, least recently checked first, so a few that never answer don't starve the rest
+    // (Fable, round 177); a quorum card is left alone: its lapse means not enough would join, and its own card says so.
+    for (const x of this.suggestions.filter((y) => y.pledge && !y.pledge.signed && !y.pledge.ended && !y.pledge.quorum && Date.now() - Date.parse(y.at) < 7 * 86_400_000 && Date.now() - (this.pledgeLooked.get(y.id) ?? 0) > 300_000)
+      .sort((a, b) => (this.pledgeLooked.get(a.id) ?? 0) - (this.pledgeLooked.get(b.id) ?? 0)).slice(0, 10)) {
+      this.pledgeLooked.set(x.id, Date.now());
       const t = await this.o.panel?.pledgeTerms?.(x.pledge!.tally, x.pledge!.id).catch(() => undefined);
       if (t?.state === 'closed' || t?.state === 'lapsed') { x.pledge!.ended = t.state; void this.saveSuggestions(); this.touch(); }
     }

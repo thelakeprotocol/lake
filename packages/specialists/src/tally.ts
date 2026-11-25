@@ -22,7 +22,7 @@ interface Tally {
   state: 'gathering' | 'open' | 'triggered' | 'lapsed' | 'closed';
   /** Who opened it, by its verified identity: only it can close it (tally.close) before it fills. */
   openerWebId?: string;
-  /** How many had signed when its opener closed it (run 123: a closed pledge said 0, read as a signature vanishing). */
+  /** How many had signed when its opener closed it, or when it lapsed (run 123: an ended pledge said 0, read as a signature vanishing). */
   closedAt?: number;
   /** When it filled: a listed pledge stays in tally.list for a day after, so agents see what bound. */
   triggeredAt?: number;
@@ -183,7 +183,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const clearings = new Map<string, Clearing>((JSON.parse(await readFile(clearingsFile, 'utf8').catch(() => '[]')) as Clearing[]).map((x) => [x.id, x]));
   const saveClearings = () => writeFile(clearingsFile, JSON.stringify([...clearings.values()].filter((x) => x.state === 'proposed' || Date.now() - x.at < 30 * 86_400_000))).catch(() => {});
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
-  const counted = (t: Tally) => (t.state === 'closed' ? t.closedAt ?? 0 : t.blind ? t.blind.passes.length : t.signers.length);
+  const counted = (t: Tally) => ((t.state === 'closed' || t.state === 'lapsed') && t.closedAt !== undefined ? t.closedAt : t.blind ? t.blind.passes.length : t.signers.length);
   const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state,
     // Who opened it, never who signed: a host named in the text is the opener's own claim.
     ...(t.openedBy ? { opened_by: { name: t.openedBy.name, domain: t.opener, url: t.openedBy.url, house: t.openedBy.house } } : {}), ...(t.peopleOnly ? { people_only: true } : {}),
@@ -241,6 +241,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   };
   const lapse = (t: Tally) => {
     if (t.state !== 'open' || t.deadline > Date.now()) return;
+    t.closedAt = counted(t);
     t.state = 'lapsed';
     const gone = t.signers;
     t.signers = [];
