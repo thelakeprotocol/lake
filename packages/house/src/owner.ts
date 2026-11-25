@@ -236,7 +236,7 @@ export interface RemovedAi { kid: string; jwk: JWK; label: string; addedAt: stri
 export interface Allowance { kid: string; credential: string; statusId: string; amount: number; currency: string; until: string; at: string }
 /** A note from an assistant to its human; it may point at a waiting request or at an offer to accept. */
 export interface Suggestion {
-  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** It counts people once each: signing needs a person stamp (run 104). */ peopleOnly?: true; /** How many it needs. */ threshold?: number; /** This owner signed it: how many had then, and whether it filled (run 106: the card said "invites you to sign" 22 min after). */ signed?: { at: string; count?: number; filled?: true; lapsed?: true }; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean }; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
+  id: string; from: string; text: string; request?: string; offer?: string; /** A pledge to sign: the owner's panel puts a Sign button on the note, saying what it costs if it holds money. */ pledge?: { tally: string; id: string; /** Its own words, from the tally (run 100: the card showed only its id). */ text?: string; /** It counts people once each: signing needs a person stamp (run 104). */ peopleOnly?: true; /** How many it needs. */ threshold?: number; /** This owner signed it: how many had then, and whether it filled (run 106: the card said "invites you to sign" 22 min after). */ signed?: { at: string; count?: number; filled?: true; lapsed?: true; /** The owner took their signature back. */ withdrawn?: true; /** Its opener called it off before it filled. */ closed?: true }; /** Who opened it, from the tally's verified record (round 117). */ openedBy?: { name: string; house: boolean; url?: string }; /** One of the owner's contacts its words name, where nothing shows that contact opened it (run 121b: "hosted by Priya", opened by a stranger's AI). Says; never decides. */ mentions?: string; money?: PledgeMoney; quorum?: PledgeQuorum; circle?: { promise: string; times: number; kinds?: string[] } }; /** A secret count the house answers from one of the owner's facts, on their tap. */ count?: RecordCount; /** From a promise circle the owner is in: a call for help, or news of their own call. */ circle?: CircleItem; /** The assistant proposes asking one of the owner's circles: a button sends it. */ circleCall?: { tally: string; id: string; need: string; help?: string; sent?: boolean }; /** The assistant proposes putting a change to one of the owner's circles to a vote: a button sends it. */ circleVote?: { tally: string; id: string; change: Record<string, unknown>; sent?: boolean }; /** A cart priced in favours its assistant got: the owner's tap pays it with a favour owed to them. */ favourPay?: { cart: unknown; seller: string; sellerName: string; total: string; paid?: boolean };
   /** A note at the door it is about; mute: the assistant proposes not hearing from its sender again (the owner's tap). */
   note?: string;
   /** Someone (not the owner's AI) invited the owner to sign this pledge, in a note: who, and whether the owner's side knows them. */
@@ -758,14 +758,14 @@ export class OwnerDesk {
   async sweepPledges() {
     // Filled ones too, for a day: late signers still count, and every signer's card should say the same (run 114: 4 on two phones, 5 on three).
     const now = Date.now();
-    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.lapsed && (!y.pledge.signed.filled || now - Date.parse(y.pledge.signed.at) < 86_400_000)).slice(0, 10)) {
+    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.lapsed && !y.pledge.signed.withdrawn && !y.pledge.signed.closed && (!y.pledge.signed.filled || now - Date.parse(y.pledge.signed.at) < 86_400_000)).slice(0, 10)) {
       const t = await this.o.panel?.pledgeTerms?.(x.pledge!.tally, x.pledge!.id).catch(() => undefined);
       if (typeof t?.count !== 'number') continue;
       const was = x.pledge!.signed!;
       // How many it needs, from the tally, where the card was made without it (run 114: "5 of ?").
       if (!x.pledge!.threshold && typeof t.threshold === 'number') { x.pledge!.threshold = t.threshold; void this.saveSuggestions(); this.touch(); }
-      if (t.count !== was.count || (t.state === 'triggered' && !was.filled) || t.state === 'lapsed') {
-        x.pledge!.signed = { ...was, count: t.count, ...(t.state === 'triggered' ? { filled: true as const } : {}), ...(t.state === 'lapsed' ? { lapsed: true as const } : {}) };
+      if (t.count !== was.count || (t.state === 'triggered' && !was.filled) || t.state === 'lapsed' || t.state === 'closed') {
+        x.pledge!.signed = { ...was, count: t.count, ...(t.state === 'triggered' ? { filled: true as const } : {}), ...(t.state === 'lapsed' ? { lapsed: true as const } : {}), ...(t.state === 'closed' ? { closed: true as const } : {}) };
         void this.saveSuggestions();
         this.touch();
       }
@@ -1929,6 +1929,8 @@ export class OwnerDesk {
     if (this.suggestions.some((x) => x.pledge?.tally === tally && x.pledge.id === ref.id)) return;
     const pledge = await this.pledgeFor(tally, ref.id).catch(() => null);
     if (!pledge) return; // a tally that doesn't answer, or no such pledge: the note still says what it says
+    const named = this.mentionedContact(pledge, from);
+    if (named) pledge.mentions = named;
     const name = from.as ? `${from.as} (via ${from.name})` : from.name;
     this.suggestions.unshift({ id: randomBytes(6).toString('hex'), from: name, at: new Date().toISOString(), note: noteId, pledge, invitedBy: { name, known, ...(from.key ? { key: from.key } : {}) },
       text: `${name} invites you to sign: ${pledge.money?.text ?? pledge.quorum?.text ?? pledge.text ?? ref.id}` });
@@ -1937,9 +1939,35 @@ export class OwnerDesk {
     this.touch();
   }
 
+  /**
+   * A contact a pledge's words name (their full name, or their first name as a word), unless it was opened by that contact's
+   * house, or by an AI their house vouched for that also sent the invite. Free text only adds a line here; it never decides.
+   */
+  private mentionedContact(pledge: NonNullable<Suggestion['pledge']>, from: NoteSender): string | undefined {
+    const text = pledge.money?.text ?? pledge.text ?? '';
+    const at = (u?: string) => (u ?? '').replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+    const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const [, c] of this.known()) {
+      const first = c.name.split(/\s+/)[0] ?? '';
+      if (c.name.trim().split(/\s+/).length < 2 || first.length < 3) continue;
+      if (!new RegExp(`\\b(${esc(c.name)}|${esc(first)})\\b`, 'i').test(text)) continue;
+      const o = pledge.openedBy;
+      const theirHouse = !!o?.house && !!c.house && at(o.url) === at(c.house);
+      const theirAi = !!o && !o.house && !!from.url && at(from.url) === at(o.url) && !!from.speaks_for?.checked && (from.speaks_for.house === c.webId || (!!c.houseKey && from.speaks_for.houseKey === c.houseKey));
+      if (!theirHouse && !theirAi) return c.name;
+    }
+    return undefined;
+  }
+
   /** The owner signed a pledge: its card says so, with the count then, instead of asking again. */
   private pledgeSigned<T>(tally: string, id: string, result: T): T {
     const reply = (result ?? {}) as Record<string, unknown>;
+    if (reply?.kind === 'tally.withdrawn') {
+      const t = tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
+      for (const x of this.suggestions.filter((y) => y.pledge?.signed && y.pledge.id === id && y.pledge.tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === t)) x.pledge!.signed = { ...x.pledge!.signed!, withdrawn: true };
+      void this.saveSuggestions();
+      this.touch();
+    }
     if (reply?.kind === 'tally.signed' || reply?.kind === 'tally.triggered') {
       const t = tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '');
       for (const x of this.suggestions.filter((y) => y.pledge && y.pledge.id === id && y.pledge.tally.replace(/\/a2a\/?$/, '').replace(/\/$/, '') === t)) {
@@ -1958,7 +1986,7 @@ export class OwnerDesk {
     if (typeof t.text === 'string' && t.text) pledge.text = t.text.slice(0, 300);
     if (t.people_only === true) pledge.peopleOnly = true;
     if (Number.isInteger(t.threshold)) pledge.threshold = Number(t.threshold);
-    if (t.opened_by?.name) pledge.openedBy = { name: String(t.opened_by.name).slice(0, 80), house: t.opened_by.house === true };
+    if (t.opened_by?.name) pledge.openedBy = { name: String(t.opened_by.name).slice(0, 80), house: t.opened_by.house === true, ...(typeof t.opened_by.url === 'string' ? { url: t.opened_by.url.slice(0, 300) } : {}) };
     if (t.circle) pledge.circle = { promise: String(t.circle.promise), times: Number(t.circle.times_a_year), ...(Array.isArray(t.circle.kinds) ? { kinds: (t.circle.kinds as unknown[]).map(String) } : {}) };
     if (t.quorum && t.state === 'gathering') pledge.quorum = { text: String(t.text), options: (t.quorum.options as unknown[]).map(String), closes: String(t.quorum.closes), least: Number(t.threshold) };
     if (t.money) pledge.money = { amount: Number(t.money.contribution.amount), currency: String(t.money.contribution.currency), payee: String(t.money.payee.name ?? t.money.payee.webId), threshold: Number(t.threshold), deadline: String(t.deadline), count: Number(t.count), ...(t.money.bond ? { bond: Number(t.money.bond.amount) } : {}), text: String(t.text) };
@@ -3798,7 +3826,7 @@ export class OwnerDesk {
             return this.pledgeSigned(d.tally, d.id, await panel.signPledge(d.tally, d.id, { credential: String(w.credential), owner: await this.o.vouchOwner(this.ownerJwk!) }));
           },
           'panel.pledge.reveal': () => panel.revealPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')),
-          'panel.pledge.withdraw': async () => panel.withdrawPledge?.(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? '')) ?? { error: 'this house can\'t take a signature back' },
+          'panel.pledge.withdraw': async () => panel.withdrawPledge ? this.pledgeSigned(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? ''), await panel.withdrawPledge(String((q as { tally?: string }).tally ?? ''), String((q as { id?: string }).id ?? ''))) : { error: 'this house can\'t take a signature back' },
         } as Record<string, () => Promise<unknown>>)[p.kind]?.().catch((e: Error) => ({ error: e.message }));
         if (answer !== undefined && p.kind === 'panel.offer.accept' && !(answer as { error?: string }).error) {
           // The assistant that suggested it is the one to pay: what was accepted, from whom, and the quoter's answer (its order).

@@ -1740,6 +1740,13 @@ describe('the open door', () => {
     const plain = await text('lake_pledge', { action: 'open', tally, id: 'e2e-plain', text: 'A plain pledge for the e2e.', threshold: 2, deadline: new Date(Date.now() + 3_600_000).toISOString() });
     expect(plain).toMatchObject({ kind: 'tally.opened', id: 'e2e-plain' });
     expect(plain.people_only).toBeUndefined();
+    // Its opener can call it off before it fills; nobody else can (run 121b: the opener's own close was refused, there being none).
+    const viaOther = async (args: Record<string, unknown>) => { const said = (((await other.callTool({ name: 'lake_pledge', arguments: { tally, id: 'e2e-plain', ...args } })).content) as { text: string }[])[0]!.text; try { return JSON.parse(said); } catch { return said; } };
+    expect(await viaOther({ action: 'sign' })).toMatchObject({ kind: 'tally.signed', count: 1 });
+    expect(JSON.stringify(await viaOther({ action: 'close' }))).toMatch(/only whoever opened it can close it/);
+    expect(await text('lake_pledge', { action: 'close', tally, id: 'e2e-plain' })).toMatchObject({ kind: 'tally.closed', state: 'closed', count: 0 });
+    expect(await t(client, { kind: 'tally.count', id: 'e2e-plain' })).toMatchObject({ state: 'closed' });
+    expect(JSON.stringify(await viaOther({ action: 'sign' }))).toMatch(/it has closed/);
     expect(await text('lake_pledge', { action: 'reveal', tally, id: 'e2e-blind' })).toMatchObject({ kind: 'tally.revealed', signers: [{ domain: o.you.domain }], unrevealed: 1 });
     expect((await t(client, { kind: 'tally.count', id: 'e2e-blind' }))).toMatchObject({ revealed: 1, bound: false });
     const both = JSON.parse((((await other.callTool({ name: 'lake_pledge', arguments: { action: 'reveal', tally, id: 'e2e-blind' } })).content) as { text: string }[])[0]!.text);

@@ -19,7 +19,9 @@ interface Tally {
   /** The verified card that opened it, shown to all (20 Nov: a pledge's text said "hosted by Priya Nair" and nothing said who opened it). */
   openedBy?: { name: string; url: string; house: boolean };
   /** gathering: still finding its quorum (SPEC §11.4b); nobody can sign until it opens. */
-  state: 'gathering' | 'open' | 'triggered' | 'lapsed';
+  state: 'gathering' | 'open' | 'triggered' | 'lapsed' | 'closed';
+  /** Who opened it, by its verified identity: only it can close it (tally.close) before it fills. */
+  openerWebId?: string;
   /** When it filled: a listed pledge stays in tally.list for a day after, so agents see what bound. */
   triggeredAt?: number;
   /** Count people, not identities: each signature needs a person stamp, and one person counts once (SPEC §6.4). */
@@ -338,7 +340,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         t.threshold = Math.max(t.threshold, quorumBinds(size, q.atLeast));
         const err = q.blind ? await registerBlind(t, !!q.unveil) : null;
         if (err) q.result.why = err;
-        t.state = err ? 'lapsed' : 'open';
+        if (t.state === 'gathering') t.state = err ? 'lapsed' : 'open';
       } else t.state = 'lapsed';
       void save();
       report(t);
@@ -1097,7 +1099,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         if (wrong) return { kind: 'refused', problems: [`money.bond: pay the bond held for this pledge first (hold: true, pledge: { tally: ${s.webId}, id: "${id}", bond: true, until }, agreement ${pledgeAgreement(s.webId, id, true)}), then open it with { bond: { hold } }: ${wrong}`] };
         bond = { hold: String(r.hold), amount: Math.round(Number(r.amount) * 100) };
       }
-      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, openedBy: { name: String(card.name ?? '').slice(0, 80), url: card.supportedInterfaces?.[0]?.url ?? '', house: profile.role === 'house' }, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
+      const t: Tally = { id, text: String(p.text).trim(), threshold, deadline, opener: profile.ownerDomain, openerWebId: from, openedBy: { name: String(card.name ?? '').slice(0, 80), url: card.supportedInterfaces?.[0]?.url ?? '', house: profile.role === 'house' }, state: 'open', signers: [], ...(p.people_only === true ? { peopleOnly: true } : {}), ...(p.listed === true ? { listed: true } : {}),
         ...(money ? { money: { contribution: cents, currency, payee: { webId: String(money.payee!.webId), url: String(money.payee!.url), ...(typeof money.payee!.name === 'string' ? { name: money.payee!.name.slice(0, 80) } : {}) }, ...(bond ? { bond } : {}), counted: [] } } : {}) };
       if (p.circle !== undefined) {
         const c = p.circle as { promise?: unknown; times?: unknown; kinds?: unknown; tags?: unknown; limit?: unknown; sisters?: unknown };
@@ -1167,7 +1169,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
         sisters: sisterCircles(),
       };
     }
-    if (!['tally.sign', 'tally.withdraw', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.note', 'tally.passed', 'circle.pass', 'circle.pay', 'circle.pass.accept', 'circle.pass.decline', 'circle.propose', 'circle.vote.join', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.count { id } or (blind) tally.reveal { id, salt }'] };
+    if (!['tally.sign', 'tally.withdraw', 'tally.close', 'tally.count', 'tally.reveal', 'tally.quorum', 'circle.call', 'circle.accept', 'circle.decline', 'circle.report', 'circle.offer', 'circle.kept', 'circle.ack', 'circle.dispute', 'circle.withdraw', 'circle.record', 'circle.clear.consent', 'tally.edges', 'tally.cleared', 'tally.look', 'tally.standing', 'tally.note', 'tally.passed', 'circle.pass', 'circle.pay', 'circle.pass.accept', 'circle.pass.decline', 'circle.propose', 'circle.vote.join', 'tally.overflow', 'tally.overflow.matched', 'tally.overflow.unmet', 'tally.overflow.kept', 'tally.overflow.withdrawn', 'tally.overflow.disputed'].includes(String(p.kind))) return { kind: 'refused', problems: ['send tally.open { id, text, threshold, deadline, people_only?, blind?, listed? }, tally.list, tally.sign { id }, tally.withdraw { id }, tally.close { id } (its opener, before it fills), tally.count { id } or (blind) tally.reveal { id, salt }'] };
     if (p.kind === 'circle.clear.consent') return consent(String(p.clearing ?? ''), from, String(p.owe ?? ''), String(p.owed ?? ''), card, envelope);
     // Between tallies across the Ocean: favours owed (to tallies only), and a loop another tally cleared.
     if (p.kind === 'tally.edges' || p.kind === 'tally.cleared' || p.kind === 'tally.look' || p.kind === 'tally.standing' || p.kind === 'tally.note' || p.kind === 'tally.passed' || String(p.kind).startsWith('tally.overflow')) {
@@ -1195,6 +1197,21 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: 'tally.joined', id: t.id, answered: q.joined.length, closes: new Date(q.closes).toISOString(), count: q.count, tellers: q.tellers, note: 'now send your answer to the count: one option, as two unreadable shares, one to each of these tellers. Only the totals come out, to this tally alone, when the quorum closes.' };
     }
     if (String(p.kind).startsWith('circle.')) return circle(t, p, from, card, String(profile.publicJwk.kid ?? from), envelope);
+    // Its opener can call it off before it fills (run 121b: an AI's pledge named a host who hadn't opened it, and nothing but
+    // its deadline could end it). Nobody is bound; each signer is told. A pledge holding money settles by its own rules.
+    if (p.kind === 'tally.close') {
+      if (t.openerWebId ? from !== t.openerWebId : profile.ownerDomain !== t.opener) return { kind: 'refused', problems: [`only whoever opened it can close it; it was opened by ${t.openedBy?.name || t.opener}`] };
+      if (t.state !== 'open' && t.state !== 'gathering') return { kind: 'refused', problems: [`it has ${t.state}${t.state === 'triggered' ? ': those who signed are bound by it' : ''}`] };
+      if (t.money) return { kind: 'refused', problems: ['it holds money: it settles at its deadline, filled or lapsed, and each signer can withdraw until then'] };
+      t.state = 'closed';
+      const gone = t.signers;
+      t.signers = [];
+      if (t.blind) t.blind.passes = [];
+      for (const x of gone) void tell(x.url, { kind: 'tally.closed', id: t.id, text: t.text, by: 'its opener', note: 'Its opener closed it before it filled: nobody is bound.' });
+      void save();
+      report(t);
+      return { kind: 'tally.closed', ...view(t) };
+    }
     if (t.state === 'gathering' && p.kind !== 'tally.count') return { kind: 'refused', problems: [`it is still finding its quorum: it opens for signing at ${new Date(t.quorum!.closes).toISOString()} only if enough people privately said they'd join`] };
     if (t.blind) {
       await unveil(t);
@@ -1310,10 +1327,11 @@ const when=(iso)=>new Date(iso).toLocaleString([], {weekday:'short',hour:'2-digi
 const esc=(x)=>String(x).replace(/[&<>"']/g,(c)=>'&#'+c.charCodeAt(0)+';');
 async function tick(){
   let v; try{v=await (await fetch(id+'.json',{cache:'no-store'})).json()}catch{return}
-  const q=v.quorum, label={gathering:'Finding its quorum, in secret',open:'Open for signing',triggered:'Filled',lapsed:'Lapsed'}[v.state]||v.state;
+  const q=v.quorum, label={gathering:'Finding its quorum, in secret',open:'Open for signing',triggered:'Filled',lapsed:'Lapsed',closed:'Closed by its opener'}[v.state]||v.state;
   $('state').textContent=v.unveil&&v.unveil.opened?'Filled · everyone revealed':label;
   let h='';
   if(v.state==='gathering'){h='<p class="big">'+q.answered+'</p><p class="of">families have answered privately. Answers close '+when(q.closes)+'. Nobody can sign until then, and only if enough would join.</p>'}
+  else if(v.state==='closed'){h='<p class="of">Its opener closed it before it filled. Nobody is bound.</p>'}
   else if(v.state==='lapsed'){h='<p class="big">'+v.count+'</p><p class="of">'+esc((q&&q.result&&q.result.why)||('of '+v.threshold+' needed by '+when(v.deadline)))+'</p>'}
   else{const out=v.unveil&&v.unveil.opened;h='<p class="big">'+v.count+' <span class="of">signed, '+v.threshold+' needed</span></p><p class="of">'+(out?'Signed blind, then everyone was revealed in the same moment, at '+when(v.unveil.opens)+' (drand round '+v.unveil.round+').':(v.blind?'Signed blind: nobody knows who until '+(v.unveil?'everyone is revealed at the same moment, '+when(v.unveil.opens):'it fills')+'.':'')+' Signing closes '+when(v.deadline)+'.')+'</p>';
     if(v.blind)h+='<p class="of">Revealed: <b>'+v.revealed+'</b> of '+v.count+'</p>'}

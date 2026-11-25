@@ -1023,6 +1023,41 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('says when a pledge names someone the owner knows who didn\'t open it, and when they withdrew or its opener closed it (run 121b)', async () => {
+    const until = new Date(Date.now() + 86_400_000).toISOString(), priya = 'https://priya-house.example';
+    const terms: Record<string, Record<string, unknown>> = {
+      'bbq-plates': { id: 'bbq-plates', text: 'BBQ plates for Saturday, hosted by Priya, A$5 each', threshold: 3, state: 'open', deadline: until, opened_by: { name: 'Brisk Nova (Claude, via MCP)', domain: 'nova.example', url: 'https://nova.example/a2a', house: false } },
+      'bbq-house': { id: 'bbq-house', text: 'BBQ at Priya Nair\'s, Saturday', threshold: 3, state: 'open', deadline: until, opened_by: { name: 'Priya Nair (house)', domain: 'priya-house.example', url: `${priya}/a2a`, house: true } },
+      'bbq-her-ai': { id: 'bbq-her-ai', text: 'BBQ at Priya\'s, Saturday', threshold: 3, state: 'open', deadline: until, opened_by: { name: 'Fern Kite (Claude, via MCP)', domain: 'fern.example', url: 'https://fern.example/a2a', house: false } },
+    };
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), pledgeTerms: async (_t: string, id: string) => ({ ...terms[id] }), signPledge: async () => ({ kind: 'tally.signed', count: 1 }), withdrawPledge: async () => ({ kind: 'tally.withdrawn', count: 0 }) } });
+    (h.desk as unknown as { contacts: Map<string, unknown> }).contacts.set('priya-house-key-0123456789abcdefghijklmnop', { name: 'Priya Nair', webId: `${priya}/#me`, house: `${priya}/a2a`, houseKey: 'priya-house-key-0123456789abcdefghijklmnop', at: new Date().toISOString() });
+    const card = (id: string) => h.desk.suggestions.find((x) => x.pledge?.id === id)?.pledge;
+    const invite = async (id: string, sender: Record<string, unknown>) => {
+      h.desk.addNote({ from: sender as never, text: `Will you sign ${id}?`, pledge: { tally: 'https://tally.example/a2a', id } });
+      for (let i = 0; i < 20 && !card(id); i++) await settle();
+      expect(card(id)).toBeTruthy();
+    };
+    // A stranger's AI opened it and its words name Priya: the card says so (it decides nothing).
+    await invite('bbq-plates', from('vic'));
+    expect(card('bbq-plates')).toMatchObject({ mentions: 'Priya Nair' });
+    // Opened by Priya's own house, or by an AI her house vouches for that sent the invite itself: nothing to say.
+    await invite('bbq-house', from('dee'));
+    expect(card('bbq-house')?.mentions).toBeUndefined();
+    await invite('bbq-her-ai', { ...from('fern'), speaks_for: { house: `${priya}/#me`, checked: true, houseKey: 'priya-house-key-0123456789abcdefghijklmnop' } });
+    expect(card('bbq-her-ai')?.mentions).toBeUndefined();
+    // Withdrawn from the card: it says so, and the sweep leaves it (run 121b: "you signed · 0 of 3 so far").
+    await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'bbq-plates' });
+    await h.owner({ kind: 'panel.pledge.withdraw', tally: 'https://tally.example/a2a', id: 'bbq-plates' });
+    expect(card('bbq-plates')?.signed).toMatchObject({ withdrawn: true });
+    // Closed by its opener before it filled: the card says nobody is bound.
+    await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'bbq-house' });
+    Object.assign(terms['bbq-house']!, { state: 'closed', count: 0 });
+    await h.desk.sweepPledges();
+    expect(card('bbq-house')?.signed).toMatchObject({ closed: true });
+    h.close();
+  });
+
   it('answers a message sent to the owner\'s AI as the owner, from the house, only when asked to (run 114)', async () => {
     const told: { url: string; p: Record<string, unknown> }[] = [];
     const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async (url: string, p: Record<string, unknown>) => { told.push({ url, p }); return { kind: 'ok' }; } } });
