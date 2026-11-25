@@ -1390,7 +1390,8 @@ function panelFor(x: {
       if (!v.ok) return { error: v.rejection.why };
       const c = (signed as LakeData).card, p = v.payload as Record<string, unknown>;
       const url = c.supportedInterfaces?.[0]?.url;
-      return { from: { name: c.name, domain: v.profile.ownerDomain, webId: v.profile.webId, ...(url ? { url } : {}), key: await keyThumbprint(v.profile.publicJwk), checked: v.domainVia !== 'sandbox' }, text: typeof p.text === 'string' ? p.text : typeof p.body === 'string' ? p.body : '' };
+      // A house's own message says so, as at the door: answering it as yourself then sends a note a house takes (run 122).
+      return { from: { name: c.name, domain: v.profile.ownerDomain, webId: v.profile.webId, ...(url ? { url } : {}), key: await keyThumbprint(v.profile.publicJwk), checked: v.domainVia !== 'sandbox', ...(v.profile.role === 'house' ? { house: true as const } : {}) }, text: typeof p.text === 'string' ? p.text : typeof p.body === 'string' ? p.body : '' };
     },
     async circleSend(tally, payload) {
       return (await send(tally, payload)).payload as Record<string, any>;

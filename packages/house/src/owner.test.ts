@@ -1698,6 +1698,28 @@ describe('what an attacker tried (round 16)', () => {
       h.close();
     });
 
+  it('answers a neighbour\'s house that wrote to the AI as yourself with a note, even from a note filed before (run 122)', async () => {
+    const sent: Record<string, any>[] = [];
+    const bill = { ...from('bill'), name: 'Bill Nguyen (house)' };
+    const h = await house({ panel: {
+      activity: () => [], money: async () => ({}),
+      // A house takes notes; a message to it is malformed.
+      replyAgent: async (_u: string, m: Record<string, any>) => { sent.push(m); return m.kind === 'message' ? { kind: 'rejected', code: 'malformed', why: 'expected an offer, a note…' } : { kind: 'noted' }; },
+      verifySigned: async (x: { envelope: { payload: { text: string } } }) => ({ from: { ...bill, house: true as const }, text: x.envelope.payload.text }),
+    } });
+    const a = await h.connect('Helper');
+    // Forwarded by the AI, signed: the house says it is a house.
+    const f = await a.call({ kind: 'assistant.forward', signed: { card: { name: 'Bill Nguyen (house)' }, envelope: { payload: { text: 'Count me in for the sale' } } }, arrived: new Date().toISOString() });
+    expect((await h.owner({ kind: 'list' })).notes.find((n: { id: string }) => n.id === f.note)?.from).toMatchObject({ house: true });
+    expect(await h.owner({ kind: 'panel.note.reply', id: f.note, text: 'Great, see you Saturday', as_house: true })).toEqual({ ok: true, as_house: true });
+    expect(sent.at(-1)).toMatchObject({ kind: 'note', text: 'Great, see you Saturday' });
+    // A note filed before, without the mark: refused as a message, sent once more as a note.
+    const old = h.desk.addNote({ from: { ...bill, key: 'bill-old-key-0123456789abcdefghijklmnop', via: a.id.publicJwk.kid! }, text: 'Is the trolley free Sunday?' })!;
+    expect(await h.owner({ kind: 'panel.note.reply', id: old, text: 'Yes, come by at 10', as_house: true })).toEqual({ ok: true, as_house: true });
+    expect(sent.slice(-2).map((m) => m.kind)).toEqual(['message', 'note']);
+    h.close();
+  });
+
   // Layer 2 (13 Nov): a message that reached only the AI's own inbox. The AI's card never names the owner's house, so the
   // house checks and counts, and the answer goes from the AI.
   it('someone who wrote to the owner\'s AI: filed as signed, a chat of its own, counted here and answered from the AI\'s address', async () => {

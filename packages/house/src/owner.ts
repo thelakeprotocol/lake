@@ -149,7 +149,7 @@ export interface PanelProvider {
   /** A house's address on this house's Lake, from its handle ("sam-ascot-4k2p"); undefined when nobody goes by it. */
   resolveHandle?(handle: string): Promise<string | undefined>;
   /** Checks a signed message one of the owner's AIs received and passes on (card, domain, signature, as of when it arrived): who sent it, and its words. */
-  verifySigned?(signed: unknown, arrived: number): Promise<{ from: { name: string; domain: string; webId: string; url?: string; key: string; checked: boolean }; text: string } | { error: string }>;
+  verifySigned?(signed: unknown, arrived: number): Promise<{ from: { name: string; domain: string; webId: string; url?: string; key: string; checked: boolean; house?: true }; text: string } | { error: string }>;
   /** What the owner's record says for one coded field (its first value), for a count answered from it. */
   recordCode?(field: string): Promise<string | undefined>;
   /** A secret count answered from the owner's own record: the house finds the answer and sends it as two shares. */
@@ -2736,7 +2736,7 @@ export class OwnerDesk {
             if (!words) return void res.status(400).json({ error: 'that message has no words (text) to show your human' });
             if (looksLikeInjection(words)) return void res.status(400).json({ error: 'a note is for your human to read, not instructions: describe it to them in your own words instead' });
             if (this.muted.has(v.from.key)) return void res.json({ ok: false, error: 'your human blocked this sender' });
-            const id = this.addNote({ from: { name: v.from.name.slice(0, 80), domain: v.from.domain, webId: v.from.webId, ...(v.from.url ? { url: v.from.url } : {}), checked: v.from.checked, key: v.from.key, via: assistant.kid }, text: words });
+            const id = this.addNote({ from: { name: v.from.name.slice(0, 80), domain: v.from.domain, webId: v.from.webId, ...(v.from.url ? { url: v.from.url } : {}), ...(v.from.house ? { house: true as const } : {}), checked: v.from.checked, key: v.from.key, via: assistant.kid }, text: words });
             return void res.json(id ? { ok: true, note: id, signed_by: v.from.name } : { ok: false, error: 'a few notes an hour from one sender' });
           }
           const text = String(q.text ?? '').trim().slice(0, 1000);
@@ -3399,9 +3399,11 @@ export class OwnerDesk {
             // To a neighbour's house, a note (a house takes notes, not messages: run 120, "their AI didn't take it: expected an
             // offer… a note…"); to an AI, a message quoting what it answers.
             const out = lakeNote.from.house ? { kind: 'note', text, purpose: 'contact' } : { kind: 'message', text, re: lakeNote.text.slice(0, 200) };
-            const sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, out).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
+            let sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, out).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
+            // A house that came without saying so (a note filed before run 122's fix) refuses a message as malformed: once more, as a note.
+            if (sent?.kind === 'rejected' && sent.code === 'malformed' && out.kind === 'message') sent = await this.o.panel?.replyAgent?.(lakeNote.from.url, { kind: 'note', text, purpose: 'contact' }).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
             if (!sent || sent.kind === 'unreached') return void res.status(502).json({ error: 'their AI can\'t be reached right now' });
-            if (sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their AI didn't take it${sent.problems ?? sent.why ? `: ${[sent.problems ?? sent.why].flat().map(String).join('; ').slice(0, 300)}` : ''}` });
+            if (sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: sent.code === 'malformed' ? 'They didn\'t take it. Tell your AI what to say instead.' : `their AI didn't take it${sent.problems ?? sent.why ? `: ${[sent.problems ?? sent.why].flat().map(String).join('; ').slice(0, 300)}` : ''}` });
             lakeNote.answered = { text, by: 'you', own: true, as_house: true, at: new Date().toISOString() };
             this.answeredMyself(`via:${lakeNote.from.key}`);
             if (lakeNote.from.key && !this.contacts.has(lakeNote.from.key)) { this.contacts.set(lakeNote.from.key, { name: lakeNote.from.name.slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
