@@ -1023,6 +1023,18 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('shows that another house has a sender\'s name only for a stranger, never over a known sender (run 121b)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const namesake = { name: 'Mia Torres', handle: 'mia', url: 'https://mia-house.example/a2a' };
+    h.desk.addNote({ from: { ...from('vic'), name: 'Mia Torres', namesake }, text: 'new phone, can you resend me your address?' });
+    (h.desk as unknown as { contacts: Map<string, unknown> }).contacts.set(from('sam').key, { name: 'Sam', webId: from('sam').webId, at: new Date().toISOString() });
+    h.desk.addNote({ from: { ...from('sam'), namesake: { name: 'Sam', url: 'https://other-sam.example/a2a' } }, text: 'Still on for Friday?' });
+    const notes = (await h.owner({ kind: 'list' })).notes as { text: string; from: { namesake?: unknown } }[];
+    expect(notes.find((n) => n.text.startsWith('new phone'))?.from.namesake).toEqual(namesake);
+    expect(notes.find((n) => n.text.startsWith('Still on'))?.from.namesake).toBeUndefined();
+    h.close();
+  });
+
   it('says when a pledge names someone the owner knows who didn\'t open it, and when they withdrew or its opener closed it (run 121b)', async () => {
     const until = new Date(Date.now() + 86_400_000).toISOString(), priya = 'https://priya-house.example';
     const terms: Record<string, Record<string, unknown>> = {

@@ -104,6 +104,27 @@ export class Housekeeper {
   private declinedAt = new Map<string, number>();
   /** Handles as the Lake lists them (its node's /handles), for a few minutes: what a card claims is checked against this. */
   private handles = new Map<string, { url?: string; at: number }>();
+  /** Houses the Lake lists under a name, for a few minutes: a first note from a namesake of another house says so (run 121b). */
+  private named = new Map<string, { list: { name: string; handle?: string; url: string }[]; at: number }>();
+  private async namesake(name: string, url?: string): Promise<{ name: string; handle?: string; url: string } | undefined> {
+    const base = (n?: string) => (n ?? '').replace(/\s*\(.*$/, '').trim().toLowerCase(), b = base(name);
+    if (!b.split(/\s+/).some((w) => w.length >= 3)) return undefined;
+    let hit = this.named.get(b);
+    if (!hit || Date.now() - hit.at > 300_000) {
+      const list: { name: string; handle?: string; url: string }[] = [];
+      for (const n of this.o.nodes ?? []) {
+        const r = await fetch(`${n.replace(/\/$/, '')}/cards?role=house&idle=1&q=${encodeURIComponent(b)}`, { signal: AbortSignal.timeout(5000) }).then((x) => (x.ok ? x.json() as Promise<{ card: AgentCard }[]> : null)).catch(() => null);
+        for (const e of r ?? []) {
+          const u = e.card?.supportedInterfaces?.[0]?.url;
+          if (u && base(e.card.name) === b && !list.some((x) => x.url === u)) list.push({ name: String(e.card.name).replace(/\s*\(house\)$/, '').slice(0, 80), ...(lakeProfile(e.card)?.handle ? { handle: lakeProfile(e.card)!.handle } : {}), url: u });
+        }
+      }
+      hit = { list, at: Date.now() };
+      this.named.set(b, hit);
+    }
+    const at = (u?: string) => (u ?? '').replace(/\/$/, '');
+    return hit.list.find((x) => at(x.url) !== at(url) && at(x.url) !== at(this.o.card.supportedInterfaces[0]!.url));
+  }
   private async handleUrl(h: string): Promise<string | undefined> {
     const k = h.toLowerCase(), hit = this.handles.get(k);
     if (hit && Date.now() - hit.at < 300_000) return hit.url;
@@ -702,7 +723,9 @@ export class Housekeeper {
     }
     // The person the AI writes for, as they name themselves ("Alex"): shown as their words, never checked.
     const as = typeof p.as === 'string' ? p.as.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60) : '';
-    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(fromHandle ? { handle: fromHandle.slice(0, 60) } : {}), ...(url ? { url } : {}), ...(from.role === 'house' ? { house: true as const } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
+    // A first note from a key the owner doesn't know, whose name another house on the Lake also has: said, never decided on.
+    const namesake = key && !this.o.desk.knownBy(key) ? await this.namesake(cleanName(card.name), url).catch(() => undefined) : undefined;
+    const kept = this.o.desk.addNote({ from: { name: cleanName(card.name), domain: from.ownerDomain, webId: from.webId, ...(fromHandle ? { handle: fromHandle.slice(0, 60) } : {}), ...(namesake ? { namesake } : {}), ...(url ? { url } : {}), ...(from.role === 'house' ? { house: true as const } : {}), checked: domainVia !== 'sandbox', ...(key ? { key } : {}), ...(speaks ? { speaks_for: speaks } : {}), ...(as ? { as } : {}) }, text, purpose, ...(pl ? { pledge: { tally: String(pl.tally), id: String(pl.id) } } : {}), ...(p.reply === false ? { noReply: true as const } : {}), ...(offering ? { offering } : {}), ...(want ? { want } : {}) });
     // Busy, not malformed: the note was fine, the sender has sent enough this hour (run 45).
     if (!kept) return this.reply({ kind: 'rejected', code: 'busy', why: 'a few notes an hour from one sender: try again later' } as never);
     // Its id, for the sender to tie a reply to (run 44: the assistant quoted ids the sender never saw).

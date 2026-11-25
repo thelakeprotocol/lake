@@ -53,6 +53,8 @@ export function ChatsTab({ tabbar, status }: { tabbar: Child; status: Child }) {
 }
 
 /** A lookalike's line in the list: calm when the new key writes from the same house, careful when not. */
+// Another house on the Lake has this name (run 121b: a door renamed "Mia Torres" warned only Mia). Two people can share a name.
+const namesakeLine = (c: Chat) => `Another house on the Lake is also called ${shortName(c.namesake!.name)}${c.namesake!.handle ? ` (@${c.namesake!.handle})` : ''}. Check this is who you think.`;
 const twinLine = (name: string, sameHouse?: boolean, self?: boolean) => self ? 'Has your name, but isn\'t you' : sameHouse === true ? `Says they're ${name}: new key, same house as before` : sameHouse === false ? `Says they're ${name}: not the ${name} you know` : `Says they're ${name}, with a different key`;
 
 /** A note to someone by their handle, sent by this house with its own key; the chat opens with it. */
@@ -87,6 +89,7 @@ export function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {
       twin && !c.toAi && c.trust !== 'lookalike' && c.agent ? h('div', { class: 'row-via' }, `Through ${shortName(c.agent)}`) : null,
       // What a new sender is, before it's opened (round 84: "Visitor from early.example: a person, a bot, spam?").
       !c.toAi && c.trust === 'new' ? h('div', { class: 'row-via' }, c.via, c.handle ? ` · @${c.handle}` : '') : null,
+      !c.toAi && c.trust === 'new' && c.namesake ? h('div', { class: 'row-via careful namesake' }, namesakeLine(c)) : null,
       h('div', { class: 'row-last' }, h('p', { class: 'chatlast' }, c.lastBy === 'you' ? 'You: ' : ai ? `${ai}: ` : '', c.last), c.unread ? h('ion-badge', { color: 'primary', class: 'unread-badge' }, String(c.unread)) : null)));
 }
 
@@ -279,6 +282,7 @@ function NewStrip({ c, latest }: { c: Chat; latest: DoorNote }) {
       mute));
   return h('div', { class: 'newstrip', role: 'note' },
     c.replyTo ? h('p', { class: 'reach' }, `Left ${c.replyTo.kind === 'email' ? 'an email address' : 'a phone number'} for your answer: `, h(ReachLinks, { r: c.replyTo })) : null,
+    c.namesake ? h('p', { class: 'namesake-line' }, h('b', {}, namesakeLine(c))) : null,
     // What a first message is, in plain words (run 116: a neighbour's own note read "their AI wrote this… nobody has checked it";
     // ChatGPT, round 159). Their house wrote it, their house confirmed its AI, or an AI no house stands behind.
     h('p', {}, c.web ? 'New, from your public page. Nothing is checked about who wrote it.' : latest.from.house ? `New: a first message from ${c.name}'s house${c.handle ? ` (@${c.handle})` : ''}. It really comes from that house; the name is the one on its door, and you haven't dealt with them before. Type below to answer, or Block.` : latest.from.speaks_for?.checked ? `New: ${latest.from.speaks_for.name ?? 'a neighbour'}'s house confirms this AI is theirs. The AI's own name, and what it says about itself, aren't checked. Type below to answer, or Block.` : `New: their AI wrote this for them.${c.doorNote ? ` They got your door note ${when(c.doorNote)}.` : ''} The message is signed, so it's the same sender each time; the name is only what their AI says, and nobody has checked it. They see nothing in your house. Type below and your answer goes to their AI, which passes it on; or Block.`),

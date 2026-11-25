@@ -611,6 +611,13 @@ describe('the owner', () => {
     // A reply from another house's phone to a note this house sent lands as a note too (round 107: it was turned away as malformed).
     expect((await ask(houses.strict!, neighbour, { kind: 'note.reply', note: 'n-elsewhere', text: 'Yes, Friday 6 to 10 works for me.' })).reply).toMatchObject({ kind: 'noted' });
     expect((await ownerCall({ kind: 'list' })).notes.some((n: { text: string }) => n.text === 'Yes, Friday 6 to 10 works for me.')).toBe(true);
+    // A first note from a namesake of another house on the Lake says so, and decides nothing (run 121b: a door renamed
+    // "Mia Torres" warned only Mia, not the neighbours who know her in life).
+    const stanName = String((await (await fetch(`${houses.stan}/.well-known/agent-card.json`)).json()).name);
+    const namesake = await makeVisitor(await generateIdentity(), 'namesake.example', stanName);
+    expect((await ask(houses.strict!, namesake, { kind: 'note', text: 'Hi, it is me from up the road.' })).reply).toMatchObject({ kind: 'noted' });
+    const fromNamesake = ((await ownerCall({ kind: 'list' })).notes as { text: string; from: { namesake?: { name: string; url: string } } }[]).find((x) => x.text.startsWith('Hi, it is me'))!.from;
+    expect(fromNamesake.namesake).toMatchObject({ name: stanName.replace(/ \(house\)$/, ''), url: expect.stringContaining(new URL(houses.stan!).host) });
     const neutral = await asHelper({ kind: 'assistant.suggest', text: 'Coffee with Ana: which day?', note: twice.note, advice: 'your_call', ask: { choices: ['Tuesday', 'Thursday'], recommend: 0 } });
     expect((await ownerCall({ kind: 'list' })).suggestions.find((x: any) => x.id === neutral.id).ask).toEqual({ choices: ['Tuesday', 'Thursday'] });
     // What the owner agreed to lives in their house: the assistant writes it in, the owner sees and removes it.
