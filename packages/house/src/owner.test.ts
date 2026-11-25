@@ -1721,6 +1721,24 @@ describe('what an attacker tried (round 16)', () => {
       h.close();
     });
 
+  it('tells the AI what its human said themselves in the AI\'s own conversation, and only that they answered in one they kept (run 126)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}), replyAgent: async () => ({ kind: 'noted' }) } });
+    const a = await h.connect('Helper'), kid = a.id.publicJwk.kid!;
+    const id = h.desk.addNote({ from: { ...from('dana'), name: 'Dana Wright (house)', house: true, via: kid }, text: 'Split the trailer Saturday?' })!;
+    expect(await h.owner({ kind: 'panel.note.reply', id, text: '35 each?', as_house: true })).toEqual({ ok: true, as_house: true });
+    await settle();
+    expect(h.told.map((t) => t.p).filter((p) => p.about === 'owner.replied').at(-1)).toMatchObject({ note: id, text: '35 each?', as_house: true, note_for_you: expect.stringContaining('say nothing that contradicts it') });
+    // A chat the owner kept for themselves: the AI hears they answered, not what.
+    const kept = h.desk.addNote({ from: from('kim'), text: 'Hi, new here' })!;
+    await h.owner({ kind: 'panel.chat.mode', key: from('kim').key, mode: 'me' });
+    await h.owner({ kind: 'panel.note.reply', id: kept, text: 'Welcome!' });
+    await settle();
+    const told = h.told.map((t) => t.p).filter((p) => p.about === 'owner.replied').at(-1)!;
+    expect(told).toMatchObject({ note: kept, text_hidden: expect.any(String) });
+    expect(told).not.toHaveProperty('text');
+    h.close();
+  });
+
   it('answers a neighbour\'s house that wrote to the AI as yourself with a note, even from a note filed before (run 122)', async () => {
     const sent: Record<string, any>[] = [];
     const bill = { ...from('bill'), name: 'Bill Nguyen (house)' };

@@ -1374,6 +1374,17 @@ export class OwnerDesk {
     })().catch(() => {});
   }
 
+  /**
+   * What the owner said themselves from the phone, told to their AI so it never contradicts them (run 126: Tom offered "35 each?"
+   * himself, and his AI then told Dana nothing was agreed). The words go to the AI whose conversation it is, or that was handed
+   * it; a chat the owner kept says only that they answered.
+   */
+  private saidMyself(about: 'owner.replied' | 'owner.wrote', n: OwnerDesk['notes'][number], text: string, as_house?: true) {
+    const task = this.taskFor(undefined, n.from), own = n.from.via;
+    const words = !!own || !!task || this.modeOf(n.from) === 'ai';
+    this.news({ about, note: n.id, with: n.from.name, ...(as_house ? { as_house } : {}),
+      ...(words ? { text: text.slice(0, 1000), note_for_you: 'your human said this themselves, from their phone: say nothing that contradicts it' } : { text_hidden: 'your human answered this conversation themselves: its words stay with them' }) }, own ?? task?.by);
+  }
   news(payload: Record<string, unknown>, onlyKid?: string, notKid?: string) {
     this.touch();
     if (payload.about === 'request.waiting') this.notifyOwner('request', 'A request is waiting for your answer.');
@@ -3401,6 +3412,7 @@ export class OwnerDesk {
         this.wroteTo.set(to.key, now);
         const at = new Date(now).toISOString();
         this.notes.push({ id: randomBytes(6).toString('hex'), started: true, from: { name: to.name, domain: new URL(to.url).host, webId: '', url: to.url, key: to.key, checked: false, house: true }, text: '', at, answered: { text, by: 'you', own: true, at } });
+        this.saidMyself('owner.wrote', this.notes.at(-1)!, text);
         // Someone this owner wrote to is someone they know: their answer isn't a stranger's.
         if (!this.contacts.has(to.key)) { this.contacts.set(to.key, { name: to.name, webId: '', at, houseKey: to.key }); await this.saveDuty(); }
         void this.saveNotes();
@@ -3430,6 +3442,7 @@ export class OwnerDesk {
             if (sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: sent.code === 'malformed' ? 'They didn\'t take it. Tell your AI what to say instead.' : `their AI didn't take it${sent.problems ?? sent.why ? `: ${[sent.problems ?? sent.why].flat().map(String).join('; ').slice(0, 300)}` : ''}` });
             lakeNote.answered = { text, by: 'you', own: true, as_house: true, at: new Date().toISOString() };
             this.answeredMyself(`via:${lakeNote.from.key}`);
+            this.saidMyself('owner.replied', lakeNote, text, true);
             if (lakeNote.from.key && !this.contacts.has(lakeNote.from.key)) { this.contacts.set(lakeNote.from.key, { name: lakeNote.from.name.slice(0, 80), webId: String(lakeNote.from.webId ?? '').slice(0, 300), at: new Date().toISOString() }); await this.saveDuty(); }
             void this.saveNotes();
             this.touch();
@@ -3441,6 +3454,7 @@ export class OwnerDesk {
           if (sent.kind === 'refused' || sent.kind === 'rejected') return void res.status(502).json({ error: `their AI didn't take it${sent.problems ?? sent.why ? `: ${[sent.problems ?? sent.why].flat().map(String).join('; ').slice(0, 300)}` : ''}` });
           lakeNote.answered = { text, by: 'you', own: true, at: new Date().toISOString() };
           this.answeredMyself(lakeNote.from.key);
+          this.saidMyself('owner.replied', lakeNote, text);
           // Kept under the name the owner saw: the vouching house's own when one checked (run 108: the real Priya wrote through
           // her AI, the contact was kept as "Quiet Moss", and Vic's "Priya Nair" matched no one).
           // The name an AI gives itself (as) is never kept: only its house's checked word; and a contact its AI made first, with
@@ -3453,7 +3467,7 @@ export class OwnerDesk {
         }
         const r = this.answerWebNote(String(q.id ?? ''), String(q.text ?? ''), 'you');
         const webNote = this.notes.find((x) => x.id === String(q.id ?? ''));
-        if (!('error' in r) && webNote) this.answeredMyself(OwnerDesk.conv(webNote.from));
+        if (!('error' in r) && webNote) { this.answeredMyself(OwnerDesk.conv(webNote.from)); this.saidMyself('owner.replied', webNote, String(q.text ?? '')); }
         return void res.status('error' in r ? 400 : 200).json(r);
       }
       if (p.kind === 'panel.note.dismiss') {
