@@ -908,6 +908,24 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('blocks a household as one through its AI, and unblocks it as one; an unchecked claim blocks only its sender (run 125)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const PK = 'priya-house-key-0123456789abcdefghijklmnop';
+    const ai = h.desk.addNote({ from: { ...from('fern'), speaks_for: { house: 'https://priya.example/#me', checked: true, name: 'Priya Nair', houseKey: PK } }, text: 'BBQ plates, 5 dollars, pay me first' })!;
+    expect(await h.owner({ kind: 'panel.note.mute', id: ai })).toMatchObject({ ok: true, household: true });
+    expect(h.desk.muted.has(from('fern').key)).toBe(true);
+    expect(h.desk.muted.has(PK)).toBe(true);
+    expect(await h.owner({ kind: 'panel.blocked' })).toEqual([expect.objectContaining({ key: from('fern').key, name: expect.stringMatching(/\(and their house\)$/) })]);
+    await h.owner({ kind: 'panel.note.unmute', key: from('fern').key });
+    expect(h.desk.muted.has(PK)).toBe(false);
+    expect(await h.owner({ kind: 'panel.blocked' })).toEqual([]);
+    // A claim nobody checked is only words: it doesn't block the house it names.
+    const claim = h.desk.addNote({ from: { ...from('vic'), speaks_for: { house: 'https://priya.example/#me', checked: false, houseKey: PK } }, text: 'hi' })!;
+    expect(await h.owner({ kind: 'panel.note.mute', id: claim })).not.toHaveProperty('household');
+    expect(h.desk.muted.has(PK)).toBe(false);
+    h.close();
+  });
+
   it('names who was blocked, lists them, and unblocks (run 104: a block on the wrong sender, named by a domain, stuck)', async () => {
     const h = await house();
     const id = h.desk.addNote({ from: { ...from('priya'), as: 'Priya' }, text: 'BBQ Saturday?' })!;

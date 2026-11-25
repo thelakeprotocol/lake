@@ -1414,7 +1414,7 @@ export class OwnerDesk {
    */
   readonly muted = new Set<string>();
   /** Who each blocked key wrote as, so the owner's list says a name, not a key (round 136). */
-  private mutedNames = new Map<string, { name: string; at: string }>();
+  private mutedNames = new Map<string, { name: string; at: string; /** The other key of a household blocked as one (its house, or the AI it was blocked through). */ with?: string }>();
   async mute(key: string) {
     if (!key) return;
     this.muted.add(key);
@@ -3349,18 +3349,28 @@ export class OwnerDesk {
         // A lookalike is named as one (run 108: both neighbours' block said "Priya Nair", and they couldn't tell which Priya).
         const twin = this.twinOf(note.from);
         const name = `${(note.from.as ?? note.from.name).replace(/ \(.*\)$/, '').slice(0, 60)}${twin?.self ? ' (not you)' : twin && !twin.sameHouse ? ` (not the ${twin.name.replace(/ \(.*\)$/, '')} you know)` : ''}`.slice(0, 100);
-        this.mutedNames.set(note.from.key, { name, at: new Date().toISOString() });
+        // Blocking a house's checked AI blocks the house too (run 125: Sam blocked the AI and the house's own note came through;
+        // George and Priya had to block twice). A house's block already covers its AIs. An unchecked claim blocks only its sender.
+        const houseKey = note.from.speaks_for?.checked && note.from.speaks_for.houseKey && note.from.speaks_for.houseKey !== note.from.key ? note.from.speaks_for.houseKey : undefined;
+        const at = new Date().toISOString();
+        this.mutedNames.set(note.from.key, { name, at, ...(houseKey ? { with: houseKey } : {}) });
+        if (houseKey) this.mutedNames.set(houseKey, { name: `${(note.from.speaks_for!.name ?? name).replace(/ \(.*\)$/, '')}'s house`, at, with: note.from.key });
         await saveWhole(join(this.o.dataDir, 'muted-names.json'), JSON.stringify([...this.mutedNames]));
         await this.mute(note.from.key);
-        this.news({ about: 'sender.muted', domain: note.from.domain, note: 'your human won\'t hear from this sender again: its notes and knocks are declined at the door' });
-        return void res.json({ ok: true, blocked: name, key: note.from.key });
+        if (houseKey) await this.mute(houseKey);
+        this.news({ about: 'sender.muted', domain: note.from.domain, note: houseKey ? 'your human won\'t hear from this household again: its house and its AIs are declined at the door' : 'your human won\'t hear from this sender again: its notes and knocks are declined at the door' });
+        return void res.json({ ok: true, blocked: name, key: note.from.key, ...(houseKey ? { household: true } : {}) });
       }
       // The owner's blocked senders, and unblocking one (run 104: a block put on the wrong sender couldn't be taken back).
-      if (p.kind === 'panel.blocked') return void res.json([...this.muted].map((k) => ({ key: k, name: this.mutedNames.get(k)?.name ?? 'someone', at: this.mutedNames.get(k)?.at })));
+      // One row a household: its house's key, blocked with it, isn't listed again.
+      if (p.kind === 'panel.blocked') return void res.json([...this.muted].filter((k) => { const w = this.mutedNames.get(k)?.with; return !(w && this.muted.has(w) && this.mutedNames.get(w)?.with === k && /'s house$/.test(this.mutedNames.get(k)?.name ?? '')); })
+        .map((k) => { const n = this.mutedNames.get(k); return { key: k, name: n?.with && this.muted.has(n.with) ? `${n.name} (and their house)` : n?.name ?? 'someone', at: n?.at }; }));
       if (p.kind === 'panel.note.unmute') {
         const key = String((p as unknown as { key?: string }).key ?? '');
         if (!this.muted.has(key)) return void res.status(404).json({ error: 'nobody blocked with that key' });
-        this.muted.delete(key); this.mutedNames.delete(key);
+        // A household blocked as one comes back as one.
+        const partner = this.mutedNames.get(key)?.with;
+        for (const k of [key, ...(partner && this.mutedNames.get(partner)?.with === key ? [partner] : [])]) { this.muted.delete(k); this.mutedNames.delete(k); }
         await saveWhole(join(this.o.dataDir, 'muted.json'), JSON.stringify([...this.muted]));
         await saveWhole(join(this.o.dataDir, 'muted-names.json'), JSON.stringify([...this.mutedNames]));
         this.touch();
