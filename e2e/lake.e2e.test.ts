@@ -1501,6 +1501,11 @@ describe('the open door', () => {
     const alsoSeeking = await theirText('lake_set_tags', { tags: ['seeking:solar-group-buy'] });
     expect(alsoSeeking.matches).toContainEqual(expect.objectContaining({ tag: 'seeking:solar-group-buy', url: o.you.url, together: true }));
     // A cart from an agent this one never wrote to says so (run 63: a stranger's "redelivery fee" read "verified: true").
+    // A long line is refused with a word about brief, never cut silently; a line with no currency, and no menu to settle one,
+    // is refused too, never a silent USD (run 128: carts lost their terms past 120 characters, and an AUD deal came as USD).
+    const sellErr = async (args: Record<string, unknown>) => { const r = await other.callTool({ name: 'lake_sell', arguments: args }); return r.isError ? (r.content as { text: string }[])[0]!.text : ''; };
+    expect(await sellErr({ action: 'cart', to: o.you.url, items: [{ label: `Dumplings, ${'mixed '.repeat(25)}`, price: 1, currency: 'AUD' }] })).toMatch(/up to 120 characters.*brief/);
+    expect(await sellErr({ action: 'cart', to: o.you.url, items: [{ label: 'Tea', price: 1 }] })).toMatch(/say the currency/);
     await theirText('lake_sell', { action: 'cart', to: o.you.url, items: [{ label: 'Parcel redelivery fee', price: 3.95, currency: 'USD' }] });
     let carts: { message?: { kind?: string }; checked?: { unsolicited?: boolean } }[] = [];
     for (let i = 0; i < 10 && !carts.some((m) => m.message?.kind === 'trade.cart'); i++) carts = [...carts, ...(await text('lake_inbox', { wait_seconds: 2 })).messages];

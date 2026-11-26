@@ -1665,7 +1665,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         order: z.number().int().optional().describe('cart / decline: the lake_inbox id of an order from your menu: its cart has the menu\'s price and delivery terms and the buyer\'s note, as if signed at once; decline tells the buyer no'),
         reason: z.string().max(300).optional().describe('decline: a word to the buyer on why'),
         members: z.array(z.object({ url: z.string(), amount: z.number() })).min(2).max(5).optional().describe('team: each member\'s A2A address (yours too) and its share; the shares add up to the total'),
-        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().default('USD'), stock: z.number().int().min(1).max(10_000).optional().describe('menu: how many you have; each paid cart takes from it, and an order for more than is left gets "sold out", no cart'), prices: z.array(z.object({ asset: z.string().regex(/^[A-Z]{3}$/).describe('HUR: certified hours of community service (deeds); FAV: favours'), value: z.number().int().min(1).max(100).default(1), accept_url: z.string().describe('the A2A address of the agent whose word that it was paid you take: the organisation that certifies the deeds') })).max(3).optional().describe('menu: other ways to pay for it, besides money ("an hour of my time for an hour volunteered at Open Hands")'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
+        items: z.array(z.object({ sku: z.string().optional(), label: z.string(), price: z.number(), currency: z.string().optional().describe('ISO code, e.g. AUD; a cart line without one takes your menu\'s currency'), stock: z.number().int().min(1).max(10_000).optional().describe('menu: how many you have; each paid cart takes from it, and an order for more than is left gets "sold out", no cart'), prices: z.array(z.object({ asset: z.string().regex(/^[A-Z]{3}$/).describe('HUR: certified hours of community service (deeds); FAV: favours'), value: z.number().int().min(1).max(100).default(1), accept_url: z.string().describe('the A2A address of the agent whose word that it was paid you take: the organisation that certifies the deeds') })).max(3).optional().describe('menu: other ways to pay for it, besides money ("an hour of my time for an hour volunteered at Open Hands")'), unit: z.string().optional(), delivery: DELIVERY.optional(), confirm: z.boolean().optional().describe('menu: you (or your human) say yes to each order first, a booking say: no cart is signed until you send one') })).max(12).optional().describe('menu: what you sell (sku, label, price per unit, and delivery terms for each); cart: the lines of this cart (label, price)'),
         delivery: DELIVERY.optional().describe('cart: what you promise about the delivery, signed into the cart (an order from your menu gets the item\'s)'),
         to: z.string().optional().describe('cart: the buyer\'s A2A endpoint'),
         minutes: z.number().min(1).max(1440).default(30).describe('cart: how long the price holds'),
@@ -1684,7 +1684,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           // Other ways to pay (SPEC §6.7): each names, pinned by key from its own card, whose word that it was paid counts.
           const alts = new Map<number, MenuPrice[]>();
           for (const [i, x] of (a.items ?? []).entries()) if (x.prices?.length) alts.set(i, await Promise.all(x.prices.map(async (q) => ({ value: q.value, assetCode: q.asset, assetScale: 0, accept: [await cartParty((await (await fetch(cardUrlFor(q.accept_url))).json()) as AgentCard)] }))));
-          const items = (a.items ?? []).map((x, i) => ({ ...(alts.get(i) ? { prices: alts.get(i) } : {}), sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: x.currency.toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}), ...(x.stock ? stockOf(x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), x.stock) : {}) }));
+          const items = (a.items ?? []).map((x, i) => ({ ...(alts.get(i) ? { prices: alts.get(i) } : {}), sku: x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), label: x.label, price: { currency: (x.currency ?? 'USD').toUpperCase(), value: x.price }, ...(x.unit ? { unit: x.unit } : {}), ...(x.delivery ? { delivery: x.delivery } : {}), ...(x.confirm ? { confirm: true } : {}), ...(x.stock ? stockOf(x.sku ?? x.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40), x.stock) : {}) }));
           await me.setMenu(items);
           menu = items;
           // Said as it is (14 Nov: "a signed cart back at once" for items that wait for a yes, and for an AI gone quiet).
@@ -1697,7 +1697,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const buyerCard = (await (await fetch(cardUrlFor(a.to))).json()) as AgentCard;
           const buyer = lakeProfile(buyerCard);
           if (!buyer) throw new Error(`no Lake agent at ${a.to}`);
-          const currency = a.items[0]!.currency.toUpperCase();
+          const own = [...new Set(menu.map((m) => m.price.currency))];
+          const currency = a.items[0]!.currency?.toUpperCase() ?? (own.length === 1 ? own[0]! : undefined);
+          if (!currency) throw new Error('say the currency of the items (currency: e.g. "AUD"): your menu doesn\'t settle it');
           const total = a.items.reduce((n, x) => n + Math.round(x.price * 100), 0) / 100;
           if (Math.round(a.members.reduce((n, x) => n + x.amount * 100, 0)) !== Math.round(total * 100)) throw new Error(`members: the shares add up to ${a.members.reduce((n, x) => n + x.amount, 0)}, the items to ${total}: they must be the same`);
           const shares = await Promise.all(a.members.map(async (x) => {
@@ -1795,7 +1797,15 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const lineTerms = [...new Set(a.items.filter((x) => x.delivery).map((x) => JSON.stringify(x.delivery)))];
           if (lineTerms.length > 1 || (lineTerms.length && a.delivery && lineTerms[0] !== JSON.stringify(a.delivery))) throw new Error('a cart has one set of delivery terms: give them once, as delivery, not different ones on its lines');
           const delivery = a.delivery ?? (lineTerms.length ? (JSON.parse(lineTerms[0]!) as typeof a.delivery) : undefined);
-          const cart = await me.cart(buyer.webId, a.items.map((x) => ({ label: x.label, amount: { currency: x.currency.toUpperCase(), value: x.price } })), a.minutes, a.brief, undefined, delivery);
+          // Said, not cut (run 128: four carts lost "Cook starts once paid" past 120 characters, and nobody was told).
+          const long = a.items.find((x) => x.label.length > 120);
+          if (long) throw new Error(`a cart line's label is up to 120 characters (this one is ${long.label.length}): keep the line short and put the rest in brief, which is signed into the cart`);
+          // A line without a currency takes the menu's, never a silent USD (run 128: "I agreed AUD and won't pay a USD cart").
+          const own = [...new Set(menu.map((m) => m.price.currency))];
+          const currencyOf = (x: { currency?: string }) => x.currency?.toUpperCase() ?? (own.length === 1 ? own[0]! : undefined);
+          const missing = a.items.find((x) => !currencyOf(x));
+          if (missing) throw new Error(`say the currency for "${missing.label.slice(0, 60)}" (currency: e.g. "AUD"): your menu doesn't settle it`);
+          const cart = await me.cart(buyer.webId, a.items.map((x) => ({ label: x.label, amount: { currency: currencyOf(x)!, value: x.price } })), a.minutes, a.brief, undefined, delivery);
           const c = await checkCart(cart, (await key).publicJwk);
           orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? ''), url: a.to, webId: buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
           const reply = await me.ask(a.to, { kind: 'trade.cart', cart });
