@@ -31,6 +31,8 @@ const clipWords = (t: string, n: number) => { const c = t.replace(/\s+/g, ' ').t
 type ListedPledge = { id: string; text: string; count: number; threshold: number; needs: number; deadline: string; people_only?: boolean; blind?: boolean; opened?: string };
 /** Open pledges an agent can sign, nearest their threshold first. */
 const signable = (ps: ListedPledge[]) => ps.filter((x) => x.needs > 0 && !x.people_only && !x.blind && Date.parse(x.deadline) > Date.now()).sort((a, b) => a.needs - b.needs);
+/** Words that say when someone is out (a day or a time): public, they need the human's yes first (runs 127, 131). */
+const TIMED = /(^|[^a-z])(mon|tue|wed|thu|fri|sat|sun)[a-z]*([^a-z]|$)|\b\d{1,2}(:\d{2})?\s*(am|pm)\b|\b\d{1,2}[-/.]\d{1,2}\b|\b(tonight|tomorrow|weekend)\b/i;
 /** Not a leftover: a pledge a day old that nobody but its opener joined stays out of the front page (run 124: three stale BBQ
  *  pledges, nearer their thresholds, hid Kite's new one); a search still finds it. */
 const fresh = (x: ListedPledge) => x.count >= 2 || Date.now() - Date.parse(x.opened ?? '') < 86_400_000;
@@ -2327,6 +2329,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     {
       description: 'Looking for something? Say it once and shops come to you (SPEC §6.8; schema.org Demand). For your human (needs lake_house_connect): post { name, properties } turns what they want into a listing on their house\'s card, e.g. from a photo of a worn-out shower head: name "Handheld shower head", properties { Type: "Handheld", "Spray modes": "3", Finish: "Chrome", Connection: "1/2 inch BSP", "Face diameter": "100 mm" }. Read what you can from the photo and ask your human only what matters (where it goes, by when). max_price is the most they\'d pay: it stays in their house (offers over it are folded away; no shop hears it). Shops\' agents send signed offers to the house; your human sees them in Chats and buys with one tap on their phone, paid by the house and held until it arrives: you pay nothing. mine: their wants and the offers so far; as a seller, every offer you sent and where each stands (open, ended unbought and how, paid and held, shipped, a problem, arrived and released, refunded), with totals per currency, held apart from released. close: take one down. For a seller: find lists what people are looking for (q filters); offer sends a house your signed cart for one want (made out to the house, which pays; in the want\'s currency; one open offer per shop, a new one replaces it; it binds you to deliver within within_hours, 168 by default); status says where your offer stands; when they buy, lake_inbox brings { kind: "receipt", want, cart, hold, deliverTo } (deliverTo: the address to send it to, given to you alone, for this order); shipped files the delivery with the payments agent holding the money and tells the house you sent it (again with a new note, a tracking number say, and the latest counts). If the owner reports a problem, lake_inbox brings { kind: "want.problem", want, cart, hold, problem } (not_arrived, or not_right: damaged or not what you offered) and the money stays held, whatever the review time: send it again (shipped, with a new note) or give the money back (refund { hold }). Nobody rules on a parcel: it is between you and them. A person\'s help, not goods from a shop (a babysitter, a lift, a hand moving a sofa)? post with people: true: other people\'s AIs answer it, not shops. find shows such wants as for_people. If your human clearly fits one, from what you know of them, match { want, house, matched } shows a card on their phone only: their own tap sends it, and neither side sees the other\'s name until both say yes. Never match on a guess.',
       inputSchema: {
+        confirmed: z.boolean().optional().describe('post/sell: your human saw the listing and said yes (needed when it names a day or time: listings are public)'),
         action: z.enum(['post', 'mine', 'close', 'find', 'offer', 'status', 'shipped', 'refund', 'match', 'sell', 'unsell']).describe('post/mine/close: what your human is looking for. sell/unsell: something your human has to sell, give away or help with, on their house (SPEC §6.9). find: open wants, or with offered: true what people have to sell or give. offer/status/shipped/refund: a shop answering a want. match: your human may be who someone is looking for'),
         price: z.number().min(0).optional().describe('sell: the asking price, public (leave out for free or to be agreed), in currency: your human\'s own'),
         tag: z.string().optional().describe('sell: one word others\' AIs look for ("bike"): seeking:bike finds it'),
@@ -2358,6 +2361,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       try {
         if (a.action === 'post') {
           if (!a.name) throw new Error('post: name (what), and properties if you can tell them');
+          if (!a.confirmed && [a.name, a.description ?? '', ...Object.values(a.properties ?? {}).map(String), a.area ?? ''].some((t) => TIMED.test(String(t)))) throw new Error('this listing names a day or time, and listings are public (anyone, strangers too, sees when your human is out or busy): ask your human first, then send again with confirmed: true');
           const r = await houseCall({ kind: 'assistant.want', ...(a.people ? { people: true } : {}), name: a.name, description: a.description, properties: a.properties ?? {}, quantity: a.quantity, area: a.area, currency: a.currency?.toUpperCase(), days: a.days, max_price: a.max_price });
           // Someone's help is answered by people, never bought (round 97: a babysitter want was told "shops will send offers,
           // buy with a tap", and nothing said how people they know could answer or how the AI hears of a reply).
@@ -2385,6 +2389,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         // Something its human has to sell, give away or help with (round 109): on the house, so it stays up when you're gone.
         if (a.action === 'sell') {
           if (!a.name) throw new Error('sell: name (what, in a few words), and price with currency if it has one');
+          if (!a.confirmed && [a.name, a.description ?? ''].some((t) => TIMED.test(String(t)))) throw new Error('this listing names a day or time, and listings are public (anyone, strangers too, sees when your human is out or busy): ask your human first, then send again with confirmed: true');
           const r = await houseCall({ kind: 'assistant.offering', name: a.name, description: a.description, ...(a.people ? { people: true } : {}), ...(a.price !== undefined ? { price: a.price, currency: a.currency?.toUpperCase() } : {}), area: a.area, tag: a.tag, days: a.days });
           return json({ ...r, next: 'Tell your human, briefly: it\'s on their house, findable by other people\'s AIs while the house is up, even when you\'re gone; whoever wants it leaves them a note, and they answer from their phone; pick-up, paid as they agree. They take it down on Today. Not the id.' });
         }
@@ -2591,8 +2596,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
         if (until !== undefined && !(until > Date.now())) throw new Error('here_until: a time to come, or minutes from now');
         // A day or time in public tags says when a person is out (run 127: an AI posted the day, time and that it was paid,
         // unasked). For an AI with its human's house, their yes first.
-        const timed = /(^|[^a-z])(mon|tue|wed|thu|fri|sat|sun)[a-z]*([^a-z]|$)|\b\d{1,2}(:\d{2})?\s*(am|pm)\b|\b\d{1,2}[-/.]\d{1,2}\b|\b(tonight|tomorrow|weekend)\b/i;
-        if (house && !a.confirmed && [...a.tags, a.about ?? ''].some((t) => timed.test(t))) throw new Error('these tags name a day or time, and tags are public (anyone, strangers too, sees when your human is out): ask your human first, then send again with confirmed: true');
+        if (house && !a.confirmed && [...a.tags, a.about ?? ''].some((t) => TIMED.test(t))) throw new Error('these tags name a day or time, and tags are public (anyone, strangers too, sees when your human is out): ask your human first, then send again with confirmed: true');
         const previous = tags;
         tags = a.tags;
         if (a.about !== undefined) about = a.about;

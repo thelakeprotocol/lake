@@ -1567,7 +1567,11 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
     expect(ended).toBe('closed');
     // Someone's help, through the connector (round 97): the AI is told how people answer, not shops, and its mine shows the
     // replies that came through the owner's link (who and how many, never the words).
-    const sitter = await one.call('lake_want', { action: 'post', people: true, name: 'Babysitter, Friday 6 to 10', properties: { When: 'Friday 6-10pm', Where: 'AU-QLD' } });
+    // A listing that says when the house is busy is public: refused until the human said yes (run 131: two Saturday posts went up unasked).
+    const unasked = await one.c.callTool({ name: 'lake_want', arguments: { action: 'post', people: true, name: 'Babysitter, Friday 6 to 10', properties: { When: 'Friday 6-10pm', Where: 'AU-QLD' } } });
+    expect(unasked.isError).toBe(true);
+    expect((unasked.content as { text: string }[])[0]!.text).toMatch(/names a day or time.*confirmed: true/);
+    const sitter = await one.call('lake_want', { action: 'post', people: true, name: 'Babysitter, Friday 6 to 10', properties: { When: 'Friday 6-10pm', Where: 'AU-QLD' }, confirmed: true });
     expect(sitter).toMatchObject({ ok: true, next: expect.stringContaining('Share with people you know') });
     expect(sitter.next).toContain('lake_house { view: "tasks" }');
     expect(sitter.next).not.toMatch(/buy with a tap/);
