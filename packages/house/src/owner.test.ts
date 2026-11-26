@@ -873,7 +873,7 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
-  it('a reply the AI already has ends the errand answered, and Today says who answered (round 121)', async () => {
+  it('a reply the AI already has ends the errand answered, said once on its card (round 121, run 126)', async () => {
     const h = await house();
     const ai = await h.connect('Nova');
     const priya = { name: 'Priya\'s AI', webId: 'https://priya.example/#agent', key: 'priya-jkt', url: 'https://priya.example/a2a' };
@@ -883,7 +883,9 @@ describe('what an attacker tried (round 16)', () => {
     expect(sug.errand).toMatchObject({ state: 'answered', ended: { how: 'answered' } });
     expect(sug.ask).toBeUndefined(); // nothing to decide: the AI has it
     expect(sug.text).toContain('Sorry, can\'t on Friday.');
-    expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).lines.map((l: { text: string }) => l.text)).toContain('Priya\'s AI answered Nova about: Babysitting Friday 6-10 pm');
+    // Said once, on its own card (run 126: card, chat and a Today line said it three times).
+    expect(sug.text).toBe('Priya\'s AI replied · Sorry, can\'t on Friday.\n\nBabysitting Friday 6-10 pm');
+    expect((await h.owner({ kind: 'panel.today', tz_offset: 0 })).lines.map((l: { text: string }) => l.text).join('\n')).not.toContain('Babysitting');
     h.close();
   });
 

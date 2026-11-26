@@ -962,11 +962,7 @@ export class OwnerDesk {
     }
     const studies = events.filter((e) => e.kind === 'compute.done');
     if (studies.length) lines.push({ by: 'rules', text: `Answered ${plural(studies.length, 'study', 'studies')} today, as unreadable shares`, at: studies[0]!.at, to: '#mydata', tile: { big: String(studies.length), label: studies.length === 1 ? 'study answered' : 'studies answered', detail: 'today · nothing readable left' } });
-    // An errand answered today: who answered, about what (round 121: the phone kept waiting after the answer came).
-    for (const x of this.suggestions.filter((y) => y.errand?.ended?.how === 'answered' && after(y.errand.ended.at))) {
-      const last = x.errand!.arrivals.at(-1);
-      if (last) lines.push({ by: 'ai', text: `${last.from.name || last.from.domain} answered ${x.from.replace(/ \(.*\)$/, '')} about: ${x.errand!.what}`, at: x.errand!.ended!.at, to: '#inbox' });
-    }
+    // An answered errand is said once, on its own card (run 126: card, chat and this line said it three times; ChatGPT, round 183).
     // An agreement the other side moved today: who, and to what (round 120: Sam's house had Mia's cancel in a second, and
     // his Today said nothing; he found it by looking at the agenda).
     // A done this owner said, waiting for the other side (run 106: Sam's Today said nothing while he waited).
@@ -1625,6 +1621,9 @@ export class OwnerDesk {
   }
   /** Errands past their date lapse quietly: off the owner's list, and the assistant's connector tells the other side. */
   private sweepErrands() {
+    // An answered errand's card goes by itself after three days if nobody tapped Done (ChatGPT, round 183: "the card never goes away").
+    const stale = this.suggestions.filter((x) => x.errand?.state === 'answered' && !x.ask && Date.now() - Date.parse(x.errand.ended?.at ?? x.at) > 3 * 86_400_000);
+    if (stale.length) { this.suggestions = this.suggestions.filter((x) => !stale.includes(x)); void this.saveSuggestions(); this.touch(); }
     const now = Date.now();
     const due = this.suggestions.filter((x) => x.errand && (x.errand.state === 'open' || x.errand.state === 'held') && Date.parse(x.errand.until) <= now);
     if (!due.length) return;
@@ -2778,7 +2777,7 @@ export class OwnerDesk {
             // (run 98: Mia's phone said "waiting on Priya" nine minutes after Priya's no, which only her AI had heard).
             if (q.seen === true) {
               er.state = 'answered'; er.ended = { at: new Date().toISOString(), how: 'answered' };
-              sug.text = `${from.name || from.domain} answered ${assistant.label.replace(/ \(.*\)$/, '')} about: ${er.what}\n\n${text}`.slice(0, 1500);
+              sug.text = `${from.name || from.domain} replied · ${text}\n\n${er.what}`.slice(0, 1500);
               sug.at = new Date().toISOString();
               await this.saveSuggestions();
               this.notifyOwner('errand', `${from.name || from.domain} answered your AI about: ${er.what}`.slice(0, 160));
@@ -2790,7 +2789,7 @@ export class OwnerDesk {
             // A stranger's (first contact from that key) can be blocked from here: scam carts come while the AI is away.
             const yes = kind === 'trade.cart' ? 'Yes, I\'ll have my AI pay' : 'Yes, go ahead';
             sug.ask = { choices: [yes, 'No thanks', 'Ask my AI later', ...(q.stranger ? ['Block'] : [])] };
-            sug.text = `${from.name || from.domain} answered your AI about: ${er.what}\n\n${text}`.slice(0, 1500);
+            sug.text = `${from.name || from.domain} replied · ${text}\n\n${er.what}`.slice(0, 1500);
             sug.at = new Date().toISOString();
             await this.saveSuggestions();
             this.notifyOwner('errand', `${from.name || from.domain} answered your AI about: ${er.what}`.slice(0, 160));
