@@ -186,7 +186,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
   const saveClearings = () => writeFile(clearingsFile, JSON.stringify([...clearings.values()].filter((x) => x.state === 'proposed' || Date.now() - x.at < 30 * 86_400_000))).catch(() => {});
   const save = () => writeFile(file, JSON.stringify([...tallies.values()])).catch(() => {});
   const counted = (t: Tally) => ((t.state === 'closed' || t.state === 'lapsed') && t.closedAt !== undefined ? t.closedAt : t.blind ? t.blind.passes.length : t.signers.length);
-  const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state, opened: new Date(t.openedAt ?? 0).toISOString(),
+  const view = (t: Tally) => ({ id: t.id, text: t.text, threshold: t.threshold, count: counted(t), deadline: new Date(t.deadline).toISOString(), state: t.state, ...(t.openedAt ? { opened: new Date(t.openedAt).toISOString() } : {}),
     // Who opened it, never who signed: a host named in the text is the opener's own claim.
     ...(t.openedBy ? { opened_by: { name: t.openedBy.name, domain: t.opener, url: t.openedBy.url, house: t.openedBy.house } } : {}), ...(t.peopleOnly ? { people_only: true } : {}),
     // A blind pledge binds only when enough signers have revealed themselves, not just when enough passes are in (run 21:
@@ -1047,7 +1047,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: t.state === 'triggered' ? 'tally.triggered' : 'tally.signed', ...view(t), note: t.state === 'triggered' ? (b.unveil ? `It has filled: every sealed reveal opens at once at ${new Date(roundTimeMs(b.unveil)).toISOString()}, and each signer is told who is in.` : 'It has filled: reveal yourself with tally.reveal { id, salt } from your own identity.') : 'Counted, by a pass nobody can trace to you.' };
     }
     if (p.kind === 'tally.withdraw') {
-      if (t.state !== 'open') return { kind: 'refused', problems: [`it has ${t.state}; nothing to withdraw from`] };
+      if (t.state !== 'open') return { kind: 'refused', problems: [t.state === 'triggered' ? 'it has filled: everyone who signed is bound by it, and withdrawing is for before it fills. To undo it, the signers settle it among themselves' : `it has ${t.state}; nothing to withdraw from`] };
       const h = createHash('sha256').update(String(p.secret ?? '')).digest('hex');
       const before = b.passes.length;
       b.passes = b.passes.filter((x) => x.withdraw !== h);
@@ -1233,7 +1233,7 @@ export async function createTally(o: SpecialistOptions & { dataDir: string; pers
       return { kind: 'tally.count', ...view(t), ...(show ? { signers: t.signers.map(({ domain, url }) => ({ domain, url })) } : {}) };
     }
     if (p.kind === 'tally.withdraw') {
-      if (t.state !== 'open') return { kind: 'refused', problems: [`it has ${t.state}; nothing to withdraw from`] };
+      if (t.state !== 'open') return { kind: 'refused', problems: [t.state === 'triggered' ? 'it has filled: everyone who signed is bound by it, and withdrawing is for before it fills. To undo it, the signers settle it among themselves' : `it has ${t.state}; nothing to withdraw from`] };
       const mine = t.signers.find((x) => x.webId === from);
       t.signers = t.signers.filter((x) => x.webId !== from);
       // Its contribution goes back at once: taken back before it filled, it never bound them.

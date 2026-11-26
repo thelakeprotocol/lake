@@ -103,6 +103,8 @@ Each capture or void is a new receipt (`captures` or `voids` the held one, namin
 
 The payments agent keeps held payments, the carts it has paid, the carts refunded and what each allowance has spent in a file in its data directory (`payments.json`, written whole and renamed into place). A restart forgets none of them: a hold whose time ran out while it was down is released when it starts again.
 
+**Ready to collect is not delivered.** For something the buyer picks up, send `lake_sell { action: "ready", cart, note: "At the door from 6pm" }` first: the buyer is told it waits for them, and nothing starts. When it changes hands, `deliver` with a hand-over note ("Handed over at 6:05"); the buyer's time to answer starts then. A pick-up note sent as `deliver` would start the buyer's clock while it still sits on the counter.
+
 ## 5. Deliver, accept, ask for changes, dispute
 
 Naming the delivery you read (`lake_buy { action: "accept" | "changes" | "dispute", cart, delivery: <its sha256> }`) keeps your answer on that one: if a revision crossed it on the wire, you're told to read the newer one first. A team cart with no delivery terms of its own takes its tightest item's.

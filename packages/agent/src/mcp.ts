@@ -703,6 +703,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     status: 'carted' | 'paid' | 'delivered' | 'accepted' | 'disputed' | 'refunded' | 'withdrawn';
     /** From the menu: which item and how many, so a paid cart takes them from its stock. */
     sku?: string; qty?: number;
+    /** The seller said it waits to be collected (trade.ready): not a delivery, no clock (run 128). */
+    ready?: { at: string; note?: string };
     total: { currency: string; value: number }; items: { label: string; amount: { currency: string; value: number } }[]; expires: string;
     mandate: CartMandate; sellerCard: AgentCard;
     evidence: { step: string; at: string; signed: unknown }[];
@@ -755,6 +757,8 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       if (x.status === 'disputed' && x.verdict?.verdict === 'changes') return seller ? 'paid, held for you: the buyer asked for changes, so it moves when they accept a revision or you refund' : 'paid, held: you asked for changes; it moves when you accept a revision or the seller refunds';
       if (x.disputed && x.status === 'disputed') return seller ? 'paid, held for you: the buyer disputed it, so it moves when they accept (a revised delivery, say), you refund, or (if they say nothing arrived) an arbiter rules' : 'paid, held: you disputed it, so it moves when you accept, the seller refunds, or (if you said nothing arrived) an arbiter rules';
       // Before a delivery the clock runs against the seller; after it, against the buyer.
+      // Ready to collect is not delivered (run 128: a pick-up note started the buyer's clock while the food sat on the counter).
+      if (!x.delivered && x.ready) return seller ? `paid, held for you: ready, not yet handed over (deliver at the hand-over${x.holdUntil ? `, by ${x.holdUntil}` : ''}, or it goes back to the buyer)` : 'paid, held: ready for you; the payment stays held until it is handed over and you accept';
       if (!x.delivered) return seller ? `paid, held for you: deliver${x.holdUntil ? ` by ${x.holdUntil}` : ''}, or it goes back to the buyer` : `paid, held: the seller delivers${x.holdUntil ? ` by ${x.holdUntil}` : ''}, or it comes back to you`;
       return seller ? `paid, held for you until the buyer accepts${x.holdUntil ? ` (or until ${x.holdUntil} with no answer)` : ''}` : `paid, held until you accept${x.holdUntil ? ` (or until ${x.holdUntil} if you don't answer)` : ''}`;
     }
@@ -952,6 +956,12 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
       // A plain payment that only names the cart isn't the cart paid (run 27's trickster paid $0.50 on a $2 cart that way).
       if (money.hold_settled) return { checked: { ...money, note: `this settles another held payment, not the one for cart ${o.cart}` } };
       return { checked: { ...money, note: money.cart ? `this does not pay cart ${o.cart} (${o.total.currency} ${o.total.value})` : `a plain payment that names cart ${o.cart}, not the cart paid: the cart is still unpaid (${o.total.currency} ${o.total.value}); the buyer pays it with lake_buy { action: "pay" }` } };
+    }
+    if (p.kind === 'trade.ready' && o?.role === 'buyer' && m.from.webId === o.with.webId) {
+      const note = typeof p.note === 'string' ? p.note.slice(0, 1000) : undefined;
+      o.ready = { at: new Date().toISOString(), ...(note ? { note } : {}) };
+      o.evidence.push({ step: 'ready (not a delivery)', at: o.ready.at, signed: m.signed });
+      return { checked: { order: moneyLine(o), note: `Ready to collect${note ? `: ${note}` : ''}. The payment stays held until the seller marks it handed over and you accept, or your review time after that runs out.` } };
     }
     if (p.kind === 'trade.deliver' && o?.role === 'buyer' && m.from.webId === o.with.webId) {
       const content = typeof p.content === 'string' ? p.content : JSON.stringify(p.content ?? null);
@@ -1500,7 +1510,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           const w = await whoIs(r.send.url);
           if (w.key !== r.send.key) throw new Error('the address their message came from now shows another key: tell your human (outcome "back")');
           // A house takes a note; a message to it is malformed. A note filed before the house said so is retried as a note once.
-          const me = await agent(), asNote = { kind: 'note', text: a.text, purpose: 'contact' };
+          // To a house (a person), with its human's house's word, as any note to a house carries by default (run 129: eight task
+          // replies came as "Claude, via MCP" and George blocked Priya's real AI as unvouched).
+          const me = await agent(), asNote = { kind: 'note', text: a.text, purpose: 'contact', ...(speaksFor ? { speaks_for: speaksFor } : {}) };
           let got = await me.ask(r.send.url, r.send.house ? asNote : { kind: 'message', text: a.text, ...(r.send.re ? { re: r.send.re } : {}) }, { task: true });
           if (!r.send.house && got.kind === 'rejected' && got.code === 'malformed') got = await me.ask(r.send.url, asNote, { task: true });
           if (got.kind === 'rejected' || got.kind === 'declined') throw new Error(`they didn't take it: ${String(got.why ?? got.kind)}`);
@@ -1661,7 +1673,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
     {
       description: 'Sell to other agents (SPEC §6.5), on AP2\'s signed carts. team: several of you did one job for one buyer: one cart, one held payment, each member paid its share when the buyer accepts; give members [{ url, amount }] (you among them); each agrees its share with consent, and the cart goes to the buyer when the last does. withdraw: take back a cart nobody has paid. menu: put what you sell, with prices, on your signed card (search finds it; an order for an item on it gets a signed cart back at once, without you). cart: make a cart for one buyer for anything else (a bespoke job, a counter-offer): signed by you, one currency, valid for minutes. A menu item or a cart can carry delivery terms you promise (how soon, revisions, word or line counts): signed in the cart, counted by the buyer\'s connector, and ruled on by the Arbiter. deliver: send what was bought, once it is paid (a held payment is paid: it is set aside for you, and the payments agent is told of each delivery by its sha256); content is what is hashed and checked, note rides beside it unhashed. The buyer\'s signed "received" names its sha256, your proof of delivery. revise: if the buyer asks for changes or disputes it, send a new delivery of the same cart (numbered, naming the one it replaces); they can accept it, which releases a held payment. refund: pay the buyer back, in full, or (with amount, while it is held) in part, the rest staying held for the buyer to accept: a way to settle a dispute. arbitrate: send what you hold about a cart to the Arbiter, which rules from the signatures alone (paid? delivered? acknowledged?) and tells both sides. orders: your sales, with the signed evidence of each step.',
       inputSchema: {
-        action: z.enum(['menu', 'cart', 'decline', 'team', 'consent', 'withdraw', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']),
+        action: z.enum(['menu', 'cart', 'decline', 'team', 'consent', 'withdraw', 'ready', 'deliver', 'revise', 'refund', 'arbitrate', 'orders']).describe('ready: tell the buyer something waits to be collected; it is not a delivery and starts no clock. deliver is the hand-over itself: for something collected, send ready first, then deliver when it changes hands (a pick-up note sent as deliver starts the buyer\'s clock)'),
         order: z.number().int().optional().describe('cart / decline: the lake_inbox id of an order from your menu: its cart has the menu\'s price and delivery terms and the buyer\'s note, as if signed at once; decline tells the buyer no'),
         reason: z.string().max(300).optional().describe('decline: a word to the buyer on why'),
         members: z.array(z.object({ url: z.string(), amount: z.number() })).min(2).max(5).optional().describe('team: each member\'s A2A address (yours too) and its share; the shares add up to the total'),
@@ -1810,6 +1822,18 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           orders.set(c.id, { cart: c.id, role: 'seller', with: { name: String(buyerCard.name ?? ''), url: a.to, webId: buyer.webId }, status: 'carted', total: c.total, items: c.items, expires: c.expires, mandate: cart, sellerCard: me.card, evidence: [{ step: 'cart signed', at: new Date().toISOString(), signed: cart }] });
           const reply = await me.ask(a.to, { kind: 'trade.cart', cart });
           return json({ sent: c.id, total: c.total, expires: c.expires, their_reply: reply, ...((reply as { code?: string }).code === 'not-a-buyer' ? { note: 'that address is a person\'s house, not a buyer\'s agent: it won\'t pay a cart. Its owner buys from their phone: answer a want of theirs (lake_want find), or leave them a note' } : {}) });
+        }
+        if (a.action === 'ready') {
+          const x = findOrder(a.cart ?? '', 'seller');
+          if (!x.payment || x.payment === 'voided') throw new Error(`cart ${x.cart} isn't paid${x.payment === 'voided' ? ' (its held payment went back)' : ''}: ready is for a paid cart that waits to be collected`);
+          if (x.delivered || x.sentDeliveries?.length) throw new Error(`cart ${x.cart} is delivered already: ready is for before the hand-over`);
+          if (x.ready) throw new Error(`you told the buyer it was ready at ${x.ready.at}`);
+          if (!x.with.url) throw new Error('no address for the buyer');
+          const note = typeof a.note === 'string' && a.note.trim() ? a.note.trim().slice(0, 1000) : undefined;
+          const reply = await me.ask(x.with.url, { kind: 'trade.ready', cart: x.cart, ...(note ? { note } : {}) });
+          x.ready = { at: new Date().toISOString(), ...(note ? { note } : {}) };
+          x.evidence.push({ step: 'ready (not a delivery)', at: x.ready.at, signed: null });
+          return json({ told: x.cart, their_reply: reply, money: moneyLine(x), note: `told the buyer it's ready; this is not a delivery and the buyer's clock hasn't started: deliver when it changes hands${x.holdUntil ? `, by ${x.holdUntil}` : ''}, or the money goes back to them` });
         }
         if (a.action === 'deliver' || a.action === 'revise') {
           const x = findOrder(a.cart ?? '', 'seller');
@@ -2976,6 +3000,9 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           return json({ ...signed.reply, kept: 'your salt and withdraw secret are kept in this conversation: reveal (once it fills) and withdraw use them' });
         }
         const s = pledged.get(slot);
+        // A plain pledge's signature is by this agent's own key: the tally takes it back, or says why not (run 128: "no blind
+        // signature" told Kite nothing about its filled pledge).
+        if (!s && a.action === 'withdraw') return json(await me.ask(a.tally, { kind: 'tally.withdraw', id: a.id }));
         if (!s) throw new Error('you have no blind signature on that pledge in this conversation');
         if (a.action === 'reveal') {
           const r = await revealBlind(a.tally, (url, payload) => me.ask(url, payload as { kind: string }), s);

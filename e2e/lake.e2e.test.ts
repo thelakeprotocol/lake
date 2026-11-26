@@ -1992,6 +1992,13 @@ describe('the open door', () => {
     expect(await poet('lake_sell', { action: 'deliver', cart: order.cart, content: '  ' }, false)).toMatch(/an empty delivery is not a delivery/);
     // Delivered with its sha256 (the note rides beside it, unhashed); the payments agent is told of it, and the buyer's time
     // to answer starts. The buyer's connector checks it, and the buyer signs that it accepts exactly that delivery.
+    // Ready to collect is not a delivery: the buyer is told, nothing is filed, and the buyer's clock doesn't start (run 128: a
+    // pick-up note sent as a delivery started it while the food sat on the counter).
+    expect(await poet('lake_sell', { action: 'ready', cart: order.cart, note: 'At the door from 6pm' })).toMatchObject({ told: order.cart, money: expect.stringMatching(/^paid, held for you: ready, not yet handed over/) });
+    expect(await poet('lake_sell', { action: 'ready', cart: order.cart }, false)).toMatch(/you told the buyer it was ready/);
+    expect((await poet('lake_sell', { action: 'orders' })).orders[0].held_until).toBe(paid.hold.until);
+    const [readyNote] = (await buyer('lake_inbox', { wait_seconds: 5 })).messages;
+    expect(readyNote).toMatchObject({ message: { kind: 'trade.ready', cart: order.cart }, checked: { note: expect.stringMatching(/^Ready to collect: At the door from 6pm\. The payment stays held/) } });
     const poem = 'Grey heron stands still / the river forgets the hour / one fish, then the next';
     const delivered = await poet('lake_sell', { action: 'deliver', cart: order.cart, content: poem, note: 'thanks for the order!' });
     expect(delivered).toMatchObject({ delivered: order.cart, their_reply: { kind: 'received' }, money: expect.stringMatching(heldFor), held_payment: expect.stringMatching(/^told of this delivery: released when the buyer accepts it, or at \S+ with no answer/) });
@@ -2005,7 +2012,7 @@ describe('the open door', () => {
     expect(sale).toMatchObject({ status: 'accepted', verdict: { verdict: 'accepted' } });
     // The buyer's connector releases the hold before it tells the seller (a refused release tells the seller nothing), so
     // the release receipt may arrive before the verdict.
-    expect(sale.evidence.map((e: { step: string }) => e.step).slice(0, 4)).toEqual(['ordered', 'cart signed', 'paid (held)', 'delivered (their signed receipt of it)']);
+    expect(sale.evidence.map((e: { step: string }) => e.step).slice(0, 5)).toEqual(['ordered', 'cart signed', 'paid (held)', 'ready (not a delivery)', 'delivered (their signed receipt of it)']);
     expect(sale.evidence.map((e: { step: string }) => e.step)).toContain('accepted');
     // Accepting released the held payment: the payments agent sends the seller the capture receipt.
     for (let i = 0; i < 20 && (await poet('lake_sell', { action: 'orders' })).orders[0].payment !== 'released'; i++) await new Promise((r) => setTimeout(r, 250));

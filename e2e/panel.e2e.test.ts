@@ -706,8 +706,8 @@ describe('the owner panel, on a phone', { timeout: 60_000 }, () => {
       // Answered, Alex is someone the owner knows, and such a chat is their AI's while it's on duty: the house changed who
       // replies without a tap, so the chat says it (the control used to flip in silence), and where you'd type says the
       // AI isn't on duty yet. The chat's details say who replies too, and lead to the same choice.
-      await page.getByText(/^You've answered Alex, so .+ replies here while it's on duty\.$/).waitFor({ timeout: 15_000 });
-      await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor();
+      // The lasting state, not the 8-second toast that says it (a busy run saw the toast come and go before it looked, twice).
+      await page.locator('.replymode.ai[aria-label$="replies. Change"]').waitFor({ timeout: 15_000 });
       await page.locator('.mode-note', { hasText: 'or type your own answer below' }).waitFor();
       await tidy();
       await page.locator('.chatwho').click();
