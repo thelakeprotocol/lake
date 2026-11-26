@@ -60,21 +60,25 @@ const twinLine = (name: string, sameHouse?: boolean, self?: boolean) => self ? '
 /** A note to someone by their handle, sent by this house with its own key; the chat opens with it. */
 function WriteSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [to, setTo] = useState(''), [text, setText] = useState(''), [busy, setBusy] = useState(false);
-  const send = async () => {
+  const send = async (correction = false) => {
     setBusy(true);
     try {
-      const r = await must({ kind: 'panel.note.write', to: to.trim(), text: text.trim() }) as { chat: string; to: string };
+      const r = await must({ kind: 'panel.note.write', to: to.trim(), text: text.trim(), ...(correction ? { correction: true } : {}) }) as { chat: string; to: string };
       setTo(''); setText(''); onClose();
-      void toast(`Sent to ${r.to}, from your house.`, { duration: 4000 });
+      void toast(correction ? `Sent to ${r.to} as a correction.` : `Sent to ${r.to}, from your house.`, { duration: 4000 });
       push(`#chat=${encodeURIComponent(r.chat)}`);
-    } catch (e) { void toast((e as Error).message, { duration: 6000 }); } finally { setBusy(false); }
+    } catch (e) {
+      // Waiting on their answer, one correction still goes (run 127: Lena couldn't take back "One more signature").
+      const m = (e as Error).message;
+      void toast(m, { duration: 8000, ...(/or send one correction/.test(m) ? { buttons: [{ text: 'Send as a correction', handler: () => { void send(true); } }] } : {}) });
+    } finally { setBusy(false); }
   };
   return h(Sheet, { open, onClose, title: 'Write to someone', half: true },
     h('div', { class: 'write-sheet' },
       h('ion-input', { value: to, placeholder: '@their-handle', 'aria-label': 'Their handle', class: 'tell-input write-to', autocapitalize: 'off', onionInput: (e: CustomEvent) => setTo(String(e.detail.value ?? '')) }),
       h('ion-textarea', { value: text, autoGrow: true, rows: 3, maxlength: 1000, placeholder: 'Your message', 'aria-label': 'Your message', class: 'tell-input write-text', onionInput: (e: CustomEvent) => setText(String(e.detail.value ?? '')) }),
       h('p', { class: 'muted-line' }, 'It goes from your house, signed as you. Their phone shows who it\'s from.'),
-      h(Btn, { label: 'Send', expand: 'block', disabled: busy || !to.trim() || !text.trim(), run: send })));
+      h(Btn, { label: 'Send', expand: 'block', disabled: busy || !to.trim() || !text.trim(), run: () => send() })));
 }
 
 export function ChatRow({ c, twin }: { c: Chat; twin?: boolean }) {

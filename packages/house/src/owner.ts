@@ -625,6 +625,8 @@ export class OwnerDesk {
   /** When this owner last started a conversation (an hour of them), and with whom: writing first is limited. */
   private writes: number[] = [];
   private wroteTo = new Map<string, number>();
+  /** Keys the owner has sent their one correction to since they last answered (run 127: Lena couldn't take back "One more signature"). */
+  private corrected = new Set<string>();
   suggestions: Suggestion[] = [];
   /** What the owner told an AI to do, newest first: the open ones, and the last few that ended (for the card that says how). */
   tasks: Task[] = [];
@@ -1894,7 +1896,7 @@ export class OwnerDesk {
   /** Notes from other agents for the owner (a favour, an invite): the newest few, shown as their words. */
   notes: { id: string; from: NoteSender; text: string; /** A conversation this owner started from their phone (panel.note.write): no words of theirs yet, the owner's in answered. */ started?: true; /** About one of the owner's offerings (SPEC §6.9): its id. */ offering?: string; /** The sender said no answer is expected (a notice). */ noReply?: true; /** A reply to one of the owner's wants, through a link they shared (SPEC §6.8): that want's id. */ want?: string; /** Set aside by the AI on duty as needing no answer (triage): the owner sees the line under Handled for you, with Undo. */ handled?: { by: string; at: string; line: string; entry: string }; /** Given back to the owner by an Undo: the AI on duty leaves it alone. */ kept?: string; purpose?: string; at: string; /** The owner's own answer to an agent's note, sent from their phone. */ answered?: { /** Sent as the owner, from the house, to someone who wrote to their AI (the owner linked the two). */ as_house?: true; text: string; by: string; at: string; /** The owner's own, from their phone (never set for an AI's). */ own?: true; /** The house's own fixed words (a held time), not the AI's. */ fixed?: true; /** The duty log's entry for an AI's reply on duty: what the owner's Undo takes back. */ entry?: string; /** Sent by the house for the owner's AI, under a task they gave it. */ task?: string; /** Earlier answers to this same note, oldest first (an AI under a task may write twice; the owner's own answer isn't written over). */ before?: { text: string; by: string; at: string; task?: string }[] }; /** What the owner's AI answered on duty and the owner took back: the note waits for the owner again. */ retracted?: { text: string; by: string; at: string; undone: string } }[] = [];
   /** Keeps a note, tells the assistants; its id, or null when its sender has sent too many this hour. */
-  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; pledge?: { tally: string; id: string }; /** The sender expects no answer (a notice): nobody waits on it. */ noReply?: true; want?: string; offering?: string }): string | null {
+  addNote(n: { from: NoteSender; text: string; purpose?: string; re?: string; /** An earlier note of theirs, unanswered, this one corrects: one goes past the hourly cap (run 127). */ corrects?: string; pledge?: { tally: string; id: string }; /** The sender expects no answer (a notice): nobody waits on it. */ noReply?: true; want?: string; offering?: string }): string | null {
     this.touch();
     // The same words again from the same sender are the same note (run 45 got one twice).
     const again = this.notes.find((x) => x.from.webId === n.from.webId && x.from.via === n.from.via && x.text === n.text);
@@ -1902,8 +1904,11 @@ export class OwnerDesk {
     // Five an hour from a stranger; a conversation with someone the owner knows runs longer (run 117: George's real reply to
     // Priya, his 7th note in 18 minutes, was refused while the attacker's notes weren't).
     const cap = this.knownBy(n.from.key) ? 30 : 5;
-    if (this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= cap) return null;
-    const note = { id: randomBytes(6).toString('hex'), ...n, at: new Date().toISOString() };
+    // One correction to a note of theirs nobody answered goes past the cap (run 127: Kai couldn't take back "sorted").
+    const fixes = n.corrects ? this.notes.find((x) => x.id === n.corrects && x.from.key === n.from.key && !x.answered && !this.notes.some((y) => (y as { corrects?: string }).corrects === x.id)) : undefined;
+    const { corrects: _c, ...rest } = n;
+    if (!fixes && this.notes.filter((x) => x.from.webId === n.from.webId && Date.now() - Date.parse(x.at) < 3_600_000).length >= cap) return null;
+    const note = { id: randomBytes(6).toString('hex'), ...rest, ...(fixes ? { corrects: fixes.id } : {}), at: new Date().toISOString() };
     this.notes = [note, ...this.notes];
     this.evictNotes();
     void this.saveNotes();
@@ -3407,7 +3412,11 @@ export class OwnerDesk {
         try { to = await this.houseAt(url); } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
         // A second note to someone who hasn't answered waits a while: writing first isn't for chasing.
         const last = this.wroteTo.get(to.key);
-        if (last && now - last < 600_000 && !this.notes.some((n) => n.from.key === to.key && !n.started && Date.parse(n.at) > last)) return void res.status(429).json({ error: `${to.name} hasn't answered yet: give them a while before writing again` });
+        const answeredSince = !!last && this.notes.some((n) => n.from.key === to.key && !n.started && Date.parse(n.at) > last);
+        if (answeredSince) this.corrected.delete(to.key);
+        const correction = (q as { correction?: unknown }).correction === true && !this.corrected.has(to.key);
+        if (last && now - last < 600_000 && !answeredSince && !correction) return void res.status(429).json({ error: `${to.name} hasn't answered yet: give them a while before writing again, or send one correction`, correction: !this.corrected.has(to.key) });
+        if (correction && last && now - last < 600_000) this.corrected.add(to.key);
         const sent = await this.o.panel?.replyAgent?.(to.url, { kind: 'note', text, purpose: 'contact' }).catch((e: Error) => ({ kind: 'unreached', problems: [e.message] }) as Record<string, any>);
         if (!sent || sent.kind === 'unreached') return void res.status(502).json({ error: `${to.name}'s house can't be reached right now` });
         if (sent.kind === 'refused' || sent.kind === 'rejected' || sent.decision === 'decline') return void res.status(502).json({ error: `${to.name}'s house didn't take it${sent.why ?? sent.reason ? `: ${String(sent.why ?? sent.reason).slice(0, 200)}` : ''}` });

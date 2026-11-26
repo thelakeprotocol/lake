@@ -1170,6 +1170,19 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('takes one correction from a stranger past the hourly cap, to a note of theirs nobody answered (run 127)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const kai = from('kai');
+    const ids = [1, 2, 3, 4, 5].map((i) => h.desk.addNote({ from: kai, text: `Note ${i}` })!);
+    expect(h.desk.addNote({ from: kai, text: 'Note 6' })).toBeNull();
+    const fix = h.desk.addNote({ from: kai, text: 'Sorry, ignore my last: Grace is not sorted yet', corrects: ids[4] });
+    expect(fix).toBeTruthy();
+    expect(h.desk.notes.find((n) => n.id === fix)).toMatchObject({ corrects: ids[4] });
+    // One only, and only to a note nobody answered.
+    expect(h.desk.addNote({ from: kai, text: 'And again', corrects: ids[4] })).toBeNull();
+    h.close();
+  });
+
   it('writes first from the phone only to a house it can find, with words, not instructions (run 113)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}), resolveHandle: async (x: string) => (x === 'sam-ascot-4k2p' ? 'https://unreachable.invalid/t/sb-1/a2a' : undefined) } });
     expect(await h.owner({ kind: 'panel.note.write', to: '@sam-ascot-4k2p', text: '' })).toMatchObject({ error: expect.stringContaining('text') });
