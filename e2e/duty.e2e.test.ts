@@ -208,7 +208,7 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     // Off duty: the house's runner stops.
     expect(await owner({ kind: 'panel.duty.off' })).toMatchObject({ ok: true });
     // It stops on its own time: a slow CI box saw it still running the moment after (25 Nov).
-    await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running?: boolean }).running === false || undefined);
+    await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running?: boolean }).running === false || undefined, 90_000);
     expect(await owner({ kind: 'panel.duty.runner' })).toMatchObject({ running: false });
 
     // A task (13 Nov): off duty, someone new leaves a note at the door; the owner tells their AI what to do in a few
@@ -272,5 +272,5 @@ describe('AI on duty: the runner', { timeout: 120_000 }, () => {
     // Ninety seconds: the runner finishes its last look first, and the build server is slower (17 Nov: 30 s failed CI twice).
     await wait(async () => ((await owner({ kind: 'panel.duty.runner' })) as { running: boolean }).running === false || undefined, 90_000);
     expect(((await owner({ kind: 'panel.duty.log' })).duties as { state: { on: boolean } }[]).every((d) => !d.state.on)).toBe(true);
-  }, 180_000);
+  }, 300_000);
 });
