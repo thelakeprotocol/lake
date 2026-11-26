@@ -1119,6 +1119,11 @@ describe('what an attacker tried (round 16)', () => {
     expect(card('bbq-house')?.signed).toMatchObject({ closed: true, count: 1 });
     expect(card('bbq-her-ai')).toMatchObject({ ended: 'closed' });
     expect(card('bbq-her-ai')?.signed).toBeUndefined();
+    // A day after this house learned it ended, the card goes (ChatGPT, round 192).
+    expect(card('bbq-her-ai')?.endedAt).toEqual(expect.any(String));
+    card('bbq-her-ai')!.endedAt = new Date(Date.now() - 25 * 3_600_000).toISOString();
+    await h.desk.sweepPledges();
+    expect(card('bbq-her-ai')).toBeUndefined();
     h.close();
   });
 

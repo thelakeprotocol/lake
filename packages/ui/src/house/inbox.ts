@@ -14,6 +14,8 @@ import { AskBox, TaskCard, TellButton } from './tasks';
 /** What the last sign-in answer did, kept past the refetch that takes the request away. */
 let connectedNote = '';
 /** What an AI app's sign-in just came to, shown once wherever the owner is (Home or Today). */
+/** A pledge that closed or lapsed: its card says so first, and asks nothing (run 131: four said a closed card still looked live). */
+const pledgeEnded = (x: Note) => !!(x.pledge?.ended || x.pledge?.signed?.closed || x.pledge?.signed?.lapsed);
 export function ConnectedNote() {
   return connectedNote ? h('ion-card', { class: 'lake-card ok-card', key: 'cn' }, h('ion-card-content', {}, h('p', {}, connectedNote), h('ion-button', { size: 'small', fill: 'clear', onClick: () => { connectedNote = ''; } }, 'OK'))) : null;
 }
@@ -249,7 +251,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
   // Who is speaking, once: a warning is the AI's like any other note, and its pill says it's a warning (13 Nov: the card
   // said "A warning" and "Warning" side by side, over the sender's raw address and five buttons).
   const waiter = x.errand?.with?.name ? shortName(x.errand.with.name) : 'an answer';
-  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' || x.errand?.state === 'answered' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house proposes` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
+  const kicker = waitingOn(x) ? `Waiting for ${waiter}` : x.errand?.state === 'held' || x.errand?.state === 'answered' ? `${x.errand.with?.name ? shortName(x.errand.with.name) : 'They'} answered ${shortName(x.from)}` : x.agreementIn ? `${shortName(x.agreementIn.from.name)}'s house proposes` : x.agreementAsk ? `${shortName(x.from)} asks` : x.matchOut ? 'You could help someone' : x.booking ? 'Held for your OK' : x.circle ? 'Your circle' : x.pledge && pledgeEnded(x) ? (x.pledge.ended === 'lapsed' || x.pledge.signed?.lapsed ? 'This pledge closed without enough signatures' : `${shortName(x.pledge.openedBy?.vouched ?? x.from)} closed this pledge`) : x.pledge ? 'A pledge' : x.offer ? 'An offer' : x.ask ? `${shortName(x.from)} asks` : shortName(x.from);
   const block = !!x.sender && /^https?:\/\//.test(x.sender);
   // Its own answers already hold a "no" (Leave it, Not now): no Dismiss beside them (13 Nov: five ways out of one card).
   const ownNo = !!x.ask && !answered && x.ask.choices.length > 1;
@@ -295,6 +297,7 @@ export function SuggestionCard({ x, onDone }: { x: Note; onDone?: () => void }) 
     // A held time, from its own fields and in this phone's time (the house's own sentence names the free hours' zone).
     x.booking?.what ? [h('h3', { class: 'held-what', key: 'hw' }, x.booking.what), h('p', { class: 'held-when', key: 'hn' }, `${dayTime(x.booking.start)} · with ${x.booking.with}`),
       h('p', { class: 'muted-line', key: 'ht' }, `Your AI pencilled this in. ${x.booking.with} was told you'll confirm it yourself.`)]
+      : x.pledge && pledgeEnded(x) ? h('p', { class: 'sug-text pledge-closed-terms' }, x.text.replace(/^.*? invites you to sign: /, ''))
       : h('p', { class: `sug-text${more || x.text.length < 280 ? '' : ' clamp'}` }, x.text),
     !x.booking?.what && !more && x.text.length >= 280 ? h('button', { type: 'button', class: 'link-btn more-link', onClick: () => setMore(true) }, 'More') : null,
     waitingOn(x) ? h('p', { class: 'muted-line' }, `${shortName(x.from)} asked ${x.errand?.with?.name ? shortName(x.errand.with.name) : 'them'} ${ago(x.at)}. When they answer, it shows here; until ${new Date(x.errand!.until).toLocaleDateString([], { day: 'numeric', month: 'short' })}.`) : null,
