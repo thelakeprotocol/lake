@@ -1044,6 +1044,15 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('says when removing an agenda entry told nobody (run 127: a cancel with words said ok and nobody heard)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const ai = await h.connect('Helper');
+    const added = await ai.call({ kind: 'assistant.agenda', what: 'Trolley pickup', when: 'Thu 9:30', start: new Date(Date.now() + 86_400_000).toISOString() });
+    expect(await h.owner({ kind: 'panel.agenda.remove', id: added.id })).toMatchObject({ ok: true, note: expect.stringMatching(/^Removed from your agenda\. Nobody was told/) });
+    expect(h.desk.agenda.some((x) => x.id === added.id)).toBe(false);
+    h.close();
+  });
+
   it('shows that another house has a sender\'s name only for a stranger, never over a known sender (run 121b)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
     const namesake = { name: 'Mia Torres', handle: 'mia', url: 'https://mia-house.example/a2a' };
@@ -1086,6 +1095,12 @@ describe('what an attacker tried (round 16)', () => {
     await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'bbq-plates' });
     await h.owner({ kind: 'panel.pledge.withdraw', tally: 'https://tally.example/a2a', id: 'bbq-plates' });
     expect(card('bbq-plates')?.signed).toMatchObject({ withdrawn: true });
+    // Closed later by its opener: the withdrawn card learns it ended, never that it filled (run 127: Lena's card never said closed).
+    Object.assign(terms['bbq-plates']!, { state: 'closed', count: 0 });
+    Object.assign(terms['bbq-her-ai']!, { state: 'closed', count: 0 }); // each unsigned card is looked at once in five minutes
+    await h.desk.sweepPledges();
+    expect(card('bbq-plates')?.signed).toMatchObject({ withdrawn: true, closed: true });
+    expect(card('bbq-plates')?.signed?.filled).toBeUndefined();
     // Closed by its opener before it filled: the card says nobody is bound.
     await h.owner({ kind: 'panel.pledge.sign', tally: 'https://tally.example/a2a', id: 'bbq-house' });
     Object.assign(terms['bbq-house']!, { state: 'closed', count: 1 });

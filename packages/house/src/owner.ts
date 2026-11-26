@@ -770,14 +770,16 @@ export class OwnerDesk {
     }
     // Filled ones too, for a day: late signers still count, and every signer's card should say the same (run 114: 4 on two phones, 5 on three).
     const now = Date.now();
-    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.lapsed && !y.pledge.signed.withdrawn && !y.pledge.signed.closed && (!y.pledge.signed.filled || now - Date.parse(y.pledge.signed.at) < 86_400_000)).slice(0, 10)) {
+    for (const x of this.suggestions.filter((y) => y.pledge?.signed && !y.pledge.signed.lapsed && !y.pledge.signed.closed && (!y.pledge.signed.filled || now - Date.parse(y.pledge.signed.at) < 86_400_000)).slice(0, 10)) {
       const t = await this.o.panel?.pledgeTerms?.(x.pledge!.tally, x.pledge!.id).catch(() => undefined);
       if (typeof t?.count !== 'number') continue;
       const was = x.pledge!.signed!;
       // How many it needs, from the tally, where the card was made without it (run 114: "5 of ?").
       if (!x.pledge!.threshold && typeof t.threshold === 'number') { x.pledge!.threshold = t.threshold; void this.saveSuggestions(); this.touch(); }
-      if (t.count !== was.count || (t.state === 'triggered' && !was.filled) || t.state === 'lapsed' || t.state === 'closed') {
-        x.pledge!.signed = { ...was, count: t.count, ...(t.state === 'triggered' ? { filled: true as const } : {}), ...(t.state === 'lapsed' ? { lapsed: true as const } : {}), ...(t.state === 'closed' ? { closed: true as const } : {}) };
+      // A withdrawn signer learns only that it ended, never that it filled (run 127: Lena's card never said closed).
+      const w = was.withdrawn;
+      if (t.count !== was.count || (!w && t.state === 'triggered' && !was.filled) || t.state === 'lapsed' || t.state === 'closed') {
+        x.pledge!.signed = { ...was, count: t.count, ...(!w && t.state === 'triggered' ? { filled: true as const } : {}), ...(t.state === 'lapsed' ? { lapsed: true as const } : {}), ...(t.state === 'closed' ? { closed: true as const } : {}) };
         void this.saveSuggestions();
         this.touch();
       }
@@ -3348,9 +3350,11 @@ export class OwnerDesk {
         const id = String((p as unknown as { id?: string }).id ?? '');
         // Taking out a held time is the owner's no: the one who asked is told.
         if (this.agenda.some((x) => x.id === id && x.held)) { const r = await this.settleBooking(id, 'declined'); return void res.status('error' in r ? 409 : 200).json(r); }
+        // Said plainly when nobody hears of it (run 127: a cancel with words said ok, and nobody was told).
+        const gone = this.agenda.find((x) => x.id === id);
         this.agenda = this.agenda.filter((x) => x.id !== id);
         await this.saveAgenda();
-        return void res.json({ ok: true });
+        return void res.json({ ok: true, ...(gone && !gone.agreement ? { note: 'Removed from your agenda. Nobody was told: it wasn\'t an agreement with anyone\'s house. To tell them, write to them.' } : {}) });
       }
       if (p.kind === 'panel.note.mute') {
         const note = this.notes.find((x) => x.id === String((p as unknown as { id?: string }).id ?? ''));
