@@ -1044,6 +1044,15 @@ describe('what an attacker tried (round 16)', () => {
     h.close();
   });
 
+  it('refuses words too long for an agenda entry or a task instead of cutting them (run 130)', async () => {
+    const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
+    const ai = await h.connect('Helper');
+    expect(await ai.call({ kind: 'assistant.agenda', what: 'School run roster: '.padEnd(250, 'x'), when: 'weekdays' })).toMatchObject({ error: expect.stringMatching(/^agenda\.what: up to 200 characters \(this is 250\)/) });
+    const note = h.desk.addNote({ from: from('dana'), text: 'Can you take Zara Tuesday?' })!;
+    expect(await h.owner({ kind: 'panel.task.set', note, text: 'Say yes '.padEnd(301, '.') })).toMatchObject({ error: expect.stringMatching(/^Up to 300 characters for your AI \(this is 301\)/) });
+    h.close();
+  });
+
   it('says when removing an agenda entry told nobody (run 127: a cancel with words said ok and nobody heard)', async () => {
     const h = await house({ panel: { activity: () => [], money: async () => ({}) } });
     const ai = await h.connect('Helper');

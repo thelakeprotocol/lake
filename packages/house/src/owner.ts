@@ -2476,6 +2476,7 @@ export class OwnerDesk {
             if (item.held) return void res.json({ ok: true, id: item.id, status: `held: their yes (${item.agreed.by}) is kept with it; your human still confirms it, and the house tells them when they do` });
             return void res.json({ ok: true, id: item.id, status: `agreed: by ${item.agreed.by}` });
           }
+          if (String(q.what ?? '').trim().length > 200) return void res.status(400).json({ error: `agenda.what: up to 200 characters (this is ${String(q.what).trim().length}): say it shorter` });
           const what = String(q.what ?? '').trim().slice(0, 200), when = String(q.when ?? '').trim().slice(0, 80);
           if (!what || !when) return void res.status(400).json({ error: 'agenda: { what, when, start?, where?, with? } (what was agreed, and when)' });
           const start = q.start ? new Date(String(q.start)) : undefined;
@@ -2726,6 +2727,8 @@ export class OwnerDesk {
           let held: AgendaItem | undefined;
           if (q.agenda !== undefined) {
             if (outcome !== 'done') return void res.status(400).json({ error: 'agenda goes with outcome "done": a time agreed in that conversation' });
+            // Too long is said, never cut (run 130: a school-run card lost 117 of its 317 characters, and nobody knew).
+            if (String(q.agenda?.what ?? '').trim().length > 200) return void res.status(400).json({ error: `agenda.what: up to 200 characters (this is ${String(q.agenda?.what).trim().length}): say what was agreed shorter, and put the details in a note to them` });
             const what = String(q.agenda?.what ?? '').trim().slice(0, 200), start = new Date(String(q.agenda?.start ?? ''));
             if (!what || Number.isNaN(start.getTime())) return void res.status(400).json({ error: 'agenda: { what, start } (what was agreed, and when it starts: ISO 8601 with its offset)' });
             if (start.getTime() < Date.now() + HELD_AHEAD) return void res.status(409).json({ error: 'a time your human confirms starts at least three hours from now, so they have time to say yes or no: tell them about it in text instead (outcome "back")' });
@@ -3138,6 +3141,7 @@ export class OwnerDesk {
       // the house holds the AI to comes from the note, never from the words: who, how many messages, until when.
       if (p.kind === 'panel.task.set') {
         const q = p as unknown as { suggestion?: string; note?: string; by?: string; text?: string };
+        if (typeof q.text === 'string' && q.text.trim().length > 300) return void res.status(400).json({ error: `Up to 300 characters for your AI (this is ${q.text.trim().length}): say it shorter` });
         const text = typeof q.text === 'string' ? q.text.trim().slice(0, 300) : '';
         if (!text) return void res.status(400).json({ error: 'text: what your AI should do, in a few words' });
         const named = q.suggestion ? this.suggestions.find((x) => x.id === String(q.suggestion)) : undefined;
