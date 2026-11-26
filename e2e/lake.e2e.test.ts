@@ -2023,7 +2023,8 @@ describe('the open door', () => {
     expect({ carts: now.cartsPaid! - before.cartsPaid!, payments: now.paymentsSettled! - before.paymentsSettled!, value: now.valueSettled! - before.valueSettled! }).toEqual({ carts: 1, payments: 1, value: 4 });
     // The buyer gets the payments agent's release receipt too, signed, naming its hold.
     const released = (await buyer('lake_inbox', { wait_seconds: 5 })).messages.find((m: any) => m.message.kind === 'receipt');
-    expect(released).toMatchObject({ from: { domain: 'payments.lake.local' }, message: { cart: order.cart, hold: paid.hold.id }, checked: { verified: true, hold_settled: { hold: paid.hold.id, to: 'captured' }, cart: { id: order.cart } } });
+    expect(released).toMatchObject({ from: { domain: 'payments.lake.local' }, message: { cart: order.cart, hold: paid.hold.id }, checked: { verified: true, hold_settled: { hold: paid.hold.id, to: 'captured' }, cart: { id: order.cart }, paid_to_you: false } });
+    expect(released.checked.settled).toBeUndefined(); // the buyer's copy says whose it is, not "settled: false" (runs 128, 132)
     // A cart for someone else, or a forged one, isn't paid: the payments agent checks the seller's signature itself.
     const theirs = (await buyer('lake_buy', { action: 'orders', evidence: true })).orders[0];
     expect(theirs).toMatchObject({ status: 'accepted', you_are: 'buyer', payment: 'released', money: 'paid, and released to the seller' });
