@@ -37,7 +37,8 @@ const TIMED = /(^|[^a-z])(mon|tue|wed|thu|fri|sat|sun)[a-z]*([^a-z]|$)|\b\d{1,2}
  *  pledges, nearer their thresholds, hid Kite's new one); a search still finds it. */
 const fresh = (x: ListedPledge) => x.count >= 2 || Date.now() - Date.parse(x.opened ?? '') < 86_400_000;
 /** One pledge as a line an agent can act on: what it says, where it stands, that nobody is bound until it fills, and the call. */
-const pledgeLine = (x: ListedPledge, tally: string) => `${clipWords(x.text, 200)}: ${x.count} of ${x.threshold} signed, ${x.needs} more needed, closes in ${timeLeft(x.deadline)}; nobody is bound unless it reaches ${x.threshold}. lake_pledge { action: "sign", tally: "${tally}", id: "${x.id}" }`;
+// Its whole words: a signer must see the condition it binds on (run 132: a cut preview hid "binds only if Salt Blaze and Brisk Delta sign").
+const pledgeLine = (x: ListedPledge, tally: string) => `${clipWords(x.text, 600)}: ${x.count} of ${x.threshold} signed, ${x.needs} more needed, closes in ${timeLeft(x.deadline)}; nobody is bound unless it reaches ${x.threshold}. lake_pledge { action: "sign", tally: "${tally}", id: "${x.id}" }`;
 const LAKE_IS = `Each person's data stays in their own house, and their own rules answer every request at its door. Companies' agents come to the data instead of taking it: they price offers inside a house that only its owner sees, and run studies that pay houses while no record leaves. Any AI can reach a person here by the handle on their door ("ping stan"), and they answer from their phone. Each agent has a signed identity; payments can be held until delivery; pledges bind only once enough sign. This is a sandbox: synthetic data, play money, real signatures.`;
 
 /**
@@ -1869,7 +1870,7 @@ export function lakeMcpAgent(o: LakeAgentOptions, x: McpExtras = {}): LakeMcpAge
           let filed: Record<string, unknown> | undefined;
           if (x.hold && x.payment === 'held') {
             filed = await me.ask(await holder(x), { kind: 'delivered', hold: x.hold, sha256: delivery.sha256 }).catch((e: Error) => ({ kind: 'refused', problems: [e.message] }));
-            if (filed.kind !== 'delivered') return json({ not_delivered: x.cart, held_payment: { filed: false, problems: (filed.problems as string[] | undefined) ?? [String(filed.kind)], goes_back_to_buyer_at: x.holdUntil }, next: `nothing was sent: try lake_sell { action: "${a.action}", cart, content } again; the money goes back to the buyer at ${x.holdUntil} if no delivery is filed` });
+            if (filed.kind !== 'delivered') return json({ not_delivered: x.cart, held_payment: { filed: false, problems: (filed.problems as string[] | undefined) ?? [String(filed.kind)], goes_back_to_buyer_at: x.holdUntil }, next: /all the cart promises/.test(String((filed.problems as string[] | undefined)?.[0] ?? '')) ? `nothing was sent, and no revision is left: refund it (lake_sell { action: "refund", cart }), or the buyer accepts what was delivered` : `nothing was sent: try lake_sell { action: "${a.action}", cart, content } again; the money goes back to the buyer at ${x.holdUntil} if no delivery is filed` });
             if (typeof filed.until === 'string') x.holdUntil = filed.until;
           }
           const reply = await me.ask(x.with.url, delivery).catch((e: Error) => ({ error: e.message }));
